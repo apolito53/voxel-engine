@@ -21,6 +21,8 @@ const NORMAL_CHUNK_REBUILDS = 4;
 const POTATO_CHUNK_REBUILDS = 2;
 const NORMAL_MINIMAP_INTERVAL = 0.15;
 const POTATO_MINIMAP_INTERVAL = 0.35;
+const NORMAL_MINIMAP_ROWS_PER_FRAME = 8;
+const POTATO_MINIMAP_ROWS_PER_FRAME = 4;
 
 const app = document.querySelector("#app");
 let potatoMode = readPotatoPreference();
@@ -100,8 +102,26 @@ const direction = new THREE.Vector3();
 const minimapDirection = new THREE.Vector3();
 
 const MINIMAP_SIZE = 128;
+const MINIMAP_TEXTURE_SIZE = 64;
 const MINIMAP_RANGE = 96;
-const MINIMAP_SCALE = MINIMAP_RANGE / MINIMAP_SIZE;
+const MINIMAP_WORLD_PER_PIXEL = MINIMAP_RANGE / MINIMAP_SIZE;
+const MINIMAP_WORLD_PER_TEXEL = MINIMAP_RANGE / MINIMAP_TEXTURE_SIZE;
+const minimapTerrain = document.createElement("canvas");
+minimapTerrain.width = MINIMAP_TEXTURE_SIZE;
+minimapTerrain.height = MINIMAP_TEXTURE_SIZE;
+const minimapTerrainContext = minimapTerrain.getContext("2d");
+const minimapImage = minimapTerrainContext.createImageData(
+  MINIMAP_TEXTURE_SIZE,
+  MINIMAP_TEXTURE_SIZE
+);
+let minimapRefreshRow = 0;
+let minimapRefreshOriginX = camera.position.x;
+let minimapRefreshOriginZ = camera.position.z;
+let minimapDisplayOriginX = camera.position.x;
+let minimapDisplayOriginZ = camera.position.z;
+let minimapSliceMaxMs = 0;
+let minimapHasTerrain = false;
+minimapContext.imageSmoothingEnabled = false;
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -215,7 +235,7 @@ function updateDebug(delta, rebuiltChunks, playerChunk) {
     `dirty ${stats.dirtyChunks} edited ${stats.modifiedChunks}`,
     `remesh ${rebuiltChunks}`,
     `mode ${potatoMode ? "potato" : "normal"} px ${renderer.getPixelRatio()}`,
-    `map ${lastMinimapMs.toFixed(1)}ms`,
+    `map slice ${lastMinimapMs.toFixed(1)}ms`,
     `gpu ${compactText(gpuInfo.vendor, 30)}`,
     compactText(gpuInfo.renderer, 34),
     `calls ${render.calls} tris ${render.triangles}`,
@@ -225,22 +245,47 @@ function updateDebug(delta, rebuiltChunks, playerChunk) {
 
 function updateMinimap(delta) {
   minimapAccumulator += delta;
-  if (minimapAccumulator < getMinimapInterval()) return;
+  if (
+    minimapRefreshRow >= MINIMAP_TEXTURE_SIZE &&
+    minimapAccumulator >= getMinimapInterval()
+  ) {
+    startMinimapRefresh();
+  }
+
+  if (minimapRefreshRow < MINIMAP_TEXTURE_SIZE) {
+    updateMinimapTerrainSlice();
+  }
+
+  renderMinimap();
+}
+
+function startMinimapRefresh() {
   minimapAccumulator = 0;
+  minimapRefreshRow = 0;
+  minimapRefreshOriginX = camera.position.x;
+  minimapRefreshOriginZ = camera.position.z;
+  minimapSliceMaxMs = 0;
+}
+
+function updateMinimapTerrainSlice() {
   const startedAt = performance.now();
+  const data = minimapImage.data;
+  const half = MINIMAP_TEXTURE_SIZE / 2;
+  const rowEnd = Math.min(
+    minimapRefreshRow + getMinimapRowsPerFrame(),
+    MINIMAP_TEXTURE_SIZE
+  );
 
-  const image = minimapContext.createImageData(MINIMAP_SIZE, MINIMAP_SIZE);
-  const data = image.data;
-  const half = MINIMAP_SIZE / 2;
-  const originX = camera.position.x;
-  const originZ = camera.position.z;
-
-  for (let py = 0; py < MINIMAP_SIZE; py += 1) {
-    for (let px = 0; px < MINIMAP_SIZE; px += 1) {
-      const wx = Math.floor(originX + (px - half) * MINIMAP_SCALE);
-      const wz = Math.floor(originZ + (py - half) * MINIMAP_SCALE);
+  for (let py = minimapRefreshRow; py < rowEnd; py += 1) {
+    for (let px = 0; px < MINIMAP_TEXTURE_SIZE; px += 1) {
+      const wx = Math.floor(
+        minimapRefreshOriginX + (px - half) * MINIMAP_WORLD_PER_TEXEL
+      );
+      const wz = Math.floor(
+        minimapRefreshOriginZ + (py - half) * MINIMAP_WORLD_PER_TEXEL
+      );
       const { block, y } = world.getTopBlock(wx, wz);
-      const offset = (px + py * MINIMAP_SIZE) * 4;
+      const offset = (px + py * MINIMAP_TEXTURE_SIZE) * 4;
 
       if (!BLOCKS[block].solid) {
         data[offset] = 44;
@@ -259,10 +304,32 @@ function updateMinimap(delta) {
     }
   }
 
-  minimapContext.putImageData(image, 0, 0);
-  drawMinimapGrid(originX, originZ);
-  drawMinimapPlayer();
-  lastMinimapMs = performance.now() - startedAt;
+  minimapRefreshRow = rowEnd;
+  minimapSliceMaxMs = Math.max(minimapSliceMaxMs, performance.now() - startedAt);
+
+  if (minimapRefreshRow >= MINIMAP_TEXTURE_SIZE) {
+    minimapTerrainContext.putImageData(minimapImage, 0, 0);
+    minimapDisplayOriginX = minimapRefreshOriginX;
+    minimapDisplayOriginZ = minimapRefreshOriginZ;
+    minimapHasTerrain = true;
+    lastMinimapMs = minimapSliceMaxMs;
+    minimapAccumulator = 0;
+  }
+}
+
+function renderMinimap() {
+  minimapContext.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+  minimapContext.imageSmoothingEnabled = false;
+
+  if (minimapHasTerrain) {
+    minimapContext.drawImage(minimapTerrain, 0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+  } else {
+    minimapContext.fillStyle = "rgba(44, 58, 72, 0.9)";
+    minimapContext.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+  }
+
+  drawMinimapGrid(minimapDisplayOriginX, minimapDisplayOriginZ);
+  drawMinimapPlayer(minimapDisplayOriginX, minimapDisplayOriginZ);
 }
 
 function drawMinimapGrid(originX, originZ) {
@@ -278,7 +345,7 @@ function drawMinimapGrid(originX, originZ) {
   const firstChunkZ = Math.floor(worldMinZ / CHUNK_SIZE) * CHUNK_SIZE;
 
   for (let wx = firstChunkX; wx <= worldMaxX; wx += CHUNK_SIZE) {
-    const x = (wx - worldMinX) / MINIMAP_SCALE;
+    const x = (wx - worldMinX) / MINIMAP_WORLD_PER_PIXEL;
     minimapContext.beginPath();
     minimapContext.moveTo(x, 0);
     minimapContext.lineTo(x, MINIMAP_SIZE);
@@ -286,7 +353,7 @@ function drawMinimapGrid(originX, originZ) {
   }
 
   for (let wz = firstChunkZ; wz <= worldMaxZ; wz += CHUNK_SIZE) {
-    const y = (wz - worldMinZ) / MINIMAP_SCALE;
+    const y = (wz - worldMinZ) / MINIMAP_WORLD_PER_PIXEL;
     minimapContext.beginPath();
     minimapContext.moveTo(0, y);
     minimapContext.lineTo(MINIMAP_SIZE, y);
@@ -296,12 +363,14 @@ function drawMinimapGrid(originX, originZ) {
   minimapContext.restore();
 }
 
-function drawMinimapPlayer() {
+function drawMinimapPlayer(originX, originZ) {
   const center = MINIMAP_SIZE / 2;
+  const playerX = center + (camera.position.x - originX) / MINIMAP_WORLD_PER_PIXEL;
+  const playerY = center + (camera.position.z - originZ) / MINIMAP_WORLD_PER_PIXEL;
   camera.getWorldDirection(minimapDirection);
 
   minimapContext.save();
-  minimapContext.translate(center, center);
+  minimapContext.translate(playerX, playerY);
   minimapContext.rotate(Math.atan2(minimapDirection.x, -minimapDirection.z));
 
   minimapContext.fillStyle = "#f1c453";
@@ -335,6 +404,7 @@ function setPotatoMode(enabled, persist = true) {
 
   debugAccumulator = Infinity;
   minimapAccumulator = Infinity;
+  minimapRefreshRow = MINIMAP_TEXTURE_SIZE;
   if (persist) writePotatoPreference(potatoMode);
 }
 
@@ -358,6 +428,10 @@ function getChunkRebuildBudget() {
 
 function getMinimapInterval() {
   return potatoMode ? POTATO_MINIMAP_INTERVAL : NORMAL_MINIMAP_INTERVAL;
+}
+
+function getMinimapRowsPerFrame() {
+  return potatoMode ? POTATO_MINIMAP_ROWS_PER_FRAME : NORMAL_MINIMAP_ROWS_PER_FRAME;
 }
 
 function readGpuInfo(activeRenderer) {
