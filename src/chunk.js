@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { BLOCK, BLOCKS } from "./blocks.js";
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
 
-export const CHUNK_SIZE = 16;
-export const WORLD_HEIGHT = 48;
+export { CHUNK_SIZE, WORLD_HEIGHT };
 
 export class Chunk {
   constructor(cx, cz) {
@@ -12,6 +12,7 @@ export class Chunk {
     this.mesh = null;
     this.dirty = true;
     this.modified = false;
+    this.revision = 0;
     this.topBlocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
     this.topYs = new Int16Array(CHUNK_SIZE * CHUNK_SIZE);
     this.topColumnsDirty = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
@@ -44,6 +45,7 @@ export class Chunk {
     if (this.blocks[blockIndex] === block) return false;
     this.blocks[blockIndex] = block;
     this.dirty = true;
+    this.revision += 1;
     this.topColumnsDirty[this.columnIndex(x, z)] = 1;
     return true;
   }
@@ -111,6 +113,37 @@ export class Chunk {
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     geometry.setIndex(indices);
     if (positions.length > 0) {
+      geometry.computeBoundingSphere();
+    } else {
+      geometry.boundingSphere = new THREE.Sphere(
+        new THREE.Vector3(ox + CHUNK_SIZE / 2, WORLD_HEIGHT / 2, oz + CHUNK_SIZE / 2),
+        0
+      );
+    }
+
+    if (this.mesh) {
+      this.mesh.geometry.dispose();
+      this.mesh.geometry = geometry;
+    } else {
+      this.mesh = new THREE.Mesh(geometry, material);
+      this.mesh.castShadow = true;
+      this.mesh.receiveShadow = true;
+    }
+
+    this.dirty = false;
+    return this.mesh;
+  }
+
+  applyMeshData(meshData, material) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(meshData.colors, 3));
+    geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+    const ox = this.cx * CHUNK_SIZE;
+    const oz = this.cz * CHUNK_SIZE;
+    if (meshData.positions.length > 0) {
       geometry.computeBoundingSphere();
     } else {
       geometry.boundingSphere = new THREE.Sphere(

@@ -70,7 +70,7 @@ const worldMaterial = new THREE.MeshStandardMaterial({
 
 const world = new VoxelWorld();
 world.ensureChunksAround(0, 0, getLoadRadius());
-world.rebuildDirty(scene, worldMaterial, Infinity);
+world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
 
 camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
 const player = new PlayerController(camera, renderer.domElement, world);
@@ -201,14 +201,14 @@ function animate() {
     toy.update(delta, world);
   }
 
-  const rebuiltChunks = world.rebuildDirty(
+  world.rebuildDirty(
     scene,
     worldMaterial,
     getChunkRebuildBudget()
   );
   updateHud();
   renderer.render(scene, camera);
-  updateDebug(delta, rebuiltChunks, playerChunk);
+  updateDebug(delta, playerChunk);
   updateMinimap(delta);
   requestAnimationFrame(animate);
 }
@@ -218,7 +218,7 @@ function updateHud() {
   title.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
 }
 
-function updateDebug(delta, rebuiltChunks, playerChunk) {
+function updateDebug(delta, playerChunk) {
   if (!debugVisible) return;
 
   const currentFps = Math.min(240, 1 / Math.max(delta, 1 / 240));
@@ -234,10 +234,10 @@ function updateDebug(delta, rebuiltChunks, playerChunk) {
   debugPanel.textContent = [
     `fps ${Math.round(smoothedFps)}`,
     `chunk ${playerChunk.cx}, ${playerChunk.cz}`,
-    `loaded ${stats.loadedChunks} queued ${stats.queuedChunks}`,
-    `saved ${stats.savedChunks} loaded/frame ${stats.loadedThisFrame}`,
-    `dirty ${stats.dirtyChunks} edited ${stats.modifiedChunks}`,
-    `remesh ${rebuiltChunks}`,
+    `chunks ${stats.loadedChunks} q ${stats.queuedChunks} gen ${stats.loadedThisFrame}/${stats.pendingChunkLoads}`,
+    `mesh q ${stats.dirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
+    `saved ${stats.savedChunks} edited ${stats.modifiedChunks}`,
+    `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
     `mode ${potatoMode ? "potato" : "normal"} px ${renderer.getPixelRatio()}`,
     `map slice ${lastMinimapMs.toFixed(1)}ms`,
     `gpu ${compactText(gpuInfo.vendor, 30)}`,
