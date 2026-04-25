@@ -4,6 +4,15 @@ import { clamp } from "./math.js";
 const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.32;
 const LOOK_SENSITIVITY = 0.0022;
+const WALK_SPEED = 5.4;
+const SPRINT_SPEED = 8.5;
+const AIR_SPEED_LIMIT = SPRINT_SPEED;
+const GROUND_ACCELERATION = 96;
+const AIR_ACCELERATION = 15;
+const GROUND_FRICTION = 12;
+const AIR_DRAG = 0.08;
+const GRAVITY = 22;
+const JUMP_SPEED = 8.2;
 
 export class PlayerController {
   constructor(camera, domElement, world) {
@@ -138,6 +147,7 @@ export class PlayerController {
   update(delta) {
     if (!this.active) return;
 
+    const wasGrounded = this.onGround;
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const wish = new THREE.Vector3();
@@ -146,15 +156,31 @@ export class PlayerController {
     if (this.keys.has("KeyS")) wish.sub(forward);
     if (this.keys.has("KeyD")) wish.add(right);
     if (this.keys.has("KeyA")) wish.sub(right);
-    if (wish.lengthSq() > 0) wish.normalize();
+    const hasWish = wish.lengthSq() > 0;
+    if (hasWish) wish.normalize();
 
-    const speed = this.keys.has("ShiftLeft") ? 8.5 : 5.4;
-    this.velocity.x = wish.x * speed;
-    this.velocity.z = wish.z * speed;
-    this.velocity.y -= 22 * delta;
+    const speed = this.keys.has("ShiftLeft") ? SPRINT_SPEED : WALK_SPEED;
+    if (wasGrounded) {
+      this.applyHorizontalFriction(GROUND_FRICTION, delta);
+    } else {
+      this.applyHorizontalFriction(AIR_DRAG, delta);
+    }
 
-    if (this.onGround && this.keys.has("Space")) {
-      this.velocity.y = 8.2;
+    if (hasWish) {
+      this.applyHorizontalAcceleration(
+        wish,
+        speed,
+        wasGrounded ? GROUND_ACCELERATION : AIR_ACCELERATION,
+        delta
+      );
+    }
+
+    this.limitHorizontalSpeed(wasGrounded ? speed : AIR_SPEED_LIMIT);
+    this.velocity.y -= GRAVITY * delta;
+
+    this.onGround = false;
+    if (wasGrounded && this.keys.has("Space")) {
+      this.velocity.y = JUMP_SPEED;
       this.onGround = false;
     }
 
@@ -163,6 +189,39 @@ export class PlayerController {
     this.moveAxis("y", this.velocity.y * delta);
 
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
+  }
+
+  applyHorizontalAcceleration(wish, targetSpeed, acceleration, delta) {
+    const currentSpeed = this.velocity.x * wish.x + this.velocity.z * wish.z;
+    const addSpeed = targetSpeed - currentSpeed;
+    if (addSpeed <= 0) return;
+
+    const accelerationStep = Math.min(addSpeed, acceleration * delta);
+    this.velocity.x += wish.x * accelerationStep;
+    this.velocity.z += wish.z * accelerationStep;
+  }
+
+  applyHorizontalFriction(friction, delta) {
+    const speed = Math.hypot(this.velocity.x, this.velocity.z);
+    if (speed < 0.001) {
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+      return;
+    }
+
+    const nextSpeed = Math.max(0, speed - speed * friction * delta);
+    const scale = nextSpeed / speed;
+    this.velocity.x *= scale;
+    this.velocity.z *= scale;
+  }
+
+  limitHorizontalSpeed(maxSpeed) {
+    const speedSq = this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z;
+    if (speedSq <= maxSpeed * maxSpeed) return;
+
+    const scale = maxSpeed / Math.sqrt(speedSq);
+    this.velocity.x *= scale;
+    this.velocity.z *= scale;
   }
 
   moveAxis(axis, amount) {
@@ -174,6 +233,7 @@ export class PlayerController {
     this.camera.position[axis] -= amount;
     if (axis === "y" && amount < 0) this.onGround = true;
     if (axis === "y") this.velocity.y = 0;
+    else this.velocity[axis] = 0;
   }
 
   overlapsBlock(x, y, z) {
