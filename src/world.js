@@ -4,12 +4,15 @@ import { fbm2 } from "./math.js";
 
 const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
+const MAX_CHUNK_LOADS_PER_FRAME = 2;
 const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
 
 export class VoxelWorld {
   constructor() {
     this.chunks = new Map();
     this.savedChunks = new Map();
+    this.chunkLoadQueue = new Map();
+    this.lastLoadedChunks = 0;
   }
 
   key(cx, cz) {
@@ -34,6 +37,7 @@ export class VoxelWorld {
         this.generateChunk(chunk);
       }
       this.chunks.set(key, chunk);
+      this.chunkLoadQueue.delete(key);
       this.markNeighborChunksDirty(cx, cz);
     }
     return chunk;
@@ -58,11 +62,70 @@ export class VoxelWorld {
     z,
     scene,
     loadRadius = LOAD_RADIUS,
-    unloadRadius = UNLOAD_RADIUS
+    unloadRadius = UNLOAD_RADIUS,
+    maxLoads = MAX_CHUNK_LOADS_PER_FRAME
   ) {
-    const center = this.ensureChunksAround(x, z, loadRadius);
+    const center = this.toChunkCoords(x, z);
+    this.queueChunksAround(center.cx, center.cz, loadRadius);
+    this.pruneQueuedChunks(center.cx, center.cz, loadRadius);
+    this.lastLoadedChunks = this.loadQueuedChunks(
+      center.cx,
+      center.cz,
+      maxLoads
+    );
     this.unloadChunksOutside(center.cx, center.cz, unloadRadius, scene);
     return center;
+  }
+
+  queueChunksAround(centerCx, centerCz, radius = LOAD_RADIUS) {
+    for (let cz = centerCz - radius; cz <= centerCz + radius; cz += 1) {
+      for (let cx = centerCx - radius; cx <= centerCx + radius; cx += 1) {
+        const key = this.key(cx, cz);
+        if (this.chunks.has(key) || this.chunkLoadQueue.has(key)) continue;
+
+        this.chunkLoadQueue.set(key, {
+          cx,
+          cz
+        });
+      }
+    }
+  }
+
+  pruneQueuedChunks(centerCx, centerCz, radius = LOAD_RADIUS) {
+    for (const [key, queued] of this.chunkLoadQueue.entries()) {
+      const distance = Math.max(
+        Math.abs(queued.cx - centerCx),
+        Math.abs(queued.cz - centerCz)
+      );
+      if (distance > radius || this.chunks.has(key)) {
+        this.chunkLoadQueue.delete(key);
+      }
+    }
+  }
+
+  loadQueuedChunks(centerCx, centerCz, maxLoads = MAX_CHUNK_LOADS_PER_FRAME) {
+    if (maxLoads <= 0) return 0;
+
+    const queuedChunks = Array.from(this.chunkLoadQueue.values()).sort(
+      (a, b) => {
+        const ax = a.cx - centerCx;
+        const az = a.cz - centerCz;
+        const bx = b.cx - centerCx;
+        const bz = b.cz - centerCz;
+        const aDistance = ax * ax + az * az;
+        const bDistance = bx * bx + bz * bz;
+        return aDistance - bDistance || a.cz - b.cz || a.cx - b.cx;
+      }
+    );
+
+    let loaded = 0;
+    for (const queued of queuedChunks) {
+      if (loaded >= maxLoads) break;
+      this.ensureChunk(queued.cx, queued.cz);
+      loaded += 1;
+    }
+
+    return loaded;
   }
 
   generateChunk(chunk) {
@@ -144,6 +207,7 @@ export class VoxelWorld {
 
       chunk.disposeMesh(scene);
       this.chunks.delete(key);
+      this.chunkLoadQueue.delete(key);
       this.markNeighborChunksDirty(chunk.cx, chunk.cz);
     }
   }
@@ -177,6 +241,8 @@ export class VoxelWorld {
     return {
       loadedChunks: this.chunks.size,
       savedChunks: this.savedChunks.size,
+      queuedChunks: this.chunkLoadQueue.size,
+      loadedThisFrame: this.lastLoadedChunks,
       dirtyChunks,
       modifiedChunks
     };

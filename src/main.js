@@ -17,6 +17,8 @@ const NORMAL_LOAD_RADIUS = 4;
 const POTATO_LOAD_RADIUS = 3;
 const NORMAL_UNLOAD_RADIUS = 5;
 const POTATO_UNLOAD_RADIUS = 4;
+const NORMAL_CHUNK_LOADS = 2;
+const POTATO_CHUNK_LOADS = 1;
 const NORMAL_CHUNK_REBUILDS = 4;
 const POTATO_CHUNK_REBUILDS = 2;
 const NORMAL_MINIMAP_INTERVAL = 0.15;
@@ -191,7 +193,8 @@ function animate() {
     camera.position.z,
     scene,
     getLoadRadius(),
-    getUnloadRadius()
+    getUnloadRadius(),
+    getChunkLoadBudget()
   );
 
   for (const toy of toys) {
@@ -231,7 +234,8 @@ function updateDebug(delta, rebuiltChunks, playerChunk) {
   debugPanel.textContent = [
     `fps ${Math.round(smoothedFps)}`,
     `chunk ${playerChunk.cx}, ${playerChunk.cz}`,
-    `loaded ${stats.loadedChunks} saved ${stats.savedChunks}`,
+    `loaded ${stats.loadedChunks} queued ${stats.queuedChunks}`,
+    `saved ${stats.savedChunks} loaded/frame ${stats.loadedThisFrame}`,
     `dirty ${stats.dirtyChunks} edited ${stats.modifiedChunks}`,
     `remesh ${rebuiltChunks}`,
     `mode ${potatoMode ? "potato" : "normal"} px ${renderer.getPixelRatio()}`,
@@ -420,6 +424,10 @@ function getLoadRadius() {
 
 function getUnloadRadius() {
   return potatoMode ? POTATO_UNLOAD_RADIUS : NORMAL_UNLOAD_RADIUS;
+}
+
+function getChunkLoadBudget() {
+  return potatoMode ? POTATO_CHUNK_LOADS : NORMAL_CHUNK_LOADS;
 }
 
 function getChunkRebuildBudget() {
