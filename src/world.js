@@ -2,11 +2,14 @@ import { BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk.js";
 import { fbm2 } from "./math.js";
 
-const WORLD_RADIUS = 4;
+const LOAD_RADIUS = 4;
+const UNLOAD_RADIUS = 5;
+const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
 
 export class VoxelWorld {
   constructor() {
     this.chunks = new Map();
+    this.savedChunks = new Map();
   }
 
   key(cx, cz) {
@@ -22,7 +25,14 @@ export class VoxelWorld {
     let chunk = this.chunks.get(key);
     if (!chunk) {
       chunk = new Chunk(cx, cz);
-      this.generateChunk(chunk);
+      const savedBlocks = this.savedChunks.get(key);
+      if (savedBlocks) {
+        chunk.blocks.set(savedBlocks);
+        chunk.refreshTopColumns();
+        chunk.modified = true;
+      } else {
+        this.generateChunk(chunk);
+      }
       this.chunks.set(key, chunk);
       this.markNeighborChunksDirty(cx, cz);
     }
@@ -33,13 +43,26 @@ export class VoxelWorld {
     this.ensureChunksAround(0, 0);
   }
 
-  ensureChunksAround(x, z, radius = WORLD_RADIUS) {
+  ensureChunksAround(x, z, radius = LOAD_RADIUS) {
     const center = this.toChunkCoords(x, z);
     for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
       for (let cx = center.cx - radius; cx <= center.cx + radius; cx += 1) {
         this.ensureChunk(cx, cz);
       }
     }
+    return center;
+  }
+
+  streamChunksAround(
+    x,
+    z,
+    scene,
+    loadRadius = LOAD_RADIUS,
+    unloadRadius = UNLOAD_RADIUS
+  ) {
+    const center = this.ensureChunksAround(x, z, loadRadius);
+    this.unloadChunksOutside(center.cx, center.cz, unloadRadius, scene);
+    return center;
   }
 
   generateChunk(chunk) {
@@ -62,6 +85,8 @@ export class VoxelWorld {
       }
     }
     chunk.dirty = true;
+    chunk.modified = false;
+    chunk.refreshTopColumns();
   }
 
   toChunkCoords(x, z) {
@@ -82,7 +107,8 @@ export class VoxelWorld {
     if (y < 0 || y >= WORLD_HEIGHT) return;
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     const chunk = this.ensureChunk(cx, cz);
-    chunk.setLocal(lx, Math.floor(y), lz, block);
+    if (!chunk.setLocal(lx, Math.floor(y), lz, block)) return;
+    chunk.modified = true;
 
     if (lx === 0) this.markDirty(cx - 1, cz);
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
@@ -102,24 +128,66 @@ export class VoxelWorld {
     this.markDirty(cx, cz + 1);
   }
 
+  unloadChunksOutside(centerCx, centerCz, unloadRadius, scene) {
+    for (const [key, chunk] of Array.from(this.chunks.entries())) {
+      const distance = Math.max(
+        Math.abs(chunk.cx - centerCx),
+        Math.abs(chunk.cz - centerCz)
+      );
+      if (distance <= unloadRadius) continue;
+
+      if (chunk.modified) {
+        this.savedChunks.set(key, chunk.blocks.slice());
+      } else {
+        this.savedChunks.delete(key);
+      }
+
+      chunk.disposeMesh(scene);
+      this.chunks.delete(key);
+      this.markNeighborChunksDirty(chunk.cx, chunk.cz);
+    }
+  }
+
   isSolid(x, y, z) {
     if (y < 0) return true;
     const block = this.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
     return block !== BLOCK.air;
   }
 
-  rebuildDirty(scene, material) {
+  rebuildDirty(scene, material, maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME) {
+    let rebuilt = 0;
     for (const chunk of this.chunks.values()) {
       if (!chunk.dirty) continue;
       const mesh = chunk.rebuildMesh(this, material);
       if (!mesh.parent) scene.add(mesh);
+      rebuilt += 1;
+      if (rebuilt >= maxRebuilds) break;
     }
+    return rebuilt;
+  }
+
+  getStats() {
+    let dirtyChunks = 0;
+    let modifiedChunks = 0;
+    for (const chunk of this.chunks.values()) {
+      if (chunk.dirty) dirtyChunks += 1;
+      if (chunk.modified) modifiedChunks += 1;
+    }
+
+    return {
+      loadedChunks: this.chunks.size,
+      savedChunks: this.savedChunks.size,
+      dirtyChunks,
+      modifiedChunks
+    };
   }
 
   highestSolidY(x, z) {
-    for (let y = WORLD_HEIGHT - 1; y >= 0; y -= 1) {
-      if (this.isSolid(x, y, z)) return y;
-    }
-    return 0;
+    return this.getTopBlock(x, z).y;
+  }
+
+  getTopBlock(x, z) {
+    const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
+    return this.getChunk(cx, cz)?.getTopLocal(lx, lz) ?? { block: BLOCK.air, y: 0 };
   }
 }

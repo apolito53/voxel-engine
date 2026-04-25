@@ -1,33 +1,55 @@
 import * as THREE from "three";
 import "./style.css";
 import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks.js";
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./chunk.js";
 import { PlayerController } from "./player.js";
 import { PhysicsToy } from "./physics.js";
 import { voxelRaycast } from "./raycast.js";
 import { VoxelWorld } from "./world.js";
 
+const NORMAL_PIXEL_RATIO_LIMIT = 2;
+const POTATO_PIXEL_RATIO = 1;
+const NORMAL_FOG_FAR = 150;
+const POTATO_FOG_FAR = 68;
+const NORMAL_CAMERA_FAR = 450;
+const POTATO_CAMERA_FAR = 180;
+const NORMAL_LOAD_RADIUS = 4;
+const POTATO_LOAD_RADIUS = 3;
+const NORMAL_UNLOAD_RADIUS = 5;
+const POTATO_UNLOAD_RADIUS = 4;
+const NORMAL_CHUNK_REBUILDS = 4;
+const POTATO_CHUNK_REBUILDS = 2;
+const NORMAL_MINIMAP_INTERVAL = 0.15;
+const POTATO_MINIMAP_INTERVAL = 0.35;
+
 const app = document.querySelector("#app");
+let potatoMode = readPotatoPreference();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !potatoMode;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
+const gpuInfo = readGpuInfo(renderer);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fb9d8);
-scene.fog = new THREE.Fog(0x8fb9d8, 55, 150);
+scene.fog = new THREE.Fog(
+  0x8fb9d8,
+  55,
+  potatoMode ? POTATO_FOG_FAR : NORMAL_FOG_FAR
+);
 
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.05,
-  450
+  potatoMode ? POTATO_CAMERA_FAR : NORMAL_CAMERA_FAR
 );
 
 const sun = new THREE.DirectionalLight(0xfff0d0, 3.2);
 sun.position.set(35, 55, 18);
-sun.castShadow = true;
+sun.castShadow = !potatoMode;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -75;
 sun.shadow.camera.right = 75;
@@ -43,33 +65,65 @@ const worldMaterial = new THREE.MeshStandardMaterial({
 });
 
 const world = new VoxelWorld();
-world.generateInitialWorld();
-world.rebuildDirty(scene, worldMaterial);
+world.ensureChunksAround(0, 0, getLoadRadius());
+world.rebuildDirty(scene, worldMaterial, Infinity);
 
 camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
 const player = new PlayerController(camera, renderer.domElement, world);
 const pauseMenu = document.querySelector("#pause-menu");
+const resumeButton = document.querySelector("#resume-button");
+const potatoButton = document.querySelector("#potato-button");
+const debugPanel = document.querySelector("#debug-panel");
+const minimap = document.querySelector("#minimap");
+const minimapContext = minimap.getContext("2d");
 player.onPauseChange = (paused) => {
   pauseMenu.classList.toggle("is-hidden", !paused);
 };
 pauseMenu.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
+  if (event.target.closest("button")) return;
   event.preventDefault();
   player.resume();
 });
+resumeButton.addEventListener("click", () => player.resume());
+potatoButton.addEventListener("click", () => setPotatoMode(!potatoMode));
 
 let selectedBlockIndex = 0;
+let debugVisible = true;
+let debugAccumulator = Infinity;
+let minimapAccumulator = Infinity;
+let smoothedFps = 0;
+let lastMinimapMs = 0;
 const toys = [];
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
+const minimapDirection = new THREE.Vector3();
+
+const MINIMAP_SIZE = 128;
+const MINIMAP_RANGE = 96;
+const MINIMAP_SCALE = MINIMAP_RANGE / MINIMAP_SIZE;
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(getRenderPixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.code === "F3") {
+    event.preventDefault();
+    debugVisible = !debugVisible;
+    debugPanel.classList.toggle("is-hidden", !debugVisible);
+    return;
+  }
+
+  if (event.code === "F4") {
+    event.preventDefault();
+    setPotatoMode(!potatoMode);
+    return;
+  }
+
   if (/^Digit[1-5]$/.test(event.code)) {
     selectedBlockIndex = Number(event.code.at(-1)) - 1;
   }
@@ -111,17 +165,28 @@ renderer.domElement.addEventListener("mousedown", (event) => {
 
 function animate() {
   const delta = Math.min(clock.getDelta(), 0.04);
-  world.ensureChunksAround(camera.position.x, camera.position.z);
   player.update(delta);
-  world.ensureChunksAround(camera.position.x, camera.position.z);
+  const playerChunk = world.streamChunksAround(
+    camera.position.x,
+    camera.position.z,
+    scene,
+    getLoadRadius(),
+    getUnloadRadius()
+  );
 
   for (const toy of toys) {
     toy.update(delta, world);
   }
 
-  world.rebuildDirty(scene, worldMaterial);
+  const rebuiltChunks = world.rebuildDirty(
+    scene,
+    worldMaterial,
+    getChunkRebuildBudget()
+  );
   updateHud();
   renderer.render(scene, camera);
+  updateDebug(delta, rebuiltChunks, playerChunk);
+  updateMinimap(delta);
   requestAnimationFrame(animate);
 }
 
@@ -130,4 +195,205 @@ function updateHud() {
   title.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
 }
 
+function updateDebug(delta, rebuiltChunks, playerChunk) {
+  if (!debugVisible) return;
+
+  const currentFps = Math.min(240, 1 / Math.max(delta, 1 / 240));
+  smoothedFps = smoothedFps === 0 ? currentFps : smoothedFps * 0.92 + currentFps * 0.08;
+  debugAccumulator += delta;
+
+  if (debugAccumulator < 0.1) return;
+  debugAccumulator = 0;
+
+  const stats = world.getStats();
+  const render = renderer.info.render;
+  const memory = renderer.info.memory;
+  debugPanel.textContent = [
+    `fps ${Math.round(smoothedFps)}`,
+    `chunk ${playerChunk.cx}, ${playerChunk.cz}`,
+    `loaded ${stats.loadedChunks} saved ${stats.savedChunks}`,
+    `dirty ${stats.dirtyChunks} edited ${stats.modifiedChunks}`,
+    `remesh ${rebuiltChunks}`,
+    `mode ${potatoMode ? "potato" : "normal"} px ${renderer.getPixelRatio()}`,
+    `map ${lastMinimapMs.toFixed(1)}ms`,
+    `gpu ${compactText(gpuInfo.vendor, 30)}`,
+    compactText(gpuInfo.renderer, 34),
+    `calls ${render.calls} tris ${render.triangles}`,
+    `geo ${memory.geometries} tex ${memory.textures}`
+  ].join("\n");
+}
+
+function updateMinimap(delta) {
+  minimapAccumulator += delta;
+  if (minimapAccumulator < getMinimapInterval()) return;
+  minimapAccumulator = 0;
+  const startedAt = performance.now();
+
+  const image = minimapContext.createImageData(MINIMAP_SIZE, MINIMAP_SIZE);
+  const data = image.data;
+  const half = MINIMAP_SIZE / 2;
+  const originX = camera.position.x;
+  const originZ = camera.position.z;
+
+  for (let py = 0; py < MINIMAP_SIZE; py += 1) {
+    for (let px = 0; px < MINIMAP_SIZE; px += 1) {
+      const wx = Math.floor(originX + (px - half) * MINIMAP_SCALE);
+      const wz = Math.floor(originZ + (py - half) * MINIMAP_SCALE);
+      const { block, y } = world.getTopBlock(wx, wz);
+      const offset = (px + py * MINIMAP_SIZE) * 4;
+
+      if (!BLOCKS[block].solid) {
+        data[offset] = 44;
+        data[offset + 1] = 58;
+        data[offset + 2] = 72;
+        data[offset + 3] = 230;
+        continue;
+      }
+
+      const shade = 0.58 + (y / WORLD_HEIGHT) * 0.42;
+      const color = BLOCKS[block].color;
+      data[offset] = color[0] * 255 * shade;
+      data[offset + 1] = color[1] * 255 * shade;
+      data[offset + 2] = color[2] * 255 * shade;
+      data[offset + 3] = 255;
+    }
+  }
+
+  minimapContext.putImageData(image, 0, 0);
+  drawMinimapGrid(originX, originZ);
+  drawMinimapPlayer();
+  lastMinimapMs = performance.now() - startedAt;
+}
+
+function drawMinimapGrid(originX, originZ) {
+  minimapContext.save();
+  minimapContext.strokeStyle = "rgba(255, 255, 255, 0.2)";
+  minimapContext.lineWidth = 1;
+
+  const worldMinX = originX - MINIMAP_RANGE / 2;
+  const worldMaxX = originX + MINIMAP_RANGE / 2;
+  const worldMinZ = originZ - MINIMAP_RANGE / 2;
+  const worldMaxZ = originZ + MINIMAP_RANGE / 2;
+  const firstChunkX = Math.floor(worldMinX / CHUNK_SIZE) * CHUNK_SIZE;
+  const firstChunkZ = Math.floor(worldMinZ / CHUNK_SIZE) * CHUNK_SIZE;
+
+  for (let wx = firstChunkX; wx <= worldMaxX; wx += CHUNK_SIZE) {
+    const x = (wx - worldMinX) / MINIMAP_SCALE;
+    minimapContext.beginPath();
+    minimapContext.moveTo(x, 0);
+    minimapContext.lineTo(x, MINIMAP_SIZE);
+    minimapContext.stroke();
+  }
+
+  for (let wz = firstChunkZ; wz <= worldMaxZ; wz += CHUNK_SIZE) {
+    const y = (wz - worldMinZ) / MINIMAP_SCALE;
+    minimapContext.beginPath();
+    minimapContext.moveTo(0, y);
+    minimapContext.lineTo(MINIMAP_SIZE, y);
+    minimapContext.stroke();
+  }
+
+  minimapContext.restore();
+}
+
+function drawMinimapPlayer() {
+  const center = MINIMAP_SIZE / 2;
+  camera.getWorldDirection(minimapDirection);
+
+  minimapContext.save();
+  minimapContext.translate(center, center);
+  minimapContext.rotate(Math.atan2(minimapDirection.x, -minimapDirection.z));
+
+  minimapContext.fillStyle = "#f1c453";
+  minimapContext.strokeStyle = "rgba(0, 0, 0, 0.45)";
+  minimapContext.lineWidth = 1.5;
+  minimapContext.beginPath();
+  minimapContext.moveTo(0, -8);
+  minimapContext.lineTo(5, 6);
+  minimapContext.lineTo(0, 3);
+  minimapContext.lineTo(-5, 6);
+  minimapContext.closePath();
+  minimapContext.fill();
+  minimapContext.stroke();
+  minimapContext.restore();
+}
+
+function setPotatoMode(enabled, persist = true) {
+  potatoMode = enabled;
+  renderer.setPixelRatio(getRenderPixelRatio());
+  renderer.shadowMap.enabled = !potatoMode;
+  renderer.shadowMap.autoUpdate = !potatoMode;
+  renderer.shadowMap.needsUpdate = true;
+  sun.castShadow = !potatoMode;
+  scene.fog.far = potatoMode ? POTATO_FOG_FAR : NORMAL_FOG_FAR;
+  camera.far = potatoMode ? POTATO_CAMERA_FAR : NORMAL_CAMERA_FAR;
+  camera.updateProjectionMatrix();
+
+  potatoButton.textContent = `Potato Mode: ${potatoMode ? "On" : "Off"}`;
+  potatoButton.setAttribute("aria-pressed", String(potatoMode));
+  document.body.classList.toggle("potato-mode", potatoMode);
+
+  debugAccumulator = Infinity;
+  minimapAccumulator = Infinity;
+  if (persist) writePotatoPreference(potatoMode);
+}
+
+function getRenderPixelRatio() {
+  return potatoMode
+    ? POTATO_PIXEL_RATIO
+    : Math.min(window.devicePixelRatio, NORMAL_PIXEL_RATIO_LIMIT);
+}
+
+function getLoadRadius() {
+  return potatoMode ? POTATO_LOAD_RADIUS : NORMAL_LOAD_RADIUS;
+}
+
+function getUnloadRadius() {
+  return potatoMode ? POTATO_UNLOAD_RADIUS : NORMAL_UNLOAD_RADIUS;
+}
+
+function getChunkRebuildBudget() {
+  return potatoMode ? POTATO_CHUNK_REBUILDS : NORMAL_CHUNK_REBUILDS;
+}
+
+function getMinimapInterval() {
+  return potatoMode ? POTATO_MINIMAP_INTERVAL : NORMAL_MINIMAP_INTERVAL;
+}
+
+function readGpuInfo(activeRenderer) {
+  const gl = activeRenderer.getContext();
+  const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+  return {
+    vendor: debugInfo
+      ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+      : gl.getParameter(gl.VENDOR),
+    renderer: debugInfo
+      ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+      : gl.getParameter(gl.RENDERER)
+  };
+}
+
+function compactText(value, maxLength) {
+  const text = String(value || "unknown");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3)}...`;
+}
+
+function readPotatoPreference() {
+  try {
+    return localStorage.getItem("voxel-potato-mode") === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writePotatoPreference(enabled) {
+  try {
+    localStorage.setItem("voxel-potato-mode", String(enabled));
+  } catch {
+    // Local storage is a convenience here; the toggle should still work without it.
+  }
+}
+
+setPotatoMode(potatoMode, false);
 animate();
