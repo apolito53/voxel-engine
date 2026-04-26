@@ -27,7 +27,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Visual styling and overlays: `src/style.css`
 - Block IDs, colors, placeable palette: `src/blocks.js`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.js`
-- Browser storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.js`
+- IndexedDB storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.js`
 - Seeded terrain generation shared by fallback and worker paths: `src/terrain.js`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.js`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.js`
@@ -43,14 +43,15 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 1. `index.html` loads `src/main.js`.
 2. `main.js` creates the Three.js renderer, scene, lights, camera, `VoxelWorld`, and `PlayerController`.
-3. The app starts on the home screen; loading or creating a world activates a saved-world slot and seed.
-4. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.js`.
-5. During play, `VoxelWorld.streamChunksAround` queues chunk generation requests near the player and sends them to `src/chunkWorker.js` when workers are available.
-6. Dirty chunks are meshed in the worker as typed-array buffers, then `Chunk.applyMeshData` uploads the returned data into Three.js `BufferGeometry`.
-7. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-8. Each animation frame updates player motion, chunk streaming, dirty mesh scheduling, physics toys, HUD/debug text, minimap, and final render only while a world is active.
-9. `Exit to Home` unloads the active world view; switching worlds happens from the home screen, not the pause menu.
-10. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are saved through `src/chunkStorage.js` and neighboring chunks are marked dirty when edge blocks change.
+3. `main.js` opens the async IndexedDB save registry, then starts on the home screen; loading or creating a world activates a saved-world slot and seed.
+4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
+5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.js`.
+6. During play, `VoxelWorld.streamChunksAround` queues chunk generation requests near the player and sends them to `src/chunkWorker.js` when workers are available.
+7. Dirty chunks are meshed in the worker as typed-array buffers, then `Chunk.applyMeshData` uploads the returned data into Three.js `BufferGeometry`.
+8. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
+9. Each animation frame updates player motion, chunk streaming, dirty mesh scheduling, physics toys, HUD/debug text, minimap, and final render only while a world is active.
+10. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
+11. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are queued to IndexedDB as raw binary chunk payloads and neighboring chunks are marked dirty when edge blocks change.
 
 ## Common Change Targets
 
@@ -68,8 +69,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 ## Sharp Edges
 
 - `rg.exe` may be blocked on this Windows machine; fall back to bounded PowerShell searches.
-- `VoxelWorld.savedChunks` mirrors persisted edited chunks; generated chunks are not stored.
-- Saved worlds are local browser slots; edited chunks persist as full chunk snapshots in browser storage, which is simple and reliable but not a final save-file format.
+- `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
+- Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.

@@ -4,7 +4,7 @@ A tiny browser-based voxel sandbox prototype. Three.js handles rendering, while 
 
 World units are metric: `1 block = 1 meter`.
 
-Edited chunks persist in browser storage. Clear this site's local storage to reset the sandbox world.
+Edited chunks persist in IndexedDB browser storage. Clear this site's browser data to reset saved worlds.
 The home screen creates and loads local saved worlds. New worlds store a name and seed.
 
 ## Run
@@ -44,7 +44,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/world.js`: chunk ownership, worker scheduling, streaming, block reads/writes
-- `src/chunkStorage.js`: browser storage adapter for saved worlds and edited chunk persistence
+- `src/chunkStorage.js`: IndexedDB adapter for saved worlds and edited chunk persistence
 - `src/terrain.js`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.js`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.js`: worker-side terrain generation and greedy mesh building

@@ -1,159 +1,334 @@
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
 
-const STORAGE_VERSION = 1;
-const STORAGE_PREFIX = `voxel-engine:v${STORAGE_VERSION}`;
-const ACTIVE_WORLD_KEY = `${STORAGE_PREFIX}:active-world`;
-const WORLDS_KEY = `${STORAGE_PREFIX}:worlds`;
+const DATABASE_NAME = "voxel-engine";
+const DATABASE_VERSION = 1;
+const METADATA_STORE = "metadata";
+const WORLDS_STORE = "worlds";
+const CHUNKS_STORE = "chunks";
+const CHUNK_WORLD_INDEX = "worldId";
+const ACTIVE_WORLD_KEY = "active-world";
 const DEFAULT_WORLD_ID = "default";
 const DEFAULT_WORLD_NAME = "Default World";
 const DEFAULT_WORLD_SEED = "";
-const LEGACY_INDEX_KEY = `${STORAGE_PREFIX}:chunk-index`;
-const LEGACY_CHUNK_KEY_PREFIX = `${STORAGE_PREFIX}:chunk:`;
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
 
-// Storage is deliberately versioned and isolated so old save formats can be ignored later.
-export function createChunkStorage(storage = readBrowserStorage(), worldId = readActiveWorldId(storage)) {
-  return storage ? new LocalChunkStorage(storage, worldId) : new NullChunkStorage(worldId);
+let sharedDatabasePromise = null;
+
+// IndexedDB is the real browser save backend. The memory backend keeps smoke tests and
+// restricted/private browser contexts usable without pretending that data is persisted.
+export async function createChunkStorage(worldId = DEFAULT_WORLD_ID, database = openSaveDatabase()) {
+  return new IndexedDbChunkStorage(await database, worldId);
 }
 
-export function createWorldRegistry(storage = readBrowserStorage()) {
-  return storage ? new LocalWorldRegistry(storage) : new NullWorldRegistry();
+export function createNullChunkStorage(worldId = DEFAULT_WORLD_ID) {
+  return new NullChunkStorage(worldId);
 }
 
-function readActiveWorldId(storage = readBrowserStorage()) {
-  if (!storage) return DEFAULT_WORLD_ID;
+export function createMemorySaveDatabase() {
+  return new MemorySaveDatabase();
+}
 
-  try {
-    return storage.getItem(ACTIVE_WORLD_KEY) || DEFAULT_WORLD_ID;
-  } catch {
-    return DEFAULT_WORLD_ID;
+export async function createWorldRegistry(database = openSaveDatabase()) {
+  const registry = new WorldRegistry(await database);
+  await registry.ensureDefaultWorld();
+  return registry;
+}
+
+async function openSaveDatabase() {
+  if (!sharedDatabasePromise) {
+    sharedDatabasePromise = openIndexedDbSaveDatabase()
+      .catch((error) => {
+        console.warn("IndexedDB save storage is unavailable; using memory saves.", error);
+        return createMemorySaveDatabase();
+      });
+  }
+  return sharedDatabasePromise;
+}
+
+async function openIndexedDbSaveDatabase() {
+  const indexedDb = readIndexedDb();
+  if (!indexedDb) {
+    throw new Error("IndexedDB is not available.");
+  }
+
+  const database = await new Promise((resolve, reject) => {
+    const request = indexedDb.open(DATABASE_NAME, DATABASE_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(METADATA_STORE)) {
+        db.createObjectStore(METADATA_STORE, { keyPath: "key" });
+      }
+
+      if (!db.objectStoreNames.contains(WORLDS_STORE)) {
+        db.createObjectStore(WORLDS_STORE, { keyPath: "id" });
+      }
+
+      if (!db.objectStoreNames.contains(CHUNKS_STORE)) {
+        const chunks = db.createObjectStore(CHUNKS_STORE, { keyPath: "id" });
+        chunks.createIndex(CHUNK_WORLD_INDEX, CHUNK_WORLD_INDEX, { unique: false });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Could not open IndexedDB."));
+    request.onblocked = () => {
+      console.warn("IndexedDB upgrade is blocked by another open voxel-engine tab.");
+    };
+  });
+
+  return new IndexedDbSaveDatabase(database);
+}
+
+class IndexedDbSaveDatabase {
+  constructor(database) {
+    this.database = database;
+  }
+
+  async getMetadata(key) {
+    const record = await this.getRecord(METADATA_STORE, key);
+    return record?.value ?? null;
+  }
+
+  async setMetadata(key, value) {
+    await this.putRecord(METADATA_STORE, { key, value });
+  }
+
+  async listWorlds() {
+    const worlds = await this.getAllRecords(WORLDS_STORE);
+    return worlds.map(normalizeWorld).filter(Boolean);
+  }
+
+  async getWorld(worldId) {
+    return normalizeWorld(await this.getRecord(WORLDS_STORE, worldId));
+  }
+
+  async putWorld(world) {
+    await this.putRecord(WORLDS_STORE, normalizeWorld(world));
+  }
+
+  async updateWorldTimestamp(worldId) {
+    const world = await this.getWorld(worldId);
+    if (!world) return;
+
+    world.updatedAt = Date.now();
+    await this.putWorld(world);
+  }
+
+  async listChunkKeys(worldId) {
+    const transaction = this.database.transaction(CHUNKS_STORE, "readonly");
+    const index = transaction.objectStore(CHUNKS_STORE).index(CHUNK_WORLD_INDEX);
+    const done = transactionDone(transaction);
+    const request = index.getAllKeys(globalThis.IDBKeyRange.only(worldId));
+    const recordIds = await requestToPromise(request);
+    await done;
+    const prefix = `${worldId}|`;
+
+    // Only keys are loaded here; chunk payloads stay lazy so big worlds do not punish startup.
+    return recordIds
+      .map((recordId) => String(recordId))
+      .filter((recordId) => recordId.startsWith(prefix))
+      .map((recordId) => recordId.slice(prefix.length));
+  }
+
+  async loadChunk(worldId, chunkKey) {
+    const record = await this.getRecord(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
+    return decodeStoredBlocks(record?.blocks);
+  }
+
+  async saveChunk(worldId, chunkKey, blocks) {
+    // Store the raw ArrayBuffer, not base64 text. IndexedDB can clone binary data directly.
+    await this.putRecord(CHUNKS_STORE, {
+      id: chunkRecordId(worldId, chunkKey),
+      worldId,
+      chunkKey,
+      blocks: cloneChunkBuffer(blocks),
+      updatedAt: Date.now()
+    });
+    await this.updateWorldTimestamp(worldId);
+  }
+
+  async deleteChunk(worldId, chunkKey) {
+    await this.deleteRecord(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
+    await this.updateWorldTimestamp(worldId);
+  }
+
+  async getRecord(storeName, key) {
+    const transaction = this.database.transaction(storeName, "readonly");
+    const done = transactionDone(transaction);
+    const request = transaction.objectStore(storeName).get(key);
+    const record = await requestToPromise(request);
+    await done;
+    return record ?? null;
+  }
+
+  async getAllRecords(storeName) {
+    const transaction = this.database.transaction(storeName, "readonly");
+    const done = transactionDone(transaction);
+    const request = transaction.objectStore(storeName).getAll();
+    const records = await requestToPromise(request);
+    await done;
+    return records;
+  }
+
+  async putRecord(storeName, record) {
+    const transaction = this.database.transaction(storeName, "readwrite");
+    const done = transactionDone(transaction);
+    await requestToPromise(transaction.objectStore(storeName).put(record));
+    await done;
+  }
+
+  async deleteRecord(storeName, key) {
+    const transaction = this.database.transaction(storeName, "readwrite");
+    const done = transactionDone(transaction);
+    await requestToPromise(transaction.objectStore(storeName).delete(key));
+    await done;
   }
 }
 
-class LocalChunkStorage {
-  constructor(storage, worldId) {
-    this.storage = storage;
+class MemorySaveDatabase {
+  constructor() {
+    this.metadata = new Map();
+    this.worlds = new Map();
+    this.chunks = new Map();
+  }
+
+  async getMetadata(key) {
+    return this.metadata.get(key) ?? null;
+  }
+
+  async setMetadata(key, value) {
+    this.metadata.set(key, value);
+  }
+
+  async listWorlds() {
+    return Array.from(this.worlds.values()).map(cloneWorld);
+  }
+
+  async getWorld(worldId) {
+    return cloneWorld(this.worlds.get(worldId));
+  }
+
+  async putWorld(world) {
+    this.worlds.set(world.id, cloneWorld(world));
+  }
+
+  async updateWorldTimestamp(worldId) {
+    const world = this.worlds.get(worldId);
+    if (!world) return;
+
+    world.updatedAt = Date.now();
+    this.worlds.set(worldId, cloneWorld(world));
+  }
+
+  async listChunkKeys(worldId) {
+    const prefix = `${worldId}|`;
+    return Array.from(this.chunks.keys())
+      .filter((recordId) => recordId.startsWith(prefix))
+      .map((recordId) => recordId.slice(prefix.length));
+  }
+
+  async loadChunk(worldId, chunkKey) {
+    const blocks = this.chunks.get(chunkRecordId(worldId, chunkKey));
+    return blocks ? blocks.slice() : null;
+  }
+
+  async saveChunk(worldId, chunkKey, blocks) {
+    this.chunks.set(chunkRecordId(worldId, chunkKey), blocks.slice());
+    await this.updateWorldTimestamp(worldId);
+  }
+
+  async deleteChunk(worldId, chunkKey) {
+    this.chunks.delete(chunkRecordId(worldId, chunkKey));
+    await this.updateWorldTimestamp(worldId);
+  }
+}
+
+class IndexedDbChunkStorage {
+  constructor(database, worldId) {
+    this.database = database;
     this.worldId = worldId || DEFAULT_WORLD_ID;
   }
 
-  loadAll() {
-    const chunks = new Map();
-
-    // The index keeps startup cheap: we only scan keys that this engine wrote.
-    for (const key of this.readIndex()) {
-      const blocks = this.loadChunk(key);
-      if (blocks) {
-        chunks.set(key, blocks);
-      } else {
-        this.deleteChunk(key);
-      }
-    }
-
-    return chunks;
+  async listChunkKeys() {
+    return this.database.listChunkKeys(this.worldId);
   }
 
-  saveChunk(key, blocks) {
-    // Each saved chunk is a full Uint8Array snapshot. Wasteful, yes; wonderfully simple, also yes.
-    const keys = this.readIndex();
-    if (!keys.includes(key)) keys.push(key);
-
+  async loadChunk(key) {
     try {
-      this.storage.setItem(this.chunkKey(key), encodeBlocks(blocks));
-      this.writeIndex(keys);
-      updateWorldTimestamp(this.storage, this.worldId);
-    } catch (error) {
-      console.warn("Could not persist chunk edit", key, error);
-    }
-  }
-
-  deleteChunk(key) {
-    // Keep the index and payload in sync so deleted edits stop shadowing generated terrain.
-    const keys = this.readIndex().filter((storedKey) => storedKey !== key);
-
-    try {
-      this.storage.removeItem(this.chunkKey(key));
-      this.writeIndex(keys);
-    } catch (error) {
-      console.warn("Could not delete persisted chunk edit", key, error);
-    }
-  }
-
-  loadChunk(key) {
-    // Bad payloads are treated as missing chunks instead of breaking the whole world load.
-    try {
-      const encoded = this.storage.getItem(this.chunkKey(key));
-      return encoded ? decodeBlocks(encoded) : null;
+      return await this.database.loadChunk(this.worldId, key);
     } catch (error) {
       console.warn("Could not load persisted chunk edit", key, error);
       return null;
     }
   }
 
-  readIndex() {
-    // If the index is missing or corrupt, fall back to an empty save set.
+  async saveChunk(key, blocks) {
     try {
-      const encoded = this.storage.getItem(this.indexKey());
-      const parsed = encoded ? JSON.parse(encoded) : [];
-      return Array.isArray(parsed) ? parsed.filter((key) => typeof key === "string") : [];
-    } catch {
-      return [];
+      await this.database.saveChunk(this.worldId, key, blocks);
+    } catch (error) {
+      console.warn("Could not persist chunk edit", key, error);
     }
   }
 
-  writeIndex(keys) {
-    this.storage.setItem(this.indexKey(), JSON.stringify(keys));
-  }
-
-  chunkKey(key) {
-    return `${this.chunkKeyPrefix()}${key}`;
-  }
-
-  indexKey() {
-    // The original single-world save used the legacy keys; keeping default there migrates nothing.
-    return this.worldId === DEFAULT_WORLD_ID
-      ? LEGACY_INDEX_KEY
-      : `${STORAGE_PREFIX}:world:${this.worldId}:chunk-index`;
-  }
-
-  chunkKeyPrefix() {
-    return this.worldId === DEFAULT_WORLD_ID
-      ? LEGACY_CHUNK_KEY_PREFIX
-      : `${STORAGE_PREFIX}:world:${this.worldId}:chunk:`;
+  async deleteChunk(key) {
+    try {
+      await this.database.deleteChunk(this.worldId, key);
+    } catch (error) {
+      console.warn("Could not delete persisted chunk edit", key, error);
+    }
   }
 }
 
-class LocalWorldRegistry {
-  constructor(storage) {
-    this.storage = storage;
-    // The default world is where the old single-save chunks live, so it must always exist.
-    this.ensureDefaultWorld();
+class NullChunkStorage {
+  constructor(worldId = DEFAULT_WORLD_ID) {
+    this.worldId = worldId;
   }
 
-  listWorlds() {
+  async listChunkKeys() {
+    return [];
+  }
+
+  async loadChunk() {
+    return null;
+  }
+
+  async saveChunk() {}
+
+  async deleteChunk() {}
+}
+
+class WorldRegistry {
+  constructor(database) {
+    this.database = database;
+  }
+
+  async listWorlds() {
+    const worlds = await this.database.listWorlds();
     // Most recently edited worlds float to the top of the menu.
-    return this.readWorlds().sort((a, b) => b.updatedAt - a.updatedAt);
+    return worlds.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  getActiveWorldId() {
-    return readActiveWorldId(this.storage);
+  async getActiveWorldId() {
+    return await this.database.getMetadata(ACTIVE_WORLD_KEY) || DEFAULT_WORLD_ID;
   }
 
-  getActiveWorld() {
-    const worlds = this.readWorlds();
-    return worlds.find((world) => world.id === this.getActiveWorldId()) ?? worlds[0];
+  async getActiveWorld() {
+    const worlds = await this.listWorlds();
+    const activeWorldId = await this.getActiveWorldId();
+    return worlds.find((world) => world.id === activeWorldId) ?? worlds[0];
   }
 
-  setActiveWorld(worldId) {
-    const worlds = this.readWorlds();
+  async setActiveWorld(worldId) {
+    const worlds = await this.listWorlds();
     if (!worlds.some((world) => world.id === worldId)) return this.getActiveWorldId();
 
-    this.storage.setItem(ACTIVE_WORLD_KEY, worldId);
+    await this.database.setMetadata(ACTIVE_WORLD_KEY, worldId);
     return worldId;
   }
 
-  createWorld(name, seed) {
+  async createWorld(name, seed) {
     const now = Date.now();
-    // World metadata is intentionally tiny; chunk payloads live under per-world keys.
     const world = {
       id: createWorldId(now),
       name: sanitizeWorldName(name),
@@ -161,106 +336,52 @@ class LocalWorldRegistry {
       createdAt: now,
       updatedAt: now
     };
-    const worlds = [world, ...this.readWorlds()];
-    this.writeWorlds(worlds);
-    this.storage.setItem(ACTIVE_WORLD_KEY, world.id);
+
+    await this.database.putWorld(world);
+    await this.database.setMetadata(ACTIVE_WORLD_KEY, world.id);
     return world;
   }
 
-  ensureDefaultWorld() {
-    const worlds = this.readWorlds();
-    if (worlds.some((world) => world.id === DEFAULT_WORLD_ID)) return;
+  async ensureDefaultWorld() {
+    const defaultWorld = await this.database.getWorld(DEFAULT_WORLD_ID);
+    if (defaultWorld) return;
 
     const now = Date.now();
-    worlds.push({
+    await this.database.putWorld({
       id: DEFAULT_WORLD_ID,
       name: DEFAULT_WORLD_NAME,
       seed: DEFAULT_WORLD_SEED,
       createdAt: now,
       updatedAt: now
     });
-    this.writeWorlds(worlds);
-  }
-
-  readWorlds() {
-    // Corrupt world metadata should not stop the engine from booting into the default world.
-    try {
-      const encoded = this.storage.getItem(WORLDS_KEY);
-      const parsed = encoded ? JSON.parse(encoded) : [];
-      return Array.isArray(parsed)
-        ? parsed.map(normalizeWorld).filter(Boolean)
-        : [];
-    } catch {
-      return [];
-    }
-  }
-
-  writeWorlds(worlds) {
-    this.storage.setItem(WORLDS_KEY, JSON.stringify(worlds));
   }
 }
 
-class NullChunkStorage {
-  // Node smoke tests and privacy-restricted browsers can run without persistent storage.
-  constructor(worldId = DEFAULT_WORLD_ID) {
-    this.worldId = worldId;
-  }
-
-  loadAll() {
-    return new Map();
-  }
-
-  saveChunk() {}
-
-  deleteChunk() {}
-}
-
-class NullWorldRegistry {
-  listWorlds() {
-    return [{
-      id: DEFAULT_WORLD_ID,
-      name: DEFAULT_WORLD_NAME,
-      seed: DEFAULT_WORLD_SEED,
-      createdAt: 0,
-      updatedAt: 0
-    }];
-  }
-
-  getActiveWorldId() {
-    return DEFAULT_WORLD_ID;
-  }
-
-  getActiveWorld() {
-    return this.listWorlds()[0];
-  }
-
-  setActiveWorld() {
-    return DEFAULT_WORLD_ID;
-  }
-
-  createWorld() {
-    return this.listWorlds()[0];
-  }
-}
-
-function readBrowserStorage() {
-  // Accessing localStorage itself can throw in restricted browser contexts.
+function readIndexedDb() {
   try {
-    return globalThis.localStorage ?? null;
+    return globalThis.indexedDB ?? null;
   } catch {
     return null;
   }
 }
 
-function updateWorldTimestamp(storage, worldId) {
-  // Timestamps are menu metadata only; failing to update one should never affect chunk saves.
-  const registry = new LocalWorldRegistry(storage);
-  const worlds = registry.readWorlds();
-  const world = worlds.find((candidate) => candidate.id === worldId);
-  if (!world) return;
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed."));
+  });
+}
 
-  world.updatedAt = Date.now();
-  registry.writeWorlds(worlds);
+function transactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+  });
+}
+
+function chunkRecordId(worldId, chunkKey) {
+  return `${worldId}|${chunkKey}`;
 }
 
 function createWorldId(now) {
@@ -295,43 +416,25 @@ function normalizeWorld(world) {
   };
 }
 
-function encodeBlocks(blocks) {
-  if (typeof btoa === "function") {
-    let binary = "";
-    // Build the binary string in slices so large chunks do not overflow the argument stack.
-    for (let offset = 0; offset < blocks.length; offset += 0x8000) {
-      const slice = blocks.subarray(offset, offset + 0x8000);
-      binary += String.fromCharCode(...slice);
-    }
-    return btoa(binary);
-  }
-
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(blocks).toString("base64");
-  }
-
-  throw new Error("No base64 encoder is available.");
+function cloneWorld(world) {
+  return world ? { ...world } : null;
 }
 
-function decodeBlocks(encoded) {
-  let binary;
+function cloneChunkBuffer(blocks) {
+  return blocks.buffer.slice(blocks.byteOffset, blocks.byteOffset + blocks.byteLength);
+}
 
-  if (typeof atob === "function") {
-    binary = atob(encoded);
-  } else if (typeof Buffer !== "undefined") {
-    binary = Buffer.from(encoded, "base64").toString("binary");
-  } else {
-    throw new Error("No base64 decoder is available.");
-  }
+function decodeStoredBlocks(blocks) {
+  if (!blocks) return null;
 
-  if (binary.length !== CHUNK_BYTE_LENGTH) {
+  const decoded = blocks instanceof Uint8Array
+    ? blocks.slice()
+    : new Uint8Array(blocks);
+
+  if (decoded.length !== CHUNK_BYTE_LENGTH) {
     // A length mismatch means this payload belongs to another chunk shape or a corrupt save.
     return null;
   }
 
-  const blocks = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    blocks[index] = binary.charCodeAt(index);
-  }
-  return blocks;
+  return decoded;
 }

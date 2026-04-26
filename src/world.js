@@ -1,6 +1,6 @@
 import { BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk.js";
-import { createChunkStorage } from "./chunkStorage.js";
+import { createNullChunkStorage } from "./chunkStorage.js";
 import { createTerrainContext, generateChunkBlocks } from "./terrain.js";
 
 const LOAD_RADIUS = 4;
@@ -9,19 +9,25 @@ const MAX_CHUNK_LOADS_PER_FRAME = 2;
 const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
 
 export class VoxelWorld {
-  constructor({ storage = createChunkStorage(), seed = "" } = {}) {
+  constructor({ storage = createNullChunkStorage(), seed = "" } = {}) {
     this.chunks = new Map();
     this.storage = storage;
     this.seed = String(seed || "");
     this.terrain = createTerrainContext(this.seed);
-    // savedChunks mirrors persisted edited chunks; generated terrain is never stored.
-    this.savedChunks = this.storage.loadAll();
+    // The key set is cheap to keep in memory; full chunk payloads are loaded only when needed.
+    this.savedChunkKeys = new Set();
+    this.savedChunks = new Map();
     this.chunkLoadQueue = new Map();
     this.pendingChunkLoads = new Map();
     this.pendingChunkKeys = new Set();
+    this.pendingSavedChunkLoads = new Map();
+    this.pendingSavedChunkKeys = new Set();
     this.pendingMeshBuilds = new Map();
     this.pendingMeshKeys = new Set();
     this.workerResults = [];
+    this.savedChunkResults = [];
+    this.storageOperations = new Set();
+    this.storageGeneration = 0;
     this.workerRequestId = 0;
     this.worker = this.createWorker();
     this.priorityCx = 0;
@@ -32,17 +38,44 @@ export class VoxelWorld {
     this.lastRequestedMeshes = 0;
   }
 
-  switchStorage(storage, scene, seed = "") {
+  async switchStorage(storage, scene, seed = "") {
+    await this.flushStorageWrites();
+    this.storageGeneration += 1;
     this.disposeLoadedChunks(scene);
     this.storage = storage;
     this.seed = String(seed || "");
     this.terrain = createTerrainContext(this.seed);
-    // Switching worlds swaps the saved edit set; generated chunks will stream back in normally.
-    this.savedChunks = this.storage.loadAll();
+    this.savedChunks.clear();
+    await this.loadSavedChunkIndex();
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
     this.lastRequestedMeshes = 0;
+  }
+
+  async loadSavedChunkIndex() {
+    // The index is tiny compared with full chunk data, so it is safe to read at world-load time.
+    try {
+      this.savedChunkKeys = new Set(await this.storage.listChunkKeys());
+    } catch (error) {
+      console.warn("Could not read saved chunk index", error);
+      this.savedChunkKeys = new Set();
+    }
+  }
+
+  async preloadSavedChunksAround(x, z, radius = LOAD_RADIUS) {
+    const center = this.toChunkCoords(x, z);
+    const loads = [];
+
+    // Initial spawn gets a blocking preload so saved edits near spawn are visible immediately.
+    for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
+      for (let cx = center.cx - radius; cx <= center.cx + radius; cx += 1) {
+        const key = this.key(cx, cz);
+        if (this.savedChunkKeys.has(key)) loads.push(this.loadSavedChunkNow(key));
+      }
+    }
+
+    await Promise.all(loads);
   }
 
   disposeLoadedChunks(scene) {
@@ -54,9 +87,12 @@ export class VoxelWorld {
     this.chunkLoadQueue.clear();
     this.pendingChunkLoads.clear();
     this.pendingChunkKeys.clear();
+    this.pendingSavedChunkLoads.clear();
+    this.pendingSavedChunkKeys.clear();
     this.pendingMeshBuilds.clear();
     this.pendingMeshKeys.clear();
     this.workerResults.length = 0;
+    this.savedChunkResults.length = 0;
   }
 
   key(cx, cz) {
@@ -153,6 +189,8 @@ export class VoxelWorld {
     unloadRadius = UNLOAD_RADIUS,
     maxLoads = MAX_CHUNK_LOADS_PER_FRAME
   ) {
+    this.lastLoadedChunks = 0;
+    this.processSavedChunkResults();
     this.processGeneratedChunkResults();
     const center = this.toChunkCoords(x, z);
     this.priorityCx = center.cx;
@@ -175,7 +213,8 @@ export class VoxelWorld {
         if (
           this.chunks.has(key) ||
           this.chunkLoadQueue.has(key) ||
-          this.pendingChunkKeys.has(key)
+          this.pendingChunkKeys.has(key) ||
+          this.pendingSavedChunkKeys.has(key)
         ) {
           continue;
         }
@@ -219,9 +258,14 @@ export class VoxelWorld {
     for (const queued of queuedChunks) {
       if (requested >= maxLoads) break;
       const key = this.key(queued.cx, queued.cz);
-      const savedBlocks = this.savedChunks.get(key);
 
-      if (!this.worker || savedBlocks) {
+      if (this.savedChunkKeys.has(key) && !this.savedChunks.has(key)) {
+        this.requestSavedChunkLoad(queued.cx, queued.cz);
+        requested += 1;
+        continue;
+      }
+
+      if (!this.worker || this.savedChunks.has(key)) {
         this.ensureChunk(queued.cx, queued.cz);
         this.lastLoadedChunks += 1;
         requested += 1;
@@ -254,8 +298,57 @@ export class VoxelWorld {
     });
   }
 
+  requestSavedChunkLoad(cx, cz) {
+    const key = this.key(cx, cz);
+    if (
+      this.pendingSavedChunkKeys.has(key) ||
+      this.chunks.has(key) ||
+      !this.savedChunkKeys.has(key)
+    ) {
+      return;
+    }
+
+    const generation = this.storageGeneration;
+    this.chunkLoadQueue.delete(key);
+    this.pendingSavedChunkKeys.add(key);
+    this.pendingSavedChunkLoads.set(key, { key, cx, cz, generation });
+
+    this.storage.loadChunk(key)
+      .then((blocks) => {
+        this.savedChunkResults.push({ key, cx, cz, blocks, generation });
+      })
+      .catch((error) => {
+        console.warn("Could not stream saved chunk", key, error);
+        this.savedChunkResults.push({ key, cx, cz, blocks: null, generation });
+      });
+  }
+
+  processSavedChunkResults() {
+    if (this.savedChunkResults.length === 0) return;
+
+    for (const result of this.savedChunkResults) {
+      const pending = this.pendingSavedChunkLoads.get(result.key);
+      if (!pending || pending.generation !== result.generation) continue;
+
+      this.pendingSavedChunkLoads.delete(result.key);
+      this.pendingSavedChunkKeys.delete(result.key);
+
+      if (!result.blocks) {
+        this.forgetSavedChunk(result.key);
+        continue;
+      }
+
+      this.savedChunks.set(result.key, result.blocks);
+      if (!this.chunks.has(result.key)) {
+        this.addGeneratedChunk(result.cx, result.cz, result.blocks, true);
+        this.lastLoadedChunks += 1;
+      }
+    }
+
+    this.savedChunkResults.length = 0;
+  }
+
   processGeneratedChunkResults() {
-    this.lastLoadedChunks = 0;
     if (this.workerResults.length === 0) return;
 
     const remaining = [];
@@ -336,14 +429,46 @@ export class VoxelWorld {
   rememberModifiedChunk(key, blocks) {
     // Copy before saving so later in-memory edits cannot mutate the stored snapshot by reference.
     const snapshot = blocks.slice();
+    this.savedChunkKeys.add(key);
     this.savedChunks.set(key, snapshot);
-    this.storage.saveChunk(key, snapshot);
+    this.queueStorageOperation(this.storage.saveChunk(key, snapshot));
   }
 
   forgetSavedChunk(key) {
     // Dropping a saved chunk lets terrain generation own that coordinate again.
+    this.savedChunkKeys.delete(key);
     this.savedChunks.delete(key);
-    this.storage.deleteChunk(key);
+    this.queueStorageOperation(this.storage.deleteChunk(key));
+  }
+
+  async loadSavedChunkNow(key) {
+    if (this.savedChunks.has(key)) return this.savedChunks.get(key);
+
+    const blocks = await this.storage.loadChunk(key);
+    if (!blocks) {
+      this.forgetSavedChunk(key);
+      return null;
+    }
+
+    this.savedChunks.set(key, blocks);
+    return blocks;
+  }
+
+  queueStorageOperation(operation) {
+    const trackedOperation = Promise.resolve(operation)
+      .catch((error) => {
+        console.warn("Save storage operation failed", error);
+      })
+      .finally(() => {
+        this.storageOperations.delete(trackedOperation);
+      });
+
+    this.storageOperations.add(trackedOperation);
+    return trackedOperation;
+  }
+
+  async flushStorageWrites() {
+    await Promise.allSettled(Array.from(this.storageOperations));
   }
 
   unloadChunksOutside(centerCx, centerCz, unloadRadius, scene) {
@@ -510,11 +635,11 @@ export class VoxelWorld {
 
     return {
       loadedChunks: this.chunks.size,
-      savedChunks: this.savedChunks.size,
+      savedChunks: this.savedChunkKeys.size,
       queuedChunks: this.chunkLoadQueue.size,
       loadedThisFrame: this.lastLoadedChunks,
       requestedLoadsThisFrame: this.lastRequestedChunkLoads,
-      pendingChunkLoads: this.pendingChunkLoads.size,
+      pendingChunkLoads: this.pendingChunkLoads.size + this.pendingSavedChunkLoads.size,
       meshedThisFrame: this.lastMeshedChunks,
       requestedMeshesThisFrame: this.lastRequestedMeshes,
       pendingMeshBuilds: this.pendingMeshBuilds.size,
