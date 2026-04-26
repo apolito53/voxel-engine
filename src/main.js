@@ -12,6 +12,7 @@ const QUALITY_STORAGE_KEY = "voxel-quality-preset";
 const LEGACY_POTATO_STORAGE_KEY = "voxel-potato-mode";
 const DEFAULT_QUALITY_PRESET = "normal";
 const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"];
+const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 // Quality presets are intentionally plain data so render distance, lighting,
 // streaming budgets, and minimap cost can be tuned without spelunking the game loop.
 const QUALITY_PRESETS = {
@@ -21,6 +22,11 @@ const QUALITY_PRESETS = {
     pixelRatioLimit: 1,
     shadows: false,
     shadowMapSize: 1024,
+    shadowCameraSize: 72,
+    shadowCameraFar: 180,
+    shadowBias: -0.00015,
+    shadowNormalBias: 0.035,
+    fogNear: 18,
     fogFar: 44,
     cameraFar: 120,
     loadRadius: 2,
@@ -38,6 +44,11 @@ const QUALITY_PRESETS = {
     pixelRatioLimit: 1,
     shadows: false,
     shadowMapSize: 1024,
+    shadowCameraSize: 88,
+    shadowCameraFar: 220,
+    shadowBias: -0.00015,
+    shadowNormalBias: 0.035,
+    fogNear: 35,
     fogFar: 68,
     cameraFar: 180,
     loadRadius: 3,
@@ -55,6 +66,11 @@ const QUALITY_PRESETS = {
     pixelRatioLimit: 2,
     shadows: true,
     shadowMapSize: 2048,
+    shadowCameraSize: 112,
+    shadowCameraFar: 280,
+    shadowBias: -0.00035,
+    shadowNormalBias: 0.14,
+    fogNear: 55,
     fogFar: 220,
     cameraFar: 450,
     loadRadius: 6,
@@ -72,6 +88,11 @@ const QUALITY_PRESETS = {
     pixelRatioLimit: 2,
     shadows: true,
     shadowMapSize: 2048,
+    shadowCameraSize: 144,
+    shadowCameraFar: 340,
+    shadowBias: -0.00032,
+    shadowNormalBias: 0.16,
+    fogNear: 75,
     fogFar: 320,
     cameraFar: 650,
     loadRadius: 9,
@@ -89,6 +110,11 @@ const QUALITY_PRESETS = {
     pixelRatioLimit: 2,
     shadows: true,
     shadowMapSize: 4096,
+    shadowCameraSize: 176,
+    shadowCameraFar: 420,
+    shadowBias: -0.0003,
+    shadowNormalBias: 0.18,
+    fogNear: 95,
     fogFar: 440,
     cameraFar: 900,
     loadRadius: 12,
@@ -116,7 +142,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fb9d8);
 scene.fog = new THREE.Fog(
   0x8fb9d8,
-  55,
+  getQualityPreset().fogNear,
   getQualityPreset().fogFar
 );
 
@@ -127,14 +153,12 @@ const camera = new THREE.PerspectiveCamera(
   getQualityPreset().cameraFar
 );
 
+const sunTarget = new THREE.Object3D();
+scene.add(sunTarget);
 const sun = new THREE.DirectionalLight(0xfff0d0, getQualityPreset().sunIntensity);
-sun.position.set(35, 55, 18);
-sun.castShadow = getQualityPreset().shadows;
-sun.shadow.mapSize.set(getQualityPreset().shadowMapSize, getQualityPreset().shadowMapSize);
-sun.shadow.camera.left = -75;
-sun.shadow.camera.right = 75;
-sun.shadow.camera.top = 75;
-sun.shadow.camera.bottom = -75;
+sun.target = sunTarget;
+configureSunShadow(getQualityPreset(), false);
+updateSunShadowAnchor();
 scene.add(sun);
 const skyLight = new THREE.HemisphereLight(0xb9d9ff, 0x394228, getQualityPreset().skyIntensity);
 scene.add(skyLight);
@@ -336,6 +360,7 @@ function animate() {
     updateMinimap(delta);
   }
 
+  updateSunShadowAnchor();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -401,6 +426,7 @@ async function loadWorld(worldId) {
     world.ensureChunksAround(0, 0, spawnLoadRadius);
     world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
     camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
+    updateSunShadowAnchor();
     homeScreen.classList.add("is-hidden");
     pauseMenu.classList.add("is-hidden");
     document.body.classList.add("in-world");
@@ -644,13 +670,14 @@ function setQualityPreset(presetId, persist = true) {
   renderer.shadowMap.enabled = preset.shadows;
   renderer.shadowMap.autoUpdate = preset.shadows;
   renderer.shadowMap.needsUpdate = true;
-  sun.castShadow = preset.shadows;
   sun.intensity = preset.sunIntensity;
-  sun.shadow.mapSize.set(preset.shadowMapSize, preset.shadowMapSize);
+  configureSunShadow(preset, true);
   skyLight.intensity = preset.skyIntensity;
+  scene.fog.near = preset.fogNear;
   scene.fog.far = preset.fogFar;
   camera.far = preset.cameraFar;
   camera.updateProjectionMatrix();
+  updateSunShadowAnchor();
 
   qualityButton.textContent = `Quality: ${preset.label}`;
   qualityButton.setAttribute("aria-label", `Quality preset: ${preset.label}`);
@@ -660,6 +687,41 @@ function setQualityPreset(presetId, persist = true) {
   minimapAccumulator = Infinity;
   minimapRefreshRow = MINIMAP_TEXTURE_SIZE;
   if (persist) writeQualityPreference(qualityPresetId);
+}
+
+function configureSunShadow(preset, resetShadowMap) {
+  sun.castShadow = preset.shadows;
+  sun.shadow.mapSize.set(preset.shadowMapSize, preset.shadowMapSize);
+  sun.shadow.camera.left = -preset.shadowCameraSize;
+  sun.shadow.camera.right = preset.shadowCameraSize;
+  sun.shadow.camera.top = preset.shadowCameraSize;
+  sun.shadow.camera.bottom = -preset.shadowCameraSize;
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = preset.shadowCameraFar;
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.bias = preset.shadowBias;
+  sun.shadow.normalBias = preset.shadowNormalBias;
+
+  if (resetShadowMap) resetSunShadowMap();
+}
+
+function resetSunShadowMap() {
+  // Three.js allocates shadow render targets lazily; quality changes need a clean target.
+  if (sun.shadow.map) {
+    sun.shadow.map.dispose();
+    sun.shadow.map = null;
+  }
+  if (sun.shadow.mapPass) {
+    sun.shadow.mapPass.dispose();
+    sun.shadow.mapPass = null;
+  }
+}
+
+function updateSunShadowAnchor() {
+  // Keep the directional light stable over the player's local chunk window.
+  sunTarget.position.set(camera.position.x, 0, camera.position.z);
+  sun.position.copy(sunTarget.position).add(SUN_OFFSET);
+  sunTarget.updateMatrixWorld();
 }
 
 function cycleQualityPreset() {
