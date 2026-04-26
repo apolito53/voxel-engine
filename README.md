@@ -4,12 +4,22 @@ A tiny browser-based voxel sandbox prototype. Three.js handles rendering, while 
 
 ## Run
 
+Windows:
+
 ```powershell
-npm.cmd install
-npm.cmd run dev -- --port 5173
+.\start.ps1
+```
+
+Linux/Ubuntu:
+
+```bash
+chmod +x ./start.sh
+./start.sh
 ```
 
 Open `http://127.0.0.1:5173`.
+
+Pass a different port as the first argument, for example `.\start.ps1 5174` or `./start.sh 5174`.
 
 ## Controls
 
@@ -26,16 +36,14 @@ Open `http://127.0.0.1:5173`.
 
 ## Engine Pieces
 
-- `src/world.js`: chunk ownership, terrain generation, block reads/writes
-- `src/chunk.js`: voxel storage and visible-face mesh building
+- `src/world.js`: chunk ownership, worker scheduling, streaming, block reads/writes
+- `src/chunk.js`: voxel storage, sync mesh fallback, worker mesh upload
+- `src/chunkWorker.js`: worker-side terrain generation and greedy mesh building
 - `src/player.js`: first-person controller and voxel collision
 - `src/raycast.js`: grid DDA block picking
 - `src/physics.js`: simple sphere-vs-voxel rigid toy
 
 ## Sensible Next Steps
 
-- Stream chunks around the player instead of generating a fixed radius.
-- Add greedy meshing to reduce vertex count.
 - Persist edited chunks to local storage.
-- Add a debug overlay for frame time, triangle count, and current chunk.
 - Give physics toys voxel damage so thrown objects can punch little craters.

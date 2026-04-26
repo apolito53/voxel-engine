@@ -13,6 +13,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 ## Commands
 
 - Install: `npm.cmd install`
+- Start on Windows: `.\start.ps1`
+- Start on Linux/Ubuntu: `chmod +x ./start.sh && ./start.sh`
 - Dev server: `npm.cmd run dev -- --port 5173`
 - Production build: `npm.cmd run build`
 - Preview build: `npm.cmd run preview -- --port 4173`
@@ -31,6 +33,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Block picking for break/place interactions: `src/raycast.js`
 - Throwable bouncing physics core: `src/physics.js`
 - Clamp, noise, and terrain math helpers: `src/math.js`
+- Windows startup helper: `start.ps1`
+- Linux/Ubuntu startup helper: `start.sh`
 
 ## Runtime Flow
 
