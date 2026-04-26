@@ -48,8 +48,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Potato`: 0.5x render distance, no shadows
 - `Low`: current low-end baseline, no shadows
 - `Normal`: 2x render distance, shadows
-- `High`: 3x render distance, shadows
-- `Ultra`: 4x render distance, higher shadow resolution
+- `High`: 4x render distance, shadows
+- `Ultra`: 6x render distance, higher shadow resolution
 
 ## Engine Pieces
 
