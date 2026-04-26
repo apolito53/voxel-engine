@@ -39,7 +39,17 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Right click` place block
 - `1-5` select block
 - `F` throw a physics core
+- `F3` toggle debug overlay
+- `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - `Esc` pause and release mouse
+
+## Quality Presets
+
+- `Potato`: 0.5x render distance, no shadows
+- `Low`: current low-end baseline, no shadows
+- `Normal`: 2x render distance, shadows
+- `High`: 3x render distance, shadows
+- `Ultra`: 4x render distance, higher shadow resolution
 
 ## Engine Pieces
 

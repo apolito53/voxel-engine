@@ -61,7 +61,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune saved worlds or edit persistence: update `src/chunkStorage.js`, home-menu glue in `src/main.js`, and the save/load calls in `src/world.js`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.js` and the debug display in `src/main.js`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.js`.
-- Tune render/performance modes: constants and `setPotatoMode` helpers in `src/main.js`.
+- Tune render/performance modes: quality preset constants and `setQualityPreset` helpers in `src/main.js`.
 - Change break/place reach or hit behavior: `src/raycast.js` and pointer handlers in `src/main.js`.
 - Change thrown object behavior: `src/physics.js` plus `KeyF` handling in `src/main.js`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, and `src/main.js`.

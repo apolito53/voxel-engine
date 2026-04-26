@@ -8,31 +8,106 @@ import { PhysicsToy } from "./physics.js";
 import { voxelRaycast } from "./raycast.js";
 import { VoxelWorld } from "./world.js";
 
-const NORMAL_PIXEL_RATIO_LIMIT = 2;
-const POTATO_PIXEL_RATIO = 1;
-const NORMAL_FOG_FAR = 150;
-const POTATO_FOG_FAR = 68;
-const NORMAL_CAMERA_FAR = 450;
-const POTATO_CAMERA_FAR = 180;
-const NORMAL_LOAD_RADIUS = 4;
-const POTATO_LOAD_RADIUS = 3;
-const NORMAL_UNLOAD_RADIUS = 5;
-const POTATO_UNLOAD_RADIUS = 4;
-const NORMAL_CHUNK_LOADS = 2;
-const POTATO_CHUNK_LOADS = 1;
-const NORMAL_CHUNK_REBUILDS = 4;
-const POTATO_CHUNK_REBUILDS = 2;
-const NORMAL_MINIMAP_INTERVAL = 0.15;
-const POTATO_MINIMAP_INTERVAL = 0.35;
-const NORMAL_MINIMAP_ROWS_PER_FRAME = 8;
-const POTATO_MINIMAP_ROWS_PER_FRAME = 4;
+const QUALITY_STORAGE_KEY = "voxel-quality-preset";
+const LEGACY_POTATO_STORAGE_KEY = "voxel-potato-mode";
+const DEFAULT_QUALITY_PRESET = "normal";
+const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"];
+// Quality presets are intentionally plain data so render distance, lighting,
+// streaming budgets, and minimap cost can be tuned without spelunking the game loop.
+const QUALITY_PRESETS = {
+  potato: {
+    label: "Potato",
+    distanceScale: 0.5,
+    pixelRatioLimit: 1,
+    shadows: false,
+    shadowMapSize: 1024,
+    fogFar: 44,
+    cameraFar: 120,
+    loadRadius: 2,
+    unloadRadius: 3,
+    chunkLoads: 1,
+    chunkRebuilds: 1,
+    minimapInterval: 0.45,
+    minimapRowsPerFrame: 3,
+    sunIntensity: 2.8,
+    skyIntensity: 1.35
+  },
+  low: {
+    label: "Low",
+    distanceScale: 1,
+    pixelRatioLimit: 1,
+    shadows: false,
+    shadowMapSize: 1024,
+    fogFar: 68,
+    cameraFar: 180,
+    loadRadius: 3,
+    unloadRadius: 4,
+    chunkLoads: 1,
+    chunkRebuilds: 2,
+    minimapInterval: 0.35,
+    minimapRowsPerFrame: 4,
+    sunIntensity: 3.2,
+    skyIntensity: 1.65
+  },
+  normal: {
+    label: "Normal",
+    distanceScale: 2,
+    pixelRatioLimit: 2,
+    shadows: true,
+    shadowMapSize: 2048,
+    fogFar: 220,
+    cameraFar: 450,
+    loadRadius: 6,
+    unloadRadius: 7,
+    chunkLoads: 2,
+    chunkRebuilds: 4,
+    minimapInterval: 0.15,
+    minimapRowsPerFrame: 8,
+    sunIntensity: 3.2,
+    skyIntensity: 1.65
+  },
+  high: {
+    label: "High",
+    distanceScale: 3,
+    pixelRatioLimit: 2,
+    shadows: true,
+    shadowMapSize: 2048,
+    fogFar: 320,
+    cameraFar: 650,
+    loadRadius: 9,
+    unloadRadius: 10,
+    chunkLoads: 3,
+    chunkRebuilds: 5,
+    minimapInterval: 0.15,
+    minimapRowsPerFrame: 8,
+    sunIntensity: 3.35,
+    skyIntensity: 1.72
+  },
+  ultra: {
+    label: "Ultra",
+    distanceScale: 4,
+    pixelRatioLimit: 2,
+    shadows: true,
+    shadowMapSize: 4096,
+    fogFar: 440,
+    cameraFar: 900,
+    loadRadius: 12,
+    unloadRadius: 13,
+    chunkLoads: 4,
+    chunkRebuilds: 6,
+    minimapInterval: 0.15,
+    minimapRowsPerFrame: 10,
+    sunIntensity: 3.5,
+    skyIntensity: 1.78
+  }
+};
 
 const app = document.querySelector("#app");
-let potatoMode = readPotatoPreference();
+let qualityPresetId = readQualityPreference();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = !potatoMode;
+renderer.shadowMap.enabled = getQualityPreset().shadows;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 const gpuInfo = readGpuInfo(renderer);
@@ -42,26 +117,27 @@ scene.background = new THREE.Color(0x8fb9d8);
 scene.fog = new THREE.Fog(
   0x8fb9d8,
   55,
-  potatoMode ? POTATO_FOG_FAR : NORMAL_FOG_FAR
+  getQualityPreset().fogFar
 );
 
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.05,
-  potatoMode ? POTATO_CAMERA_FAR : NORMAL_CAMERA_FAR
+  getQualityPreset().cameraFar
 );
 
-const sun = new THREE.DirectionalLight(0xfff0d0, 3.2);
+const sun = new THREE.DirectionalLight(0xfff0d0, getQualityPreset().sunIntensity);
 sun.position.set(35, 55, 18);
-sun.castShadow = !potatoMode;
-sun.shadow.mapSize.set(2048, 2048);
+sun.castShadow = getQualityPreset().shadows;
+sun.shadow.mapSize.set(getQualityPreset().shadowMapSize, getQualityPreset().shadowMapSize);
 sun.shadow.camera.left = -75;
 sun.shadow.camera.right = 75;
 sun.shadow.camera.top = 75;
 sun.shadow.camera.bottom = -75;
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xb9d9ff, 0x394228, 1.65));
+const skyLight = new THREE.HemisphereLight(0xb9d9ff, 0x394228, getQualityPreset().skyIntensity);
+scene.add(skyLight);
 
 const worldMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
@@ -81,7 +157,7 @@ const homeWorldList = document.querySelector("#home-world-list");
 const pauseMenu = document.querySelector("#pause-menu");
 const resumeButton = document.querySelector("#resume-button");
 const homeButton = document.querySelector("#home-button");
-const potatoButton = document.querySelector("#potato-button");
+const qualityButton = document.querySelector("#quality-button");
 const debugPanel = document.querySelector("#debug-panel");
 const minimap = document.querySelector("#minimap");
 const minimapContext = minimap.getContext("2d");
@@ -134,7 +210,7 @@ async function startApp() {
     camera.position.set(2, 24, 2);
     player = new PlayerController(camera, renderer.domElement, world);
     wireMenuControls();
-    setPotatoMode(potatoMode, false);
+    setQualityPreset(qualityPresetId, false);
     worldSeedInput.value = createReadableSeed();
     await renderHomeWorldList();
     animate();
@@ -160,7 +236,7 @@ function wireMenuControls() {
   homeButton.addEventListener("click", () => {
     void exitToHome();
   });
-  potatoButton.addEventListener("click", () => setPotatoMode(!potatoMode));
+  qualityButton.addEventListener("click", () => cycleQualityPreset());
   createWorldForm.addEventListener("submit", (event) => {
     void createWorldFromForm(event);
   });
@@ -187,7 +263,7 @@ document.addEventListener("keydown", (event) => {
 
   if (event.code === "F4") {
     event.preventDefault();
-    setPotatoMode(!potatoMode);
+    cycleQualityPreset();
     return;
   }
 
@@ -318,9 +394,11 @@ async function loadWorld(worldId) {
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await world.switchStorage(chunkStorage, scene, savedWorld.seed);
+    // Keep first load bounded; larger quality presets stream their extra distance after spawn.
+    const spawnLoadRadius = getInitialLoadRadius();
     // For now every world starts near the origin; player-position saves can layer on later.
-    await world.preloadSavedChunksAround(0, 0, getLoadRadius());
-    world.ensureChunksAround(0, 0, getLoadRadius());
+    await world.preloadSavedChunksAround(0, 0, spawnLoadRadius);
+    world.ensureChunksAround(0, 0, spawnLoadRadius);
     world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
     camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
     homeScreen.classList.add("is-hidden");
@@ -405,7 +483,7 @@ function updateDebug(delta, playerChunk) {
     `mesh q ${stats.dirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
     `saved ${stats.savedChunks} edited ${stats.modifiedChunks}`,
     `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
-    `mode ${potatoMode ? "potato" : "normal"} px ${renderer.getPixelRatio()}`,
+    `quality ${getQualityPreset().label.toLowerCase()} ${getQualityPreset().distanceScale}x px ${renderer.getPixelRatio()}`,
     `map slice ${lastMinimapMs.toFixed(1)}ms`,
     `gpu ${compactText(gpuInfo.vendor, 30)}`,
     compactText(gpuInfo.renderer, 34),
@@ -558,55 +636,69 @@ function drawMinimapPlayer(originX, originZ) {
   minimapContext.restore();
 }
 
-function setPotatoMode(enabled, persist = true) {
-  potatoMode = enabled;
+function setQualityPreset(presetId, persist = true) {
+  qualityPresetId = normalizeQualityPresetId(presetId);
+  const preset = getQualityPreset();
+
   renderer.setPixelRatio(getRenderPixelRatio());
-  renderer.shadowMap.enabled = !potatoMode;
-  renderer.shadowMap.autoUpdate = !potatoMode;
+  renderer.shadowMap.enabled = preset.shadows;
+  renderer.shadowMap.autoUpdate = preset.shadows;
   renderer.shadowMap.needsUpdate = true;
-  sun.castShadow = !potatoMode;
-  scene.fog.far = potatoMode ? POTATO_FOG_FAR : NORMAL_FOG_FAR;
-  camera.far = potatoMode ? POTATO_CAMERA_FAR : NORMAL_CAMERA_FAR;
+  sun.castShadow = preset.shadows;
+  sun.intensity = preset.sunIntensity;
+  sun.shadow.mapSize.set(preset.shadowMapSize, preset.shadowMapSize);
+  skyLight.intensity = preset.skyIntensity;
+  scene.fog.far = preset.fogFar;
+  camera.far = preset.cameraFar;
   camera.updateProjectionMatrix();
 
-  potatoButton.textContent = `Potato Mode: ${potatoMode ? "On" : "Off"}`;
-  potatoButton.setAttribute("aria-pressed", String(potatoMode));
-  document.body.classList.toggle("potato-mode", potatoMode);
+  qualityButton.textContent = `Quality: ${preset.label}`;
+  qualityButton.setAttribute("aria-label", `Quality preset: ${preset.label}`);
+  document.body.dataset.quality = qualityPresetId;
 
   debugAccumulator = Infinity;
   minimapAccumulator = Infinity;
   minimapRefreshRow = MINIMAP_TEXTURE_SIZE;
-  if (persist) writePotatoPreference(potatoMode);
+  if (persist) writeQualityPreference(qualityPresetId);
+}
+
+function cycleQualityPreset() {
+  const currentIndex = QUALITY_PRESET_ORDER.indexOf(qualityPresetId);
+  const nextIndex = (currentIndex + 1) % QUALITY_PRESET_ORDER.length;
+  setQualityPreset(QUALITY_PRESET_ORDER[nextIndex]);
 }
 
 function getRenderPixelRatio() {
-  return potatoMode
-    ? POTATO_PIXEL_RATIO
-    : Math.min(window.devicePixelRatio, NORMAL_PIXEL_RATIO_LIMIT);
+  return Math.min(window.devicePixelRatio, getQualityPreset().pixelRatioLimit);
 }
 
 function getLoadRadius() {
-  return potatoMode ? POTATO_LOAD_RADIUS : NORMAL_LOAD_RADIUS;
+  return getQualityPreset().loadRadius;
+}
+
+function getInitialLoadRadius() {
+  // High and ultra should not freeze world entry by synchronously building every distant chunk.
+  return Math.min(getLoadRadius(), QUALITY_PRESETS.low.loadRadius);
 }
 
 function getUnloadRadius() {
-  return potatoMode ? POTATO_UNLOAD_RADIUS : NORMAL_UNLOAD_RADIUS;
+  return getQualityPreset().unloadRadius;
 }
 
 function getChunkLoadBudget() {
-  return potatoMode ? POTATO_CHUNK_LOADS : NORMAL_CHUNK_LOADS;
+  return getQualityPreset().chunkLoads;
 }
 
 function getChunkRebuildBudget() {
-  return potatoMode ? POTATO_CHUNK_REBUILDS : NORMAL_CHUNK_REBUILDS;
+  return getQualityPreset().chunkRebuilds;
 }
 
 function getMinimapInterval() {
-  return potatoMode ? POTATO_MINIMAP_INTERVAL : NORMAL_MINIMAP_INTERVAL;
+  return getQualityPreset().minimapInterval;
 }
 
 function getMinimapRowsPerFrame() {
-  return potatoMode ? POTATO_MINIMAP_ROWS_PER_FRAME : NORMAL_MINIMAP_ROWS_PER_FRAME;
+  return getQualityPreset().minimapRowsPerFrame;
 }
 
 function readGpuInfo(activeRenderer) {
@@ -628,19 +720,33 @@ function compactText(value, maxLength) {
   return `${text.slice(0, maxLength - 3)}...`;
 }
 
-function readPotatoPreference() {
+function getQualityPreset() {
+  return QUALITY_PRESETS[qualityPresetId] ?? QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
+}
+
+function normalizeQualityPresetId(presetId) {
+  return QUALITY_PRESETS[presetId] ? presetId : DEFAULT_QUALITY_PRESET;
+}
+
+function readQualityPreference() {
   try {
-    return localStorage.getItem("voxel-potato-mode") === "true";
+    const storedPreset = localStorage.getItem(QUALITY_STORAGE_KEY);
+    if (QUALITY_PRESETS[storedPreset]) return storedPreset;
+
+    // Keep old sessions intuitive: the previous "potato on" setting is now "low".
+    if (localStorage.getItem(LEGACY_POTATO_STORAGE_KEY) === "true") return "low";
+    return DEFAULT_QUALITY_PRESET;
   } catch {
-    return false;
+    return DEFAULT_QUALITY_PRESET;
   }
 }
 
-function writePotatoPreference(enabled) {
+function writeQualityPreference(presetId) {
   try {
-    localStorage.setItem("voxel-potato-mode", String(enabled));
+    localStorage.setItem(QUALITY_STORAGE_KEY, presetId);
+    localStorage.removeItem(LEGACY_POTATO_STORAGE_KEY);
   } catch {
-    // Local storage is a convenience here; the toggle should still work without it.
+    // Local storage is a convenience here; quality changes should still work without it.
   }
 }
 
