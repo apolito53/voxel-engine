@@ -1,18 +1,19 @@
 import * as THREE from "three";
 import { clamp } from "./math.js";
+import { METERS_PER_BLOCK } from "./voxelConstants.js";
 
-const PLAYER_HEIGHT = 1.8;
-const PLAYER_RADIUS = 0.32;
+const PLAYER_HEIGHT = 1.8 * METERS_PER_BLOCK;
+const PLAYER_RADIUS = 0.32 * METERS_PER_BLOCK;
 const LOOK_SENSITIVITY = 0.0022;
-const WALK_SPEED = 5.4;
-const SPRINT_SPEED = 8.5;
+const WALK_SPEED = 5.4 * METERS_PER_BLOCK;
+const SPRINT_SPEED = 8.5 * METERS_PER_BLOCK;
 const AIR_SPEED_LIMIT = SPRINT_SPEED;
-const GROUND_ACCELERATION = 96;
-const AIR_ACCELERATION = 15;
+const GROUND_ACCELERATION = 96 * METERS_PER_BLOCK;
+const AIR_ACCELERATION = 15 * METERS_PER_BLOCK;
 const GROUND_FRICTION = 12;
 const AIR_DRAG = 0.08;
-const GRAVITY = 22;
-const JUMP_SPEED = 8.2;
+const GRAVITY = 22 * METERS_PER_BLOCK;
+const JUMP_SPEED = 8.2 * METERS_PER_BLOCK;
 
 export class PlayerController {
   constructor(camera, domElement, world) {

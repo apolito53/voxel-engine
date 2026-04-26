@@ -2,6 +2,8 @@
 
 A tiny browser-based voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, block edits, and simple physics toys.
 
+World units are metric: `1 block = 1 meter`.
+
 ## Run
 
 Windows:

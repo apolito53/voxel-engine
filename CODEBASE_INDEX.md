@@ -8,6 +8,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 - Vite browser app using native ES modules plus a module Web Worker for chunk CPU work.
 - Three.js handles rendering, camera, materials, lights, and meshes.
+- World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.js`.
 - The app code owns chunks, terrain generation, voxel meshing, player movement, collision, ray picking, HUD, minimap, and simple physics toys.
 
 ## Commands
@@ -25,7 +26,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - HTML shell, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
 - Block IDs, colors, placeable palette: `src/blocks.js`
-- Shared chunk dimensions and world height constants: `src/voxelConstants.js`
+- Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.js`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.js`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.js`
 - Chunk ownership, worker scheduling, streaming, reads/writes: `src/world.js`
@@ -53,7 +54,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune chunk dimensions: update `src/voxelConstants.js`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `generateChunkBlocks` in `src/chunkWorker.js` and `VoxelWorld.generateChunk` in `src/world.js`; terrain noise lives in `src/math.js`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.js` and the debug display in `src/main.js`.
-- Tune movement feel: constants and collision resolution in `src/player.js`.
+- Tune movement feel: metric-scaled constants and collision resolution in `src/player.js`.
 - Tune render/performance modes: constants and `setPotatoMode` helpers in `src/main.js`.
 - Change break/place reach or hit behavior: `src/raycast.js` and pointer handlers in `src/main.js`.
 - Change thrown object behavior: `src/physics.js` plus `KeyF` handling in `src/main.js`.
