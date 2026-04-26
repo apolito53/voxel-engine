@@ -2,6 +2,7 @@ import * as THREE from "three";
 import "./style.css";
 import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks.js";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./chunk.js";
+import { createChunkStorage, createWorldRegistry } from "./chunkStorage.js";
 import { PlayerController } from "./player.js";
 import { PhysicsToy } from "./physics.js";
 import { voxelRaycast } from "./raycast.js";
@@ -77,9 +78,12 @@ const player = new PlayerController(camera, renderer.domElement, world);
 const pauseMenu = document.querySelector("#pause-menu");
 const resumeButton = document.querySelector("#resume-button");
 const potatoButton = document.querySelector("#potato-button");
+const worldSelect = document.querySelector("#world-select");
+const newWorldButton = document.querySelector("#new-world-button");
 const debugPanel = document.querySelector("#debug-panel");
 const minimap = document.querySelector("#minimap");
 const minimapContext = minimap.getContext("2d");
+const worldRegistry = createWorldRegistry();
 player.onPauseChange = (paused) => {
   pauseMenu.classList.toggle("is-hidden", !paused);
 };
@@ -91,6 +95,8 @@ pauseMenu.addEventListener("pointerdown", (event) => {
 });
 resumeButton.addEventListener("click", () => player.resume());
 potatoButton.addEventListener("click", () => setPotatoMode(!potatoMode));
+worldSelect.addEventListener("change", () => switchSavedWorld(worldSelect.value));
+newWorldButton.addEventListener("click", () => createSavedWorld());
 
 let selectedBlockIndex = 0;
 let debugVisible = true;
@@ -216,6 +222,56 @@ function animate() {
 function updateHud() {
   const title = document.querySelector("#hud .title");
   title.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
+}
+
+function renderWorldList() {
+  const activeWorldId = worldRegistry.getActiveWorldId();
+  const worlds = worldRegistry.listWorlds();
+
+  // Rebuild the select from registry metadata so storage remains the single source of truth.
+  worldSelect.replaceChildren(
+    ...worlds.map((savedWorld) => {
+      const option = document.createElement("option");
+      option.value = savedWorld.id;
+      option.textContent = formatWorldOption(savedWorld);
+      return option;
+    })
+  );
+  worldSelect.value = activeWorldId;
+}
+
+function createSavedWorld() {
+  // Native prompt keeps the first save-slot UI tiny; a nicer modal can replace this later.
+  const name = window.prompt("Name this world:", "New World");
+  if (name === null) return;
+
+  const savedWorld = worldRegistry.createWorld(name);
+  switchSavedWorld(savedWorld.id);
+}
+
+function switchSavedWorld(worldId) {
+  const activeWorldId = worldRegistry.setActiveWorld(worldId);
+  const chunkStorage = createChunkStorage(undefined, activeWorldId);
+
+  // Switching worlds keeps engine settings, but replaces every loaded/generated chunk.
+  world.switchStorage(chunkStorage, scene);
+  // For now every world starts near the origin; player-position saves can layer on later.
+  world.ensureChunksAround(0, 0, getLoadRadius());
+  world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
+  camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
+  debugAccumulator = Infinity;
+  minimapAccumulator = Infinity;
+  minimapHasTerrain = false;
+  minimapRefreshRow = MINIMAP_TEXTURE_SIZE;
+  renderWorldList();
+}
+
+function formatWorldOption(savedWorld) {
+  // The date is intentionally compact so long world names still fit in the pause menu.
+  const date = savedWorld.updatedAt
+    ? new Date(savedWorld.updatedAt).toLocaleDateString()
+    : "new";
+  return `${savedWorld.name} (${date})`;
 }
 
 function updateDebug(delta, playerChunk) {
@@ -478,4 +534,5 @@ function writePotatoPreference(enabled) {
 }
 
 setPotatoMode(potatoMode, false);
+renderWorldList();
 animate();

@@ -27,7 +27,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Visual styling and overlays: `src/style.css`
 - Block IDs, colors, placeable palette: `src/blocks.js`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.js`
-- Browser storage adapter for edited chunk persistence: `src/chunkStorage.js`
+- Browser storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.js`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.js`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.js`
 - Chunk ownership, worker scheduling, streaming, reads/writes: `src/world.js`
@@ -47,14 +47,15 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 5. Dirty chunks are meshed in the worker as typed-array buffers, then `Chunk.applyMeshData` uploads the returned data into Three.js `BufferGeometry`.
 6. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
 7. Each animation frame updates player motion, chunk streaming, dirty mesh scheduling, physics toys, HUD/debug text, minimap, and final render.
-8. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are saved through `src/chunkStorage.js` and neighboring chunks are marked dirty when edge blocks change.
+8. Saved-world selection in the pause menu swaps `VoxelWorld` to another chunk storage namespace, clears loaded chunks, and respawns near the origin.
+9. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are saved through `src/chunkStorage.js` and neighboring chunks are marked dirty when edge blocks change.
 
 ## Common Change Targets
 
 - Add or recolor blocks: update `src/blocks.js`; inspect mesh color use in `src/chunk.js`.
 - Tune chunk dimensions: update `src/voxelConstants.js`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `generateChunkBlocks` in `src/chunkWorker.js` and `VoxelWorld.generateChunk` in `src/world.js`; terrain noise lives in `src/math.js`.
-- Tune edit persistence: update `src/chunkStorage.js` and the save/load calls in `src/world.js`.
+- Tune saved worlds or edit persistence: update `src/chunkStorage.js`, pause-menu glue in `src/main.js`, and the save/load calls in `src/world.js`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.js` and the debug display in `src/main.js`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.js`.
 - Tune render/performance modes: constants and `setPotatoMode` helpers in `src/main.js`.
@@ -66,7 +67,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 - `rg.exe` may be blocked on this Windows machine; fall back to bounded PowerShell searches.
 - `VoxelWorld.savedChunks` mirrors persisted edited chunks; generated chunks are not stored.
-- Edited chunks persist as full chunk snapshots in browser storage; this is simple and reliable, but not a final save-file format.
+- Saved worlds are local browser slots; edited chunks persist as full chunk snapshots in browser storage, which is simple and reliable but not a final save-file format.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.

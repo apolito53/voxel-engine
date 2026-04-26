@@ -30,6 +30,26 @@ export class VoxelWorld {
     this.lastRequestedMeshes = 0;
   }
 
+  switchStorage(storage, scene) {
+    this.disposeLoadedChunks(scene);
+    this.storage = storage;
+    // Switching worlds swaps the saved edit set; generated chunks will stream back in normally.
+    this.savedChunks = this.storage.loadAll();
+  }
+
+  disposeLoadedChunks(scene) {
+    for (const chunk of this.chunks.values()) {
+      chunk.disposeMesh(scene);
+    }
+    this.chunks.clear();
+    this.chunkLoadQueue.clear();
+    this.pendingChunkLoads.clear();
+    this.pendingChunkKeys.clear();
+    this.pendingMeshBuilds.clear();
+    this.pendingMeshKeys.clear();
+    this.workerResults.length = 0;
+  }
+
   key(cx, cz) {
     return `${cx},${cz}`;
   }

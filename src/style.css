@@ -51,6 +51,50 @@ body.playing canvas {
   font-weight: 800;
 }
 
+.world-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.menu-label {
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.76;
+  text-transform: uppercase;
+}
+
+.world-row {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 8px;
+}
+
+.world-select,
+.icon-button {
+  height: 42px;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.world-select {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(237, 244, 248, 0.08);
+  color: #edf4f8;
+  padding: 0 10px;
+}
+
+.icon-button {
+  border: 0;
+  background: #f1c453;
+  color: #17202a;
+  cursor: pointer;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .menu-actions {
   display: grid;
   gap: 10px;
@@ -80,7 +124,9 @@ body.playing canvas {
   color: #122016;
 }
 
-.menu-button:focus-visible {
+.menu-button:focus-visible,
+.world-select:focus-visible,
+.icon-button:focus-visible {
   outline: 3px solid rgba(241, 196, 83, 0.42);
   outline-offset: 3px;
 }

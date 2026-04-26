@@ -5,6 +5,7 @@ A tiny browser-based voxel sandbox prototype. Three.js handles rendering, while 
 World units are metric: `1 block = 1 meter`.
 
 Edited chunks persist in browser storage. Clear this site's local storage to reset the sandbox world.
+The pause menu includes a saved-world selector and a create-world button for switching between local world slots.
 
 ## Run
 
@@ -29,6 +30,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 - `WASD` move
 - `Resume` captures mouse and starts play
+- Pause menu saved-world selector switches local world slots
+- Pause menu `+` creates a new local world slot
 - `Mouse` look while playing
 - `Space` jump
 - `Shift` sprint
@@ -41,7 +44,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/world.js`: chunk ownership, worker scheduling, streaming, block reads/writes
-- `src/chunkStorage.js`: browser storage adapter for edited chunk persistence
+- `src/chunkStorage.js`: browser storage adapter for saved worlds and edited chunk persistence
 - `src/chunk.js`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.js`: worker-side terrain generation and greedy mesh building
 - `src/player.js`: first-person controller and voxel collision
