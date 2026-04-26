@@ -22,12 +22,13 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 ## Fast Lookup
 
-- App bootstrap, render loop, HUD, minimap, input glue: `src/main.js`
-- HTML shell, HUD nodes, pause menu, minimap canvas: `index.html`
+- App bootstrap, splash/home menu, render loop, HUD, minimap, input glue: `src/main.js`
+- HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
 - Block IDs, colors, placeable palette: `src/blocks.js`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.js`
 - Browser storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.js`
+- Seeded terrain generation shared by fallback and worker paths: `src/terrain.js`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.js`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.js`
 - Chunk ownership, worker scheduling, streaming, reads/writes: `src/world.js`
@@ -42,20 +43,21 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 1. `index.html` loads `src/main.js`.
 2. `main.js` creates the Three.js renderer, scene, lights, camera, `VoxelWorld`, and `PlayerController`.
-3. `VoxelWorld.ensureChunksAround` creates initial spawn chunks; generated chunks use `fbm2` terrain noise.
-4. During play, `VoxelWorld.streamChunksAround` queues chunk generation requests near the player and sends them to `src/chunkWorker.js` when workers are available.
-5. Dirty chunks are meshed in the worker as typed-array buffers, then `Chunk.applyMeshData` uploads the returned data into Three.js `BufferGeometry`.
-6. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-7. Each animation frame updates player motion, chunk streaming, dirty mesh scheduling, physics toys, HUD/debug text, minimap, and final render.
-8. Saved-world selection in the pause menu swaps `VoxelWorld` to another chunk storage namespace, clears loaded chunks, and respawns near the origin.
-9. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are saved through `src/chunkStorage.js` and neighboring chunks are marked dirty when edge blocks change.
+3. The app starts on the home screen; loading or creating a world activates a saved-world slot and seed.
+4. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.js`.
+5. During play, `VoxelWorld.streamChunksAround` queues chunk generation requests near the player and sends them to `src/chunkWorker.js` when workers are available.
+6. Dirty chunks are meshed in the worker as typed-array buffers, then `Chunk.applyMeshData` uploads the returned data into Three.js `BufferGeometry`.
+7. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
+8. Each animation frame updates player motion, chunk streaming, dirty mesh scheduling, physics toys, HUD/debug text, minimap, and final render only while a world is active.
+9. `Exit to Home` unloads the active world view; switching worlds happens from the home screen, not the pause menu.
+10. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are saved through `src/chunkStorage.js` and neighboring chunks are marked dirty when edge blocks change.
 
 ## Common Change Targets
 
 - Add or recolor blocks: update `src/blocks.js`; inspect mesh color use in `src/chunk.js`.
 - Tune chunk dimensions: update `src/voxelConstants.js`, then verify worker and main-thread paths still agree.
-- Tune terrain: update `generateChunkBlocks` in `src/chunkWorker.js` and `VoxelWorld.generateChunk` in `src/world.js`; terrain noise lives in `src/math.js`.
-- Tune saved worlds or edit persistence: update `src/chunkStorage.js`, pause-menu glue in `src/main.js`, and the save/load calls in `src/world.js`.
+- Tune terrain: update `src/terrain.js`; terrain noise helpers live in `src/math.js`.
+- Tune saved worlds or edit persistence: update `src/chunkStorage.js`, home-menu glue in `src/main.js`, and the save/load calls in `src/world.js`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.js` and the debug display in `src/main.js`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.js`.
 - Tune render/performance modes: constants and `setPotatoMode` helpers in `src/main.js`.

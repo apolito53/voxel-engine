@@ -69,23 +69,31 @@ const worldMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.0
 });
 
-const world = new VoxelWorld();
-world.ensureChunksAround(0, 0, getLoadRadius());
-world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
+const worldRegistry = createWorldRegistry();
+const initialWorld = worldRegistry.getActiveWorld();
+const world = new VoxelWorld({
+  storage: createChunkStorage(undefined, initialWorld.id),
+  seed: initialWorld.seed
+});
 
-camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
+camera.position.set(2, 24, 2);
 const player = new PlayerController(camera, renderer.domElement, world);
+const homeScreen = document.querySelector("#home-screen");
+const createWorldForm = document.querySelector("#create-world-form");
+const worldNameInput = document.querySelector("#world-name-input");
+const worldSeedInput = document.querySelector("#world-seed-input");
+const randomSeedButton = document.querySelector("#random-seed-button");
+const homeWorldList = document.querySelector("#home-world-list");
 const pauseMenu = document.querySelector("#pause-menu");
 const resumeButton = document.querySelector("#resume-button");
+const homeButton = document.querySelector("#home-button");
 const potatoButton = document.querySelector("#potato-button");
-const worldSelect = document.querySelector("#world-select");
-const newWorldButton = document.querySelector("#new-world-button");
 const debugPanel = document.querySelector("#debug-panel");
 const minimap = document.querySelector("#minimap");
 const minimapContext = minimap.getContext("2d");
-const worldRegistry = createWorldRegistry();
+let inWorld = false;
 player.onPauseChange = (paused) => {
-  pauseMenu.classList.toggle("is-hidden", !paused);
+  pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
 };
 pauseMenu.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
@@ -94,9 +102,14 @@ pauseMenu.addEventListener("pointerdown", (event) => {
   player.resume();
 });
 resumeButton.addEventListener("click", () => player.resume());
+// World switching stays on the home screen; the pause menu only exits back there.
+homeButton.addEventListener("click", () => exitToHome());
 potatoButton.addEventListener("click", () => setPotatoMode(!potatoMode));
-worldSelect.addEventListener("change", () => switchSavedWorld(worldSelect.value));
-newWorldButton.addEventListener("click", () => createSavedWorld());
+createWorldForm.addEventListener("submit", (event) => createWorldFromForm(event));
+randomSeedButton.addEventListener("click", () => {
+  worldSeedInput.value = createReadableSeed();
+  worldSeedInput.focus();
+});
 
 let selectedBlockIndex = 0;
 let debugVisible = true;
@@ -152,6 +165,8 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (!inWorld) return;
+
   if (/^Digit[1-5]$/.test(event.code)) {
     selectedBlockIndex = Number(event.code.at(-1)) - 1;
   }
@@ -169,7 +184,7 @@ document.addEventListener("keydown", (event) => {
 
 renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
 renderer.domElement.addEventListener("mousedown", (event) => {
-  if (!player.isLooking()) return;
+  if (!inWorld || !player.isLooking()) return;
 
   camera.getWorldDirection(direction);
   const hit = voxelRaycast(world, camera.position, direction, 8);
@@ -193,29 +208,33 @@ renderer.domElement.addEventListener("mousedown", (event) => {
 
 function animate() {
   const delta = Math.min(clock.getDelta(), 0.04);
-  player.update(delta);
-  const playerChunk = world.streamChunksAround(
-    camera.position.x,
-    camera.position.z,
-    scene,
-    getLoadRadius(),
-    getUnloadRadius(),
-    getChunkLoadBudget()
-  );
 
-  for (const toy of toys) {
-    toy.update(delta, world);
+  if (inWorld) {
+    player.update(delta);
+    const playerChunk = world.streamChunksAround(
+      camera.position.x,
+      camera.position.z,
+      scene,
+      getLoadRadius(),
+      getUnloadRadius(),
+      getChunkLoadBudget()
+    );
+
+    for (const toy of toys) {
+      toy.update(delta, world);
+    }
+
+    world.rebuildDirty(
+      scene,
+      worldMaterial,
+      getChunkRebuildBudget()
+    );
+    updateHud();
+    updateDebug(delta, playerChunk);
+    updateMinimap(delta);
   }
 
-  world.rebuildDirty(
-    scene,
-    worldMaterial,
-    getChunkRebuildBudget()
-  );
-  updateHud();
   renderer.render(scene, camera);
-  updateDebug(delta, playerChunk);
-  updateMinimap(delta);
   requestAnimationFrame(animate);
 }
 
@@ -224,54 +243,100 @@ function updateHud() {
   title.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
 }
 
-function renderWorldList() {
+function renderHomeWorldList() {
   const activeWorldId = worldRegistry.getActiveWorldId();
   const worlds = worldRegistry.listWorlds();
 
-  // Rebuild the select from registry metadata so storage remains the single source of truth.
-  worldSelect.replaceChildren(
+  // Rebuild visible save rows from registry metadata so storage remains the single source of truth.
+  homeWorldList.replaceChildren(
     ...worlds.map((savedWorld) => {
-      const option = document.createElement("option");
-      option.value = savedWorld.id;
-      option.textContent = formatWorldOption(savedWorld);
-      return option;
+      const button = document.createElement("button");
+      const isActive = savedWorld.id === activeWorldId;
+      button.type = "button";
+      button.className = `world-slot${isActive ? " is-active" : ""}`;
+      button.setAttribute("aria-pressed", String(isActive));
+      button.addEventListener("click", () => loadWorld(savedWorld.id));
+      button.append(
+        createWorldSlotLine("world-slot-name", savedWorld.name),
+        createWorldSlotLine("world-slot-meta", formatWorldMeta(savedWorld, isActive)),
+        createWorldSlotLine("world-slot-seed", `Seed: ${savedWorld.seed || "classic"}`)
+      );
+      return button;
     })
   );
-  worldSelect.value = activeWorldId;
 }
 
-function createSavedWorld() {
-  // Native prompt keeps the first save-slot UI tiny; a nicer modal can replace this later.
-  const name = window.prompt("Name this world:", "New World");
-  if (name === null) return;
+function createWorldFromForm(event) {
+  event.preventDefault();
 
-  const savedWorld = worldRegistry.createWorld(name);
-  switchSavedWorld(savedWorld.id);
+  const name = worldNameInput.value.trim() || `World ${worldRegistry.listWorlds().length + 1}`;
+  const seed = worldSeedInput.value.trim() || createReadableSeed();
+  const savedWorld = worldRegistry.createWorld(name, seed);
+  worldNameInput.value = "";
+  worldSeedInput.value = "";
+  loadWorld(savedWorld.id);
 }
 
-function switchSavedWorld(worldId) {
+function loadWorld(worldId) {
   const activeWorldId = worldRegistry.setActiveWorld(worldId);
+  const savedWorld = worldRegistry.getActiveWorld();
   const chunkStorage = createChunkStorage(undefined, activeWorldId);
 
-  // Switching worlds keeps engine settings, but replaces every loaded/generated chunk.
-  world.switchStorage(chunkStorage, scene);
+  // Loading from the home screen is the only place world slots swap into the active engine.
+  world.switchStorage(chunkStorage, scene, savedWorld.seed);
   // For now every world starts near the origin; player-position saves can layer on later.
   world.ensureChunksAround(0, 0, getLoadRadius());
   world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
   camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
+  homeScreen.classList.add("is-hidden");
+  pauseMenu.classList.add("is-hidden");
+  document.body.classList.add("in-world");
+  inWorld = true;
   debugAccumulator = Infinity;
   minimapAccumulator = Infinity;
   minimapHasTerrain = false;
   minimapRefreshRow = MINIMAP_TEXTURE_SIZE;
-  renderWorldList();
+  player.resume();
 }
 
-function formatWorldOption(savedWorld) {
+function exitToHome() {
+  // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
+  player.pause(true);
+  clearToys();
+  world.disposeLoadedChunks(scene);
+  inWorld = false;
+  document.body.classList.remove("in-world", "playing");
+  pauseMenu.classList.add("is-hidden");
+  homeScreen.classList.remove("is-hidden");
+  renderHomeWorldList();
+}
+
+function clearToys() {
+  for (const toy of toys) {
+    scene.remove(toy.mesh);
+    toy.mesh.geometry.dispose();
+    toy.mesh.material.dispose();
+  }
+  toys.length = 0;
+}
+
+function createWorldSlotLine(className, text) {
+  const line = document.createElement("span");
+  line.className = className;
+  line.textContent = text;
+  return line;
+}
+
+function formatWorldMeta(savedWorld, isActive) {
   // The date is intentionally compact so long world names still fit in the pause menu.
   const date = savedWorld.updatedAt
     ? new Date(savedWorld.updatedAt).toLocaleDateString()
     : "new";
-  return `${savedWorld.name} (${date})`;
+  return `${isActive ? "Current" : "Saved"} - ${date}`;
+}
+
+function createReadableSeed() {
+  return Math.random().toString(36).slice(2, 10);
 }
 
 function updateDebug(delta, playerChunk) {
@@ -534,5 +599,6 @@ function writePotatoPreference(enabled) {
 }
 
 setPotatoMode(potatoMode, false);
-renderWorldList();
+worldSeedInput.value = createReadableSeed();
+renderHomeWorldList();
 animate();

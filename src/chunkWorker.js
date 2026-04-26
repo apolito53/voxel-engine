@@ -1,12 +1,18 @@
 import { BLOCK, BLOCKS } from "./blocks.js";
-import { fbm2 } from "./math.js";
+import { createTerrainContext, generateChunkBlocks } from "./terrain.js";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
+
+const terrainContexts = new Map();
 
 self.onmessage = (event) => {
   const message = event.data;
 
   if (message.type === "generate") {
-    const blocks = generateChunkBlocks(message.cx, message.cz);
+    const blocks = generateChunkBlocks(
+      message.cx,
+      message.cz,
+      getTerrainContext(message.seed)
+    );
     self.postMessage(
       {
         type: "generated",
@@ -50,30 +56,13 @@ self.onmessage = (event) => {
   }
 };
 
-function generateChunkBlocks(cx, cz) {
-  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
-  const ox = cx * CHUNK_SIZE;
-  const oz = cz * CHUNK_SIZE;
-
-  for (let z = 0; z < CHUNK_SIZE; z += 1) {
-    for (let x = 0; x < CHUNK_SIZE; x += 1) {
-      const wx = ox + x;
-      const wz = oz + z;
-      const continent = fbm2(wx * 0.018, wz * 0.018, 4);
-      const detail = fbm2(wx * 0.07 + 9.2, wz * 0.07 - 4.8, 3);
-      const height = Math.floor(8 + continent * 18 + detail * 5);
-
-      for (let y = 0; y < WORLD_HEIGHT; y += 1) {
-        if (y > height) continue;
-        let block = BLOCK.stone;
-        if (y === height) block = height < 14 ? BLOCK.sand : BLOCK.grass;
-        else if (y > height - 4) block = BLOCK.dirt;
-        blocks[index(x, y, z)] = block;
-      }
-    }
+function getTerrainContext(seed = "") {
+  const key = String(seed || "");
+  if (!terrainContexts.has(key)) {
+    // Cache by seed so chunk streaming does not rebuild the same terrain offsets every request.
+    terrainContexts.set(key, createTerrainContext(key));
   }
-
-  return blocks;
+  return terrainContexts.get(key);
 }
 
 function readNeighbors(neighbors) {

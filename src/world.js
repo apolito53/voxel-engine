@@ -1,7 +1,7 @@
 import { BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk.js";
 import { createChunkStorage } from "./chunkStorage.js";
-import { fbm2 } from "./math.js";
+import { createTerrainContext, generateChunkBlocks } from "./terrain.js";
 
 const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
@@ -9,9 +9,11 @@ const MAX_CHUNK_LOADS_PER_FRAME = 2;
 const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
 
 export class VoxelWorld {
-  constructor({ storage = createChunkStorage() } = {}) {
+  constructor({ storage = createChunkStorage(), seed = "" } = {}) {
     this.chunks = new Map();
     this.storage = storage;
+    this.seed = String(seed || "");
+    this.terrain = createTerrainContext(this.seed);
     // savedChunks mirrors persisted edited chunks; generated terrain is never stored.
     this.savedChunks = this.storage.loadAll();
     this.chunkLoadQueue = new Map();
@@ -30,14 +32,21 @@ export class VoxelWorld {
     this.lastRequestedMeshes = 0;
   }
 
-  switchStorage(storage, scene) {
+  switchStorage(storage, scene, seed = "") {
     this.disposeLoadedChunks(scene);
     this.storage = storage;
+    this.seed = String(seed || "");
+    this.terrain = createTerrainContext(this.seed);
     // Switching worlds swaps the saved edit set; generated chunks will stream back in normally.
     this.savedChunks = this.storage.loadAll();
+    this.lastLoadedChunks = 0;
+    this.lastRequestedChunkLoads = 0;
+    this.lastMeshedChunks = 0;
+    this.lastRequestedMeshes = 0;
   }
 
   disposeLoadedChunks(scene) {
+    // Meshes belong to the currently active world; world switches and home exits drop them all.
     for (const chunk of this.chunks.values()) {
       chunk.disposeMesh(scene);
     }
@@ -240,7 +249,8 @@ export class VoxelWorld {
       type: "generate",
       requestId,
       cx,
-      cz
+      cz,
+      seed: this.seed
     });
   }
 
@@ -275,24 +285,7 @@ export class VoxelWorld {
   }
 
   generateChunk(chunk) {
-    const ox = chunk.cx * CHUNK_SIZE;
-    const oz = chunk.cz * CHUNK_SIZE;
-    for (let z = 0; z < CHUNK_SIZE; z += 1) {
-      for (let x = 0; x < CHUNK_SIZE; x += 1) {
-        const wx = ox + x;
-        const wz = oz + z;
-        const continent = fbm2(wx * 0.018, wz * 0.018, 4);
-        const detail = fbm2(wx * 0.07 + 9.2, wz * 0.07 - 4.8, 3);
-        const height = Math.floor(8 + continent * 18 + detail * 5);
-        for (let y = 0; y < WORLD_HEIGHT; y += 1) {
-          if (y > height) continue;
-          let block = BLOCK.stone;
-          if (y === height) block = height < 14 ? BLOCK.sand : BLOCK.grass;
-          else if (y > height - 4) block = BLOCK.dirt;
-          chunk.setLocal(x, y, z, block);
-        }
-      }
-    }
+    chunk.blocks.set(generateChunkBlocks(chunk.cx, chunk.cz, this.terrain));
     chunk.dirty = true;
     chunk.modified = false;
     chunk.revision = 0;

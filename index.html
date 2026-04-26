@@ -15,20 +15,59 @@
     </div>
     <div id="debug-panel"></div>
     <canvas id="minimap" width="128" height="128"></canvas>
-    <div id="pause-menu">
+    <div id="home-screen">
+      <div class="home-shell">
+        <div class="home-brand">
+          <div class="home-title">Voxel Sandbox Engine</div>
+          <div class="home-subtitle">Local worlds</div>
+        </div>
+        <div class="home-grid">
+          <section class="menu-panel">
+            <div class="menu-title">Create World</div>
+            <form id="create-world-form" class="world-form">
+              <label class="menu-label" for="world-name-input">Name</label>
+              <input
+                id="world-name-input"
+                class="text-input"
+                name="worldName"
+                type="text"
+                maxlength="48"
+                autocomplete="off"
+                placeholder="New World"
+              />
+              <label class="menu-label" for="world-seed-input">Seed</label>
+              <div class="seed-row">
+                <input
+                  id="world-seed-input"
+                  class="text-input"
+                  name="worldSeed"
+                  type="text"
+                  maxlength="64"
+                  autocomplete="off"
+                  placeholder="random"
+                />
+                <button id="random-seed-button" class="menu-button secondary" type="button">
+                  Random
+                </button>
+              </div>
+              <button class="menu-button" type="submit">Create</button>
+            </form>
+          </section>
+          <section class="menu-panel">
+            <div class="menu-title">Load World</div>
+            <div id="home-world-list" class="world-list" aria-label="Saved worlds"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+    <div id="pause-menu" class="is-hidden">
       <div class="menu-panel">
         <div class="menu-title">Voxel Sandbox Engine</div>
-        <div class="world-panel">
-          <label class="menu-label" for="world-select">Saved World</label>
-          <div class="world-row">
-            <select id="world-select" class="world-select"></select>
-            <button id="new-world-button" class="icon-button" type="button" aria-label="Create world">
-              +
-            </button>
-          </div>
-        </div>
         <div class="menu-actions">
           <button id="resume-button" class="menu-button" type="button">Resume</button>
+          <button id="home-button" class="menu-button secondary" type="button">
+            Exit to Home
+          </button>
           <button
             id="potato-button"
             class="menu-button secondary"

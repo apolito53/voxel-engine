@@ -6,6 +6,7 @@ const ACTIVE_WORLD_KEY = `${STORAGE_PREFIX}:active-world`;
 const WORLDS_KEY = `${STORAGE_PREFIX}:worlds`;
 const DEFAULT_WORLD_ID = "default";
 const DEFAULT_WORLD_NAME = "Default World";
+const DEFAULT_WORLD_SEED = "";
 const LEGACY_INDEX_KEY = `${STORAGE_PREFIX}:chunk-index`;
 const LEGACY_CHUNK_KEY_PREFIX = `${STORAGE_PREFIX}:chunk:`;
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
@@ -137,6 +138,11 @@ class LocalWorldRegistry {
     return readActiveWorldId(this.storage);
   }
 
+  getActiveWorld() {
+    const worlds = this.readWorlds();
+    return worlds.find((world) => world.id === this.getActiveWorldId()) ?? worlds[0];
+  }
+
   setActiveWorld(worldId) {
     const worlds = this.readWorlds();
     if (!worlds.some((world) => world.id === worldId)) return this.getActiveWorldId();
@@ -145,12 +151,13 @@ class LocalWorldRegistry {
     return worldId;
   }
 
-  createWorld(name) {
+  createWorld(name, seed) {
     const now = Date.now();
     // World metadata is intentionally tiny; chunk payloads live under per-world keys.
     const world = {
       id: createWorldId(now),
       name: sanitizeWorldName(name),
+      seed: sanitizeWorldSeed(seed) || createRandomSeed(now),
       createdAt: now,
       updatedAt: now
     };
@@ -168,6 +175,7 @@ class LocalWorldRegistry {
     worlds.push({
       id: DEFAULT_WORLD_ID,
       name: DEFAULT_WORLD_NAME,
+      seed: DEFAULT_WORLD_SEED,
       createdAt: now,
       updatedAt: now
     });
@@ -212,6 +220,7 @@ class NullWorldRegistry {
     return [{
       id: DEFAULT_WORLD_ID,
       name: DEFAULT_WORLD_NAME,
+      seed: DEFAULT_WORLD_SEED,
       createdAt: 0,
       updatedAt: 0
     }];
@@ -219,6 +228,10 @@ class NullWorldRegistry {
 
   getActiveWorldId() {
     return DEFAULT_WORLD_ID;
+  }
+
+  getActiveWorld() {
+    return this.listWorlds()[0];
   }
 
   setActiveWorld() {
@@ -255,9 +268,18 @@ function createWorldId(now) {
   return `world-${now.toString(36)}-${random}`;
 }
 
+function createRandomSeed(now) {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `${now.toString(36)}-${random}`;
+}
+
 function sanitizeWorldName(name) {
   const trimmed = String(name || "").trim();
   return trimmed || "Untitled World";
+}
+
+function sanitizeWorldSeed(seed) {
+  return String(seed || "").trim();
 }
 
 function normalizeWorld(world) {
@@ -267,6 +289,7 @@ function normalizeWorld(world) {
   return {
     id: world.id,
     name: sanitizeWorldName(world.name),
+    seed: sanitizeWorldSeed(world.seed),
     createdAt: Number.isFinite(world.createdAt) ? world.createdAt : 0,
     updatedAt: Number.isFinite(world.updatedAt) ? world.updatedAt : 0
   };
