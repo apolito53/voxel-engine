@@ -224,6 +224,7 @@ const toys = [];
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const minimapDirection = new THREE.Vector3();
+const chunkStreamDirection = new THREE.Vector3();
 
 const MINIMAP_SIZE = 128;
 const MINIMAP_TEXTURE_SIZE = 64;
@@ -367,13 +368,15 @@ function animate() {
 
   if (inWorld) {
     player.update(delta);
+    camera.getWorldDirection(chunkStreamDirection);
     const playerChunk = world.streamChunksAround(
       camera.position.x,
       camera.position.z,
       scene,
       getLoadRadius(),
       getUnloadRadius(),
-      getChunkLoadBudget()
+      getChunkLoadBudget(),
+      chunkStreamDirection
     );
 
     for (const toy of toys) {

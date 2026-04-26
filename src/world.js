@@ -7,6 +7,9 @@ const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
 const MAX_CHUNK_LOADS_PER_FRAME = 2;
 const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
+const VIEW_PRIORITY_NEAR_RADIUS = 2;
+const VIEW_PRIORITY_FRONT_DOT = 0.42;
+const VIEW_PRIORITY_SIDE_DOT = -0.15;
 
 export class VoxelWorld {
   constructor({ storage = createNullChunkStorage(), seed = "" } = {}) {
@@ -32,6 +35,9 @@ export class VoxelWorld {
     this.worker = this.createWorker();
     this.priorityCx = 0;
     this.priorityCz = 0;
+    this.priorityViewX = 0;
+    this.priorityViewZ = -1;
+    this.priorityViewActive = false;
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
@@ -171,8 +177,7 @@ export class VoxelWorld {
 
   ensureChunksAround(x, z, radius = LOAD_RADIUS) {
     const center = this.toChunkCoords(x, z);
-    this.priorityCx = center.cx;
-    this.priorityCz = center.cz;
+    this.setPriority(center.cx, center.cz);
     for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
       for (let cx = center.cx - radius; cx <= center.cx + radius; cx += 1) {
         this.ensureChunk(cx, cz);
@@ -187,14 +192,14 @@ export class VoxelWorld {
     scene,
     loadRadius = LOAD_RADIUS,
     unloadRadius = UNLOAD_RADIUS,
-    maxLoads = MAX_CHUNK_LOADS_PER_FRAME
+    maxLoads = MAX_CHUNK_LOADS_PER_FRAME,
+    viewDirection = null
   ) {
     this.lastLoadedChunks = 0;
     this.processSavedChunkResults();
     this.processGeneratedChunkResults();
     const center = this.toChunkCoords(x, z);
-    this.priorityCx = center.cx;
-    this.priorityCz = center.cz;
+    this.setPriority(center.cx, center.cz, viewDirection);
     this.queueChunksAround(center.cx, center.cz, loadRadius);
     this.pruneQueuedChunks(center.cx, center.cz, loadRadius);
     this.lastRequestedChunkLoads = this.requestQueuedChunkLoads(
@@ -237,6 +242,22 @@ export class VoxelWorld {
         this.chunkLoadQueue.delete(key);
       }
     }
+  }
+
+  setPriority(centerCx, centerCz, viewDirection = null) {
+    this.priorityCx = centerCx;
+    this.priorityCz = centerCz;
+
+    // Keep the horizontal camera direction normalized so chunk scheduling can
+    // prefer work the player is likely to see next.
+    const viewX = viewDirection?.x ?? 0;
+    const viewZ = viewDirection?.z ?? 0;
+    const viewLength = Math.hypot(viewX, viewZ);
+    this.priorityViewActive = viewLength > 0.001;
+    if (!this.priorityViewActive) return;
+
+    this.priorityViewX = viewX / viewLength;
+    this.priorityViewZ = viewZ / viewLength;
   }
 
   requestQueuedChunkLoads(centerCx, centerCz, maxLoads = MAX_CHUNK_LOADS_PER_FRAME) {
@@ -590,12 +611,7 @@ export class VoxelWorld {
   }
 
   insertNearest(nearest, item, centerCx, centerCz, limit) {
-    const dx = item.cx - centerCx;
-    const dz = item.cz - centerCz;
-    const entry = {
-      item,
-      distance: dx * dx + dz * dz
-    };
+    const entry = this.createPriorityEntry(item, centerCx, centerCz);
 
     let insertAt = nearest.length;
     while (insertAt > 0 && this.isNearer(entry, nearest[insertAt - 1])) {
@@ -607,8 +623,40 @@ export class VoxelWorld {
     if (nearest.length > limit) nearest.pop();
   }
 
+  createPriorityEntry(item, centerCx, centerCz) {
+    const dx = item.cx - centerCx;
+    const dz = item.cz - centerCz;
+    const distance = dx * dx + dz * dz;
+    const ring = Math.max(Math.abs(dx), Math.abs(dz));
+    const alignment = this.chunkViewAlignment(dx, dz, distance);
+
+    return {
+      item,
+      distance,
+      alignment,
+      lane: this.priorityLane(ring, alignment)
+    };
+  }
+
+  chunkViewAlignment(dx, dz, distance) {
+    if (!this.priorityViewActive || distance === 0) return 0;
+    return (dx * this.priorityViewX + dz * this.priorityViewZ) / Math.sqrt(distance);
+  }
+
+  priorityLane(ring, alignment) {
+    // Lanes keep the immediate neighborhood complete, then spend the remaining
+    // budget front-to-back instead of blindly filling a square around the player.
+    if (ring <= VIEW_PRIORITY_NEAR_RADIUS) return 0;
+    if (!this.priorityViewActive) return 1;
+    if (alignment >= VIEW_PRIORITY_FRONT_DOT) return 1;
+    if (alignment >= VIEW_PRIORITY_SIDE_DOT) return 2;
+    return 3;
+  }
+
   isNearer(a, b) {
+    if (a.lane !== b.lane) return a.lane < b.lane;
     if (a.distance !== b.distance) return a.distance < b.distance;
+    if (a.alignment !== b.alignment) return a.alignment > b.alignment;
     if (a.item.cz !== b.item.cz) return a.item.cz < b.item.cz;
     return a.item.cx < b.item.cx;
   }
