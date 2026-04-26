@@ -11,7 +11,7 @@ import { VoxelWorld } from "./world.js";
 const QUALITY_STORAGE_KEY = "voxel-quality-preset";
 const LEGACY_POTATO_STORAGE_KEY = "voxel-potato-mode";
 const DEFAULT_QUALITY_PRESET = "normal";
-const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"];
+const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra", "superUltra"];
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 // Quality presets are intentionally plain data so render distance, lighting,
 // streaming budgets, and minimap cost can be tuned without spelunking the game loop.
@@ -125,6 +125,28 @@ const QUALITY_PRESETS = {
     minimapRowsPerFrame: 12,
     sunIntensity: 3.5,
     skyIntensity: 1.78
+  },
+  superUltra: {
+    label: "Super Ultra",
+    distanceScale: 12,
+    pixelRatioLimit: 2,
+    shadows: true,
+    shadowMapSize: 4096,
+    shadowCameraSize: 360,
+    shadowCameraFar: 820,
+    shadowBias: -0.00028,
+    shadowNormalBias: 0.2,
+    fogNear: 270,
+    fogFar: 1320,
+    cameraFar: 2600,
+    loadRadius: 36,
+    unloadRadius: 37,
+    chunkLoads: 10,
+    chunkRebuilds: 10,
+    minimapInterval: 0.15,
+    minimapRowsPerFrame: 14,
+    sunIntensity: 3.6,
+    skyIntensity: 1.82
   }
 };
 

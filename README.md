@@ -40,7 +40,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `1-5` select block
 - `F` throw a physics core
 - `F3` toggle debug overlay
-- `F4` cycle quality: Potato, Low, Normal, High, Ultra
+- `F4` cycle quality: Potato, Low, Normal, High, Ultra, Super Ultra
 - `Esc` pause and release mouse
 
 ## Quality Presets
@@ -50,6 +50,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Normal`: 2x render distance, shadows
 - `High`: 4x render distance, shadows
 - `Ultra`: 6x render distance, higher shadow resolution
+- `Super Ultra`: 12x render distance, maximum stress-test mode
 
 ## Engine Pieces
 

@@ -242,17 +242,7 @@ export class VoxelWorld {
   requestQueuedChunkLoads(centerCx, centerCz, maxLoads = MAX_CHUNK_LOADS_PER_FRAME) {
     if (maxLoads <= 0) return 0;
 
-    const queuedChunks = Array.from(this.chunkLoadQueue.values()).sort(
-      (a, b) => {
-        const ax = a.cx - centerCx;
-        const az = a.cz - centerCz;
-        const bx = b.cx - centerCx;
-        const bz = b.cz - centerCz;
-        const aDistance = ax * ax + az * az;
-        const bDistance = bx * bx + bz * bz;
-        return aDistance - bDistance || a.cz - b.cz || a.cx - b.cx;
-      }
-    );
+    const queuedChunks = this.pickNearestQueuedChunks(centerCx, centerCz, maxLoads);
 
     let requested = 0;
     for (const queued of queuedChunks) {
@@ -277,6 +267,17 @@ export class VoxelWorld {
     }
 
     return requested;
+  }
+
+  pickNearestQueuedChunks(centerCx, centerCz, limit) {
+    const nearest = [];
+
+    // Huge quality tiers can queue thousands of chunks; keep only the few this frame can request.
+    for (const queued of this.chunkLoadQueue.values()) {
+      this.insertNearest(nearest, queued, centerCx, centerCz, limit);
+    }
+
+    return nearest.map((entry) => entry.item);
   }
 
   requestChunkGeneration(cx, cz) {
@@ -562,20 +563,7 @@ export class VoxelWorld {
   requestDirtyMeshBuilds(maxBuilds = MAX_CHUNK_REBUILDS_PER_FRAME) {
     if (maxBuilds <= 0) return 0;
 
-    const dirtyChunks = Array.from(this.chunks.values())
-      .filter((chunk) => {
-        const key = this.key(chunk.cx, chunk.cz);
-        return chunk.dirty && !this.pendingMeshKeys.has(key);
-      })
-      .sort((a, b) => {
-        const ax = a.cx - this.priorityCx;
-        const az = a.cz - this.priorityCz;
-        const bx = b.cx - this.priorityCx;
-        const bz = b.cz - this.priorityCz;
-        const aDistance = ax * ax + az * az;
-        const bDistance = bx * bx + bz * bz;
-        return aDistance - bDistance || a.cz - b.cz || a.cx - b.cx;
-      });
+    const dirtyChunks = this.pickNearestDirtyChunks(maxBuilds);
 
     let requested = 0;
     for (const chunk of dirtyChunks) {
@@ -586,6 +574,43 @@ export class VoxelWorld {
     }
 
     return requested;
+  }
+
+  pickNearestDirtyChunks(limit) {
+    const nearest = [];
+
+    // Mesh budgets are tiny compared with loaded chunks, so avoid sorting the whole world.
+    for (const chunk of this.chunks.values()) {
+      const key = this.key(chunk.cx, chunk.cz);
+      if (!chunk.dirty || this.pendingMeshKeys.has(key)) continue;
+      this.insertNearest(nearest, chunk, this.priorityCx, this.priorityCz, limit);
+    }
+
+    return nearest.map((entry) => entry.item);
+  }
+
+  insertNearest(nearest, item, centerCx, centerCz, limit) {
+    const dx = item.cx - centerCx;
+    const dz = item.cz - centerCz;
+    const entry = {
+      item,
+      distance: dx * dx + dz * dz
+    };
+
+    let insertAt = nearest.length;
+    while (insertAt > 0 && this.isNearer(entry, nearest[insertAt - 1])) {
+      insertAt -= 1;
+    }
+
+    if (insertAt >= limit) return;
+    nearest.splice(insertAt, 0, entry);
+    if (nearest.length > limit) nearest.pop();
+  }
+
+  isNearer(a, b) {
+    if (a.distance !== b.distance) return a.distance < b.distance;
+    if (a.item.cz !== b.item.cz) return a.item.cz < b.item.cz;
+    return a.item.cx < b.item.cx;
   }
 
   requestMeshBuild(chunk, key) {
