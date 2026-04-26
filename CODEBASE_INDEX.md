@@ -61,7 +61,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune saved worlds or edit persistence: update `src/chunkStorage.js`, home-menu glue in `src/main.js`, and the save/load calls in `src/world.js`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.js` and the debug display in `src/main.js`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.js`.
-- Tune render/performance modes: quality preset constants and `setQualityPreset` helpers in `src/main.js`.
+- Tune render/performance modes: quality preset constants, the Super Ultra opt-in toggle, and `setQualityPreset` helpers in `src/main.js`.
 - Change break/place reach or hit behavior: `src/raycast.js` and pointer handlers in `src/main.js`.
 - Change thrown object behavior: `src/physics.js` plus `KeyF` handling in `src/main.js`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, and `src/main.js`.
@@ -73,6 +73,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
 - Large render-distance presets depend on bounded nearest-first chunk and mesh selection in `src/world.js`; avoid reintroducing full queue sorts on every frame.
+- `Super Ultra` is intentionally gated by a pause-menu opt-in so normal quality cycling tops out at `Ultra`.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - Pointer lock behavior is browser-sensitive; test movement changes in the browser, not just with `npm.cmd run build`.

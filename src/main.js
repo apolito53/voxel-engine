@@ -9,9 +9,11 @@ import { voxelRaycast } from "./raycast.js";
 import { VoxelWorld } from "./world.js";
 
 const QUALITY_STORAGE_KEY = "voxel-quality-preset";
+const SUPER_ULTRA_STORAGE_KEY = "voxel-super-ultra-enabled";
 const LEGACY_POTATO_STORAGE_KEY = "voxel-potato-mode";
 const DEFAULT_QUALITY_PRESET = "normal";
-const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra", "superUltra"];
+const SUPER_ULTRA_PRESET_ID = "superUltra";
+const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"];
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 // Quality presets are intentionally plain data so render distance, lighting,
 // streaming budgets, and minimap cost can be tuned without spelunking the game loop.
@@ -126,7 +128,7 @@ const QUALITY_PRESETS = {
     sunIntensity: 3.5,
     skyIntensity: 1.78
   },
-  superUltra: {
+  [SUPER_ULTRA_PRESET_ID]: {
     label: "Super Ultra",
     distanceScale: 12,
     pixelRatioLimit: 2,
@@ -151,6 +153,7 @@ const QUALITY_PRESETS = {
 };
 
 const app = document.querySelector("#app");
+let superUltraEnabled = readSuperUltraPreference();
 let qualityPresetId = readQualityPreference();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(getRenderPixelRatio());
@@ -204,6 +207,7 @@ const pauseMenu = document.querySelector("#pause-menu");
 const resumeButton = document.querySelector("#resume-button");
 const homeButton = document.querySelector("#home-button");
 const qualityButton = document.querySelector("#quality-button");
+const superUltraToggle = document.querySelector("#super-ultra-toggle");
 const debugPanel = document.querySelector("#debug-panel");
 const minimap = document.querySelector("#minimap");
 const minimapContext = minimap.getContext("2d");
@@ -256,6 +260,7 @@ async function startApp() {
     camera.position.set(2, 24, 2);
     player = new PlayerController(camera, renderer.domElement, world);
     wireMenuControls();
+    syncSuperUltraToggle();
     setQualityPreset(qualityPresetId, false);
     worldSeedInput.value = createReadableSeed();
     await renderHomeWorldList();
@@ -273,7 +278,7 @@ function wireMenuControls() {
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target.closest("button")) return;
+    if (event.target.closest("button, input, label")) return;
     event.preventDefault();
     player.resume();
   });
@@ -283,6 +288,9 @@ function wireMenuControls() {
     void exitToHome();
   });
   qualityButton.addEventListener("click", () => cycleQualityPreset());
+  superUltraToggle.addEventListener("change", () => {
+    setSuperUltraEnabled(superUltraToggle.checked);
+  });
   createWorldForm.addEventListener("submit", (event) => {
     void createWorldFromForm(event);
   });
@@ -711,6 +719,27 @@ function setQualityPreset(presetId, persist = true) {
   if (persist) writeQualityPreference(qualityPresetId);
 }
 
+function setSuperUltraEnabled(enabled, persist = true) {
+  superUltraEnabled = enabled;
+  syncSuperUltraToggle();
+
+  if (persist) writeSuperUltraPreference(superUltraEnabled);
+  if (superUltraEnabled) {
+    setQualityPreset(SUPER_ULTRA_PRESET_ID);
+    return;
+  }
+
+  if (qualityPresetId === SUPER_ULTRA_PRESET_ID) {
+    setQualityPreset("ultra");
+  }
+}
+
+function syncSuperUltraToggle() {
+  superUltraToggle.checked = superUltraEnabled;
+  superUltraToggle.setAttribute("aria-checked", String(superUltraEnabled));
+  document.body.classList.toggle("super-ultra-enabled", superUltraEnabled);
+}
+
 function configureSunShadow(preset, resetShadowMap) {
   sun.castShadow = preset.shadows;
   sun.shadow.mapSize.set(preset.shadowMapSize, preset.shadowMapSize);
@@ -747,9 +776,16 @@ function updateSunShadowAnchor() {
 }
 
 function cycleQualityPreset() {
-  const currentIndex = QUALITY_PRESET_ORDER.indexOf(qualityPresetId);
-  const nextIndex = (currentIndex + 1) % QUALITY_PRESET_ORDER.length;
-  setQualityPreset(QUALITY_PRESET_ORDER[nextIndex]);
+  const selectablePresets = getSelectableQualityPresets();
+  const currentIndex = selectablePresets.indexOf(qualityPresetId);
+  const nextIndex = (currentIndex + 1) % selectablePresets.length;
+  setQualityPreset(selectablePresets[nextIndex]);
+}
+
+function getSelectableQualityPresets() {
+  return superUltraEnabled
+    ? [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID]
+    : QUALITY_PRESET_ORDER;
 }
 
 function getRenderPixelRatio() {
@@ -809,19 +845,37 @@ function getQualityPreset() {
 }
 
 function normalizeQualityPresetId(presetId) {
-  return QUALITY_PRESETS[presetId] ? presetId : DEFAULT_QUALITY_PRESET;
+  if (!QUALITY_PRESETS[presetId]) return DEFAULT_QUALITY_PRESET;
+  if (presetId === SUPER_ULTRA_PRESET_ID && !superUltraEnabled) return "ultra";
+  return presetId;
 }
 
 function readQualityPreference() {
   try {
     const storedPreset = localStorage.getItem(QUALITY_STORAGE_KEY);
-    if (QUALITY_PRESETS[storedPreset]) return storedPreset;
+    if (QUALITY_PRESETS[storedPreset]) return normalizeQualityPresetId(storedPreset);
 
     // Keep old sessions intuitive: the previous "potato on" setting is now "low".
     if (localStorage.getItem(LEGACY_POTATO_STORAGE_KEY) === "true") return "low";
     return DEFAULT_QUALITY_PRESET;
   } catch {
     return DEFAULT_QUALITY_PRESET;
+  }
+}
+
+function readSuperUltraPreference() {
+  try {
+    return localStorage.getItem(SUPER_ULTRA_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeSuperUltraPreference(enabled) {
+  try {
+    localStorage.setItem(SUPER_ULTRA_STORAGE_KEY, String(enabled));
+  } catch {
+    // The warning toggle is a convenience; Super Ultra can still be enabled this session.
   }
 }
 

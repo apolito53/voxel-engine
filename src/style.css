@@ -203,9 +203,48 @@ body.playing canvas {
   color: #122016;
 }
 
+.danger-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 58px;
+  border: 1px solid rgba(241, 196, 83, 0.34);
+  border-radius: 6px;
+  background: rgba(241, 196, 83, 0.1);
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.danger-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.danger-title {
+  color: #f8d36d;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.danger-warning {
+  color: rgba(237, 244, 248, 0.72);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.toggle-input {
+  width: 20px;
+  height: 20px;
+  accent-color: #f1c453;
+  cursor: pointer;
+}
+
 .menu-button:focus-visible,
 .world-slot:focus-visible,
-.text-input:focus-visible {
+.text-input:focus-visible,
+.toggle-input:focus-visible {
   outline: 3px solid rgba(241, 196, 83, 0.42);
   outline-offset: 3px;
 }
