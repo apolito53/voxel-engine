@@ -1,5 +1,6 @@
 import { BLOCK } from "./blocks.js";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk.js";
+import { createChunkStorage } from "./chunkStorage.js";
 import { fbm2 } from "./math.js";
 
 const LOAD_RADIUS = 4;
@@ -8,9 +9,11 @@ const MAX_CHUNK_LOADS_PER_FRAME = 2;
 const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
 
 export class VoxelWorld {
-  constructor() {
+  constructor({ storage = createChunkStorage() } = {}) {
     this.chunks = new Map();
-    this.savedChunks = new Map();
+    this.storage = storage;
+    // savedChunks mirrors persisted edited chunks; generated terrain is never stored.
+    this.savedChunks = this.storage.loadAll();
     this.chunkLoadQueue = new Map();
     this.pendingChunkLoads = new Map();
     this.pendingChunkKeys = new Set();
@@ -63,6 +66,7 @@ export class VoxelWorld {
       chunk = new Chunk(cx, cz);
       const savedBlocks = this.savedChunks.get(key);
       if (savedBlocks) {
+        // Saved chunks are full block snapshots, so loading one replaces terrain generation.
         this.populateChunk(chunk, savedBlocks);
         chunk.modified = true;
       } else {
@@ -292,9 +296,11 @@ export class VoxelWorld {
   setBlock(x, y, z, block) {
     if (y < 0 || y >= WORLD_HEIGHT) return;
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
+    const key = this.key(cx, cz);
     const chunk = this.ensureChunk(cx, cz);
     if (!chunk.setLocal(lx, Math.floor(y), lz, block)) return;
     chunk.modified = true;
+    this.rememberModifiedChunk(key, chunk.blocks);
 
     if (lx === 0) this.markDirty(cx - 1, cz);
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
@@ -314,6 +320,19 @@ export class VoxelWorld {
     this.markDirty(cx, cz + 1);
   }
 
+  rememberModifiedChunk(key, blocks) {
+    // Copy before saving so later in-memory edits cannot mutate the stored snapshot by reference.
+    const snapshot = blocks.slice();
+    this.savedChunks.set(key, snapshot);
+    this.storage.saveChunk(key, snapshot);
+  }
+
+  forgetSavedChunk(key) {
+    // Dropping a saved chunk lets terrain generation own that coordinate again.
+    this.savedChunks.delete(key);
+    this.storage.deleteChunk(key);
+  }
+
   unloadChunksOutside(centerCx, centerCz, unloadRadius, scene) {
     for (const [key, chunk] of Array.from(this.chunks.entries())) {
       const distance = Math.max(
@@ -323,9 +342,9 @@ export class VoxelWorld {
       if (distance <= unloadRadius) continue;
 
       if (chunk.modified) {
-        this.savedChunks.set(key, chunk.blocks.slice());
+        this.rememberModifiedChunk(key, chunk.blocks);
       } else {
-        this.savedChunks.delete(key);
+        this.forgetSavedChunk(key);
       }
 
       chunk.disposeMesh(scene);

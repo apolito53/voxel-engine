@@ -4,6 +4,8 @@ A tiny browser-based voxel sandbox prototype. Three.js handles rendering, while 
 
 World units are metric: `1 block = 1 meter`.
 
+Edited chunks persist in browser storage. Clear this site's local storage to reset the sandbox world.
+
 ## Run
 
 Windows:
@@ -39,6 +41,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/world.js`: chunk ownership, worker scheduling, streaming, block reads/writes
+- `src/chunkStorage.js`: browser storage adapter for edited chunk persistence
 - `src/chunk.js`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.js`: worker-side terrain generation and greedy mesh building
 - `src/player.js`: first-person controller and voxel collision
@@ -47,5 +50,4 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Sensible Next Steps
 
-- Persist edited chunks to local storage.
 - Give physics toys voxel damage so thrown objects can punch little craters.
