@@ -38,6 +38,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - First-person movement, pointer lock, voxel collision: `src/player.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Throwable bouncing physics core: `src/physics.ts`
+- Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
 - Linux/Ubuntu startup helper: `start.sh`
@@ -65,7 +66,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune saved worlds or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.ts`.
-- Tune render/performance modes: quality preset constants, the Super Ultra opt-in toggle, and `setQualityPreset` helpers in `src/main.ts`.
+- Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and `setQualityPreset` helpers in `src/main.ts`.
 - Change break/place reach or hit behavior: `src/raycast.ts` and pointer handlers in `src/main.ts`.
 - Change thrown object behavior: `src/physics.ts` plus `KeyF` handling in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, and `src/main.ts`.
