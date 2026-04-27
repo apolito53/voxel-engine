@@ -19,8 +19,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Dev server: `npm.cmd run dev -- --port 5173`
 - Production build: `npm.cmd run build`
 - Preview build: `npm.cmd run preview -- --port 4173`
-- TypeScript migration plan: `.\scripts\run_python.ps1 .\scripts\ts_migration.py plan`
-- TypeScript migration audit: `.\scripts\run_python.ps1 .\scripts\ts_migration_audit.py`
+- TypeScript migration plan: `python .\scripts\ts_migration.py plan`
+- TypeScript migration audit: `python .\scripts\ts_migration_audit.py`
 
 ## Fast Lookup
 

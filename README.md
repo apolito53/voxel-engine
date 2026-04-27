@@ -66,9 +66,9 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## TypeScript Migration Prep
 
-- `.\scripts\run_python.ps1 .\scripts\ts_migration.py plan`: preview the mechanical JS-to-TS rename/import/package changes
-- `.\scripts\run_python.ps1 .\scripts\ts_migration.py apply`: perform the mechanical migration when ready
-- `.\scripts\run_python.ps1 .\scripts\ts_migration_audit.py`: list module hotspots and suggested manual typing order
+- `python .\scripts\ts_migration.py plan`: preview the mechanical JS-to-TS rename/import/package changes
+- `python .\scripts\ts_migration.py apply`: perform the mechanical migration when ready
+- `python .\scripts\ts_migration_audit.py`: list module hotspots and suggested manual typing order
 
 ## Sensible Next Steps
 
