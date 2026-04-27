@@ -1,11 +1,13 @@
 import * as THREE from "three";
+import {
+  BLOCK_FRAGMENT_COLLISION_RADIUS,
+  BLOCK_FRAGMENT_VISUAL_SIZE
+} from "./blockFragments";
 import { BLOCKS } from "./blocks";
 import type { CollisionWorld } from "./collision";
 
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 
-const FRAGMENT_SIZE = 0.34;
-const FRAGMENT_RADIUS = 0.21;
 const FRAGMENT_MAX_AGE_SECONDS = 9;
 const FRAGMENT_SLEEP_SPEED = 0.18;
 const FRAGMENT_SLEEP_AFTER_SECONDS = 0.35;
@@ -14,9 +16,9 @@ const FRAGMENT_SLEEP_AFTER_SECONDS = 0.35;
 // Creating GPU buffers/materials during every explosion is exactly the sort of
 // allocation burst that feels like a hitch even when the smoothed FPS looks fine.
 const sharedFragmentGeometry = new THREE.BoxGeometry(
-  FRAGMENT_SIZE,
-  FRAGMENT_SIZE,
-  FRAGMENT_SIZE
+  BLOCK_FRAGMENT_VISUAL_SIZE,
+  BLOCK_FRAGMENT_VISUAL_SIZE,
+  BLOCK_FRAGMENT_VISUAL_SIZE
 );
 const sharedFragmentMaterials = new Map<number, THREE.MeshStandardMaterial>();
 
@@ -85,7 +87,7 @@ export class PhysicsToy {
 
   static createBlockFragment(block: number, position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
     return new PhysicsToy(position, velocity, {
-      radius: FRAGMENT_RADIUS,
+      radius: BLOCK_FRAGMENT_COLLISION_RADIUS,
       geometry: sharedFragmentGeometry,
       material: getFragmentMaterial(block),
       damagesBlocks: false,

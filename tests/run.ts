@@ -1,4 +1,10 @@
 import * as THREE from "three";
+import {
+  BLOCK_FRAGMENT_COUNT,
+  BLOCK_FRAGMENT_GRID_SIZE,
+  BLOCK_FRAGMENT_SPACING,
+  getBlockFragmentOffset
+} from "../src/blockFragments";
 import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
@@ -308,6 +314,43 @@ test("block damage tracks health before removing voxels", () => {
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed block should leave the voxel grid");
   assertEqual(world.getBlockDamage(2, 3, 4), 0, "destroyed blocks should clear transient damage state");
+});
+
+test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
+  assertEqual(BLOCK_FRAGMENT_GRID_SIZE, 3, "block fracture grid should be three pieces per axis");
+  assertEqual(BLOCK_FRAGMENT_COUNT, 27, "block fracture grid should create 27 loose pieces");
+
+  const uniqueOffsets = new Set<string>();
+  const uniqueX = new Set<number>();
+  const uniqueY = new Set<number>();
+  const uniqueZ = new Set<number>();
+
+  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
+    const offset = getBlockFragmentOffset(index);
+    uniqueOffsets.add(`${offset.x},${offset.y},${offset.z}`);
+    uniqueX.add(offset.x);
+    uniqueY.add(offset.y);
+    uniqueZ.add(offset.z);
+  }
+
+  assertEqual(uniqueOffsets.size, BLOCK_FRAGMENT_COUNT, "each debris piece should get a unique local offset");
+  assertEqual(uniqueX.size, BLOCK_FRAGMENT_GRID_SIZE, "x axis should span the full fracture grid");
+  assertEqual(uniqueY.size, BLOCK_FRAGMENT_GRID_SIZE, "y axis should span the full fracture grid");
+  assertEqual(uniqueZ.size, BLOCK_FRAGMENT_GRID_SIZE, "z axis should span the full fracture grid");
+  assertDeepEqual(
+    getBlockFragmentOffset(Math.floor(BLOCK_FRAGMENT_COUNT / 2)),
+    { x: 0, y: 0, z: 0 },
+    "odd fracture grids should include a centered shard"
+  );
+  assertDeepEqual(
+    getBlockFragmentOffset(0),
+    {
+      x: -BLOCK_FRAGMENT_SPACING,
+      y: -BLOCK_FRAGMENT_SPACING,
+      z: -BLOCK_FRAGMENT_SPACING
+    },
+    "first shard should sit at the low corner of the centered grid"
+  );
 });
 
 test("physics impacts report speed so block damage can be thresholded", () => {

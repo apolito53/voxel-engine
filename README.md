@@ -38,7 +38,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Left click` break block
 - `Right click` place block
 - `1-5` select block
-- `F` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into loose cube fragments that sleep/expire to keep debris cheap
+- `F` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into 27 loose cube fragments that sleep/expire to keep debris cheap
 - `F3` toggle debug overlay, including smoothed FPS plus raw/peak frame time for hitch hunting
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Physics Object Budget` stepper changes the current quality preset's physics-body budget
@@ -65,6 +65,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/player.ts`: first-person controller and voxel collision
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
+- `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, impact reporting, and shared-resource cube fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application

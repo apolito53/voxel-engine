@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import "./style.css";
+import { BLOCK_FRAGMENT_COUNT, getBlockFragmentOffset } from "./blockFragments";
 import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
 import {
   createChunkStorage,
@@ -35,8 +36,6 @@ import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 const BLOCK_INTERACTION_REACH = 8;
-const BLOCK_FRAGMENT_GRID_SIZE = 2;
-const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 
 const app = requireElement<HTMLElement>("#app");
@@ -399,15 +398,13 @@ function spawnBlockFragments(
   const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
 
   for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
-    const xBit = index & 1;
-    const yBit = (index >> 1) & 1;
-    const zBit = (index >> 2) & 1;
+    const fragmentOffset = getBlockFragmentOffset(index);
     const offset = new THREE.Vector3(
-      xBit ? 0.19 : -0.19,
-      yBit ? 0.19 : -0.19,
-      zBit ? 0.19 : -0.19
+      fragmentOffset.x,
+      fragmentOffset.y,
+      fragmentOffset.z
     );
-    const scatter = offset.clone().normalize().multiplyScalar(1.7 + Math.random() * 1.4);
+    const scatter = createFragmentScatterDirection(offset).multiplyScalar(1.7 + Math.random() * 1.4);
     const velocity = impact.normal.clone()
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
@@ -415,6 +412,25 @@ function spawnBlockFragments(
 
     addPhysicsToy(PhysicsToy.createBlockFragment(block, blockCenter.clone().add(offset), velocity));
   }
+}
+
+function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
+  if (offset.lengthSq() > 0.0001) {
+    return offset.clone().normalize();
+  }
+
+  // The exact center shard in an odd grid has no natural outward vector, so
+  // give it a tiny random bias instead of letting it travel as a dead lump.
+  const randomDirection = new THREE.Vector3(
+    Math.random() - 0.5,
+    Math.random() - 0.35,
+    Math.random() - 0.5
+  );
+
+  if (randomDirection.lengthSq() <= 0.0001) {
+    randomDirection.set(0, 1, 0);
+  }
+  return randomDirection.normalize();
 }
 
 function addPhysicsToy(toy: PhysicsToy): void {
