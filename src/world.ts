@@ -1,6 +1,12 @@
 // @ts-nocheck
 import { BLOCK } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
+import type {
+  ChunkMeshRequest,
+  ChunkNeighborBuffers,
+  ChunkWorkerRequest,
+  ChunkWorkerResult
+} from "./chunkProtocol";
 import { createNullChunkStorage } from "./chunkStorage";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
 
@@ -119,7 +125,7 @@ export class VoxelWorld {
     const worker = new Worker(new URL("./chunkWorker.ts", import.meta.url), {
       type: "module"
     });
-    worker.onmessage = (event) => {
+    worker.onmessage = (event: MessageEvent<ChunkWorkerResult>) => {
       this.workerResults.push(event.data);
     };
     worker.onerror = (event) => {
@@ -318,13 +324,14 @@ export class VoxelWorld {
     this.chunkLoadQueue.delete(key);
     this.pendingChunkKeys.add(key);
     this.pendingChunkLoads.set(requestId, { key, cx, cz });
-    this.worker.postMessage({
+    const message: ChunkWorkerRequest = {
       type: "generate",
       requestId,
       cx,
       cz,
       seed: this.seed
-    });
+    };
+    this.worker.postMessage(message);
   }
 
   requestSavedChunkLoad(cx, cz) {
@@ -705,7 +712,7 @@ export class VoxelWorld {
     const neighbors = this.snapshotNeighborBlocks(chunk.cx, chunk.cz);
     const transfers = [
       blocks.buffer,
-      ...Object.values(neighbors).filter(Boolean)
+      ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
     ];
 
     this.pendingMeshKeys.add(key);
@@ -713,21 +720,19 @@ export class VoxelWorld {
       key,
       revision: chunk.revision
     });
-    this.worker.postMessage(
-      {
-        type: "mesh",
-        requestId,
-        cx: chunk.cx,
-        cz: chunk.cz,
-        revision: chunk.revision,
-        blocks: blocks.buffer,
-        neighbors
-      },
-      transfers
-    );
+    const message: ChunkMeshRequest = {
+      type: "mesh",
+      requestId,
+      cx: chunk.cx,
+      cz: chunk.cz,
+      revision: chunk.revision,
+      blocks: blocks.buffer,
+      neighbors
+    };
+    this.worker.postMessage(message, transfers);
   }
 
-  snapshotNeighborBlocks(cx, cz) {
+  snapshotNeighborBlocks(cx, cz): ChunkNeighborBuffers {
     return {
       negativeX: this.getChunk(cx - 1, cz)?.blocks.slice().buffer ?? null,
       positiveX: this.getChunk(cx + 1, cz)?.blocks.slice().buffer ?? null,

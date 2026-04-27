@@ -1,10 +1,21 @@
 import { BLOCK, BLOCKS } from "./blocks";
+import type {
+  ChunkGeneratedResult,
+  ChunkMeshData,
+  ChunkMeshedResult,
+  ChunkNeighborBlocks,
+  ChunkNeighborBuffers,
+  ChunkWorkerRequest
+} from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
+import type { TerrainContext } from "./terrain";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
-const terrainContexts = new Map();
+const terrainContexts = new Map<string, TerrainContext>();
 
-self.onmessage = (event) => {
+const workerScope = self as unknown as DedicatedWorkerGlobalScope;
+
+workerScope.onmessage = (event: MessageEvent<ChunkWorkerRequest>) => {
   const message = event.data;
 
   if (message.type === "generate") {
@@ -13,14 +24,14 @@ self.onmessage = (event) => {
       message.cz,
       getTerrainContext(message.seed)
     );
-    self.postMessage(
+    workerScope.postMessage(
       {
         type: "generated",
         requestId: message.requestId,
         cx: message.cx,
         cz: message.cz,
         blocks
-      },
+      } satisfies ChunkGeneratedResult,
       [blocks.buffer]
     );
     return;
@@ -34,7 +45,7 @@ self.onmessage = (event) => {
       neighbors: readNeighbors(message.neighbors)
     });
 
-    self.postMessage(
+    workerScope.postMessage(
       {
         type: "meshed",
         requestId: message.requestId,
@@ -45,7 +56,7 @@ self.onmessage = (event) => {
         normals: meshData.normals,
         colors: meshData.colors,
         indices: meshData.indices
-      },
+      } satisfies ChunkMeshedResult,
       [
         meshData.positions.buffer,
         meshData.normals.buffer,
@@ -56,7 +67,7 @@ self.onmessage = (event) => {
   }
 };
 
-function getTerrainContext(seed = "") {
+function getTerrainContext(seed = ""): TerrainContext {
   const key = String(seed || "");
   if (!terrainContexts.has(key)) {
     // Cache by seed so chunk streaming does not rebuild the same terrain offsets every request.
@@ -65,7 +76,7 @@ function getTerrainContext(seed = "") {
   return terrainContexts.get(key);
 }
 
-function readNeighbors(neighbors) {
+function readNeighbors(neighbors: ChunkNeighborBuffers): ChunkNeighborBlocks {
   return {
     negativeX: neighbors.negativeX ? new Uint8Array(neighbors.negativeX) : null,
     positiveX: neighbors.positiveX ? new Uint8Array(neighbors.positiveX) : null,
@@ -74,11 +85,21 @@ function readNeighbors(neighbors) {
   };
 }
 
-function buildChunkMesh({ cx, cz, blocks, neighbors }) {
-  const positions = [];
-  const normals = [];
-  const colors = [];
-  const indices = [];
+function buildChunkMesh({
+  cx,
+  cz,
+  blocks,
+  neighbors
+}: {
+  cx: number;
+  cz: number;
+  blocks: Uint8Array;
+  neighbors: ChunkNeighborBlocks;
+}): ChunkMeshData {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
 
@@ -94,7 +115,16 @@ function buildChunkMesh({ cx, cz, blocks, neighbors }) {
   };
 }
 
-function buildXFaces(blocks, neighbors, ox, oz, positions, normals, colors, indices) {
+function buildXFaces(
+  blocks: Uint8Array,
+  neighbors: ChunkNeighborBlocks,
+  ox: number,
+  oz: number,
+  positions: number[],
+  normals: number[],
+  colors: number[],
+  indices: number[]
+): void {
   for (let x = 0; x < CHUNK_SIZE; x += 1) {
     emitGreedyFaces(
       WORLD_HEIGHT,
@@ -142,7 +172,16 @@ function buildXFaces(blocks, neighbors, ox, oz, positions, normals, colors, indi
   }
 }
 
-function buildYFaces(blocks, neighbors, ox, oz, positions, normals, colors, indices) {
+function buildYFaces(
+  blocks: Uint8Array,
+  neighbors: ChunkNeighborBlocks,
+  ox: number,
+  oz: number,
+  positions: number[],
+  normals: number[],
+  colors: number[],
+  indices: number[]
+): void {
   for (let y = 0; y < WORLD_HEIGHT; y += 1) {
     emitGreedyFaces(
       CHUNK_SIZE,
@@ -190,7 +229,16 @@ function buildYFaces(blocks, neighbors, ox, oz, positions, normals, colors, indi
   }
 }
 
-function buildZFaces(blocks, neighbors, ox, oz, positions, normals, colors, indices) {
+function buildZFaces(
+  blocks: Uint8Array,
+  neighbors: ChunkNeighborBlocks,
+  ox: number,
+  oz: number,
+  positions: number[],
+  normals: number[],
+  colors: number[],
+  indices: number[]
+): void {
   for (let z = 0; z < CHUNK_SIZE; z += 1) {
     emitGreedyFaces(
       CHUNK_SIZE,
@@ -238,7 +286,16 @@ function buildZFaces(blocks, neighbors, ox, oz, positions, normals, colors, indi
   }
 }
 
-function exposedBlock(blocks, neighbors, x, y, z, nx, ny, nz) {
+function exposedBlock(
+  blocks: Uint8Array,
+  neighbors: ChunkNeighborBlocks,
+  x: number,
+  y: number,
+  z: number,
+  nx: number,
+  ny: number,
+  nz: number
+): number {
   const block = blocks[index(x, y, z)];
   if (!BLOCKS[block].solid || isSolidAt(blocks, neighbors, nx, ny, nz)) {
     return BLOCK.air;
@@ -246,13 +303,25 @@ function exposedBlock(blocks, neighbors, x, y, z, nx, ny, nz) {
   return block;
 }
 
-function isSolidAt(blocks, neighbors, x, y, z) {
+function isSolidAt(
+  blocks: Uint8Array,
+  neighbors: ChunkNeighborBlocks,
+  x: number,
+  y: number,
+  z: number
+): boolean {
   if (y < 0) return true;
   if (y >= WORLD_HEIGHT) return false;
   return BLOCKS[getBlockAt(blocks, neighbors, x, y, z)].solid;
 }
 
-function getBlockAt(blocks, neighbors, x, y, z) {
+function getBlockAt(
+  blocks: Uint8Array,
+  neighbors: ChunkNeighborBlocks,
+  x: number,
+  y: number,
+  z: number
+): number {
   if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
     return blocks[index(x, y, z)];
   }
@@ -276,7 +345,12 @@ function getBlockAt(blocks, neighbors, x, y, z) {
   return BLOCK.air;
 }
 
-function emitGreedyFaces(width, height, getBlock, emit) {
+function emitGreedyFaces(
+  width: number,
+  height: number,
+  getBlock: (u: number, v: number) => number,
+  emit: (u: number, v: number, width: number, height: number, block: number) => void
+): void {
   const consumed = new Uint8Array(width * height);
 
   for (let v = 0; v < height; v += 1) {
@@ -320,7 +394,15 @@ function emitGreedyFaces(width, height, getBlock, emit) {
   }
 }
 
-function addQuad(positions, normals, colors, indices, block, normal, corners) {
+function addQuad(
+  positions: number[],
+  normals: number[],
+  colors: number[],
+  indices: number[],
+  block: number,
+  normal: readonly [number, number, number],
+  corners: readonly (readonly [number, number, number])[]
+): void {
   const base = positions.length / 3;
   const shade = normal[1] > 0 ? 1 : normal[1] < 0 ? 0.45 : 0.72;
   const color = BLOCKS[block].color.map((channel) => channel * shade);
@@ -334,6 +416,6 @@ function addQuad(positions, normals, colors, indices, block, normal, corners) {
   indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
-function index(x, y, z) {
+function index(x: number, y: number, z: number): number {
   return x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
 }

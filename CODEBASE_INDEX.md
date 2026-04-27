@@ -32,6 +32,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - IndexedDB storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.ts`
 - Seeded terrain generation shared by fallback and worker paths: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
+- Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
 - Chunk ownership, worker scheduling, streaming, reads/writes: `src/world.ts`
 - First-person movement, pointer lock, voxel collision: `src/player.ts`
