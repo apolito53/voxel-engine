@@ -342,9 +342,14 @@ test("physics impacts report speed so block damage can be thresholded", () => {
 
 test("physics object budget clamps and steps predictably", () => {
   assertEqual(
+    normalizePhysicsObjectBudget(null, QUALITY_PRESETS.high.physicsObjectBudget),
+    QUALITY_PRESETS.high.physicsObjectBudget,
+    "missing stored budget should use the active quality fallback"
+  );
+  assertEqual(
     normalizePhysicsObjectBudget(null),
     DEFAULT_PHYSICS_OBJECT_BUDGET,
-    "missing stored budget should use the default budget"
+    "missing fallback should use the default budget"
   );
   assertEqual(
     normalizePhysicsObjectBudget(MIN_PHYSICS_OBJECT_BUDGET - PHYSICS_OBJECT_BUDGET_STEP),
@@ -370,6 +375,7 @@ test("physics object budget clamps and steps predictably", () => {
 
 test("quality presets keep scheduler and render-distance invariants", () => {
   const presetIds = [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID];
+  let previousPhysicsBudget = 0;
 
   for (const presetId of presetIds) {
     const preset = QUALITY_PRESETS[presetId];
@@ -380,6 +386,24 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     assert(preset.fogFar > preset.fogNear, `${preset.label} fog far should exceed fog near`);
     assert(isPowerOfTwo(preset.shadowMapSize), `${preset.label} shadow map size should stay GPU-friendly`);
     assert(preset.minimapRowsPerFrame >= 1, `${preset.label} minimap should process at least one row`);
+    assert(
+      preset.physicsObjectBudget >= MIN_PHYSICS_OBJECT_BUDGET,
+      `${preset.label} physics budget should respect the lower safety bound`
+    );
+    assert(
+      preset.physicsObjectBudget <= MAX_PHYSICS_OBJECT_BUDGET,
+      `${preset.label} physics budget should respect the upper safety bound`
+    );
+    assertEqual(
+      preset.physicsObjectBudget % PHYSICS_OBJECT_BUDGET_STEP,
+      0,
+      `${preset.label} physics budget should stay step-aligned`
+    );
+    assert(
+      preset.physicsObjectBudget >= previousPhysicsBudget,
+      `${preset.label} physics budget should not shrink as quality increases`
+    );
+    previousPhysicsBudget = preset.physicsObjectBudget;
   }
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
@@ -387,6 +411,11 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.high.distanceScale, 4, "High should remain 4x distance");
   assertEqual(QUALITY_PRESETS.ultra.distanceScale, 6, "Ultra should remain 6x distance");
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
+  assertEqual(
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget,
+    1024,
+    "Super Ultra should carry the largest physics-object stress budget"
+  );
   assertEqual(
     QUALITY_PRESET_ORDER.filter(shouldShowSuperUltraOptIn).join(","),
     "ultra",

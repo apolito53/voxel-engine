@@ -101,7 +101,7 @@ let inWorld = false;
 let worldTransitioning = false;
 let selectedBlockIndex = 0;
 let qualityController: QualityController;
-let physicsObjectBudget = readPhysicsObjectBudgetPreference();
+let physicsObjectBudget = bootPreset.physicsObjectBudget;
 
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
@@ -144,6 +144,7 @@ qualityController = new QualityController({
   onQualityChanged: () => {
     debugHud.reset();
     minimapRenderer.reset();
+    syncPhysicsBudgetToQuality();
   }
 });
 qualityController.initialize();
@@ -423,17 +424,36 @@ function addPhysicsToy(toy: PhysicsToy): void {
 }
 
 function changePhysicsObjectBudget(direction: PhysicsBudgetDirection): void {
-  setPhysicsObjectBudget(stepPhysicsObjectBudget(physicsObjectBudget, direction));
+  setPhysicsObjectBudget(
+    stepPhysicsObjectBudget(physicsObjectBudget, direction, qualityController.preset.physicsObjectBudget)
+  );
 }
 
 function setPhysicsObjectBudget(nextBudget: number, persist = true): void {
-  physicsObjectBudget = normalizePhysicsObjectBudget(nextBudget);
+  const preset = qualityController.preset;
+
+  physicsObjectBudget = normalizePhysicsObjectBudget(nextBudget, preset.physicsObjectBudget);
   if (persist) {
-    writePhysicsObjectBudgetPreference(physicsObjectBudget);
+    writePhysicsObjectBudgetPreference(
+      qualityController.currentPresetId,
+      physicsObjectBudget,
+      preset.physicsObjectBudget
+    );
   }
 
   updatePhysicsBudgetControls();
   enforcePhysicsToyBudget();
+}
+
+function syncPhysicsBudgetToQuality(): void {
+  const preset = qualityController.preset;
+
+  // Quality changes should feel immediate: use the preset default unless this
+  // specific tier already has a player-tuned override in local storage.
+  setPhysicsObjectBudget(
+    readPhysicsObjectBudgetPreference(qualityController.currentPresetId, preset.physicsObjectBudget),
+    false
+  );
 }
 
 function updatePhysicsBudgetControls(): void {

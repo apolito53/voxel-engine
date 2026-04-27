@@ -47,9 +47,9 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
-- Persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
+- Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
-- Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
+- Render quality preset definitions, physics-body defaults, and tuning knobs: `src/qualityPresets.ts`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
@@ -69,7 +69,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active.
+10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active.
 11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
 13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning small loose cube fragments that reuse geometry/materials, avoid shadow casting, sleep when settled, and expire after a short lifetime.
@@ -85,7 +85,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior, debris lifetime, object budget, or impact damage: `src/physics.ts`, `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
+- Change thrown object behavior, debris lifetime, object budget, or impact damage: `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges

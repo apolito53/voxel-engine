@@ -41,18 +41,18 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `F` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into loose cube fragments that sleep/expire to keep debris cheap
 - `F3` toggle debug overlay, including smoothed FPS plus raw/peak frame time for hitch hunting
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
-- Pause menu `Physics Object Budget` stepper changes how many loose physics bodies can exist at once
+- Pause menu `Physics Object Budget` stepper changes the current quality preset's physics-body budget
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
 - `Esc` pause and release mouse
 
 ## Quality Presets
 
-- `Potato`: 0.5x render distance, no shadows
-- `Low`: current low-end baseline, no shadows
-- `Normal`: 2x render distance, shadows
-- `High`: 4x render distance, shadows
-- `Ultra`: 6x render distance, higher shadow resolution
-- `Super Ultra`: 12x render distance, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Potato`: 0.5x render distance, no shadows, 32 physics bodies
+- `Low`: current low-end baseline, no shadows, 64 physics bodies
+- `Normal`: 2x render distance, shadows, 96 physics bodies
+- `High`: 4x render distance, shadows, 256 physics bodies
+- `Ultra`: 6x render distance, higher shadow resolution, 512 physics bodies
+- `Super Ultra`: 12x render distance, 1024 physics bodies, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 
 ## Engine Pieces
 
@@ -66,7 +66,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, impact reporting, and shared-resource cube fragments
-- `src/physicsBudget.ts`: persisted physics body budget bounds and step helpers
+- `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing

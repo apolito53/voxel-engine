@@ -55,6 +55,10 @@ export class QualityController {
     return QUALITY_PRESETS[this.presetId];
   }
 
+  get currentPresetId(): QualityPresetId {
+    return this.presetId;
+  }
+
   get loadRadius(): number {
     return this.preset.loadRadius;
   }

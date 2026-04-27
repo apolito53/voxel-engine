@@ -25,6 +25,7 @@ export type QualityPreset = {
   readonly unloadRadius: number;
   readonly chunkLoads: number;
   readonly chunkRebuilds: number;
+  readonly physicsObjectBudget: number;
   readonly minimapInterval: number;
   readonly minimapRowsPerFrame: number;
   readonly sunIntensity: number;
@@ -32,7 +33,8 @@ export type QualityPreset = {
 };
 
 // Quality presets are intentionally plain data so render distance, lighting,
-// streaming budgets, and minimap cost can be tuned without spelunking the game loop.
+// streaming budgets, minimap cost, and physics body defaults can be tuned
+// without spelunking the game loop.
 export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
   potato: {
     label: "Potato",
@@ -51,6 +53,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 3,
     chunkLoads: 1,
     chunkRebuilds: 1,
+    physicsObjectBudget: 32,
     minimapInterval: 0.45,
     minimapRowsPerFrame: 3,
     sunIntensity: 2.8,
@@ -73,6 +76,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 4,
     chunkLoads: 1,
     chunkRebuilds: 2,
+    physicsObjectBudget: 64,
     minimapInterval: 0.35,
     minimapRowsPerFrame: 4,
     sunIntensity: 3.2,
@@ -95,6 +99,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 7,
     chunkLoads: 2,
     chunkRebuilds: 4,
+    physicsObjectBudget: 96,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
     sunIntensity: 3.2,
@@ -117,6 +122,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 13,
     chunkLoads: 4,
     chunkRebuilds: 6,
+    physicsObjectBudget: 256,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 10,
     sunIntensity: 3.35,
@@ -139,6 +145,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 19,
     chunkLoads: 6,
     chunkRebuilds: 8,
+    physicsObjectBudget: 512,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 12,
     sunIntensity: 3.5,
@@ -161,6 +168,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 37,
     chunkLoads: 10,
     chunkRebuilds: 10,
+    physicsObjectBudget: 1024,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,
     sunIntensity: 3.6,
