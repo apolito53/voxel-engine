@@ -35,6 +35,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
 - Chunk ownership, worker scheduling, streaming, reads/writes: `src/world.ts`
+- Shared collision-world shape used by player and physics toys: `src/collision.ts`
 - First-person movement, pointer lock, voxel collision: `src/player.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Throwable bouncing physics core: `src/physics.ts`

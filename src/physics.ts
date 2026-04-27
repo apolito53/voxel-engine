@@ -1,8 +1,12 @@
-// @ts-nocheck
 import * as THREE from "three";
+import type { CollisionWorld } from "./collision";
 
 export class PhysicsToy {
-  constructor(position, velocity) {
+  readonly radius: number;
+  readonly velocity: THREE.Vector3;
+  readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
+
+  constructor(position: THREE.Vector3, velocity: THREE.Vector3) {
     this.radius = 0.35;
     this.velocity = velocity.clone();
     this.mesh = new THREE.Mesh(
@@ -18,7 +22,7 @@ export class PhysicsToy {
     this.mesh.position.copy(position);
   }
 
-  update(delta, world) {
+  update(delta: number, world: CollisionWorld): void {
     this.velocity.y -= 18 * delta;
     this.mesh.position.addScaledVector(this.velocity, delta);
 

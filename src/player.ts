@@ -1,5 +1,5 @@
-// @ts-nocheck
 import * as THREE from "three";
+import type { CollisionWorld } from "./collision";
 import { clamp } from "./math";
 import { METERS_PER_BLOCK } from "./voxelConstants";
 
@@ -16,8 +16,33 @@ const AIR_DRAG = 0.08;
 const GRAVITY = 22 * METERS_PER_BLOCK;
 const JUMP_SPEED = 8.2 * METERS_PER_BLOCK;
 
+type MovementAxis = "x" | "y" | "z";
+
+export type PlayerBounds = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+};
+
 export class PlayerController {
-  constructor(camera, domElement, world) {
+  readonly camera: THREE.PerspectiveCamera;
+  readonly domElement: HTMLElement;
+  readonly world: CollisionWorld;
+  readonly velocity: THREE.Vector3;
+  readonly keys: Set<string>;
+  pitch: number;
+  yaw: number;
+  onGround: boolean;
+  active: boolean;
+  locked: boolean;
+  pendingLock: boolean;
+  lockTimeout: number | null;
+  onPauseChange: (paused: boolean) => void;
+
+  constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: CollisionWorld) {
     this.camera = camera;
     this.domElement = domElement;
     this.world = world;
@@ -42,7 +67,7 @@ export class PlayerController {
       const wasLocked = this.locked;
       this.locked = document.pointerLockElement === domElement;
       this.pendingLock = false;
-      window.clearTimeout(this.lockTimeout);
+      this.clearLockTimeout();
       if (this.locked) {
         this.updateCursor();
         return;
@@ -57,7 +82,7 @@ export class PlayerController {
     });
     document.addEventListener("pointerlockerror", () => {
       this.pendingLock = false;
-      window.clearTimeout(this.lockTimeout);
+      this.clearLockTimeout();
       this.updateCursor();
     });
     document.addEventListener("mousemove", (event) => this.handleMouse(event));
@@ -72,7 +97,7 @@ export class PlayerController {
     document.addEventListener("keyup", (event) => this.keys.delete(event.code));
   }
 
-  resume() {
+  resume(): void {
     if (this.active) {
       if (!this.locked && !this.pendingLock) this.requestLock();
       return;
@@ -84,7 +109,7 @@ export class PlayerController {
     this.requestLock();
   }
 
-  requestLock() {
+  requestLock(): void {
     if (!this.active || this.locked || this.pendingLock) return;
 
     if (!this.domElement.requestPointerLock) {
@@ -96,12 +121,13 @@ export class PlayerController {
     this.updateCursor();
 
     const lockRequest = this.domElement.requestPointerLock();
-    lockRequest?.catch?.(() => {
+    void lockRequest.catch(() => {
       this.pendingLock = false;
+      this.clearLockTimeout();
       this.updateCursor();
     });
 
-    window.clearTimeout(this.lockTimeout);
+    this.clearLockTimeout();
     this.lockTimeout = window.setTimeout(() => {
       if (this.pendingLock && !this.locked) {
         this.pendingLock = false;
@@ -110,30 +136,37 @@ export class PlayerController {
     }, 1200);
   }
 
-  handleMouse(event) {
+  clearLockTimeout(): void {
+    if (this.lockTimeout === null) return;
+
+    window.clearTimeout(this.lockTimeout);
+    this.lockTimeout = null;
+  }
+
+  handleMouse(event: MouseEvent): void {
     if (this.active) {
       this.applyMouseDelta(event.movementX, event.movementY);
     }
   }
 
-  applyMouseDelta(x, y) {
+  applyMouseDelta(x: number, y: number): void {
     this.yaw -= x * LOOK_SENSITIVITY;
     this.pitch -= y * LOOK_SENSITIVITY;
     this.pitch = clamp(this.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
   }
 
-  isLooking() {
+  isLooking(): boolean {
     return this.active;
   }
 
-  releaseLook() {
+  releaseLook(): void {
     this.pause(true);
   }
 
-  pause(exitPointerLock = true) {
+  pause(exitPointerLock = true): void {
     this.active = false;
     this.pendingLock = false;
-    window.clearTimeout(this.lockTimeout);
+    this.clearLockTimeout();
     this.keys.clear();
     this.onPauseChange(true);
     if (exitPointerLock && document.pointerLockElement === this.domElement) {
@@ -142,11 +175,11 @@ export class PlayerController {
     this.updateCursor();
   }
 
-  updateCursor() {
+  updateCursor(): void {
     document.body.classList.toggle("playing", this.active);
   }
 
-  update(delta) {
+  update(delta: number): void {
     if (!this.active) return;
 
     const wasGrounded = this.onGround;
@@ -193,7 +226,12 @@ export class PlayerController {
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
   }
 
-  applyHorizontalAcceleration(wish, targetSpeed, acceleration, delta) {
+  applyHorizontalAcceleration(
+    wish: THREE.Vector3,
+    targetSpeed: number,
+    acceleration: number,
+    delta: number
+  ): void {
     const currentSpeed = this.velocity.x * wish.x + this.velocity.z * wish.z;
     const addSpeed = targetSpeed - currentSpeed;
     if (addSpeed <= 0) return;
@@ -203,7 +241,7 @@ export class PlayerController {
     this.velocity.z += wish.z * accelerationStep;
   }
 
-  applyHorizontalFriction(friction, delta) {
+  applyHorizontalFriction(friction: number, delta: number): void {
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (speed < 0.001) {
       this.velocity.x = 0;
@@ -217,7 +255,7 @@ export class PlayerController {
     this.velocity.z *= scale;
   }
 
-  limitHorizontalSpeed(maxSpeed) {
+  limitHorizontalSpeed(maxSpeed: number): void {
     const speedSq = this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z;
     if (speedSq <= maxSpeed * maxSpeed) return;
 
@@ -226,7 +264,7 @@ export class PlayerController {
     this.velocity.z *= scale;
   }
 
-  moveAxis(axis, amount) {
+  moveAxis(axis: MovementAxis, amount: number): void {
     if (amount === 0) return;
     this.camera.position[axis] += amount;
 
@@ -238,7 +276,7 @@ export class PlayerController {
     else this.velocity[axis] = 0;
   }
 
-  overlapsBlock(x, y, z) {
+  overlapsBlock(x: number, y: number, z: number): boolean {
     const bounds = this.getBounds();
     return (
       x < bounds.maxX &&
@@ -250,7 +288,7 @@ export class PlayerController {
     );
   }
 
-  getBounds() {
+  getBounds(): PlayerBounds {
     return {
       minX: this.camera.position.x - PLAYER_RADIUS,
       maxX: this.camera.position.x + PLAYER_RADIUS,
@@ -261,7 +299,7 @@ export class PlayerController {
     };
   }
 
-  collides() {
+  collides(): boolean {
     const bounds = this.getBounds();
     const minX = Math.floor(bounds.minX);
     const maxX = Math.floor(bounds.maxX);
