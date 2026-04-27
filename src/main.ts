@@ -12,6 +12,15 @@ import { readGpuInfo } from "./gpu";
 import { MinimapRenderer } from "./minimap";
 import { PlayerController } from "./player";
 import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy, type PhysicsImpact } from "./physics";
+import {
+  MAX_PHYSICS_OBJECT_BUDGET,
+  MIN_PHYSICS_OBJECT_BUDGET,
+  normalizePhysicsObjectBudget,
+  readPhysicsObjectBudgetPreference,
+  stepPhysicsObjectBudget,
+  writePhysicsObjectBudgetPreference,
+  type PhysicsBudgetDirection
+} from "./physicsBudget";
 import { QualityController } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
@@ -26,7 +35,6 @@ import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 const BLOCK_INTERACTION_REACH = 8;
-const MAX_PHYSICS_TOYS = 96;
 const BLOCK_FRAGMENT_GRID_SIZE = 2;
 const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
@@ -42,6 +50,9 @@ const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
 const qualityButton = requireElement<HTMLButtonElement>("#quality-button");
+const physicsBudgetValue = requireElement<HTMLElement>("#physics-budget-value");
+const physicsBudgetDecreaseButton = requireElement<HTMLButtonElement>("#physics-budget-decrease");
+const physicsBudgetIncreaseButton = requireElement<HTMLButtonElement>("#physics-budget-increase");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
@@ -90,6 +101,7 @@ let inWorld = false;
 let worldTransitioning = false;
 let selectedBlockIndex = 0;
 let qualityController: QualityController;
+let physicsObjectBudget = readPhysicsObjectBudgetPreference();
 
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
@@ -135,6 +147,7 @@ qualityController = new QualityController({
   }
 });
 qualityController.initialize();
+updatePhysicsBudgetControls();
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {
@@ -198,6 +211,8 @@ function wireMenuControls(): void {
     void exitToHome();
   });
   qualityButton.addEventListener("click", () => qualityController.cycle());
+  physicsBudgetDecreaseButton.addEventListener("click", () => changePhysicsObjectBudget("decrease"));
+  physicsBudgetIncreaseButton.addEventListener("click", () => changePhysicsObjectBudget("increase"));
   superUltraToggle.addEventListener("change", () => {
     qualityController.setSuperUltraEnabled(superUltraToggle.checked);
   });
@@ -312,7 +327,9 @@ function animate(): void {
       rawDelta,
       playerChunk,
       activeWorld.getStats(),
-      minimapRenderer.lastUpdateMs
+      minimapRenderer.lastUpdateMs,
+      toys.length,
+      physicsObjectBudget
     );
     minimapRenderer.update(delta);
     updateTargetBlockHighlighter();
@@ -405,8 +422,28 @@ function addPhysicsToy(toy: PhysicsToy): void {
   enforcePhysicsToyBudget();
 }
 
+function changePhysicsObjectBudget(direction: PhysicsBudgetDirection): void {
+  setPhysicsObjectBudget(stepPhysicsObjectBudget(physicsObjectBudget, direction));
+}
+
+function setPhysicsObjectBudget(nextBudget: number, persist = true): void {
+  physicsObjectBudget = normalizePhysicsObjectBudget(nextBudget);
+  if (persist) {
+    writePhysicsObjectBudgetPreference(physicsObjectBudget);
+  }
+
+  updatePhysicsBudgetControls();
+  enforcePhysicsToyBudget();
+}
+
+function updatePhysicsBudgetControls(): void {
+  physicsBudgetValue.textContent = `${physicsObjectBudget} bodies`;
+  physicsBudgetDecreaseButton.disabled = physicsObjectBudget <= MIN_PHYSICS_OBJECT_BUDGET;
+  physicsBudgetIncreaseButton.disabled = physicsObjectBudget >= MAX_PHYSICS_OBJECT_BUDGET;
+}
+
 function enforcePhysicsToyBudget(): void {
-  while (toys.length > MAX_PHYSICS_TOYS) {
+  while (toys.length > physicsObjectBudget) {
     removePhysicsToyAt(0);
   }
 }

@@ -47,6 +47,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
+- Persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
@@ -84,7 +85,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior, debris budget/lifetime, or impact damage: `src/physics.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
+- Change thrown object behavior, debris lifetime, object budget, or impact damage: `src/physics.ts`, `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges

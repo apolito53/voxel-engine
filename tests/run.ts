@@ -3,6 +3,14 @@ import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
+import {
+  DEFAULT_PHYSICS_OBJECT_BUDGET,
+  MAX_PHYSICS_OBJECT_BUDGET,
+  MIN_PHYSICS_OBJECT_BUDGET,
+  normalizePhysicsObjectBudget,
+  PHYSICS_OBJECT_BUDGET_STEP,
+  stepPhysicsObjectBudget
+} from "../src/physicsBudget";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import { QUALITY_PRESET_ORDER, QUALITY_PRESETS, SUPER_ULTRA_PRESET_ID } from "../src/qualityPresets";
 import { voxelRaycast } from "../src/raycast";
@@ -329,6 +337,34 @@ test("physics impacts report speed so block damage can be thresholded", () => {
   assert(
     fastImpacts[0].speed > BLOCK_DAMAGE_IMPACT_SPEED,
     "faster impacts should clear the current block damage gate"
+  );
+});
+
+test("physics object budget clamps and steps predictably", () => {
+  assertEqual(
+    normalizePhysicsObjectBudget(null),
+    DEFAULT_PHYSICS_OBJECT_BUDGET,
+    "missing stored budget should use the default budget"
+  );
+  assertEqual(
+    normalizePhysicsObjectBudget(MIN_PHYSICS_OBJECT_BUDGET - PHYSICS_OBJECT_BUDGET_STEP),
+    MIN_PHYSICS_OBJECT_BUDGET,
+    "budget should clamp to the lower safety bound"
+  );
+  assertEqual(
+    normalizePhysicsObjectBudget(MAX_PHYSICS_OBJECT_BUDGET + PHYSICS_OBJECT_BUDGET_STEP),
+    MAX_PHYSICS_OBJECT_BUDGET,
+    "budget should clamp to the upper safety bound"
+  );
+  assertEqual(
+    stepPhysicsObjectBudget(96, "increase"),
+    96 + PHYSICS_OBJECT_BUDGET_STEP,
+    "increase should move by one configured step"
+  );
+  assertEqual(
+    stepPhysicsObjectBudget(96, "decrease"),
+    96 - PHYSICS_OBJECT_BUDGET_STEP,
+    "decrease should move by one configured step"
   );
 });
 

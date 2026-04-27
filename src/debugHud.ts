@@ -41,7 +41,9 @@ export class DebugHud {
     rawDelta: number,
     playerChunk: ChunkCoords,
     stats: WorldStats,
-    lastMinimapMs: number
+    lastMinimapMs: number,
+    physicsBodyCount: number,
+    physicsBodyBudget: number
   ): void {
     if (!this.visible) return;
 
@@ -66,6 +68,7 @@ export class DebugHud {
       `view ${stats.visibleChunks}/${stats.loadedChunks} culled ${stats.culledChunks}`,
       `mesh q ${stats.dirtyChunks} view ${stats.visibleDirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
       `saved ${stats.savedChunks} edited ${stats.modifiedChunks} saveq ${stats.pendingChunkSaves} dmg ${stats.damagedBlocks}`,
+      `physics ${physicsBodyCount}/${physicsBodyBudget}`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,
