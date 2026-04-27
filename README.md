@@ -72,6 +72,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Development Checks
 
 - `npm.cmd run typecheck`: strict TypeScript no-emit validation
+- `npm.cmd run test`: strict typecheck plus bundled Node engine robustness tests
 - `npm.cmd run build`: production build smoke test
 - `git diff --check`: whitespace sanity check before commits
 

@@ -18,6 +18,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Start on Linux/Ubuntu: `chmod +x ./start.sh && ./start.sh`
 - Dev server: `npm.cmd run dev -- --port 5173`
 - Strict type check: `npm.cmd run typecheck`
+- Engine robustness tests: `npm.cmd run test`
 - Production build: `npm.cmd run build`
 - Preview build: `npm.cmd run preview -- --port 4173`
 - TypeScript migration plan: `python .\scripts\ts_migration.py plan`
@@ -50,6 +51,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
 - Linux/Ubuntu startup helper: `start.sh`
+- Tiny Node test bundler: `scripts/run_tests.mjs`
+- Engine robustness test entrypoint: `tests/run.ts`
 - TypeScript migration helpers: `scripts/ts_migration.py`, `scripts/ts_migration_audit.py`, `scripts/run_python.ps1`, `scripts/run_python.sh`, `scripts/README.md`
 
 ## Runtime Flow
@@ -90,6 +93,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts on every frame.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in so normal quality cycling tops out at `Ultra`.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
+- `npm.cmd run test` bundles `tests/run.ts` into `.test-dist/` with esbuild before running in Node; `.test-dist/` is generated and ignored.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - Pointer lock behavior is browser-sensitive; test movement changes in the browser, not just with `npm.cmd run build`.
 - TypeScript migration helpers are historical prep tools now; source in `src` is expected to stay strict without `@ts-nocheck` or explicit `any`.
