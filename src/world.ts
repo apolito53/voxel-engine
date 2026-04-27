@@ -1,4 +1,4 @@
-// @ts-nocheck
+import type * as THREE from "three";
 import { BLOCK } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
@@ -7,8 +7,9 @@ import type {
   ChunkWorkerRequest,
   ChunkWorkerResult
 } from "./chunkProtocol";
-import { createNullChunkStorage } from "./chunkStorage";
-import { createTerrainContext, generateChunkBlocks } from "./terrain";
+import type { CollisionWorld } from "./collision";
+import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
+import { createTerrainContext, generateChunkBlocks, type TerrainContext } from "./terrain";
 
 const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
@@ -40,8 +41,88 @@ export type WorldStats = {
   readonly modifiedChunks: number;
 };
 
-export class VoxelWorld {
-  constructor({ storage = createNullChunkStorage(), seed = "" } = {}) {
+export type WorldOptions = {
+  readonly storage?: ChunkStorage;
+  readonly seed?: string;
+};
+
+export type ChunkCoords = {
+  readonly cx: number;
+  readonly cz: number;
+  readonly lx: number;
+  readonly lz: number;
+};
+
+type HorizontalViewDirection = Pick<THREE.Vector3, "x" | "z">;
+
+type ChunkQueueEntry = {
+  readonly cx: number;
+  readonly cz: number;
+};
+
+type PendingChunkLoad = ChunkQueueEntry & {
+  readonly key: string;
+};
+
+type PendingSavedChunkLoad = PendingChunkLoad & {
+  readonly generation: number;
+};
+
+type SavedChunkLoadResult = PendingSavedChunkLoad & {
+  readonly blocks: Uint8Array | null;
+};
+
+type PendingMeshBuild = {
+  readonly key: string;
+  readonly revision: number;
+};
+
+type PriorityItem = {
+  readonly cx: number;
+  readonly cz: number;
+};
+
+type PriorityEntry<T extends PriorityItem> = {
+  readonly item: T;
+  readonly distance: number;
+  readonly alignment: number;
+  readonly visible: boolean;
+  readonly lane: number;
+};
+
+export class VoxelWorld implements CollisionWorld {
+  chunks: Map<string, Chunk>;
+  storage: ChunkStorage;
+  seed: string;
+  terrain: TerrainContext;
+  savedChunkKeys: Set<string>;
+  savedChunks: Map<string, Uint8Array>;
+  chunkLoadQueue: Map<string, ChunkQueueEntry>;
+  pendingChunkLoads: Map<number, PendingChunkLoad>;
+  pendingChunkKeys: Set<string>;
+  pendingSavedChunkLoads: Map<string, PendingSavedChunkLoad>;
+  pendingSavedChunkKeys: Set<string>;
+  pendingMeshBuilds: Map<number, PendingMeshBuild>;
+  pendingMeshKeys: Set<string>;
+  workerResults: ChunkWorkerResult[];
+  savedChunkResults: SavedChunkLoadResult[];
+  storageOperations: Set<Promise<void>>;
+  storageGeneration: number;
+  workerRequestId: number;
+  worker: Worker | null;
+  priorityCx: number;
+  priorityCz: number;
+  priorityViewX: number;
+  priorityViewZ: number;
+  priorityViewActive: boolean;
+  priorityFrustum: THREE.Frustum | null;
+  priorityFrustumActive: boolean;
+  lastLoadedChunks: number;
+  lastRequestedChunkLoads: number;
+  lastMeshedChunks: number;
+  lastRequestedMeshes: number;
+
+  constructor({ storage = createNullChunkStorage(), seed = "" }: WorldOptions = {}) {
     this.chunks = new Map();
     this.storage = storage;
     this.seed = String(seed || "");
@@ -75,7 +156,7 @@ export class VoxelWorld {
     this.lastRequestedMeshes = 0;
   }
 
-  async switchStorage(storage, scene, seed = "") {
+  async switchStorage(storage: ChunkStorage, scene: THREE.Scene, seed = ""): Promise<void> {
     await this.flushStorageWrites();
     this.storageGeneration += 1;
     this.disposeLoadedChunks(scene);
@@ -90,7 +171,7 @@ export class VoxelWorld {
     this.lastRequestedMeshes = 0;
   }
 
-  async loadSavedChunkIndex() {
+  async loadSavedChunkIndex(): Promise<void> {
     // The index is tiny compared with full chunk data, so it is safe to read at world-load time.
     try {
       this.savedChunkKeys = new Set(await this.storage.listChunkKeys());
@@ -100,9 +181,9 @@ export class VoxelWorld {
     }
   }
 
-  async preloadSavedChunksAround(x, z, radius = LOAD_RADIUS) {
+  async preloadSavedChunksAround(x: number, z: number, radius = LOAD_RADIUS): Promise<void> {
     const center = this.toChunkCoords(x, z);
-    const loads = [];
+    const loads: Promise<Uint8Array | null>[] = [];
 
     // Initial spawn gets a blocking preload so saved edits near spawn are visible immediately.
     for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
@@ -115,7 +196,7 @@ export class VoxelWorld {
     await Promise.all(loads);
   }
 
-  disposeLoadedChunks(scene) {
+  disposeLoadedChunks(scene: THREE.Scene): void {
     // Meshes belong to the currently active world; world switches and home exits drop them all.
     for (const chunk of this.chunks.values()) {
       chunk.disposeMesh(scene);
@@ -132,15 +213,15 @@ export class VoxelWorld {
     this.savedChunkResults.length = 0;
   }
 
-  key(cx, cz) {
+  key(cx: number, cz: number): string {
     return `${cx},${cz}`;
   }
 
-  getChunk(cx, cz) {
+  getChunk(cx: number, cz: number): Chunk | undefined {
     return this.chunks.get(this.key(cx, cz));
   }
 
-  createWorker() {
+  createWorker(): Worker | null {
     if (typeof Worker === "undefined") return null;
 
     const worker = new Worker(new URL("./chunkWorker.ts", import.meta.url), {
@@ -149,7 +230,7 @@ export class VoxelWorld {
     worker.onmessage = (event: MessageEvent<ChunkWorkerResult>) => {
       this.workerResults.push(event.data);
     };
-    worker.onerror = (event) => {
+    worker.onerror = (event: ErrorEvent) => {
       console.error("Chunk worker failed", event.message);
       worker.terminate();
       this.worker = null;
@@ -161,7 +242,7 @@ export class VoxelWorld {
     return worker;
   }
 
-  ensureChunk(cx, cz) {
+  ensureChunk(cx: number, cz: number): Chunk {
     const key = this.key(cx, cz);
     let chunk = this.chunks.get(key);
     if (!chunk) {
@@ -181,16 +262,17 @@ export class VoxelWorld {
     return chunk;
   }
 
-  populateChunk(chunk, blocks) {
+  populateChunk(chunk: Chunk, blocks: Uint8Array): void {
     chunk.blocks.set(blocks);
     chunk.refreshTopColumns();
     chunk.dirty = true;
     chunk.revision = 0;
   }
 
-  addGeneratedChunk(cx, cz, blocks, modified = false) {
+  addGeneratedChunk(cx: number, cz: number, blocks: Uint8Array, modified = false): Chunk {
     const key = this.key(cx, cz);
-    if (this.chunks.has(key)) return this.chunks.get(key);
+    const existingChunk = this.chunks.get(key);
+    if (existingChunk) return existingChunk;
 
     const chunk = new Chunk(cx, cz);
     this.populateChunk(chunk, blocks);
@@ -202,11 +284,11 @@ export class VoxelWorld {
     return chunk;
   }
 
-  generateInitialWorld() {
+  generateInitialWorld(): void {
     this.ensureChunksAround(0, 0);
   }
 
-  ensureChunksAround(x, z, radius = LOAD_RADIUS) {
+  ensureChunksAround(x: number, z: number, radius = LOAD_RADIUS): ChunkCoords {
     const center = this.toChunkCoords(x, z);
     this.setPriority(center.cx, center.cz);
     for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
@@ -218,15 +300,15 @@ export class VoxelWorld {
   }
 
   streamChunksAround(
-    x,
-    z,
-    scene,
+    x: number,
+    z: number,
+    scene: THREE.Scene,
     loadRadius = LOAD_RADIUS,
     unloadRadius = UNLOAD_RADIUS,
     maxLoads = MAX_CHUNK_LOADS_PER_FRAME,
-    viewDirection = null,
-    viewFrustum = null
-  ) {
+    viewDirection: HorizontalViewDirection | null = null,
+    viewFrustum: THREE.Frustum | null = null
+  ): ChunkCoords {
     this.lastLoadedChunks = 0;
     this.processSavedChunkResults();
     this.processGeneratedChunkResults();
@@ -243,7 +325,7 @@ export class VoxelWorld {
     return center;
   }
 
-  queueChunksAround(centerCx, centerCz, radius = LOAD_RADIUS) {
+  queueChunksAround(centerCx: number, centerCz: number, radius = LOAD_RADIUS): void {
     for (let cz = centerCz - radius; cz <= centerCz + radius; cz += 1) {
       for (let cx = centerCx - radius; cx <= centerCx + radius; cx += 1) {
         const key = this.key(cx, cz);
@@ -264,7 +346,7 @@ export class VoxelWorld {
     }
   }
 
-  pruneQueuedChunks(centerCx, centerCz, radius = LOAD_RADIUS) {
+  pruneQueuedChunks(centerCx: number, centerCz: number, radius = LOAD_RADIUS): void {
     for (const [key, queued] of this.chunkLoadQueue.entries()) {
       const distance = Math.max(
         Math.abs(queued.cx - centerCx),
@@ -276,7 +358,12 @@ export class VoxelWorld {
     }
   }
 
-  setPriority(centerCx, centerCz, viewDirection = null, viewFrustum = null) {
+  setPriority(
+    centerCx: number,
+    centerCz: number,
+    viewDirection: HorizontalViewDirection | null = null,
+    viewFrustum: THREE.Frustum | null = null
+  ): void {
     this.priorityCx = centerCx;
     this.priorityCz = centerCz;
     this.priorityFrustum = viewFrustum?.planes?.length ? viewFrustum : null;
@@ -294,7 +381,11 @@ export class VoxelWorld {
     this.priorityViewZ = viewZ / viewLength;
   }
 
-  requestQueuedChunkLoads(centerCx, centerCz, maxLoads = MAX_CHUNK_LOADS_PER_FRAME) {
+  requestQueuedChunkLoads(
+    centerCx: number,
+    centerCz: number,
+    maxLoads = MAX_CHUNK_LOADS_PER_FRAME
+  ): number {
     if (maxLoads <= 0) return 0;
 
     const loadSlots = this.availableChunkLoadSlots(maxLoads);
@@ -327,7 +418,7 @@ export class VoxelWorld {
     return requested;
   }
 
-  availableChunkLoadSlots(maxLoads) {
+  availableChunkLoadSlots(maxLoads: number): number {
     if (!this.worker) return maxLoads;
 
     const pendingLoads = this.pendingChunkLoads.size + this.pendingSavedChunkLoads.size;
@@ -342,8 +433,8 @@ export class VoxelWorld {
     return Math.max(0, Math.min(maxLoads, loadPipelineLimit - pendingLoads));
   }
 
-  pickNearestQueuedChunks(centerCx, centerCz, limit) {
-    const nearest = [];
+  pickNearestQueuedChunks(centerCx: number, centerCz: number, limit: number): ChunkQueueEntry[] {
+    const nearest: PriorityEntry<ChunkQueueEntry>[] = [];
 
     // Huge quality tiers can queue thousands of chunks; keep only the few this frame can request.
     for (const queued of this.chunkLoadQueue.values()) {
@@ -353,7 +444,7 @@ export class VoxelWorld {
     return nearest.map((entry) => entry.item);
   }
 
-  requestChunkGeneration(cx, cz) {
+  requestChunkGeneration(cx: number, cz: number): void {
     const key = this.key(cx, cz);
     if (!this.worker || this.pendingChunkKeys.has(key) || this.chunks.has(key)) {
       return;
@@ -373,7 +464,7 @@ export class VoxelWorld {
     this.worker.postMessage(message);
   }
 
-  requestSavedChunkLoad(cx, cz) {
+  requestSavedChunkLoad(cx: number, cz: number): void {
     const key = this.key(cx, cz);
     if (
       this.pendingSavedChunkKeys.has(key) ||
@@ -398,7 +489,7 @@ export class VoxelWorld {
       });
   }
 
-  processSavedChunkResults() {
+  processSavedChunkResults(): void {
     if (this.savedChunkResults.length === 0) return;
 
     for (const result of this.savedChunkResults) {
@@ -423,10 +514,10 @@ export class VoxelWorld {
     this.savedChunkResults.length = 0;
   }
 
-  processGeneratedChunkResults() {
+  processGeneratedChunkResults(): void {
     if (this.workerResults.length === 0) return;
 
-    const remaining = [];
+    const remaining: ChunkWorkerResult[] = [];
     for (const result of this.workerResults) {
       if (result.type !== "generated") {
         remaining.push(result);
@@ -447,12 +538,12 @@ export class VoxelWorld {
     this.workerResults = remaining;
   }
 
-  nextWorkerRequestId() {
+  nextWorkerRequestId(): number {
     this.workerRequestId += 1;
     return this.workerRequestId;
   }
 
-  generateChunk(chunk) {
+  generateChunk(chunk: Chunk): void {
     chunk.blocks.set(generateChunkBlocks(chunk.cx, chunk.cz, this.terrain));
     chunk.dirty = true;
     chunk.modified = false;
@@ -460,7 +551,7 @@ export class VoxelWorld {
     chunk.refreshTopColumns();
   }
 
-  toChunkCoords(x, z) {
+  toChunkCoords(x: number, z: number): ChunkCoords {
     const cx = Math.floor(x / CHUNK_SIZE);
     const cz = Math.floor(z / CHUNK_SIZE);
     const lx = ((Math.floor(x) % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
@@ -468,13 +559,13 @@ export class VoxelWorld {
     return { cx, cz, lx, lz };
   }
 
-  getBlock(x, y, z) {
+  getBlock(x: number, y: number, z: number): number {
     if (y < 0 || y >= WORLD_HEIGHT) return BLOCK.air;
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     return this.getChunk(cx, cz)?.getLocal(lx, Math.floor(y), lz) ?? BLOCK.air;
   }
 
-  setBlock(x, y, z, block) {
+  setBlock(x: number, y: number, z: number, block: number): void {
     if (y < 0 || y >= WORLD_HEIGHT) return;
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     const key = this.key(cx, cz);
@@ -489,7 +580,7 @@ export class VoxelWorld {
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
   }
 
-  markDirty(cx, cz) {
+  markDirty(cx: number, cz: number): void {
     const chunk = this.getChunk(cx, cz);
     if (!chunk) return;
 
@@ -499,14 +590,14 @@ export class VoxelWorld {
     chunk.revision += 1;
   }
 
-  markNeighborChunksDirty(cx, cz) {
+  markNeighborChunksDirty(cx: number, cz: number): void {
     this.markDirty(cx - 1, cz);
     this.markDirty(cx + 1, cz);
     this.markDirty(cx, cz - 1);
     this.markDirty(cx, cz + 1);
   }
 
-  rememberModifiedChunk(key, blocks) {
+  rememberModifiedChunk(key: string, blocks: Uint8Array): void {
     // Copy before saving so later in-memory edits cannot mutate the stored snapshot by reference.
     const snapshot = blocks.slice();
     this.savedChunkKeys.add(key);
@@ -514,15 +605,16 @@ export class VoxelWorld {
     this.queueStorageOperation(this.storage.saveChunk(key, snapshot));
   }
 
-  forgetSavedChunk(key) {
+  forgetSavedChunk(key: string): void {
     // Dropping a saved chunk lets terrain generation own that coordinate again.
     this.savedChunkKeys.delete(key);
     this.savedChunks.delete(key);
     this.queueStorageOperation(this.storage.deleteChunk(key));
   }
 
-  async loadSavedChunkNow(key) {
-    if (this.savedChunks.has(key)) return this.savedChunks.get(key);
+  async loadSavedChunkNow(key: string): Promise<Uint8Array | null> {
+    const cachedBlocks = this.savedChunks.get(key);
+    if (cachedBlocks) return cachedBlocks;
 
     const blocks = await this.storage.loadChunk(key);
     if (!blocks) {
@@ -534,24 +626,30 @@ export class VoxelWorld {
     return blocks;
   }
 
-  queueStorageOperation(operation) {
+  queueStorageOperation(operation: Promise<unknown>): Promise<void> {
     const trackedOperation = Promise.resolve(operation)
       .catch((error) => {
         console.warn("Save storage operation failed", error);
       })
-      .finally(() => {
-        this.storageOperations.delete(trackedOperation);
-      });
+      .then(() => undefined);
 
     this.storageOperations.add(trackedOperation);
+    void trackedOperation.finally(() => {
+      this.storageOperations.delete(trackedOperation);
+    });
     return trackedOperation;
   }
 
-  async flushStorageWrites() {
+  async flushStorageWrites(): Promise<void> {
     await Promise.allSettled(Array.from(this.storageOperations));
   }
 
-  unloadChunksOutside(centerCx, centerCz, unloadRadius, scene) {
+  unloadChunksOutside(
+    centerCx: number,
+    centerCz: number,
+    unloadRadius: number,
+    scene: THREE.Scene
+  ): void {
     for (const [key, chunk] of Array.from(this.chunks.entries())) {
       const distance = Math.max(
         Math.abs(chunk.cx - centerCx),
@@ -573,13 +671,17 @@ export class VoxelWorld {
     }
   }
 
-  isSolid(x, y, z) {
+  isSolid(x: number, y: number, z: number): boolean {
     if (y < 0) return true;
     const block = this.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
     return block !== BLOCK.air;
   }
 
-  rebuildDirty(scene, material, maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME) {
+  rebuildDirty(
+    scene: THREE.Scene,
+    material: THREE.Material,
+    maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME
+  ): number {
     if (this.worker) {
       this.processMeshResults(scene, material);
       this.lastRequestedMeshes = this.requestDirtyMeshBuilds(maxRebuilds);
@@ -600,11 +702,11 @@ export class VoxelWorld {
     return rebuilt;
   }
 
-  processMeshResults(scene, material) {
+  processMeshResults(scene: THREE.Scene, material: THREE.Material): void {
     this.lastMeshedChunks = 0;
     if (this.workerResults.length === 0) return;
 
-    const remaining = [];
+    const remaining: ChunkWorkerResult[] = [];
     for (const result of this.workerResults) {
       if (result.type !== "meshed") {
         remaining.push(result);
@@ -639,7 +741,7 @@ export class VoxelWorld {
     this.workerResults = remaining;
   }
 
-  requestDirtyMeshBuilds(maxBuilds = MAX_CHUNK_REBUILDS_PER_FRAME) {
+  requestDirtyMeshBuilds(maxBuilds = MAX_CHUNK_REBUILDS_PER_FRAME): number {
     if (maxBuilds <= 0) return 0;
 
     const buildSlots = this.availableMeshBuildSlots(maxBuilds);
@@ -658,13 +760,13 @@ export class VoxelWorld {
     return requested;
   }
 
-  availableMeshBuildSlots(maxBuilds) {
+  availableMeshBuildSlots(maxBuilds: number): number {
     const meshPipelineLimit = Math.max(maxBuilds, maxBuilds * MAX_PENDING_MESH_MULTIPLIER);
     return Math.max(0, Math.min(maxBuilds, meshPipelineLimit - this.pendingMeshBuilds.size));
   }
 
-  pickNearestDirtyChunks(limit) {
-    const nearest = [];
+  pickNearestDirtyChunks(limit: number): Chunk[] {
+    const nearest: PriorityEntry<Chunk>[] = [];
 
     // Mesh budgets are tiny compared with loaded chunks, so avoid sorting the whole world.
     for (const chunk of this.chunks.values()) {
@@ -676,7 +778,7 @@ export class VoxelWorld {
     return nearest.map((entry) => entry.item);
   }
 
-  countDirtyChunks() {
+  countDirtyChunks(): number {
     let dirtyChunks = 0;
     for (const chunk of this.chunks.values()) {
       if (chunk.dirty) dirtyChunks += 1;
@@ -684,7 +786,13 @@ export class VoxelWorld {
     return dirtyChunks;
   }
 
-  insertNearest(nearest, item, centerCx, centerCz, limit) {
+  insertNearest<T extends PriorityItem>(
+    nearest: PriorityEntry<T>[],
+    item: T,
+    centerCx: number,
+    centerCz: number,
+    limit: number
+  ): void {
     const entry = this.createPriorityEntry(item, centerCx, centerCz);
 
     let insertAt = nearest.length;
@@ -697,7 +805,11 @@ export class VoxelWorld {
     if (nearest.length > limit) nearest.pop();
   }
 
-  createPriorityEntry(item, centerCx, centerCz) {
+  createPriorityEntry<T extends PriorityItem>(
+    item: T,
+    centerCx: number,
+    centerCz: number
+  ): PriorityEntry<T> {
     const dx = item.cx - centerCx;
     const dz = item.cz - centerCz;
     const distance = dx * dx + dz * dz;
@@ -714,13 +826,15 @@ export class VoxelWorld {
     };
   }
 
-  chunkViewAlignment(dx, dz, distance) {
+  chunkViewAlignment(dx: number, dz: number, distance: number): number {
     if (!this.priorityViewActive || distance === 0) return 0;
     return (dx * this.priorityViewX + dz * this.priorityViewZ) / Math.sqrt(distance);
   }
 
-  chunkIntersectsFrustum(cx, cz) {
+  chunkIntersectsFrustum(cx: number, cz: number): boolean {
     if (!this.priorityFrustumActive) return true;
+    const frustum = this.priorityFrustum;
+    if (!frustum) return true;
 
     const minX = cx * CHUNK_SIZE - FRUSTUM_PRIORITY_PADDING;
     const maxX = (cx + 1) * CHUNK_SIZE + FRUSTUM_PRIORITY_PADDING;
@@ -729,7 +843,7 @@ export class VoxelWorld {
     const minZ = cz * CHUNK_SIZE - FRUSTUM_PRIORITY_PADDING;
     const maxZ = (cz + 1) * CHUNK_SIZE + FRUSTUM_PRIORITY_PADDING;
 
-    for (const plane of this.priorityFrustum.planes) {
+    for (const plane of frustum.planes) {
       const normal = plane.normal;
       const x = normal.x >= 0 ? maxX : minX;
       const y = normal.y >= 0 ? maxY : minY;
@@ -742,7 +856,7 @@ export class VoxelWorld {
     return true;
   }
 
-  priorityLane(ring, alignment, visible) {
+  priorityLane(ring: number, alignment: number, visible: boolean): number {
     // Lanes keep the immediate neighborhood complete, then spend the remaining
     // budget on chunks in the frustum before broader front-to-back catch-up work.
     if (ring <= VIEW_PRIORITY_NEAR_RADIUS) return 0;
@@ -753,7 +867,7 @@ export class VoxelWorld {
     return 4;
   }
 
-  isNearer(a, b) {
+  isNearer<T extends PriorityItem>(a: PriorityEntry<T>, b: PriorityEntry<T>): boolean {
     if (a.lane !== b.lane) return a.lane < b.lane;
     if (a.distance !== b.distance) return a.distance < b.distance;
     if (a.alignment !== b.alignment) return a.alignment > b.alignment;
@@ -761,12 +875,15 @@ export class VoxelWorld {
     return a.item.cx < b.item.cx;
   }
 
-  requestMeshBuild(chunk, key) {
+  requestMeshBuild(chunk: Chunk, key: string): void {
+    if (!this.worker) return;
+
     const requestId = this.nextWorkerRequestId();
     const blocks = chunk.blocks.slice();
     const neighbors = this.snapshotNeighborBlocks(chunk.cx, chunk.cz);
-    const transfers = [
-      blocks.buffer,
+    const blocksBuffer = transferChunkBuffer(blocks);
+    const transfers: Transferable[] = [
+      blocksBuffer,
       ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
     ];
 
@@ -781,18 +898,18 @@ export class VoxelWorld {
       cx: chunk.cx,
       cz: chunk.cz,
       revision: chunk.revision,
-      blocks: blocks.buffer,
+      blocks: blocksBuffer,
       neighbors
     };
     this.worker.postMessage(message, transfers);
   }
 
-  snapshotNeighborBlocks(cx, cz): ChunkNeighborBuffers {
+  snapshotNeighborBlocks(cx: number, cz: number): ChunkNeighborBuffers {
     return {
-      negativeX: this.getChunk(cx - 1, cz)?.blocks.slice().buffer ?? null,
-      positiveX: this.getChunk(cx + 1, cz)?.blocks.slice().buffer ?? null,
-      negativeZ: this.getChunk(cx, cz - 1)?.blocks.slice().buffer ?? null,
-      positiveZ: this.getChunk(cx, cz + 1)?.blocks.slice().buffer ?? null
+      negativeX: cloneChunkBuffer(this.getChunk(cx - 1, cz)),
+      positiveX: cloneChunkBuffer(this.getChunk(cx + 1, cz)),
+      negativeZ: cloneChunkBuffer(this.getChunk(cx, cz - 1)),
+      positiveZ: cloneChunkBuffer(this.getChunk(cx, cz + 1))
     };
   }
 
@@ -828,12 +945,21 @@ export class VoxelWorld {
     };
   }
 
-  highestSolidY(x, z) {
+  highestSolidY(x: number, z: number): number {
     return this.getTopBlock(x, z).y;
   }
 
-  getTopBlock(x, z) {
+  getTopBlock(x: number, z: number): { readonly block: number; readonly y: number } {
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     return this.getChunk(cx, cz)?.getTopLocal(lx, lz) ?? { block: BLOCK.air, y: 0 };
   }
+}
+
+function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {
+  return chunk ? transferChunkBuffer(chunk.blocks.slice()) : null;
+}
+
+function transferChunkBuffer(blocks: Uint8Array): ArrayBuffer {
+  // All chunk snapshots in this engine are plain Uint8Array instances, not shared buffers.
+  return blocks.buffer as ArrayBuffer;
 }
