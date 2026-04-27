@@ -225,6 +225,8 @@ const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const minimapDirection = new THREE.Vector3();
 const chunkStreamDirection = new THREE.Vector3();
+const chunkStreamFrustum = new THREE.Frustum();
+const chunkStreamProjection = new THREE.Matrix4();
 
 const MINIMAP_SIZE = 128;
 const MINIMAP_TEXTURE_SIZE = 64;
@@ -369,6 +371,7 @@ function animate() {
   if (inWorld) {
     player.update(delta);
     camera.getWorldDirection(chunkStreamDirection);
+    updateChunkStreamFrustum();
     const playerChunk = world.streamChunksAround(
       camera.position.x,
       camera.position.z,
@@ -376,7 +379,8 @@ function animate() {
       getLoadRadius(),
       getUnloadRadius(),
       getChunkLoadBudget(),
-      chunkStreamDirection
+      chunkStreamDirection,
+      chunkStreamFrustum
     );
 
     for (const toy of toys) {
@@ -396,6 +400,13 @@ function animate() {
   updateSunShadowAnchor();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
+}
+
+function updateChunkStreamFrustum() {
+  // The world scheduler only needs camera planes, not renderer state, to prefer visible work.
+  camera.updateMatrixWorld();
+  chunkStreamProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  chunkStreamFrustum.setFromProjectionMatrix(chunkStreamProjection);
 }
 
 function updateHud() {
@@ -539,7 +550,8 @@ function updateDebug(delta, playerChunk) {
     `fps ${Math.round(smoothedFps)}`,
     `chunk ${playerChunk.cx}, ${playerChunk.cz}`,
     `chunks ${stats.loadedChunks} q ${stats.queuedChunks} gen ${stats.loadedThisFrame}/${stats.pendingChunkLoads}`,
-    `mesh q ${stats.dirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
+    `view ${stats.visibleChunks}/${stats.loadedChunks} culled ${stats.culledChunks}`,
+    `mesh q ${stats.dirtyChunks} view ${stats.visibleDirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
     `saved ${stats.savedChunks} edited ${stats.modifiedChunks}`,
     `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
     `quality ${getQualityPreset().label.toLowerCase()} ${getQualityPreset().distanceScale}x px ${renderer.getPixelRatio()}`,

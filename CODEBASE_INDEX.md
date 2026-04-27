@@ -46,8 +46,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 3. `main.js` opens the async IndexedDB save registry, then starts on the home screen; loading or creating a world activates a saved-world slot and seed.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.js`.
-6. During play, `main.js` passes the camera view direction into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded view-biased slice near and in front of the player.
-7. Dirty chunks use the same bounded view-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
+6. During play, `main.js` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded slice that keeps nearby chunks first, then prioritizes chunks inside the camera view.
+7. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
 8. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
 9. Each animation frame updates player motion, chunk streaming, dirty mesh scheduling, physics toys, HUD/debug text, minimap, and final render only while a world is active.
 10. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
@@ -72,7 +72,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
-- Large render-distance presets depend on bounded view-biased chunk and mesh selection in `src/world.js`; avoid reintroducing full queue sorts on every frame.
+- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.js`; avoid reintroducing full queue sorts on every frame.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in so normal quality cycling tops out at `Ultra`.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.

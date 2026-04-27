@@ -10,6 +10,7 @@ const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
 const VIEW_PRIORITY_NEAR_RADIUS = 2;
 const VIEW_PRIORITY_FRONT_DOT = 0.42;
 const VIEW_PRIORITY_SIDE_DOT = -0.15;
+const FRUSTUM_PRIORITY_PADDING = CHUNK_SIZE * 0.5;
 
 export class VoxelWorld {
   constructor({ storage = createNullChunkStorage(), seed = "" } = {}) {
@@ -38,6 +39,8 @@ export class VoxelWorld {
     this.priorityViewX = 0;
     this.priorityViewZ = -1;
     this.priorityViewActive = false;
+    this.priorityFrustum = null;
+    this.priorityFrustumActive = false;
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
@@ -193,13 +196,14 @@ export class VoxelWorld {
     loadRadius = LOAD_RADIUS,
     unloadRadius = UNLOAD_RADIUS,
     maxLoads = MAX_CHUNK_LOADS_PER_FRAME,
-    viewDirection = null
+    viewDirection = null,
+    viewFrustum = null
   ) {
     this.lastLoadedChunks = 0;
     this.processSavedChunkResults();
     this.processGeneratedChunkResults();
     const center = this.toChunkCoords(x, z);
-    this.setPriority(center.cx, center.cz, viewDirection);
+    this.setPriority(center.cx, center.cz, viewDirection, viewFrustum);
     this.queueChunksAround(center.cx, center.cz, loadRadius);
     this.pruneQueuedChunks(center.cx, center.cz, loadRadius);
     this.lastRequestedChunkLoads = this.requestQueuedChunkLoads(
@@ -244,9 +248,11 @@ export class VoxelWorld {
     }
   }
 
-  setPriority(centerCx, centerCz, viewDirection = null) {
+  setPriority(centerCx, centerCz, viewDirection = null, viewFrustum = null) {
     this.priorityCx = centerCx;
     this.priorityCz = centerCz;
+    this.priorityFrustum = viewFrustum?.planes?.length ? viewFrustum : null;
+    this.priorityFrustumActive = Boolean(this.priorityFrustum);
 
     // Keep the horizontal camera direction normalized so chunk scheduling can
     // prefer work the player is likely to see next.
@@ -531,8 +537,8 @@ export class VoxelWorld {
     this.lastRequestedMeshes = 0;
     this.lastMeshedChunks = 0;
     let rebuilt = 0;
-    for (const chunk of this.chunks.values()) {
-      if (!chunk.dirty) continue;
+    const dirtyChunks = this.pickNearestDirtyChunks(maxRebuilds);
+    for (const chunk of dirtyChunks) {
       const mesh = chunk.rebuildMesh(this, material);
       if (!mesh.parent) scene.add(mesh);
       rebuilt += 1;
@@ -629,12 +635,14 @@ export class VoxelWorld {
     const distance = dx * dx + dz * dz;
     const ring = Math.max(Math.abs(dx), Math.abs(dz));
     const alignment = this.chunkViewAlignment(dx, dz, distance);
+    const visible = this.chunkIntersectsFrustum(item.cx, item.cz);
 
     return {
       item,
       distance,
       alignment,
-      lane: this.priorityLane(ring, alignment)
+      visible,
+      lane: this.priorityLane(ring, alignment, visible)
     };
   }
 
@@ -643,14 +651,38 @@ export class VoxelWorld {
     return (dx * this.priorityViewX + dz * this.priorityViewZ) / Math.sqrt(distance);
   }
 
-  priorityLane(ring, alignment) {
+  chunkIntersectsFrustum(cx, cz) {
+    if (!this.priorityFrustumActive) return true;
+
+    const minX = cx * CHUNK_SIZE - FRUSTUM_PRIORITY_PADDING;
+    const maxX = (cx + 1) * CHUNK_SIZE + FRUSTUM_PRIORITY_PADDING;
+    const minY = -FRUSTUM_PRIORITY_PADDING;
+    const maxY = WORLD_HEIGHT + FRUSTUM_PRIORITY_PADDING;
+    const minZ = cz * CHUNK_SIZE - FRUSTUM_PRIORITY_PADDING;
+    const maxZ = (cz + 1) * CHUNK_SIZE + FRUSTUM_PRIORITY_PADDING;
+
+    for (const plane of this.priorityFrustum.planes) {
+      const normal = plane.normal;
+      const x = normal.x >= 0 ? maxX : minX;
+      const y = normal.y >= 0 ? maxY : minY;
+      const z = normal.z >= 0 ? maxZ : minZ;
+      if (normal.x * x + normal.y * y + normal.z * z + plane.constant < 0) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  priorityLane(ring, alignment, visible) {
     // Lanes keep the immediate neighborhood complete, then spend the remaining
-    // budget front-to-back instead of blindly filling a square around the player.
+    // budget on chunks in the frustum before broader front-to-back catch-up work.
     if (ring <= VIEW_PRIORITY_NEAR_RADIUS) return 0;
-    if (!this.priorityViewActive) return 1;
-    if (alignment >= VIEW_PRIORITY_FRONT_DOT) return 1;
-    if (alignment >= VIEW_PRIORITY_SIDE_DOT) return 2;
-    return 3;
+    if (visible) return 1;
+    if (!this.priorityViewActive) return 2;
+    if (alignment >= VIEW_PRIORITY_FRONT_DOT) return 2;
+    if (alignment >= VIEW_PRIORITY_SIDE_DOT) return 3;
+    return 4;
   }
 
   isNearer(a, b) {
@@ -701,13 +733,20 @@ export class VoxelWorld {
   getStats() {
     let dirtyChunks = 0;
     let modifiedChunks = 0;
+    let visibleChunks = 0;
+    let visibleDirtyChunks = 0;
     for (const chunk of this.chunks.values()) {
       if (chunk.dirty) dirtyChunks += 1;
       if (chunk.modified) modifiedChunks += 1;
+      if (!this.chunkIntersectsFrustum(chunk.cx, chunk.cz)) continue;
+      visibleChunks += 1;
+      if (chunk.dirty) visibleDirtyChunks += 1;
     }
 
     return {
       loadedChunks: this.chunks.size,
+      visibleChunks,
+      culledChunks: this.chunks.size - visibleChunks,
       savedChunks: this.savedChunkKeys.size,
       queuedChunks: this.chunkLoadQueue.size,
       loadedThisFrame: this.lastLoadedChunks,
@@ -717,6 +756,8 @@ export class VoxelWorld {
       requestedMeshesThisFrame: this.lastRequestedMeshes,
       pendingMeshBuilds: this.pendingMeshBuilds.size,
       dirtyChunks,
+      visibleDirtyChunks,
+      culledDirtyChunks: dirtyChunks - visibleDirtyChunks,
       modifiedChunks
     };
   }
