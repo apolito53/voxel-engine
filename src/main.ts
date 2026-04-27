@@ -1,9 +1,13 @@
-// @ts-nocheck
 import * as THREE from "three";
 import "./style.css";
 import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./chunk";
-import { createChunkStorage, createWorldRegistry } from "./chunkStorage";
+import {
+  createChunkStorage,
+  createWorldRegistry,
+  type SavedWorld,
+  type WorldRegistry
+} from "./chunkStorage";
 import { PlayerController } from "./player";
 import { PhysicsToy } from "./physics";
 import {
@@ -11,18 +15,25 @@ import {
   LEGACY_POTATO_STORAGE_KEY,
   QUALITY_PRESET_ORDER,
   QUALITY_PRESETS,
+  type QualityPreset,
+  type QualityPresetId,
   QUALITY_STORAGE_KEY,
   SUPER_ULTRA_PRESET_ID,
   SUPER_ULTRA_STORAGE_KEY
 } from "./qualityPresets";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
-import { VoxelWorld, type WorldStats } from "./world";
+import { VoxelWorld, type ChunkCoords, type WorldStats } from "./world";
 
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 
-const app = document.querySelector("#app");
-let superUltraEnabled = readSuperUltraPreference();
-let qualityPresetId = readQualityPreference();
+type GpuInfo = {
+  readonly vendor: string;
+  readonly renderer: string;
+};
+
+const app = requireElement<HTMLElement>("#app");
+let superUltraEnabled: boolean = readSuperUltraPreference();
+let qualityPresetId: QualityPresetId = readQualityPreference();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -33,11 +44,12 @@ const gpuInfo = readGpuInfo(renderer);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fb9d8);
-scene.fog = new THREE.Fog(
+const sceneFog = new THREE.Fog(
   0x8fb9d8,
   getQualityPreset().fogNear,
   getQualityPreset().fogFar
 );
+scene.fog = sceneFog;
 
 const camera = new THREE.PerspectiveCamera(
   75,
@@ -62,23 +74,24 @@ const worldMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.0
 });
 
-let worldRegistry = null;
-let world = null;
-let player = null;
-const homeScreen = document.querySelector("#home-screen");
-const createWorldForm = document.querySelector("#create-world-form");
-const worldNameInput = document.querySelector("#world-name-input");
-const worldSeedInput = document.querySelector("#world-seed-input");
-const randomSeedButton = document.querySelector("#random-seed-button");
-const homeWorldList = document.querySelector("#home-world-list");
-const pauseMenu = document.querySelector("#pause-menu");
-const resumeButton = document.querySelector("#resume-button");
-const homeButton = document.querySelector("#home-button");
-const qualityButton = document.querySelector("#quality-button");
-const superUltraToggle = document.querySelector("#super-ultra-toggle");
-const debugPanel = document.querySelector("#debug-panel");
-const minimap = document.querySelector("#minimap");
-const minimapContext = minimap.getContext("2d");
+let worldRegistry: WorldRegistry | null = null;
+let world: VoxelWorld | null = null;
+let player: PlayerController | null = null;
+const homeScreen = requireElement<HTMLElement>("#home-screen");
+const createWorldForm = requireElement<HTMLFormElement>("#create-world-form");
+const worldNameInput = requireElement<HTMLInputElement>("#world-name-input");
+const worldSeedInput = requireElement<HTMLInputElement>("#world-seed-input");
+const randomSeedButton = requireElement<HTMLButtonElement>("#random-seed-button");
+const homeWorldList = requireElement<HTMLElement>("#home-world-list");
+const pauseMenu = requireElement<HTMLElement>("#pause-menu");
+const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
+const homeButton = requireElement<HTMLButtonElement>("#home-button");
+const qualityButton = requireElement<HTMLButtonElement>("#quality-button");
+const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
+const debugPanel = requireElement<HTMLElement>("#debug-panel");
+const minimap = requireElement<HTMLCanvasElement>("#minimap");
+const minimapContext = requireCanvasContext(minimap);
+const hudTitle = requireElement<HTMLElement>("#hud .title");
 let inWorld = false;
 let worldTransitioning = false;
 
@@ -88,7 +101,7 @@ let debugAccumulator = Infinity;
 let minimapAccumulator = Infinity;
 let smoothedFps = 0;
 let lastMinimapMs = 0;
-const toys = [];
+const toys: PhysicsToy[] = [];
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const minimapDirection = new THREE.Vector3();
@@ -104,7 +117,7 @@ const MINIMAP_WORLD_PER_TEXEL = MINIMAP_RANGE / MINIMAP_TEXTURE_SIZE;
 const minimapTerrain = document.createElement("canvas");
 minimapTerrain.width = MINIMAP_TEXTURE_SIZE;
 minimapTerrain.height = MINIMAP_TEXTURE_SIZE;
-const minimapTerrainContext = minimapTerrain.getContext("2d");
+const minimapTerrainContext = requireCanvasContext(minimapTerrain);
 const minimapImage = minimapTerrainContext.createImageData(
   MINIMAP_TEXTURE_SIZE,
   MINIMAP_TEXTURE_SIZE
@@ -118,7 +131,44 @@ let minimapSliceMaxMs = 0;
 let minimapHasTerrain = false;
 minimapContext.imageSmoothingEnabled = false;
 
-async function startApp() {
+function requireElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) {
+    throw new Error(`Missing required element: ${selector}`);
+  }
+  return element;
+}
+
+function requireCanvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas 2D context is unavailable.");
+  }
+  return context;
+}
+
+function requireWorldRegistry(): WorldRegistry {
+  if (!worldRegistry) {
+    throw new Error("World registry is not initialized.");
+  }
+  return worldRegistry;
+}
+
+function requireWorld(): VoxelWorld {
+  if (!world) {
+    throw new Error("World is not initialized.");
+  }
+  return world;
+}
+
+function requirePlayer(): PlayerController {
+  if (!player) {
+    throw new Error("Player is not initialized.");
+  }
+  return player;
+}
+
+async function startApp(): Promise<void> {
   try {
     worldRegistry = await createWorldRegistry();
     const initialWorld = await worldRegistry.getActiveWorld();
@@ -142,18 +192,20 @@ async function startApp() {
   }
 }
 
-function wireMenuControls() {
-  player.onPauseChange = (paused) => {
+function wireMenuControls(): void {
+  const activePlayer = requirePlayer();
+
+  activePlayer.onPauseChange = (paused: boolean) => {
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
   };
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target.closest("button, input, label")) return;
+    if (event.target instanceof Element && event.target.closest("button, input, label")) return;
     event.preventDefault();
-    player.resume();
+    requirePlayer().resume();
   });
-  resumeButton.addEventListener("click", () => player.resume());
+  resumeButton.addEventListener("click", () => requirePlayer().resume());
   // World switching stays on the home screen; the pause menu only exits back there.
   homeButton.addEventListener("click", () => {
     void exitToHome();
@@ -195,10 +247,11 @@ document.addEventListener("keydown", (event) => {
   if (!inWorld) return;
 
   if (/^Digit[1-5]$/.test(event.code)) {
-    selectedBlockIndex = Number(event.code.at(-1)) - 1;
+    selectedBlockIndex = Number(event.code.slice(-1)) - 1;
   }
 
-  if (event.code === "KeyF" && player.isLooking()) {
+  const activePlayer = requirePlayer();
+  if (event.code === "KeyF" && activePlayer.isLooking()) {
     camera.getWorldDirection(direction);
     const toy = new PhysicsToy(
       camera.position.clone().addScaledVector(direction, 1.4),
@@ -211,14 +264,18 @@ document.addEventListener("keydown", (event) => {
 
 renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
 renderer.domElement.addEventListener("mousedown", (event) => {
-  if (!inWorld || !player.isLooking()) return;
+  if (!inWorld) return;
+
+  const activeWorld = requireWorld();
+  const activePlayer = requirePlayer();
+  if (!activePlayer.isLooking()) return;
 
   camera.getWorldDirection(direction);
-  const hit: VoxelRaycastHit | null = voxelRaycast(world, camera.position, direction, 8);
+  const hit: VoxelRaycastHit | null = voxelRaycast(activeWorld, camera.position, direction, 8);
   if (!hit) return;
 
   if (event.button === 0) {
-    world.setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
+    activeWorld.setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
   }
 
   if (event.button === 2) {
@@ -228,19 +285,22 @@ renderer.domElement.addEventListener("mousedown", (event) => {
       y: hit.block.y + hit.normal.y,
       z: hit.block.z + hit.normal.z
     };
-    if (player.overlapsBlock(target.x, target.y, target.z)) return;
-    world.setBlock(target.x, target.y, target.z, block);
+    if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
+    activeWorld.setBlock(target.x, target.y, target.z, block);
   }
 });
 
-function animate() {
+function animate(): void {
   const delta = Math.min(clock.getDelta(), 0.04);
 
   if (inWorld) {
-    player.update(delta);
+    const activeWorld = requireWorld();
+    const activePlayer = requirePlayer();
+
+    activePlayer.update(delta);
     camera.getWorldDirection(chunkStreamDirection);
     updateChunkStreamFrustum();
-    const playerChunk = world.streamChunksAround(
+    const playerChunk = activeWorld.streamChunksAround(
       camera.position.x,
       camera.position.z,
       scene,
@@ -252,16 +312,16 @@ function animate() {
     );
 
     for (const toy of toys) {
-      toy.update(delta, world);
+      toy.update(delta, activeWorld);
     }
 
-    world.rebuildDirty(
+    activeWorld.rebuildDirty(
       scene,
       worldMaterial,
       getChunkRebuildBudget()
     );
     updateHud();
-    updateDebug(delta, playerChunk);
+    updateDebug(delta, playerChunk, activeWorld);
     updateMinimap(delta);
   }
 
@@ -270,21 +330,21 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
-function updateChunkStreamFrustum() {
+function updateChunkStreamFrustum(): void {
   // The world scheduler only needs camera planes, not renderer state, to prefer visible work.
   camera.updateMatrixWorld();
   chunkStreamProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   chunkStreamFrustum.setFromProjectionMatrix(chunkStreamProjection);
 }
 
-function updateHud() {
-  const title = document.querySelector("#hud .title");
-  title.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
+function updateHud(): void {
+  hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
 }
 
-async function renderHomeWorldList() {
-  const activeWorldId = await worldRegistry.getActiveWorldId();
-  const worlds = await worldRegistry.listWorlds();
+async function renderHomeWorldList(): Promise<void> {
+  const registry = requireWorldRegistry();
+  const activeWorldId = await registry.getActiveWorldId();
+  const worlds = await registry.listWorlds();
 
   // Rebuild visible save rows from registry metadata so storage remains the single source of truth.
   homeWorldList.replaceChildren(
@@ -307,37 +367,41 @@ async function renderHomeWorldList() {
   );
 }
 
-async function createWorldFromForm(event) {
+async function createWorldFromForm(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   if (worldTransitioning) return;
 
-  const worlds = await worldRegistry.listWorlds();
+  const registry = requireWorldRegistry();
+  const worlds = await registry.listWorlds();
   const name = worldNameInput.value.trim() || `World ${worlds.length + 1}`;
   const seed = worldSeedInput.value.trim() || createReadableSeed();
-  const savedWorld = await worldRegistry.createWorld(name, seed);
+  const savedWorld = await registry.createWorld(name, seed);
   worldNameInput.value = "";
   worldSeedInput.value = "";
   await loadWorld(savedWorld.id);
 }
 
-async function loadWorld(worldId) {
+async function loadWorld(worldId: string): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
 
   try {
-    const activeWorldId = await worldRegistry.setActiveWorld(worldId);
-    const savedWorld = await worldRegistry.getActiveWorld();
+    const registry = requireWorldRegistry();
+    const activeWorld = requireWorld();
+    const activePlayer = requirePlayer();
+    const activeWorldId = await registry.setActiveWorld(worldId);
+    const savedWorld = await registry.getActiveWorld();
     const chunkStorage = await createChunkStorage(activeWorldId);
 
     // Loading from the home screen is the only place world slots swap into the active engine.
-    await world.switchStorage(chunkStorage, scene, savedWorld.seed);
+    await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed);
     // Keep first load bounded; larger quality presets stream their extra distance after spawn.
     const spawnLoadRadius = getInitialLoadRadius();
     // For now every world starts near the origin; player-position saves can layer on later.
-    await world.preloadSavedChunksAround(0, 0, spawnLoadRadius);
-    world.ensureChunksAround(0, 0, spawnLoadRadius);
-    world.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
-    camera.position.set(2, world.highestSolidY(2, 2) + 5, 2);
+    await activeWorld.preloadSavedChunksAround(0, 0, spawnLoadRadius);
+    activeWorld.ensureChunksAround(0, 0, spawnLoadRadius);
+    activeWorld.rebuildDirty(scene, worldMaterial, getChunkRebuildBudget());
+    camera.position.set(2, activeWorld.highestSolidY(2, 2) + 5, 2);
     updateSunShadowAnchor();
     homeScreen.classList.add("is-hidden");
     pauseMenu.classList.add("is-hidden");
@@ -347,22 +411,23 @@ async function loadWorld(worldId) {
     minimapAccumulator = Infinity;
     minimapHasTerrain = false;
     minimapRefreshRow = MINIMAP_TEXTURE_SIZE;
-    player.resume();
+    activePlayer.resume();
   } finally {
     worldTransitioning = false;
   }
 }
 
-async function exitToHome() {
+async function exitToHome(): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
 
   try {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
-    player.pause(true);
+    const activeWorld = requireWorld();
+    requirePlayer().pause(true);
     clearToys();
-    await world.flushStorageWrites();
-    world.disposeLoadedChunks(scene);
+    await activeWorld.flushStorageWrites();
+    activeWorld.disposeLoadedChunks(scene);
     inWorld = false;
     document.body.classList.remove("in-world", "playing");
     pauseMenu.classList.add("is-hidden");
@@ -373,7 +438,7 @@ async function exitToHome() {
   }
 }
 
-function clearToys() {
+function clearToys(): void {
   for (const toy of toys) {
     scene.remove(toy.mesh);
     toy.mesh.geometry.dispose();
@@ -382,14 +447,14 @@ function clearToys() {
   toys.length = 0;
 }
 
-function createWorldSlotLine(className, text) {
+function createWorldSlotLine(className: string, text: string): HTMLSpanElement {
   const line = document.createElement("span");
   line.className = className;
   line.textContent = text;
   return line;
 }
 
-function formatWorldMeta(savedWorld, isActive) {
+function formatWorldMeta(savedWorld: SavedWorld, isActive: boolean): string {
   // The date is intentionally compact so long world names still fit in the pause menu.
   const date = savedWorld.updatedAt
     ? new Date(savedWorld.updatedAt).toLocaleDateString()
@@ -397,11 +462,11 @@ function formatWorldMeta(savedWorld, isActive) {
   return `${isActive ? "Current" : "Saved"} - ${date}`;
 }
 
-function createReadableSeed() {
+function createReadableSeed(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function updateDebug(delta, playerChunk) {
+function updateDebug(delta: number, playerChunk: ChunkCoords, activeWorld: VoxelWorld): void {
   if (!debugVisible) return;
 
   const currentFps = Math.min(240, 1 / Math.max(delta, 1 / 240));
@@ -411,7 +476,7 @@ function updateDebug(delta, playerChunk) {
   if (debugAccumulator < 0.1) return;
   debugAccumulator = 0;
 
-  const stats: WorldStats = world.getStats();
+  const stats: WorldStats = activeWorld.getStats();
   const render = renderer.info.render;
   const memory = renderer.info.memory;
   debugPanel.textContent = [
@@ -431,7 +496,7 @@ function updateDebug(delta, playerChunk) {
   ].join("\n");
 }
 
-function updateMinimap(delta) {
+function updateMinimap(delta: number): void {
   minimapAccumulator += delta;
   if (
     minimapRefreshRow >= MINIMAP_TEXTURE_SIZE &&
@@ -447,7 +512,7 @@ function updateMinimap(delta) {
   renderMinimap();
 }
 
-function startMinimapRefresh() {
+function startMinimapRefresh(): void {
   minimapAccumulator = 0;
   minimapRefreshRow = 0;
   minimapRefreshOriginX = camera.position.x;
@@ -455,7 +520,8 @@ function startMinimapRefresh() {
   minimapSliceMaxMs = 0;
 }
 
-function updateMinimapTerrainSlice() {
+function updateMinimapTerrainSlice(): void {
+  const activeWorld = requireWorld();
   const startedAt = performance.now();
   const data = minimapImage.data;
   const half = MINIMAP_TEXTURE_SIZE / 2;
@@ -472,7 +538,7 @@ function updateMinimapTerrainSlice() {
       const wz = Math.floor(
         minimapRefreshOriginZ + (py - half) * MINIMAP_WORLD_PER_TEXEL
       );
-      const { block, y } = world.getTopBlock(wx, wz);
+      const { block, y } = activeWorld.getTopBlock(wx, wz);
       const offset = (px + py * MINIMAP_TEXTURE_SIZE) * 4;
 
       if (!BLOCKS[block].solid) {
@@ -505,7 +571,7 @@ function updateMinimapTerrainSlice() {
   }
 }
 
-function renderMinimap() {
+function renderMinimap(): void {
   minimapContext.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
   minimapContext.imageSmoothingEnabled = false;
 
@@ -520,7 +586,7 @@ function renderMinimap() {
   drawMinimapPlayer(minimapDisplayOriginX, minimapDisplayOriginZ);
 }
 
-function drawMinimapGrid(originX, originZ) {
+function drawMinimapGrid(originX: number, originZ: number): void {
   minimapContext.save();
   minimapContext.strokeStyle = "rgba(255, 255, 255, 0.2)";
   minimapContext.lineWidth = 1;
@@ -551,7 +617,7 @@ function drawMinimapGrid(originX, originZ) {
   minimapContext.restore();
 }
 
-function drawMinimapPlayer(originX, originZ) {
+function drawMinimapPlayer(originX: number, originZ: number): void {
   const center = MINIMAP_SIZE / 2;
   const playerX = center + (camera.position.x - originX) / MINIMAP_WORLD_PER_PIXEL;
   const playerY = center + (camera.position.z - originZ) / MINIMAP_WORLD_PER_PIXEL;
@@ -575,7 +641,7 @@ function drawMinimapPlayer(originX, originZ) {
   minimapContext.restore();
 }
 
-function setQualityPreset(presetId, persist = true) {
+function setQualityPreset(presetId: unknown, persist = true): void {
   qualityPresetId = normalizeQualityPresetId(presetId);
   const preset = getQualityPreset();
 
@@ -586,8 +652,8 @@ function setQualityPreset(presetId, persist = true) {
   sun.intensity = preset.sunIntensity;
   configureSunShadow(preset, true);
   skyLight.intensity = preset.skyIntensity;
-  scene.fog.near = preset.fogNear;
-  scene.fog.far = preset.fogFar;
+  sceneFog.near = preset.fogNear;
+  sceneFog.far = preset.fogFar;
   camera.far = preset.cameraFar;
   camera.updateProjectionMatrix();
   updateSunShadowAnchor();
@@ -602,7 +668,7 @@ function setQualityPreset(presetId, persist = true) {
   if (persist) writeQualityPreference(qualityPresetId);
 }
 
-function setSuperUltraEnabled(enabled, persist = true) {
+function setSuperUltraEnabled(enabled: boolean, persist = true): void {
   superUltraEnabled = enabled;
   syncSuperUltraToggle();
 
@@ -617,13 +683,13 @@ function setSuperUltraEnabled(enabled, persist = true) {
   }
 }
 
-function syncSuperUltraToggle() {
+function syncSuperUltraToggle(): void {
   superUltraToggle.checked = superUltraEnabled;
   superUltraToggle.setAttribute("aria-checked", String(superUltraEnabled));
   document.body.classList.toggle("super-ultra-enabled", superUltraEnabled);
 }
 
-function configureSunShadow(preset, resetShadowMap) {
+function configureSunShadow(preset: QualityPreset, resetShadowMap: boolean): void {
   sun.castShadow = preset.shadows;
   sun.shadow.mapSize.set(preset.shadowMapSize, preset.shadowMapSize);
   sun.shadow.camera.left = -preset.shadowCameraSize;
@@ -639,7 +705,7 @@ function configureSunShadow(preset, resetShadowMap) {
   if (resetShadowMap) resetSunShadowMap();
 }
 
-function resetSunShadowMap() {
+function resetSunShadowMap(): void {
   // Three.js allocates shadow render targets lazily; quality changes need a clean target.
   if (sun.shadow.map) {
     sun.shadow.map.dispose();
@@ -651,92 +717,106 @@ function resetSunShadowMap() {
   }
 }
 
-function updateSunShadowAnchor() {
+function updateSunShadowAnchor(): void {
   // Keep the directional light stable over the player's local chunk window.
   sunTarget.position.set(camera.position.x, 0, camera.position.z);
   sun.position.copy(sunTarget.position).add(SUN_OFFSET);
   sunTarget.updateMatrixWorld();
 }
 
-function cycleQualityPreset() {
+function cycleQualityPreset(): void {
   const selectablePresets = getSelectableQualityPresets();
   const currentIndex = selectablePresets.indexOf(qualityPresetId);
   const nextIndex = (currentIndex + 1) % selectablePresets.length;
-  setQualityPreset(selectablePresets[nextIndex]);
+  setQualityPreset(selectablePresets[nextIndex] ?? DEFAULT_QUALITY_PRESET);
 }
 
-function getSelectableQualityPresets() {
+function getSelectableQualityPresets(): QualityPresetId[] {
   return superUltraEnabled
     ? [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID]
-    : QUALITY_PRESET_ORDER;
+    : [...QUALITY_PRESET_ORDER];
 }
 
-function getRenderPixelRatio() {
+function getRenderPixelRatio(): number {
   return Math.min(window.devicePixelRatio, getQualityPreset().pixelRatioLimit);
 }
 
-function getLoadRadius() {
+function getLoadRadius(): number {
   return getQualityPreset().loadRadius;
 }
 
-function getInitialLoadRadius() {
+function getInitialLoadRadius(): number {
   // High and ultra should not freeze world entry by synchronously building every distant chunk.
   return Math.min(getLoadRadius(), QUALITY_PRESETS.low.loadRadius);
 }
 
-function getUnloadRadius() {
+function getUnloadRadius(): number {
   return getQualityPreset().unloadRadius;
 }
 
-function getChunkLoadBudget() {
+function getChunkLoadBudget(): number {
   return getQualityPreset().chunkLoads;
 }
 
-function getChunkRebuildBudget() {
+function getChunkRebuildBudget(): number {
   return getQualityPreset().chunkRebuilds;
 }
 
-function getMinimapInterval() {
+function getMinimapInterval(): number {
   return getQualityPreset().minimapInterval;
 }
 
-function getMinimapRowsPerFrame() {
+function getMinimapRowsPerFrame(): number {
   return getQualityPreset().minimapRowsPerFrame;
 }
 
-function readGpuInfo(activeRenderer) {
+function readGpuInfo(activeRenderer: THREE.WebGLRenderer): GpuInfo {
   const gl = activeRenderer.getContext();
   const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
   return {
     vendor: debugInfo
-      ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
-      : gl.getParameter(gl.VENDOR),
+      ? readGlString(gl, debugInfo.UNMASKED_VENDOR_WEBGL)
+      : readGlString(gl, gl.VENDOR),
     renderer: debugInfo
-      ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
-      : gl.getParameter(gl.RENDERER)
+      ? readGlString(gl, debugInfo.UNMASKED_RENDERER_WEBGL)
+      : readGlString(gl, gl.RENDERER)
   };
 }
 
-function compactText(value, maxLength) {
+function readGlString(
+  gl: WebGLRenderingContext | WebGL2RenderingContext,
+  parameter: number
+): string {
+  return String(gl.getParameter(parameter) ?? "unknown");
+}
+
+function compactText(value: unknown, maxLength: number): string {
   const text = String(value || "unknown");
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 3)}...`;
 }
 
-function getQualityPreset() {
-  return QUALITY_PRESETS[qualityPresetId] ?? QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
+function getQualityPreset(): QualityPreset {
+  return QUALITY_PRESETS[qualityPresetId];
 }
 
-function normalizeQualityPresetId(presetId) {
-  if (!QUALITY_PRESETS[presetId]) return DEFAULT_QUALITY_PRESET;
+function normalizeQualityPresetId(presetId: unknown): QualityPresetId {
+  if (!isQualityPresetId(presetId)) return DEFAULT_QUALITY_PRESET;
   if (presetId === SUPER_ULTRA_PRESET_ID && !superUltraEnabled) return "ultra";
   return presetId;
 }
 
-function readQualityPreference() {
+function isQualityPresetId(presetId: unknown): presetId is QualityPresetId {
+  return (
+    typeof presetId === "string" &&
+    Object.prototype.hasOwnProperty.call(QUALITY_PRESETS, presetId)
+  );
+}
+
+function readQualityPreference(): QualityPresetId {
   try {
     const storedPreset = localStorage.getItem(QUALITY_STORAGE_KEY);
-    if (QUALITY_PRESETS[storedPreset]) return normalizeQualityPresetId(storedPreset);
+    if (isQualityPresetId(storedPreset)) return normalizeQualityPresetId(storedPreset);
 
     // Keep old sessions intuitive: the previous "potato on" setting is now "low".
     if (localStorage.getItem(LEGACY_POTATO_STORAGE_KEY) === "true") return "low";
@@ -746,7 +826,7 @@ function readQualityPreference() {
   }
 }
 
-function readSuperUltraPreference() {
+function readSuperUltraPreference(): boolean {
   try {
     return localStorage.getItem(SUPER_ULTRA_STORAGE_KEY) === "true";
   } catch {
@@ -754,7 +834,7 @@ function readSuperUltraPreference() {
   }
 }
 
-function writeSuperUltraPreference(enabled) {
+function writeSuperUltraPreference(enabled: boolean): void {
   try {
     localStorage.setItem(SUPER_ULTRA_STORAGE_KEY, String(enabled));
   } catch {
@@ -762,7 +842,7 @@ function writeSuperUltraPreference(enabled) {
   }
 }
 
-function writeQualityPreference(presetId) {
+function writeQualityPreference(presetId: QualityPresetId): void {
   try {
     localStorage.setItem(QUALITY_STORAGE_KEY, presetId);
     localStorage.removeItem(LEGACY_POTATO_STORAGE_KEY);
