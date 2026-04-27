@@ -6,7 +6,7 @@ import {
   AIR_DRAG,
   AIR_SPEED_LIMIT,
   CROUCH_OR_DESCEND_KEY,
-  FLIGHT_ACCELERATION,
+  CROUCH_VIEW_DROP,
   FLIGHT_DRAG,
   FLIGHT_TOGGLE_KEY,
   GROUND_ACCELERATION,
@@ -19,11 +19,11 @@ import {
   PLAYER_RADIUS,
   SLIDE_FRICTION,
   SLIDE_PRIME_SPEED,
-  SPRINT_SPEED,
-  WALK_SPEED,
+  getCrouchViewTargetOffset,
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  smoothCrouchViewOffset,
   shouldContinueSlide,
   shouldPrimeSlide
 } from "./playerMovement";
@@ -62,6 +62,7 @@ export class PlayerController {
   lockTimeout: number | null;
   onPauseChange: (paused: boolean) => void;
   private slidePrimed = false;
+  private crouchViewOffset = 0;
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: CollisionWorld) {
     this.camera = camera;
@@ -230,6 +231,7 @@ export class PlayerController {
 
     if (this.flying) {
       this.updateFlight(delta, forward, right);
+      this.updateCrouchViewOffset(delta);
       this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
       return;
     }
@@ -281,6 +283,7 @@ export class PlayerController {
     this.moveAxis("z", this.velocity.z * delta);
     this.moveAxis("y", this.velocity.y * delta);
 
+    this.updateCrouchViewOffset(delta);
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
   }
 
@@ -406,18 +409,31 @@ export class PlayerController {
 
     if (wantsCrouch) {
       this.crouching = true;
-      this.camera.position.y -= PLAYER_HEIGHT - PLAYER_CROUCH_HEIGHT;
       return;
     }
 
-    this.camera.position.y += PLAYER_HEIGHT - PLAYER_CROUCH_HEIGHT;
     this.crouching = false;
     if (!this.collides()) return;
 
     // If there is a ceiling overhead, stay crouched and keep retrying on later
     // frames after the player moves clear of it. No skull-clipping allowed.
-    this.camera.position.y -= PLAYER_HEIGHT - PLAYER_CROUCH_HEIGHT;
     this.crouching = true;
+  }
+
+  updateCrouchViewOffset(delta: number): void {
+    const targetOffset = getCrouchViewTargetOffset(this.crouching);
+    this.setCrouchViewOffset(smoothCrouchViewOffset(this.crouchViewOffset, targetOffset, delta));
+  }
+
+  setCrouchViewOffset(nextOffset: number): void {
+    const clampedOffset = clamp(nextOffset, 0, CROUCH_VIEW_DROP);
+    const offsetDelta = clampedOffset - this.crouchViewOffset;
+    if (Math.abs(offsetDelta) <= 0.000001) return;
+
+    // The camera is the rendered eye point, so changing the visual crouch offset
+    // moves only the view. Feet/collision stay anchored through getFeetY().
+    this.camera.position.y -= offsetDelta;
+    this.crouchViewOffset = clampedOffset;
   }
 
   updateSlideState(wasGrounded: boolean, hasWish: boolean): void {
@@ -475,15 +491,29 @@ export class PlayerController {
   }
 
   getBounds(): PlayerBounds {
-    const height = this.crouching ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
+    const feetY = this.getFeetY();
+    const height = this.getCollisionHeight();
+
     return {
       minX: this.camera.position.x - PLAYER_RADIUS,
       maxX: this.camera.position.x + PLAYER_RADIUS,
-      minY: this.camera.position.y - height,
-      maxY: this.camera.position.y - 0.05,
+      minY: feetY,
+      maxY: feetY + height - 0.05,
       minZ: this.camera.position.z - PLAYER_RADIUS,
       maxZ: this.camera.position.z + PLAYER_RADIUS
     };
+  }
+
+  getFeetY(): number {
+    return this.camera.position.y - this.getVisualEyeHeight();
+  }
+
+  getVisualEyeHeight(): number {
+    return PLAYER_HEIGHT - this.crouchViewOffset;
+  }
+
+  getCollisionHeight(): number {
+    return this.crouching ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
   }
 
   collides(): boolean {

@@ -4,6 +4,8 @@ export const PLAYER_HEIGHT = 1.8 * METERS_PER_BLOCK;
 export const PLAYER_CROUCH_HEIGHT = 1.15 * METERS_PER_BLOCK;
 export const PLAYER_RADIUS = 0.32 * METERS_PER_BLOCK;
 export const LOOK_SENSITIVITY = 0.0022;
+export const CROUCH_VIEW_DROP = PLAYER_HEIGHT - PLAYER_CROUCH_HEIGHT;
+export const CROUCH_VIEW_RESPONSE = 18;
 
 export const WALK_SPEED = 5.4 * METERS_PER_BLOCK;
 export const PREVIOUS_SPRINT_SPEED = 8.5 * METERS_PER_BLOCK;
@@ -53,6 +55,18 @@ export function getFlightMovementSpeed(sprinting: boolean): number {
 
 export function getFlightMovementAcceleration(sprinting: boolean): number {
   return sprinting ? FLIGHT_BOOST_ACCELERATION : FLIGHT_ACCELERATION;
+}
+
+export function getCrouchViewTargetOffset(crouching: boolean): number {
+  return crouching ? CROUCH_VIEW_DROP : 0;
+}
+
+export function smoothCrouchViewOffset(currentOffset: number, targetOffset: number, delta: number): number {
+  if (delta <= 0 || currentOffset === targetOffset) return currentOffset;
+
+  const blend = 1 - Math.exp(-CROUCH_VIEW_RESPONSE * delta);
+  const nextOffset = currentOffset + (targetOffset - currentOffset) * blend;
+  return Math.abs(targetOffset - nextOffset) < 0.0005 ? targetOffset : nextOffset;
 }
 
 export function shouldPrimeSlide(

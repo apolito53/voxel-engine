@@ -34,7 +34,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
 - `Space` jump, or fly upward while flight mode is active
-- `C` crouch on foot, or fly downward while flight mode is active
+- `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting, then release movement, to slide
 - `Shift` sprint or use the stronger flight speed boost
 - `Left click` break block

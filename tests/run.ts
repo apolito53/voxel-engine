@@ -14,6 +14,8 @@ import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
+  CROUCH_VIEW_DROP,
+  CROUCH_VIEW_RESPONSE,
   FLIGHT_ACCELERATION,
   FLIGHT_BOOST_ACCELERATION,
   FLIGHT_BOOST_SPEED,
@@ -24,9 +26,11 @@ import {
   SLIDE_STOP_SPEED,
   SPRINT_SPEED,
   WALK_SPEED,
+  getCrouchViewTargetOffset,
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  smoothCrouchViewOffset,
   shouldContinueSlide,
   shouldPrimeSlide
 } from "../src/playerMovement";
@@ -212,6 +216,24 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   assertEqual(CROUCH_OR_DESCEND_KEY, "KeyC", "crouch and flight descent should use the C key");
   assertEqual(SPRINT_SPEED, PREVIOUS_SPRINT_SPEED * 1.5, "sprint speed should be 50 percent faster than before");
   assertEqual(FLIGHT_BOOST_SPEED, SPRINT_SPEED * 2, "flight boost should be twice the ground sprint speed");
+  assert(CROUCH_VIEW_RESPONSE > 0, "crouch view smoothing should move toward its target");
+  assertEqual(getCrouchViewTargetOffset(false), 0, "standing view should have no crouch offset");
+  assertEqual(getCrouchViewTargetOffset(true), CROUCH_VIEW_DROP, "crouched view should target the full crouch drop");
+  const firstCrouchStep = smoothCrouchViewOffset(0, CROUCH_VIEW_DROP, 1 / 60);
+  assert(
+    firstCrouchStep > 0 && firstCrouchStep < CROUCH_VIEW_DROP,
+    "crouch view should ease down instead of snapping to the target"
+  );
+  const firstStandStep = smoothCrouchViewOffset(CROUCH_VIEW_DROP, 0, 1 / 60);
+  assert(
+    firstStandStep > 0 && firstStandStep < CROUCH_VIEW_DROP,
+    "crouch view should ease back up instead of snapping to standing"
+  );
+  assertEqual(
+    smoothCrouchViewOffset(CROUCH_VIEW_DROP - 0.0001, CROUCH_VIEW_DROP, 1 / 60),
+    CROUCH_VIEW_DROP,
+    "tiny crouch-view gaps should settle exactly on the target"
+  );
   assertEqual(
     getGroundMovementSpeed({ sprinting: false, crouching: false, sliding: false }),
     WALK_SPEED,
