@@ -25,9 +25,14 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 ## Fast Lookup
 
-- App bootstrap, splash/home menu, render loop, HUD, minimap, input glue: `src/main.ts`
+- App bootstrap, render loop, input glue, world lifecycle orchestration: `src/main.ts`
 - HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
+- Required DOM/canvas lookup helpers: `src/dom.ts`
+- WebGL GPU text helpers: `src/gpu.ts`
+- Saved-world list rendering and seed generation: `src/worldMenu.ts`
+- Debug HUD throttling and renderer stats text: `src/debugHud.ts`
+- Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, placeable palette: `src/blocks.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
 - IndexedDB storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.ts`
@@ -40,6 +45,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - First-person movement, pointer lock, voxel collision: `src/player.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Throwable bouncing physics core: `src/physics.ts`
+- Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
@@ -49,8 +55,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 ## Runtime Flow
 
 1. `index.html` loads `src/main.ts`.
-2. `main.ts` creates the Three.js renderer, scene, lights, camera, `VoxelWorld`, and `PlayerController`.
-3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; loading or creating a world activates a saved-world slot and seed.
+2. `main.ts` creates the Three.js renderer, scene, lights, camera, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
+3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading or creating a world activates a saved-world slot and seed.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded slice that keeps nearby chunks first, then prioritizes chunks inside the camera view.
@@ -68,10 +74,10 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune saved worlds or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.ts`.
-- Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and `setQualityPreset` helpers in `src/main.ts`.
+- Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Change break/place reach or hit behavior: `src/raycast.ts` and pointer handlers in `src/main.ts`.
 - Change thrown object behavior: `src/physics.ts` plus `KeyF` handling in `src/main.ts`.
-- Change HUD/minimap/debug UI: `index.html`, `src/style.css`, and `src/main.ts`.
+- Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
 

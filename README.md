@@ -55,6 +55,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Engine Pieces
 
+- `src/main.ts`: app bootstrap, render loop, input glue, and world lifecycle orchestration
 - `src/world.ts`: chunk ownership, worker scheduling, streaming, block reads/writes
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
@@ -63,6 +64,10 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/player.ts`: first-person controller and voxel collision
 - `src/raycast.ts`: grid DDA block picking
 - `src/physics.ts`: simple sphere-vs-voxel rigid toy
+- `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
+- `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
+- `src/debugHud.ts`: debug overlay stats formatting and update throttling
+- `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 
 ## Development Checks
 
