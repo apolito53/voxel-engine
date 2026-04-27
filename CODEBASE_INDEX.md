@@ -44,7 +44,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
 - Chunk ownership, worker scheduling, streaming, reads/writes, sparse block damage, coalesced chunk-save writes: `src/world.ts`
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
-- First-person movement, pointer lock, voxel collision: `src/player.ts`
+- First-person walking, flight, crouch, slide, pointer lock, voxel collision: `src/player.ts`
+- Player movement constants and slide/flight tuning helpers: `src/playerMovement.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
@@ -82,11 +83,11 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
 - Tune saved worlds or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
-- Tune movement feel: metric-scaled constants and collision resolution in `src/player.ts`.
+- Tune movement feel: metric-scaled constants and slide/flight helpers in `src/playerMovement.ts`, plus collision resolution in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior, debris lifetime, debris grid size, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
+- Change thrown object behavior, debris lifetime, debris grid size, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT` and `handlePhysicsImpact` in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges

@@ -252,7 +252,8 @@ document.addEventListener("keydown", (event) => {
   }
 
   const activePlayer = requirePlayer();
-  if (event.code === "KeyF" && activePlayer.isLooking()) {
+  if (event.code === "KeyT" && activePlayer.isLooking()) {
+    event.preventDefault();
     camera.getWorldDirection(direction);
     const toy = new PhysicsToy(
       camera.position.clone().addScaledVector(direction, 1.4),
@@ -350,7 +351,9 @@ function updateChunkStreamFrustum(): void {
 }
 
 function updateHud(): void {
-  hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
+  const movementMode = requirePlayer().movementMode;
+  const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
+  hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}${modeSuffix}`;
 }
 
 function getTargetBlockHit(): VoxelRaycastHit | null {

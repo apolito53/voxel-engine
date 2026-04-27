@@ -10,6 +10,19 @@ import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
 import {
+  CROUCH_OR_DESCEND_KEY,
+  CROUCH_SPEED,
+  FLIGHT_TOGGLE_KEY,
+  PREVIOUS_SPRINT_SPEED,
+  SLIDE_PRIME_SPEED,
+  SLIDE_STOP_SPEED,
+  SPRINT_SPEED,
+  WALK_SPEED,
+  getGroundMovementSpeed,
+  shouldContinueSlide,
+  shouldPrimeSlide
+} from "../src/playerMovement";
+import {
   DEFAULT_PHYSICS_OBJECT_BUDGET,
   MAX_PHYSICS_OBJECT_BUDGET,
   MIN_PHYSICS_OBJECT_BUDGET,
@@ -182,6 +195,54 @@ test("raycast handles grid boundaries and exact edge crossings", () => {
     voxelRaycast(diagonalWorld, { x: 0.5, y: 0.5, z: 0.5 }, diagonalDirection, 2),
     { block: { x: 1, y: 0, z: 1 }, normal: { x: -1, y: 0, z: 0 }, distance: Math.SQRT1_2 },
     "edge-crossing rays should advance into the diagonal voxel"
+  );
+});
+
+test("player movement tuning supports sprint, flight, crouch, and slide states", () => {
+  assertEqual(FLIGHT_TOGGLE_KEY, "KeyF", "flight should toggle with the F key");
+  assertEqual(CROUCH_OR_DESCEND_KEY, "KeyC", "crouch and flight descent should use the C key");
+  assertEqual(SPRINT_SPEED, PREVIOUS_SPRINT_SPEED * 1.5, "sprint speed should be 50 percent faster than before");
+  assertEqual(
+    getGroundMovementSpeed({ sprinting: false, crouching: false, sliding: false }),
+    WALK_SPEED,
+    "plain movement should use walk speed"
+  );
+  assertEqual(
+    getGroundMovementSpeed({ sprinting: true, crouching: false, sliding: false }),
+    SPRINT_SPEED,
+    "sprinting should use boosted sprint speed"
+  );
+  assertEqual(
+    getGroundMovementSpeed({ sprinting: true, crouching: true, sliding: false }),
+    CROUCH_SPEED,
+    "crouch should slow grounded movement even if sprint is held"
+  );
+  assertEqual(
+    getGroundMovementSpeed({ sprinting: false, crouching: true, sliding: true }),
+    SPRINT_SPEED,
+    "active slides should keep the fast horizontal cap while friction bleeds speed"
+  );
+  assertEqual(
+    getGroundMovementSpeed({ sprinting: true, crouching: true, sliding: false, slidePrimed: true }),
+    SPRINT_SPEED,
+    "primed slides should preserve sprint speed until movement input is released"
+  );
+
+  assert(
+    shouldPrimeSlide(true, true, true, true, SLIDE_PRIME_SPEED),
+    "grounded sprint-crouch movement should prime a slide once speed is high enough"
+  );
+  assert(
+    !shouldPrimeSlide(true, true, true, true, SLIDE_PRIME_SPEED - 0.01),
+    "slow movement should not prime a slide"
+  );
+  assert(
+    shouldContinueSlide(true, true, false, SLIDE_STOP_SPEED + 0.01),
+    "releasing movement while crouched should continue a fast slide"
+  );
+  assert(
+    !shouldContinueSlide(true, true, true, SLIDE_STOP_SPEED + 0.01),
+    "adding movement input should end the hands-off slide state"
   );
 });
 
