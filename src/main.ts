@@ -11,7 +11,7 @@ import { requireElement } from "./dom";
 import { readGpuInfo } from "./gpu";
 import { MinimapRenderer } from "./minimap";
 import { PlayerController } from "./player";
-import { PhysicsToy } from "./physics";
+import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy, type PhysicsImpact } from "./physics";
 import { QualityController } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
@@ -26,6 +26,9 @@ import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 const BLOCK_INTERACTION_REACH = 8;
+const MAX_PHYSICS_TOYS = 96;
+const BLOCK_FRAGMENT_GRID_SIZE = 2;
+const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 
 const app = requireElement<HTMLElement>("#app");
@@ -238,8 +241,7 @@ document.addEventListener("keydown", (event) => {
       camera.position.clone().addScaledVector(direction, 1.4),
       direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0))
     );
-    toys.push(toy);
-    scene.add(toy.mesh);
+    addPhysicsToy(toy);
   }
 });
 
@@ -288,8 +290,13 @@ function animate(): void {
       chunkStreamFrustum
     );
 
-    for (const toy of toys) {
-      toy.update(delta, activeWorld);
+    const physicsStepToys = [...toys];
+    const damagedBlocksThisFrame = new Set<string>();
+    for (const toy of physicsStepToys) {
+      const impacts = toy.update(delta, activeWorld);
+      for (const impact of impacts) {
+        handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame);
+      }
     }
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
@@ -339,6 +346,65 @@ function updateTargetBlockHighlighter(): void {
   }
 
   targetBlockHighlighter.showBlock(hit.block);
+}
+
+function handlePhysicsImpact(
+  activeWorld: VoxelWorld,
+  impact: PhysicsImpact,
+  damagedBlocksThisFrame: Set<string>
+): void {
+  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return;
+
+  const damageKey = activeWorld.damageKey(impact.block.x, impact.block.y, impact.block.z);
+  if (damagedBlocksThisFrame.has(damageKey)) return;
+  damagedBlocksThisFrame.add(damageKey);
+
+  const result = activeWorld.damageBlock(impact.block.x, impact.block.y, impact.block.z, 1);
+  if (!result?.destroyed) return;
+
+  spawnBlockFragments(result.block, result.position, impact);
+}
+
+function spawnBlockFragments(
+  block: number,
+  position: { readonly x: number; readonly y: number; readonly z: number },
+  impact: PhysicsImpact
+): void {
+  const fragmentBaseSpeed = Math.min(9, impact.speed * 0.72);
+  const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
+
+  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
+    const xBit = index & 1;
+    const yBit = (index >> 1) & 1;
+    const zBit = (index >> 2) & 1;
+    const offset = new THREE.Vector3(
+      xBit ? 0.19 : -0.19,
+      yBit ? 0.19 : -0.19,
+      zBit ? 0.19 : -0.19
+    );
+    const scatter = offset.clone().normalize().multiplyScalar(1.7 + Math.random() * 1.4);
+    const velocity = impact.normal.clone()
+      .multiplyScalar(fragmentBaseSpeed)
+      .add(scatter)
+      .add(new THREE.Vector3(0, 2.4 + Math.random() * 1.8, 0));
+
+    addPhysicsToy(PhysicsToy.createBlockFragment(block, blockCenter.clone().add(offset), velocity));
+  }
+}
+
+function addPhysicsToy(toy: PhysicsToy): void {
+  toys.push(toy);
+  scene.add(toy.mesh);
+  enforcePhysicsToyBudget();
+}
+
+function enforcePhysicsToyBudget(): void {
+  while (toys.length > MAX_PHYSICS_TOYS) {
+    const removedToy = toys.shift();
+    if (!removedToy) return;
+    scene.remove(removedToy.mesh);
+    removedToy.dispose();
+  }
 }
 
 async function refreshHomeWorldList(): Promise<void> {
@@ -415,8 +481,7 @@ async function exitToHome(): Promise<void> {
 function clearToys(): void {
   for (const toy of toys) {
     scene.remove(toy.mesh);
-    toy.mesh.geometry.dispose();
-    toy.mesh.material.dispose();
+    toy.dispose();
   }
   toys.length = 0;
 }

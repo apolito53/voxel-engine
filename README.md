@@ -1,6 +1,6 @@
 # Voxel Sandbox Engine
 
-A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, block edits, and simple physics toys.
+A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, block edits, impact damage, and simple physics toys.
 
 World units are metric: `1 block = 1 meter`.
 
@@ -38,7 +38,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Left click` break block
 - `Right click` place block
 - `1-5` select block
-- `F` throw a physics core
+- `F` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into loose cube fragments
 - `F3` toggle debug overlay
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
@@ -56,7 +56,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, and world lifecycle orchestration
-- `src/world.ts`: chunk ownership, worker scheduling, streaming, block reads/writes
+- `src/world.ts`: chunk ownership, worker scheduling, streaming, block reads/writes, and sparse block damage
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
@@ -64,7 +64,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/player.ts`: first-person controller and voxel collision
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
-- `src/physics.ts`: simple sphere-vs-voxel rigid toy
+- `src/physics.ts`: simple sphere-vs-voxel rigid bodies, impact reporting, and cube fragments
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
@@ -80,4 +80,4 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Sensible Next Steps
 
-- Give physics toys voxel damage so thrown objects can punch little craters.
+- Add material-specific fracture behavior so stone, dirt, sand, grass, and ember fail differently.

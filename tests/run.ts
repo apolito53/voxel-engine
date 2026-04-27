@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
+import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import { QUALITY_PRESET_ORDER, QUALITY_PRESETS, SUPER_ULTRA_PRESET_ID } from "../src/qualityPresets";
 import { voxelRaycast } from "../src/raycast";
@@ -210,6 +211,60 @@ test("world block reads, writes, and solidity follow bounds", async () => {
 
   await world.flushStorageWrites();
   assertEqual(world.getStats().savedChunks, 1, "edited chunk should be tracked as saved");
+});
+
+test("block damage tracks health before removing voxels", () => {
+  const world = new VoxelWorld({ seed: "damage-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const firstHit = world.damageBlock(2, 3, 4, 1);
+  assertDeepEqual(
+    firstHit,
+    { block: BLOCK.stone, position: { x: 2, y: 3, z: 4 }, remainingHealth: 1, destroyed: false },
+    "first meaningful hit should damage but not remove a two-health block"
+  );
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "damaged block should remain in the voxel grid");
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "world should remember sparse block damage");
+  assertEqual(world.getStats().damagedBlocks, 1, "debug stats should count damaged blocks");
+
+  const secondHit = world.damageBlock(2, 3, 4, 1);
+  assertDeepEqual(
+    secondHit,
+    { block: BLOCK.stone, position: { x: 2, y: 3, z: 4 }, remainingHealth: 0, destroyed: true },
+    "second meaningful hit should destroy a two-health block"
+  );
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed block should leave the voxel grid");
+  assertEqual(world.getBlockDamage(2, 3, 4), 0, "destroyed blocks should clear transient damage state");
+});
+
+test("physics impacts report speed so block damage can be thresholded", () => {
+  const collisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return `${x},${y},${z}` === "2,2,2";
+    }
+  };
+  const slowToy = new PhysicsToy(
+    new THREE.Vector3(1.7, 2.5, 2.5),
+    new THREE.Vector3(BLOCK_DAMAGE_IMPACT_SPEED, 0, 0)
+  );
+  const fastToy = new PhysicsToy(
+    new THREE.Vector3(1.7, 2.5, 2.5),
+    new THREE.Vector3(BLOCK_DAMAGE_IMPACT_SPEED + 0.5, 0, 0)
+  );
+
+  const slowImpacts = slowToy.update(0, collisionWorld);
+  const fastImpacts = fastToy.update(0, collisionWorld);
+
+  assertEqual(slowImpacts.length, 1, "slow contact should still report the collision for tuning");
+  assertEqual(fastImpacts.length, 1, "fast contact should report the collision for damage handling");
+  assert(
+    slowImpacts[0].speed <= BLOCK_DAMAGE_IMPACT_SPEED,
+    "exactly-threshold impacts should remain below the current damage gate"
+  );
+  assert(
+    fastImpacts[0].speed > BLOCK_DAMAGE_IMPACT_SPEED,
+    "faster impacts should clear the current block damage gate"
+  );
 });
 
 test("quality presets keep scheduler and render-distance invariants", () => {

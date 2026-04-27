@@ -1,5 +1,5 @@
 import type * as THREE from "three";
-import { BLOCK } from "./blocks";
+import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
   ChunkMeshRequest,
@@ -39,6 +39,7 @@ export type WorldStats = {
   readonly visibleDirtyChunks: number;
   readonly culledDirtyChunks: number;
   readonly modifiedChunks: number;
+  readonly damagedBlocks: number;
 };
 
 export type WorldOptions = {
@@ -51,6 +52,19 @@ export type ChunkCoords = {
   readonly cz: number;
   readonly lx: number;
   readonly lz: number;
+};
+
+export type BlockDamageResult = {
+  readonly block: number;
+  readonly position: VoxelBlockPosition;
+  readonly remainingHealth: number;
+  readonly destroyed: boolean;
+};
+
+export type VoxelBlockPosition = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
 };
 
 type HorizontalViewDirection = Pick<THREE.Vector3, "x" | "z">;
@@ -121,6 +135,7 @@ export class VoxelWorld implements CollisionWorld {
   lastRequestedChunkLoads: number;
   lastMeshedChunks: number;
   lastRequestedMeshes: number;
+  private readonly blockDamage: Map<string, number>;
 
   constructor({ storage = createNullChunkStorage(), seed = "" }: WorldOptions = {}) {
     this.chunks = new Map();
@@ -154,6 +169,7 @@ export class VoxelWorld implements CollisionWorld {
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
     this.lastRequestedMeshes = 0;
+    this.blockDamage = new Map();
   }
 
   async switchStorage(storage: ChunkStorage, scene: THREE.Scene, seed = ""): Promise<void> {
@@ -164,6 +180,7 @@ export class VoxelWorld implements CollisionWorld {
     this.seed = String(seed || "");
     this.terrain = createTerrainContext(this.seed);
     this.savedChunks.clear();
+    this.blockDamage.clear();
     await this.loadSavedChunkIndex();
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
@@ -211,6 +228,7 @@ export class VoxelWorld implements CollisionWorld {
     this.pendingMeshKeys.clear();
     this.workerResults.length = 0;
     this.savedChunkResults.length = 0;
+    this.blockDamage.clear();
   }
 
   key(cx: number, cz: number): string {
@@ -544,6 +562,7 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   generateChunk(chunk: Chunk): void {
+    this.clearDamageForChunk(chunk.cx, chunk.cz);
     chunk.blocks.set(generateChunkBlocks(chunk.cx, chunk.cz, this.terrain));
     chunk.dirty = true;
     chunk.modified = false;
@@ -567,10 +586,17 @@ export class VoxelWorld implements CollisionWorld {
 
   setBlock(x: number, y: number, z: number, block: number): void {
     if (y < 0 || y >= WORLD_HEIGHT) return;
+    const blockX = Math.floor(x);
+    const blockY = Math.floor(y);
+    const blockZ = Math.floor(z);
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     const key = this.key(cx, cz);
     const chunk = this.ensureChunk(cx, cz);
-    if (!chunk.setLocal(lx, Math.floor(y), lz, block)) return;
+    if (!chunk.setLocal(lx, blockY, lz, block)) {
+      if (block === BLOCK.air) this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
+      return;
+    }
+    this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
     chunk.modified = true;
     this.rememberModifiedChunk(key, chunk.blocks);
 
@@ -578,6 +604,52 @@ export class VoxelWorld implements CollisionWorld {
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
     if (lz === 0) this.markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+  }
+
+  damageBlock(x: number, y: number, z: number, amount = 1): BlockDamageResult | null {
+    const position = {
+      x: Math.floor(x),
+      y: Math.floor(y),
+      z: Math.floor(z)
+    };
+    const block = this.getBlock(position.x, position.y, position.z);
+    const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
+    if (!definition.solid || definition.health <= 0) return null;
+
+    const key = this.damageKey(position.x, position.y, position.z);
+    const nextDamage = (this.blockDamage.get(key) ?? 0) + Math.max(0, amount);
+    const remainingHealth = Math.max(0, definition.health - nextDamage);
+
+    if (remainingHealth > 0) {
+      this.blockDamage.set(key, nextDamage);
+      return { block, position, remainingHealth, destroyed: false };
+    }
+
+    this.blockDamage.delete(key);
+    this.setBlock(position.x, position.y, position.z, BLOCK.air);
+    return { block, position, remainingHealth: 0, destroyed: true };
+  }
+
+  getBlockDamage(x: number, y: number, z: number): number {
+    return this.blockDamage.get(this.damageKey(Math.floor(x), Math.floor(y), Math.floor(z))) ?? 0;
+  }
+
+  damageKey(x: number, y: number, z: number): string {
+    return `${x},${y},${z}`;
+  }
+
+  clearDamageForChunk(cx: number, cz: number): void {
+    const minX = cx * CHUNK_SIZE;
+    const maxX = minX + CHUNK_SIZE - 1;
+    const minZ = cz * CHUNK_SIZE;
+    const maxZ = minZ + CHUNK_SIZE - 1;
+
+    for (const key of this.blockDamage.keys()) {
+      const [x, , z] = key.split(",").map(Number);
+      if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
+        this.blockDamage.delete(key);
+      }
+    }
   }
 
   markDirty(cx: number, cz: number): void {
@@ -667,6 +739,7 @@ export class VoxelWorld implements CollisionWorld {
       this.chunks.delete(key);
       this.chunkLoadQueue.delete(key);
       this.pendingMeshKeys.delete(key);
+      this.clearDamageForChunk(chunk.cx, chunk.cz);
       this.markNeighborChunksDirty(chunk.cx, chunk.cz);
     }
   }
@@ -941,7 +1014,8 @@ export class VoxelWorld implements CollisionWorld {
       dirtyChunks,
       visibleDirtyChunks,
       culledDirtyChunks: dirtyChunks - visibleDirtyChunks,
-      modifiedChunks
+      modifiedChunks,
+      damagedBlocks: this.blockDamage.size
     };
   }
 
