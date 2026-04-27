@@ -69,11 +69,13 @@ workerScope.onmessage = (event: MessageEvent<ChunkWorkerRequest>) => {
 
 function getTerrainContext(seed = ""): TerrainContext {
   const key = String(seed || "");
-  if (!terrainContexts.has(key)) {
+  let context = terrainContexts.get(key);
+  if (!context) {
     // Cache by seed so chunk streaming does not rebuild the same terrain offsets every request.
-    terrainContexts.set(key, createTerrainContext(key));
+    context = createTerrainContext(key);
+    terrainContexts.set(key, context);
   }
-  return terrainContexts.get(key);
+  return context;
 }
 
 function readNeighbors(neighbors: ChunkNeighborBuffers): ChunkNeighborBlocks {
