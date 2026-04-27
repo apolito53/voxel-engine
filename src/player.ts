@@ -17,6 +17,7 @@ import {
   PLAYER_CROUCH_HEIGHT,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
+  getAirMovementSpeed,
   getCrouchViewTargetOffset,
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
@@ -262,11 +263,12 @@ export class PlayerController {
     this.updateSlideState(delta, wasGrounded, justStartedCrouching, holdingForward);
     this.syncCrouchState(wantsCrouch || this.sliding);
 
-    const speed = getGroundMovementSpeed({
-      sprinting: this.isGroundSprintActive(),
+    const groundSpeed = getGroundMovementSpeed({
+      sprinting: this.isGroundSprintActive(wasGrounded),
       crouching: this.crouching,
       sliding: this.sliding
     });
+    const movementSpeed = wasGrounded ? groundSpeed : getAirMovementSpeed();
 
     if (wasGrounded) {
       this.applyHorizontalFriction(this.sliding ? getSlideFriction(holdingForward) : GROUND_FRICTION, delta);
@@ -277,13 +279,13 @@ export class PlayerController {
     if (hasWish && !this.sliding && !this.slideMomentumAirborne) {
       this.applyHorizontalAcceleration(
         wish,
-        speed,
+        movementSpeed,
         wasGrounded ? GROUND_ACCELERATION : AIR_ACCELERATION,
         delta
       );
     }
 
-    const groundSpeedLimit = this.sliding ? Math.max(speed, this.slideSpeedLimit) : speed;
+    const groundSpeedLimit = this.sliding ? Math.max(groundSpeed, this.slideSpeedLimit) : groundSpeed;
     const horizontalSpeedLimit = this.slideMomentumAirborne
       ? Math.max(AIR_SPEED_LIMIT, Math.hypot(this.velocity.x, this.velocity.z))
       : AIR_SPEED_LIMIT;
@@ -520,8 +522,8 @@ export class PlayerController {
     return this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
   }
 
-  isGroundSprintActive(): boolean {
-    return this.isSprintHeld() && !this.crouching && !this.sliding;
+  isGroundSprintActive(grounded: boolean): boolean {
+    return grounded && this.isSprintHeld() && !this.crouching && !this.sliding;
   }
 
   isCrouchOrDescendHeld(): boolean {

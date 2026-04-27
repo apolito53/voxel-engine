@@ -29,6 +29,7 @@ import {
   SLIDE_RELEASE_FRICTION,
   SPRINT_SPEED,
   WALK_SPEED,
+  getAirMovementSpeed,
   getCrouchViewTargetOffset,
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
@@ -261,6 +262,11 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     getGroundMovementSpeed({ sprinting: false, crouching: true, sliding: true }),
     SPRINT_SPEED,
     "active slides should keep the fast horizontal cap while friction bleeds speed"
+  );
+  assertEqual(
+    getAirMovementSpeed(),
+    WALK_SPEED,
+    "ordinary airborne control should ignore sprint boost; only flight mode uses boosted Shift movement"
   );
   assertEqual(getFlightMovementSpeed(false), WALK_SPEED, "plain flight should use walk speed");
   assertEqual(getFlightMovementSpeed(true), FLIGHT_BOOST_SPEED, "boosted flight should use the larger flight cap");

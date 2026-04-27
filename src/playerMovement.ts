@@ -50,6 +50,13 @@ export function getGroundMovementSpeed(options: GroundMovementSpeedOptions): num
   return options.sprinting ? SPRINT_SPEED : WALK_SPEED;
 }
 
+export function getAirMovementSpeed(): number {
+  // Ordinary jumps get gentle air control, not the flight boost path. Sprint
+  // momentum can still carry through the jump via AIR_SPEED_LIMIT, but holding
+  // Shift mid-air should not keep accelerating the player like flight mode.
+  return WALK_SPEED;
+}
+
 export function getFlightMovementSpeed(sprinting: boolean): number {
   return sprinting ? FLIGHT_BOOST_SPEED : WALK_SPEED;
 }
