@@ -65,7 +65,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded slice that keeps nearby chunks first, then prioritizes chunks inside the camera view.
-7. Completed worker/storage chunk results are also applied in bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or meshes in one frame.
+7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
 10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active.

@@ -335,14 +335,15 @@ export class VoxelWorld implements CollisionWorld {
     viewDirection: HorizontalViewDirection | null = null,
     viewFrustum: THREE.Frustum | null = null
   ): ChunkCoords {
-    this.lastLoadedChunks = 0;
-    // Worker/storage callbacks can complete in bursts. Apply completed work with
-    // the same budget discipline as new requests so fresh high-distance worlds do
-    // not hitch while the main thread uploads a pile of chunks at once.
-    this.processSavedChunkResults(maxLoads);
-    this.processGeneratedChunkResults(maxLoads);
     const center = this.toChunkCoords(x, z);
     this.setPriority(center.cx, center.cz, viewDirection, viewFrustum);
+    this.lastLoadedChunks = 0;
+    // Worker/storage callbacks can complete in bursts. Apply completed work with
+    // the same budget discipline as new requests, but choose the chunks most
+    // relevant to the current camera first. FIFO result draining was smooth, but
+    // it let invisible chunks steal the frame budget and made visible terrain pop.
+    this.processSavedChunkResults(maxLoads);
+    this.processGeneratedChunkResults(maxLoads);
     this.queueChunksAround(center.cx, center.cz, loadRadius);
     this.pruneQueuedChunks(center.cx, center.cz, loadRadius);
     this.lastRequestedChunkLoads = this.requestQueuedChunkLoads(
@@ -521,10 +522,11 @@ export class VoxelWorld implements CollisionWorld {
   processSavedChunkResults(maxResults = MAX_CHUNK_LOADS_PER_FRAME): void {
     if (this.savedChunkResults.length === 0) return;
 
+    const selectedResults = this.pickSavedChunkResultIndexes(maxResults);
     const remaining: SavedChunkLoadResult[] = [];
-    let processed = 0;
-    for (const result of this.savedChunkResults) {
-      if (processed >= maxResults) {
+    for (let index = 0; index < this.savedChunkResults.length; index += 1) {
+      const result = this.savedChunkResults[index];
+      if (!selectedResults.has(index)) {
         remaining.push(result);
         continue;
       }
@@ -537,7 +539,6 @@ export class VoxelWorld implements CollisionWorld {
 
       if (!result.blocks) {
         this.forgetSavedChunk(result.key);
-        processed += 1;
         continue;
       }
 
@@ -546,7 +547,6 @@ export class VoxelWorld implements CollisionWorld {
         this.addGeneratedChunk(result.cx, result.cz, result.blocks, true);
         this.lastLoadedChunks += 1;
       }
-      processed += 1;
     }
 
     this.savedChunkResults = remaining;
@@ -555,14 +555,11 @@ export class VoxelWorld implements CollisionWorld {
   processGeneratedChunkResults(maxResults = MAX_CHUNK_LOADS_PER_FRAME): void {
     if (this.workerResults.length === 0) return;
 
+    const selectedResults = this.pickWorkerResultIndexes("generated", maxResults);
     const remaining: ChunkWorkerResult[] = [];
-    let processed = 0;
-    for (const result of this.workerResults) {
+    for (let index = 0; index < this.workerResults.length; index += 1) {
+      const result = this.workerResults[index];
       if (result.type !== "generated") {
-        remaining.push(result);
-        continue;
-      }
-      if (processed >= maxResults) {
         remaining.push(result);
         continue;
       }
@@ -570,13 +567,17 @@ export class VoxelWorld implements CollisionWorld {
       const pending = this.pendingChunkLoads.get(result.requestId);
       if (!pending) continue;
 
+      if (!selectedResults.has(index)) {
+        remaining.push(result);
+        continue;
+      }
+
       this.pendingChunkLoads.delete(result.requestId);
       this.pendingChunkKeys.delete(pending.key);
       if (!this.chunks.has(pending.key)) {
         this.addGeneratedChunk(result.cx, result.cz, result.blocks);
         this.lastLoadedChunks += 1;
       }
-      processed += 1;
     }
 
     this.workerResults = remaining;
@@ -857,13 +858,11 @@ export class VoxelWorld implements CollisionWorld {
     this.lastMeshedChunks = 0;
     if (this.workerResults.length === 0) return;
 
+    const selectedResults = this.pickWorkerResultIndexes("meshed", maxResults);
     const remaining: ChunkWorkerResult[] = [];
-    for (const result of this.workerResults) {
+    for (let index = 0; index < this.workerResults.length; index += 1) {
+      const result = this.workerResults[index];
       if (result.type !== "meshed") {
-        remaining.push(result);
-        continue;
-      }
-      if (this.lastMeshedChunks >= maxResults) {
         remaining.push(result);
         continue;
       }
@@ -871,14 +870,21 @@ export class VoxelWorld implements CollisionWorld {
       const pending = this.pendingMeshBuilds.get(result.requestId);
       if (!pending) continue;
 
-      this.pendingMeshBuilds.delete(result.requestId);
-      this.pendingMeshKeys.delete(pending.key);
-
       const chunk = this.getChunk(result.cx, result.cz);
       if (!chunk || chunk.revision !== result.revision) {
+        this.pendingMeshBuilds.delete(result.requestId);
+        this.pendingMeshKeys.delete(pending.key);
         if (chunk) chunk.dirty = true;
         continue;
       }
+
+      if (!selectedResults.has(index)) {
+        remaining.push(result);
+        continue;
+      }
+
+      this.pendingMeshBuilds.delete(result.requestId);
+      this.pendingMeshKeys.delete(pending.key);
 
       const mesh = chunk.applyMeshData(
         {
@@ -894,6 +900,54 @@ export class VoxelWorld implements CollisionWorld {
     }
 
     this.workerResults = remaining;
+  }
+
+  pickWorkerResultIndexes(
+    type: ChunkWorkerResult["type"],
+    limit: number
+  ): Set<number> {
+    const candidates: Array<PriorityEntry<{ readonly cx: number; readonly cz: number; readonly index: number }>> = [];
+
+    for (let index = 0; index < this.workerResults.length; index += 1) {
+      const result = this.workerResults[index];
+      if (result.type !== type) continue;
+      if (result.type === "generated" && !this.pendingChunkLoads.has(result.requestId)) continue;
+      if (result.type === "meshed") {
+        const chunk = this.getChunk(result.cx, result.cz);
+        if (!this.pendingMeshBuilds.has(result.requestId) || !chunk || chunk.revision !== result.revision) {
+          continue;
+        }
+      }
+
+      this.insertNearest(
+        candidates,
+        { cx: result.cx, cz: result.cz, index },
+        this.priorityCx,
+        this.priorityCz,
+        limit
+      );
+    }
+
+    return new Set(candidates.map((entry) => entry.item.index));
+  }
+
+  pickSavedChunkResultIndexes(limit: number): Set<number> {
+    const candidates: Array<PriorityEntry<{ readonly cx: number; readonly cz: number; readonly index: number }>> = [];
+
+    for (let index = 0; index < this.savedChunkResults.length; index += 1) {
+      const result = this.savedChunkResults[index];
+      const pending = this.pendingSavedChunkLoads.get(result.key);
+      if (!pending || pending.generation !== result.generation) continue;
+      this.insertNearest(
+        candidates,
+        { cx: result.cx, cz: result.cz, index },
+        this.priorityCx,
+        this.priorityCz,
+        limit
+      );
+    }
+
+    return new Set(candidates.map((entry) => entry.item.index));
   }
 
   requestDirtyMeshBuilds(maxBuilds = MAX_CHUNK_REBUILDS_PER_FRAME): number {

@@ -219,9 +219,12 @@ test("world applies completed generated chunks within the frame budget", () => {
     } satisfies ChunkGeneratedResult);
   }
 
+  world.setPriority(4, 0);
   world.processGeneratedChunkResults(2);
 
   assertEqual(world.getStats().loadedChunks, 2, "only the budgeted generated chunks should be applied");
+  assert(Boolean(world.getChunk(4, 0)), "the closest completed result should be applied first");
+  assert(Boolean(world.getChunk(3, 0)), "the next closest completed result should use the remaining budget");
   assertEqual(world.workerResults.length, 3, "extra generated chunks should remain queued for later frames");
 });
 
