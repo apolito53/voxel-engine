@@ -1,12 +1,44 @@
-// @ts-nocheck
 import * as THREE from "three";
 import { BLOCK, BLOCKS } from "./blocks";
+import type { ChunkMeshData } from "./chunkProtocol";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 export { CHUNK_SIZE, WORLD_HEIGHT };
 
+export type TopBlock = {
+  readonly block: number;
+  readonly y: number;
+};
+
+type MeshWorld = {
+  isSolid(x: number, y: number, z: number): boolean;
+};
+
+type MeshNumberBuffer = number[];
+type FaceNormal = readonly [number, number, number];
+type QuadCorner = readonly [number, number, number];
+type GreedyBlockReader = (u: number, v: number) => number;
+type GreedyFaceEmitter = (
+  u: number,
+  v: number,
+  width: number,
+  height: number,
+  block: number
+) => void;
+
 export class Chunk {
-  constructor(cx, cz) {
+  readonly cx: number;
+  readonly cz: number;
+  readonly blocks: Uint8Array;
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material> | null;
+  dirty: boolean;
+  modified: boolean;
+  revision: number;
+  private readonly topBlocks: Uint8Array;
+  private readonly topYs: Int16Array;
+  private readonly topColumnsDirty: Uint8Array;
+
+  constructor(cx: number, cz: number) {
     this.cx = cx;
     this.cz = cz;
     this.blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
@@ -20,11 +52,11 @@ export class Chunk {
     this.topColumnsDirty.fill(1);
   }
 
-  index(x, y, z) {
+  index(x: number, y: number, z: number): number {
     return x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
   }
 
-  inBounds(x, y, z) {
+  inBounds(x: number, y: number, z: number): boolean {
     return (
       x >= 0 &&
       x < CHUNK_SIZE &&
@@ -35,12 +67,12 @@ export class Chunk {
     );
   }
 
-  getLocal(x, y, z) {
+  getLocal(x: number, y: number, z: number): number {
     if (!this.inBounds(x, y, z)) return BLOCK.air;
     return this.blocks[this.index(x, y, z)];
   }
 
-  setLocal(x, y, z, block) {
+  setLocal(x: number, y: number, z: number, block: number): boolean {
     if (!this.inBounds(x, y, z)) return false;
     const blockIndex = this.index(x, y, z);
     if (this.blocks[blockIndex] === block) return false;
@@ -51,11 +83,11 @@ export class Chunk {
     return true;
   }
 
-  columnIndex(x, z) {
+  columnIndex(x: number, z: number): number {
     return x + CHUNK_SIZE * z;
   }
 
-  getTopLocal(x, z) {
+  getTopLocal(x: number, z: number): TopBlock {
     if (x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
       return { block: BLOCK.air, y: 0 };
     }
@@ -71,7 +103,7 @@ export class Chunk {
     };
   }
 
-  refreshTopColumns() {
+  refreshTopColumns(): void {
     for (let z = 0; z < CHUNK_SIZE; z += 1) {
       for (let x = 0; x < CHUNK_SIZE; x += 1) {
         this.rebuildTopColumn(x, z);
@@ -79,7 +111,7 @@ export class Chunk {
     }
   }
 
-  rebuildTopColumn(x, z) {
+  rebuildTopColumn(x: number, z: number): void {
     const column = this.columnIndex(x, z);
     for (let y = WORLD_HEIGHT - 1; y >= 0; y -= 1) {
       const block = this.blocks[this.index(x, y, z)];
@@ -96,11 +128,14 @@ export class Chunk {
     this.topColumnsDirty[column] = 0;
   }
 
-  rebuildMesh(world, material) {
-    const positions = [];
-    const normals = [];
-    const colors = [];
-    const indices = [];
+  rebuildMesh(
+    world: MeshWorld,
+    material: THREE.Material
+  ): THREE.Mesh<THREE.BufferGeometry, THREE.Material> {
+    const positions: MeshNumberBuffer = [];
+    const normals: MeshNumberBuffer = [];
+    const colors: MeshNumberBuffer = [];
+    const indices: MeshNumberBuffer = [];
     const ox = this.cx * CHUNK_SIZE;
     const oz = this.cz * CHUNK_SIZE;
 
@@ -135,7 +170,10 @@ export class Chunk {
     return this.mesh;
   }
 
-  applyMeshData(meshData, material) {
+  applyMeshData(
+    meshData: ChunkMeshData,
+    material: THREE.Material
+  ): THREE.Mesh<THREE.BufferGeometry, THREE.Material> {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
@@ -166,14 +204,22 @@ export class Chunk {
     return this.mesh;
   }
 
-  disposeMesh(scene) {
+  disposeMesh(scene: THREE.Scene): void {
     if (!this.mesh) return;
     if (this.mesh.parent) scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.mesh = null;
   }
 
-  buildXFaces(world, ox, oz, positions, normals, colors, indices) {
+  buildXFaces(
+    world: MeshWorld,
+    ox: number,
+    oz: number,
+    positions: MeshNumberBuffer,
+    normals: MeshNumberBuffer,
+    colors: MeshNumberBuffer,
+    indices: MeshNumberBuffer
+  ): void {
     for (let x = 0; x < CHUNK_SIZE; x += 1) {
       emitGreedyFaces(
         WORLD_HEIGHT,
@@ -221,7 +267,15 @@ export class Chunk {
     }
   }
 
-  buildYFaces(world, ox, oz, positions, normals, colors, indices) {
+  buildYFaces(
+    world: MeshWorld,
+    ox: number,
+    oz: number,
+    positions: MeshNumberBuffer,
+    normals: MeshNumberBuffer,
+    colors: MeshNumberBuffer,
+    indices: MeshNumberBuffer
+  ): void {
     for (let y = 0; y < WORLD_HEIGHT; y += 1) {
       emitGreedyFaces(
         CHUNK_SIZE,
@@ -269,7 +323,15 @@ export class Chunk {
     }
   }
 
-  buildZFaces(world, ox, oz, positions, normals, colors, indices) {
+  buildZFaces(
+    world: MeshWorld,
+    ox: number,
+    oz: number,
+    positions: MeshNumberBuffer,
+    normals: MeshNumberBuffer,
+    colors: MeshNumberBuffer,
+    indices: MeshNumberBuffer
+  ): void {
     for (let z = 0; z < CHUNK_SIZE; z += 1) {
       emitGreedyFaces(
         CHUNK_SIZE,
@@ -318,13 +380,30 @@ export class Chunk {
   }
 }
 
-function exposedBlock(chunk, world, x, y, z, nx, ny, nz) {
+function exposedBlock(
+  chunk: Chunk,
+  world: MeshWorld,
+  x: number,
+  y: number,
+  z: number,
+  nx: number,
+  ny: number,
+  nz: number,
+  _normalX: number,
+  _normalY: number,
+  _normalZ: number
+): number {
   const block = chunk.getLocal(x, y, z);
   if (!BLOCKS[block].solid || world.isSolid(nx, ny, nz)) return BLOCK.air;
   return block;
 }
 
-function emitGreedyFaces(width, height, getBlock, emit) {
+function emitGreedyFaces(
+  width: number,
+  height: number,
+  getBlock: GreedyBlockReader,
+  emit: GreedyFaceEmitter
+): void {
   const consumed = new Uint8Array(width * height);
 
   for (let v = 0; v < height; v += 1) {
@@ -368,7 +447,15 @@ function emitGreedyFaces(width, height, getBlock, emit) {
   }
 }
 
-function addQuad(positions, normals, colors, indices, block, normal, corners) {
+function addQuad(
+  positions: MeshNumberBuffer,
+  normals: MeshNumberBuffer,
+  colors: MeshNumberBuffer,
+  indices: MeshNumberBuffer,
+  block: number,
+  normal: FaceNormal,
+  corners: readonly QuadCorner[]
+): void {
   const base = positions.length / 3;
   const shade = normal[1] > 0 ? 1 : normal[1] < 0 ? 0.45 : 0.72;
   const color = BLOCKS[block].color.map((channel) => channel * shade);
