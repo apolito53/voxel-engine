@@ -28,6 +28,7 @@ import {
   SLIDE_PRIME_SPEED,
   SLIDE_RELEASE_FRICTION,
   SPRINT_SPEED,
+  SPRINT_SPEED_MULTIPLIER,
   WALK_SPEED,
   getAirMovementSpeed,
   getCrouchViewTargetOffset,
@@ -230,7 +231,16 @@ test("raycast handles grid boundaries and exact edge crossings", () => {
 test("player movement tuning supports sprint, flight, crouch, and slide states", () => {
   assertEqual(FLIGHT_TOGGLE_KEY, "KeyF", "flight should toggle with the F key");
   assertEqual(CROUCH_OR_DESCEND_KEY, "KeyC", "crouch and flight descent should use the C key");
-  assertEqual(SPRINT_SPEED, PREVIOUS_SPRINT_SPEED * 1.5, "sprint speed should be 50 percent faster than before");
+  assertEqual(
+    SPRINT_SPEED_MULTIPLIER,
+    1.5 * 1.5,
+    "sprint tuning should stack the earlier 50 percent bump with another 50 percent bump"
+  );
+  assertEqual(
+    SPRINT_SPEED,
+    PREVIOUS_SPRINT_SPEED * SPRINT_SPEED_MULTIPLIER,
+    "sprint speed should follow the documented sprint multiplier"
+  );
   assertEqual(FLIGHT_BOOST_SPEED, SPRINT_SPEED * 2, "flight boost should be twice the ground sprint speed");
   assert(CROUCH_VIEW_RESPONSE > 0, "crouch view smoothing should move toward its target");
   assertEqual(getCrouchViewTargetOffset(false), 0, "standing view should have no crouch offset");

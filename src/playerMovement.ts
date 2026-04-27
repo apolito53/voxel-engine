@@ -9,7 +9,8 @@ export const CROUCH_VIEW_RESPONSE = 18;
 
 export const WALK_SPEED = 5.4 * METERS_PER_BLOCK;
 export const PREVIOUS_SPRINT_SPEED = 8.5 * METERS_PER_BLOCK;
-export const SPRINT_SPEED = PREVIOUS_SPRINT_SPEED * 1.5;
+export const SPRINT_SPEED_MULTIPLIER = 1.5 * 1.5;
+export const SPRINT_SPEED = PREVIOUS_SPRINT_SPEED * SPRINT_SPEED_MULTIPLIER;
 export const CROUCH_SPEED = WALK_SPEED * 0.48;
 export const AIR_SPEED_LIMIT = SPRINT_SPEED;
 export const GROUND_ACCELERATION = 96 * METERS_PER_BLOCK;
@@ -26,7 +27,8 @@ export const CROUCH_OR_DESCEND_KEY = "KeyC";
 // extra acceleration too; otherwise drag keeps it far below its speed cap.
 export const FLIGHT_BOOST_SPEED = SPRINT_SPEED * 2;
 export const FLIGHT_ACCELERATION = 56 * METERS_PER_BLOCK;
-export const FLIGHT_BOOST_ACCELERATION = FLIGHT_ACCELERATION * 4;
+export const FLIGHT_BOOST_ACCELERATION_MULTIPLIER = 4 * 1.5;
+export const FLIGHT_BOOST_ACCELERATION = FLIGHT_ACCELERATION * FLIGHT_BOOST_ACCELERATION_MULTIPLIER;
 export const FLIGHT_DRAG = 7.5;
 
 // A slide is deliberately a "carry sprint momentum" state, not a separate
