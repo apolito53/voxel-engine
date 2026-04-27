@@ -6,8 +6,8 @@ import { CHUNK_SIZE, WORLD_HEIGHT } from "./chunk";
 import { createChunkStorage, createWorldRegistry } from "./chunkStorage";
 import { PlayerController } from "./player";
 import { PhysicsToy } from "./physics";
-import { voxelRaycast } from "./raycast";
-import { VoxelWorld } from "./world";
+import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
+import { VoxelWorld, type WorldStats } from "./world";
 
 const QUALITY_STORAGE_KEY = "voxel-quality-preset";
 const SUPER_ULTRA_STORAGE_KEY = "voxel-super-ultra-enabled";
@@ -347,7 +347,7 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   if (!inWorld || !player.isLooking()) return;
 
   camera.getWorldDirection(direction);
-  const hit = voxelRaycast(world, camera.position, direction, 8);
+  const hit: VoxelRaycastHit | null = voxelRaycast(world, camera.position, direction, 8);
   if (!hit) return;
 
   if (event.button === 0) {
@@ -544,7 +544,7 @@ function updateDebug(delta, playerChunk) {
   if (debugAccumulator < 0.1) return;
   debugAccumulator = 0;
 
-  const stats = world.getStats();
+  const stats: WorldStats = world.getStats();
   const render = renderer.info.render;
   const memory = renderer.info.memory;
   debugPanel.textContent = [

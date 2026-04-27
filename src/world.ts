@@ -19,6 +19,24 @@ const VIEW_PRIORITY_FRONT_DOT = 0.42;
 const VIEW_PRIORITY_SIDE_DOT = -0.15;
 const FRUSTUM_PRIORITY_PADDING = CHUNK_SIZE * 0.5;
 
+export type WorldStats = {
+  readonly loadedChunks: number;
+  readonly visibleChunks: number;
+  readonly culledChunks: number;
+  readonly savedChunks: number;
+  readonly queuedChunks: number;
+  readonly loadedThisFrame: number;
+  readonly requestedLoadsThisFrame: number;
+  readonly pendingChunkLoads: number;
+  readonly meshedThisFrame: number;
+  readonly requestedMeshesThisFrame: number;
+  readonly pendingMeshBuilds: number;
+  readonly dirtyChunks: number;
+  readonly visibleDirtyChunks: number;
+  readonly culledDirtyChunks: number;
+  readonly modifiedChunks: number;
+};
+
 export class VoxelWorld {
   constructor({ storage = createNullChunkStorage(), seed = "" } = {}) {
     this.chunks = new Map();
@@ -741,7 +759,7 @@ export class VoxelWorld {
     };
   }
 
-  getStats() {
+  getStats(): WorldStats {
     let dirtyChunks = 0;
     let modifiedChunks = 0;
     let visibleChunks = 0;

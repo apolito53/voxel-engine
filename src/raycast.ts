@@ -1,4 +1,31 @@
-export function voxelRaycast(world, origin, direction, maxDistance = 8) {
+type RaycastWorld = {
+  isSolid(x: number, y: number, z: number): boolean;
+};
+
+type VectorLike = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
+export type VoxelBlockPosition = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
+export type VoxelRaycastHit = {
+  readonly block: VoxelBlockPosition;
+  readonly normal: VoxelBlockPosition;
+  readonly distance: number;
+};
+
+export function voxelRaycast(
+  world: RaycastWorld,
+  origin: VectorLike,
+  direction: VectorLike,
+  maxDistance = 8
+): VoxelRaycastHit | null {
   let x = Math.floor(origin.x);
   let y = Math.floor(origin.y);
   let z = Math.floor(origin.z);
@@ -14,7 +41,7 @@ export function voxelRaycast(world, origin, direction, maxDistance = 8) {
   let tMaxX = intBound(origin.x, direction.x);
   let tMaxY = intBound(origin.y, direction.y);
   let tMaxZ = intBound(origin.z, direction.z);
-  let face = { x: 0, y: 0, z: 0 };
+  let face: VoxelBlockPosition = { x: 0, y: 0, z: 0 };
 
   for (let distance = 0; distance <= maxDistance; ) {
     if (world.isSolid(x, y, z)) {
@@ -49,7 +76,7 @@ export function voxelRaycast(world, origin, direction, maxDistance = 8) {
   return null;
 }
 
-function intBound(value, direction) {
+function intBound(value: number, direction: number): number {
   if (direction === 0) return Number.POSITIVE_INFINITY;
   const next = direction > 0 ? Math.ceil(value) : Math.floor(value);
   return (next - value) / direction;
