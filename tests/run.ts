@@ -22,17 +22,25 @@ import {
   FLIGHT_DRAG,
   FLIGHT_TOGGLE_KEY,
   PREVIOUS_SPRINT_SPEED,
+  SLIDE_END_SPEED,
+  SLIDE_FORWARD_FRICTION,
+  SLIDE_MIN_DURATION,
   SLIDE_PRIME_SPEED,
-  SLIDE_STOP_SPEED,
+  SLIDE_RELEASE_FRICTION,
   SPRINT_SPEED,
   WALK_SPEED,
   getCrouchViewTargetOffset,
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  getSlideFriction,
+  getSlideSpeedLimit,
+  isSlideMinimumLocked,
   smoothCrouchViewOffset,
   shouldContinueSlide,
-  shouldPrimeSlide
+  shouldPreserveSlideJumpMomentum,
+  shouldStartLandingSlide,
+  shouldStartSlide
 } from "../src/playerMovement";
 import { isCatchablePointerLockRequest } from "../src/player";
 import {
@@ -254,11 +262,6 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     SPRINT_SPEED,
     "active slides should keep the fast horizontal cap while friction bleeds speed"
   );
-  assertEqual(
-    getGroundMovementSpeed({ sprinting: true, crouching: true, sliding: false, slidePrimed: true }),
-    SPRINT_SPEED,
-    "primed slides should preserve sprint speed until movement input is released"
-  );
   assertEqual(getFlightMovementSpeed(false), WALK_SPEED, "plain flight should use walk speed");
   assertEqual(getFlightMovementSpeed(true), FLIGHT_BOOST_SPEED, "boosted flight should use the larger flight cap");
   assertEqual(
@@ -281,20 +284,69 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
 
   assert(
-    shouldPrimeSlide(true, true, true, true, SLIDE_PRIME_SPEED),
+    shouldStartSlide(true, true, true, true, SLIDE_PRIME_SPEED),
     "grounded sprint-crouch movement should prime a slide once speed is high enough"
   );
   assert(
-    !shouldPrimeSlide(true, true, true, true, SLIDE_PRIME_SPEED - 0.01),
+    !shouldStartSlide(true, true, true, true, SLIDE_PRIME_SPEED - 0.01),
     "slow movement should not prime a slide"
   );
   assert(
-    shouldContinueSlide(true, true, false, SLIDE_STOP_SPEED + 0.01),
-    "releasing movement while crouched should continue a fast slide"
+    !shouldStartSlide(true, false, true, true, SLIDE_PRIME_SPEED),
+    "holding crouch before sprinting should not retroactively start a slide"
   );
   assert(
-    !shouldContinueSlide(true, true, true, SLIDE_STOP_SPEED + 0.01),
-    "adding movement input should end the hands-off slide state"
+    shouldStartLandingSlide(true, true, SLIDE_PRIME_SPEED),
+    "landing while crouched with enough speed should enter the slide lock"
+  );
+  assert(
+    !shouldStartLandingSlide(true, true, SLIDE_PRIME_SPEED - 0.01),
+    "slow crouched landings should stay crouched without forcing a slide"
+  );
+  assert(
+    !shouldStartLandingSlide(true, false, SLIDE_PRIME_SPEED),
+    "landing upright should not enter a slide"
+  );
+  assert(
+    shouldContinueSlide(true, SLIDE_MIN_DURATION - 0.01, SLIDE_END_SPEED * 0.5),
+    "slides should remain locked for the minimum duration even after bleeding below crouch speed"
+  );
+  assert(
+    shouldContinueSlide(true, SLIDE_MIN_DURATION + 0.01, SLIDE_END_SPEED + 0.01),
+    "slides should continue after the minimum duration until speed reaches crouch pace"
+  );
+  assert(
+    !shouldContinueSlide(true, SLIDE_MIN_DURATION + 0.01, SLIDE_END_SPEED),
+    "slides should end after the lock once they reach crouch speed"
+  );
+  assert(
+    !shouldContinueSlide(false, SLIDE_MIN_DURATION - 0.01, SLIDE_END_SPEED + 1),
+    "leaving the ground should hand slide state to airborne momentum preservation"
+  );
+  assertEqual(getSlideFriction(true), SLIDE_FORWARD_FRICTION, "holding forward should keep the longer slide glide");
+  assertEqual(getSlideFriction(false), SLIDE_RELEASE_FRICTION, "releasing forward should bleed slide speed faster");
+  assertEqual(
+    getSlideSpeedLimit(SPRINT_SPEED * 1.25),
+    SPRINT_SPEED * 1.25,
+    "slides should preserve above-sprint entry speed instead of clamping momentum away"
+  );
+  assertEqual(
+    getSlideSpeedLimit(SPRINT_SPEED * 0.75),
+    SPRINT_SPEED,
+    "ordinary slides should still use the sprint cap as their baseline speed limit"
+  );
+  assert(isSlideMinimumLocked(0.5), "slides should be locked during their first second");
+  assert(
+    !isSlideMinimumLocked(SLIDE_MIN_DURATION),
+    "slide minimum lock should release exactly at the configured duration"
+  );
+  assert(
+    shouldPreserveSlideJumpMomentum(true, true),
+    "jumping from an active slide should preserve horizontal momentum until landing"
+  );
+  assert(
+    !shouldPreserveSlideJumpMomentum(false, true),
+    "normal jumps should not enter slide momentum preservation"
   );
 });
 

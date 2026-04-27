@@ -44,8 +44,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
 - Chunk ownership, worker scheduling, streaming, reads/writes, sparse block damage, coalesced chunk-save writes: `src/world.ts`
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
-- First-person walking, flight, smoothed crouch view, slide, pointer lock, voxel collision: `src/player.ts`
-- Player movement constants and slide/flight/crouch-view tuning helpers: `src/playerMovement.ts`
+- First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, voxel collision: `src/player.ts`
+- Player movement constants and committed slide/landing-slide/flight/crouch-view tuning helpers: `src/playerMovement.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
@@ -83,7 +83,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
 - Tune saved worlds or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
-- Tune movement feel: metric-scaled constants and slide/flight/crouch-view helpers in `src/playerMovement.ts`, plus collision resolution and visual eye-height handling in `src/player.ts`.
+- Tune movement feel: metric-scaled constants and committed slide/landing-slide/flight/crouch-view helpers in `src/playerMovement.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.

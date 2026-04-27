@@ -35,7 +35,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Mouse` look while playing
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
-- `C` while sprinting, then release movement, to slide
+- `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide; hold `W` to glide longer, `Space` to slide-jump
 - `Shift` sprint or use the stronger flight speed boost
 - `Left click` break block
 - `Right click` place block

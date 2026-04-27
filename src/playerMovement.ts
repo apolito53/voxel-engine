@@ -30,21 +30,22 @@ export const FLIGHT_BOOST_ACCELERATION = FLIGHT_ACCELERATION * 4;
 export const FLIGHT_DRAG = 7.5;
 
 // A slide is deliberately a "carry sprint momentum" state, not a separate
-// rocket boost. C primes it while sprinting, then releasing movement lets
-// friction bleed that stored speed down.
+// rocket boost. Entering crouch while sprinting commits to a short forced
+// crouch, then friction bleeds the stored speed down to normal crouch pace.
 export const SLIDE_PRIME_SPEED = PREVIOUS_SPRINT_SPEED * 0.9;
-export const SLIDE_STOP_SPEED = WALK_SPEED * 0.55;
-export const SLIDE_FRICTION = 1.45;
+export const SLIDE_END_SPEED = CROUCH_SPEED;
+export const SLIDE_MIN_DURATION = 1;
+export const SLIDE_FORWARD_FRICTION = 0.95;
+export const SLIDE_RELEASE_FRICTION = 2.25;
 
 export type GroundMovementSpeedOptions = {
   readonly sprinting: boolean;
   readonly crouching: boolean;
   readonly sliding: boolean;
-  readonly slidePrimed?: boolean;
 };
 
 export function getGroundMovementSpeed(options: GroundMovementSpeedOptions): number {
-  if (options.sliding || options.slidePrimed) return SPRINT_SPEED;
+  if (options.sliding) return SPRINT_SPEED;
   if (options.crouching) return CROUCH_SPEED;
   return options.sprinting ? SPRINT_SPEED : WALK_SPEED;
 }
@@ -69,27 +70,53 @@ export function smoothCrouchViewOffset(currentOffset: number, targetOffset: numb
   return Math.abs(targetOffset - nextOffset) < 0.0005 ? targetOffset : nextOffset;
 }
 
-export function shouldPrimeSlide(
+export function shouldStartSlide(
   grounded: boolean,
-  crouching: boolean,
+  justStartedCrouching: boolean,
   sprinting: boolean,
-  hasMovementInput: boolean,
+  holdingForward: boolean,
   horizontalSpeed: number
 ): boolean {
   return (
     grounded &&
-    crouching &&
+    justStartedCrouching &&
     sprinting &&
-    hasMovementInput &&
+    holdingForward &&
     horizontalSpeed >= SLIDE_PRIME_SPEED
   );
 }
 
-export function shouldContinueSlide(
-  grounded: boolean,
+export function shouldStartLandingSlide(
+  landed: boolean,
   crouching: boolean,
-  hasMovementInput: boolean,
   horizontalSpeed: number
 ): boolean {
-  return grounded && crouching && !hasMovementInput && horizontalSpeed > SLIDE_STOP_SPEED;
+  return landed && crouching && horizontalSpeed >= SLIDE_PRIME_SPEED;
+}
+
+export function shouldContinueSlide(
+  grounded: boolean,
+  elapsed: number,
+  horizontalSpeed: number
+): boolean {
+  return grounded && (elapsed < SLIDE_MIN_DURATION || horizontalSpeed > SLIDE_END_SPEED);
+}
+
+export function getSlideFriction(holdingForward: boolean): number {
+  return holdingForward ? SLIDE_FORWARD_FRICTION : SLIDE_RELEASE_FRICTION;
+}
+
+export function getSlideSpeedLimit(entryHorizontalSpeed: number): number {
+  return Math.max(SPRINT_SPEED, entryHorizontalSpeed);
+}
+
+export function isSlideMinimumLocked(elapsed: number): boolean {
+  return elapsed < SLIDE_MIN_DURATION;
+}
+
+export function shouldPreserveSlideJumpMomentum(
+  wasSliding: boolean,
+  jumpedFromGround: boolean
+): boolean {
+  return wasSliding && jumpedFromGround;
 }

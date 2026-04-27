@@ -17,15 +17,17 @@ import {
   PLAYER_CROUCH_HEIGHT,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
-  SLIDE_FRICTION,
-  SLIDE_PRIME_SPEED,
   getCrouchViewTargetOffset,
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  getSlideFriction,
+  getSlideSpeedLimit,
   smoothCrouchViewOffset,
   shouldContinueSlide,
-  shouldPrimeSlide
+  shouldPreserveSlideJumpMomentum,
+  shouldStartLandingSlide,
+  shouldStartSlide
 } from "./playerMovement";
 
 type MovementAxis = "x" | "y" | "z";
@@ -61,7 +63,9 @@ export class PlayerController {
   pendingLock: boolean;
   lockTimeout: number | null;
   onPauseChange: (paused: boolean) => void;
-  private slidePrimed = false;
+  private slideElapsed = 0;
+  private slideSpeedLimit = 0;
+  private slideMomentumAirborne = false;
   private crouchViewOffset = 0;
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: CollisionWorld) {
@@ -198,7 +202,7 @@ export class PlayerController {
 
   get movementMode(): PlayerMovementMode {
     if (this.flying) return "flight";
-    if (this.sliding) return "slide";
+    if (this.sliding || this.slideMomentumAirborne) return "slide";
     if (this.crouching) return "crouch";
     return "walk";
   }
@@ -246,22 +250,31 @@ export class PlayerController {
     const hasWish = wish.lengthSq() > 0;
     if (hasWish) wish.normalize();
 
-    this.syncCrouchState(this.isCrouchOrDescendHeld());
-    this.updateSlideState(wasGrounded, hasWish);
+    if (wasGrounded) this.slideMomentumAirborne = false;
+
+    const wantsCrouch = this.isCrouchOrDescendHeld();
+    const justStartedCrouching = wantsCrouch && !this.crouching;
+    const holdingForward = this.keys.has("KeyW");
+
+    // Slide owns crouch while it is active. That lets the player release C
+    // during the committed slide without popping back to standing early.
+    this.syncCrouchState(wantsCrouch || this.sliding);
+    this.updateSlideState(delta, wasGrounded, justStartedCrouching, holdingForward);
+    this.syncCrouchState(wantsCrouch || this.sliding);
+
     const speed = getGroundMovementSpeed({
-      sprinting: this.isSprintHeld(),
+      sprinting: this.isGroundSprintActive(),
       crouching: this.crouching,
-      sliding: this.sliding,
-      slidePrimed: this.slidePrimed
+      sliding: this.sliding
     });
 
     if (wasGrounded) {
-      this.applyHorizontalFriction(this.sliding ? SLIDE_FRICTION : GROUND_FRICTION, delta);
-    } else {
+      this.applyHorizontalFriction(this.sliding ? getSlideFriction(holdingForward) : GROUND_FRICTION, delta);
+    } else if (!this.slideMomentumAirborne) {
       this.applyHorizontalFriction(AIR_DRAG, delta);
     }
 
-    if (hasWish && !this.sliding) {
+    if (hasWish && !this.sliding && !this.slideMomentumAirborne) {
       this.applyHorizontalAcceleration(
         wish,
         speed,
@@ -270,18 +283,28 @@ export class PlayerController {
       );
     }
 
-    this.limitHorizontalSpeed(wasGrounded ? speed : AIR_SPEED_LIMIT);
+    const groundSpeedLimit = this.sliding ? Math.max(speed, this.slideSpeedLimit) : speed;
+    const horizontalSpeedLimit = this.slideMomentumAirborne
+      ? Math.max(AIR_SPEED_LIMIT, Math.hypot(this.velocity.x, this.velocity.z))
+      : AIR_SPEED_LIMIT;
+    this.limitHorizontalSpeed(wasGrounded ? groundSpeedLimit : horizontalSpeedLimit);
     this.velocity.y -= GRAVITY * delta;
 
     this.onGround = false;
     if (wasGrounded && this.keys.has("Space")) {
+      const jumpingFromSlide = this.sliding;
       this.velocity.y = JUMP_SPEED;
       this.onGround = false;
+      // A slide jump should carry the stored horizontal velocity instead of
+      // immediately becoming a normal air-control jump.
+      this.slideMomentumAirborne = shouldPreserveSlideJumpMomentum(jumpingFromSlide, true);
+      if (jumpingFromSlide) this.endSlide();
     }
 
     this.moveAxis("x", this.velocity.x * delta);
     this.moveAxis("z", this.velocity.z * delta);
     this.moveAxis("y", this.velocity.y * delta);
+    this.updateLandingSlideState(!wasGrounded && this.onGround);
 
     this.updateCrouchViewOffset(delta);
     this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
@@ -396,8 +419,8 @@ export class PlayerController {
 
     this.flying = enabled;
     this.velocity.y = 0;
-    this.sliding = false;
-    this.slidePrimed = false;
+    this.endSlide();
+    this.slideMomentumAirborne = false;
 
     if (enabled) {
       this.syncCrouchState(false);
@@ -436,30 +459,69 @@ export class PlayerController {
     this.crouchViewOffset = clampedOffset;
   }
 
-  updateSlideState(wasGrounded: boolean, hasWish: boolean): void {
+  updateSlideState(
+    delta: number,
+    wasGrounded: boolean,
+    justStartedCrouching: boolean,
+    holdingForward: boolean
+  ): void {
     const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     const sprinting = this.isSprintHeld();
 
-    if (shouldPrimeSlide(wasGrounded, this.crouching, sprinting, hasWish, horizontalSpeed)) {
-      this.slidePrimed = true;
-    }
-
-    if (this.sliding) {
-      this.sliding = shouldContinueSlide(wasGrounded, this.crouching, hasWish, horizontalSpeed);
-      if (!this.sliding) this.slidePrimed = false;
+    if (this.sliding && !wasGrounded) {
+      this.slideMomentumAirborne = true;
+      this.endSlide();
       return;
     }
 
-    this.sliding = (this.slidePrimed || (sprinting && horizontalSpeed >= SLIDE_PRIME_SPEED)) &&
-      shouldContinueSlide(wasGrounded, this.crouching, hasWish, horizontalSpeed);
-
-    if (!this.crouching || !wasGrounded || (hasWish && !sprinting)) {
-      this.slidePrimed = false;
+    if (this.sliding) {
+      this.slideElapsed += delta;
+      // Release timing is speed-based after the minimum lock: forward keeps
+      // the low-friction glide alive longer, while letting go bleeds speed down
+      // quickly until the controller is back at crouch pace.
+      if (!shouldContinueSlide(wasGrounded, this.slideElapsed, horizontalSpeed)) {
+        this.endSlide();
+      }
+      return;
     }
+
+    if (shouldStartSlide(wasGrounded, justStartedCrouching, sprinting, holdingForward, horizontalSpeed)) {
+      this.startSlide(horizontalSpeed);
+    }
+  }
+
+  updateLandingSlideState(landedThisFrame: boolean): void {
+    if (!landedThisFrame) return;
+
+    const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    this.slideMomentumAirborne = false;
+    if (!this.sliding && shouldStartLandingSlide(true, this.crouching, horizontalSpeed)) {
+      this.startSlide(horizontalSpeed);
+    }
+  }
+
+  startSlide(horizontalSpeed: number): void {
+    this.sliding = true;
+    this.crouching = true;
+    this.slideElapsed = 0;
+    // Preserve the speed the player actually brought into the slide. Without
+    // this, high-speed landings or slide jumps can get chopped down by the
+    // normal ground movement cap before friction has a chance to feel physical.
+    this.slideSpeedLimit = getSlideSpeedLimit(horizontalSpeed);
+  }
+
+  endSlide(): void {
+    this.sliding = false;
+    this.slideElapsed = 0;
+    this.slideSpeedLimit = 0;
   }
 
   isSprintHeld(): boolean {
     return this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
+  }
+
+  isGroundSprintActive(): boolean {
+    return this.isSprintHeld() && !this.crouching && !this.sliding;
   }
 
   isCrouchOrDescendHeld(): boolean {
