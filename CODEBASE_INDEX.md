@@ -72,6 +72,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
+- Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
 - Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.js`; avoid reintroducing full queue sorts on every frame.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in so normal quality cycling tops out at `Ultra`.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.

@@ -444,7 +444,12 @@ export class VoxelWorld {
 
   markDirty(cx, cz) {
     const chunk = this.getChunk(cx, cz);
-    if (chunk) chunk.dirty = true;
+    if (!chunk) return;
+
+    // Neighbor loads and edge edits can invalidate a mesh even when this chunk's
+    // blocks did not change, so bump the revision to reject stale worker results.
+    chunk.dirty = true;
+    chunk.revision += 1;
   }
 
   markNeighborChunksDirty(cx, cz) {
