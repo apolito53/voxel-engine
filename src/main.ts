@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import "./style.css";
-import { BLOCK_FRAGMENT_COUNT, getBlockFragmentOffset } from "./blockFragments";
+import { getBlockFragmentOffset, getDistributedBlockFragmentIndex } from "./blockFragments";
 import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
 import {
   createChunkStorage,
@@ -400,8 +400,11 @@ function spawnBlockFragments(
   const fragmentBaseSpeed = Math.min(9, impact.speed * 0.72);
   const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
 
-  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
-    const fragmentOffset = getBlockFragmentOffset(index);
+  const fragmentCount = qualityController.preset.blockFragmentCount;
+
+  for (let index = 0; index < fragmentCount; index += 1) {
+    const fragmentGridIndex = getDistributedBlockFragmentIndex(index, fragmentCount);
+    const fragmentOffset = getBlockFragmentOffset(fragmentGridIndex);
     const offset = new THREE.Vector3(
       fragmentOffset.x,
       fragmentOffset.y,

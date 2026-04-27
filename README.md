@@ -41,7 +41,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Right click` place block
 - `1-5` select block
 - `F` toggle flight mode
-- `T` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into 27 loose cube fragments that sleep/expire to keep debris cheap
+- `T` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into quality-scaled loose cube fragments that sleep/expire to keep debris cheap
 - `F3` toggle debug overlay, including smoothed FPS plus raw/peak frame time for hitch hunting
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Physics Object Budget` stepper changes the current quality preset's physics-body budget
@@ -50,12 +50,12 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Quality Presets
 
-- `Potato`: 0.5x render distance, no shadows, 64 physics bodies
-- `Low`: current low-end baseline, no shadows, 128 physics bodies
-- `Normal`: 2x render distance, shadows, 192 physics bodies
-- `High`: 4x render distance, shadows, 512 physics bodies
-- `Ultra`: 6x render distance, higher shadow resolution, 1024 physics bodies
-- `Super Ultra`: 12x render distance, 2048 physics bodies, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 2 debris shards
+- `Low`: current low-end baseline, no shadows, 128 physics bodies, 4 debris shards
+- `Normal`: 2x render distance, shadows, 192 physics bodies, 7 debris shards
+- `High`: 4x render distance, shadows, 512 physics bodies, 14 debris shards
+- `Ultra`: 6x render distance, higher shadow resolution, 1024 physics bodies, 27 debris shards
+- `Super Ultra`: 12x render distance, 2048 physics bodies, 27 debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 
 ## Engine Pieces
 

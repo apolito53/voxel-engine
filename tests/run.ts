@@ -3,7 +3,9 @@ import {
   BLOCK_FRAGMENT_COUNT,
   BLOCK_FRAGMENT_GRID_SIZE,
   BLOCK_FRAGMENT_SPACING,
-  getBlockFragmentOffset
+  getBlockFragmentOffset,
+  getDistributedBlockFragmentIndex,
+  normalizeBlockFragmentCount
 } from "../src/blockFragments";
 import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
@@ -461,6 +463,33 @@ test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
   );
 });
 
+test("quality-scaled block fracture counts sample the full debris grid", () => {
+  assertEqual(normalizeBlockFragmentCount(-1), 1, "fragment count should keep at least one shard");
+  assertEqual(normalizeBlockFragmentCount(99), BLOCK_FRAGMENT_COUNT, "fragment count should clamp to the full grid");
+
+  assertEqual(getDistributedBlockFragmentIndex(0, BLOCK_FRAGMENT_COUNT), 0, "full debris should keep first grid index");
+  assertEqual(
+    getDistributedBlockFragmentIndex(BLOCK_FRAGMENT_COUNT - 1, BLOCK_FRAGMENT_COUNT),
+    BLOCK_FRAGMENT_COUNT - 1,
+    "full debris should keep final grid index"
+  );
+  assertEqual(
+    getDistributedBlockFragmentIndex(3, 7),
+    Math.floor(BLOCK_FRAGMENT_COUNT / 2),
+    "normal-quality debris should include the center shard"
+  );
+
+  const highQualityIndexes = new Set<number>();
+  for (let index = 0; index < QUALITY_PRESETS.high.blockFragmentCount; index += 1) {
+    highQualityIndexes.add(getDistributedBlockFragmentIndex(index, QUALITY_PRESETS.high.blockFragmentCount));
+  }
+  assertEqual(
+    highQualityIndexes.size,
+    QUALITY_PRESETS.high.blockFragmentCount,
+    "high-quality debris should choose unique grid indexes"
+  );
+});
+
 test("physics impacts report speed so block damage can be thresholded", () => {
   const collisionWorld = {
     isSolid(x: number, y: number, z: number): boolean {
@@ -554,6 +583,10 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       preset.physicsObjectBudget >= previousPhysicsBudget,
       `${preset.label} physics budget should not shrink as quality increases`
     );
+    assert(
+      preset.blockFragmentCount >= 1 && preset.blockFragmentCount <= BLOCK_FRAGMENT_COUNT,
+      `${preset.label} debris count should stay within the fracture grid`
+    );
     previousPhysicsBudget = preset.physicsObjectBudget;
   }
 
@@ -567,6 +600,16 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 physics bodies by default");
   assertEqual(QUALITY_PRESETS.high.physicsObjectBudget, 512, "High should allow 512 physics bodies by default");
   assertEqual(QUALITY_PRESETS.ultra.physicsObjectBudget, 1024, "Ultra should allow 1024 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.potato.blockFragmentCount, 2, "Potato should spawn only two shards per destroyed block");
+  assertEqual(QUALITY_PRESETS.low.blockFragmentCount, 4, "Low should spawn four shards per destroyed block");
+  assertEqual(QUALITY_PRESETS.normal.blockFragmentCount, 7, "Normal should spawn seven shards per destroyed block");
+  assertEqual(QUALITY_PRESETS.high.blockFragmentCount, 14, "High should spawn about half of the full shard count");
+  assertEqual(QUALITY_PRESETS.ultra.blockFragmentCount, 27, "Ultra should keep the full fracture grid");
+  assertEqual(
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount,
+    27,
+    "Super Ultra should keep the full fracture grid"
+  );
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget,
     2048,

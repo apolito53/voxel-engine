@@ -26,6 +26,7 @@ export type QualityPreset = {
   readonly chunkLoads: number;
   readonly chunkRebuilds: number;
   readonly physicsObjectBudget: number;
+  readonly blockFragmentCount: number;
   readonly minimapInterval: number;
   readonly minimapRowsPerFrame: number;
   readonly sunIntensity: number;
@@ -54,6 +55,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkLoads: 1,
     chunkRebuilds: 1,
     physicsObjectBudget: 64,
+    blockFragmentCount: 2,
     minimapInterval: 0.45,
     minimapRowsPerFrame: 3,
     sunIntensity: 2.8,
@@ -77,6 +79,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkLoads: 1,
     chunkRebuilds: 2,
     physicsObjectBudget: 128,
+    blockFragmentCount: 4,
     minimapInterval: 0.35,
     minimapRowsPerFrame: 4,
     sunIntensity: 3.2,
@@ -100,6 +103,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkLoads: 2,
     chunkRebuilds: 4,
     physicsObjectBudget: 192,
+    blockFragmentCount: 7,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
     sunIntensity: 3.2,
@@ -123,6 +127,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkLoads: 4,
     chunkRebuilds: 6,
     physicsObjectBudget: 512,
+    blockFragmentCount: 14,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 10,
     sunIntensity: 3.35,
@@ -146,6 +151,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkLoads: 6,
     chunkRebuilds: 8,
     physicsObjectBudget: 1024,
+    blockFragmentCount: 27,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 12,
     sunIntensity: 3.5,
@@ -169,6 +175,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkLoads: 10,
     chunkRebuilds: 10,
     physicsObjectBudget: 2048,
+    blockFragmentCount: 27,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,
     sunIntensity: 3.6,

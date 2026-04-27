@@ -28,3 +28,23 @@ export function getBlockFragmentOffset(index: number): BlockFragmentOffset {
     z: (zIndex - centeredOrigin) * BLOCK_FRAGMENT_SPACING
   };
 }
+
+export function getDistributedBlockFragmentIndex(fragmentIndex: number, fragmentCount: number): number {
+  const normalizedCount = normalizeBlockFragmentCount(fragmentCount);
+  if (!Number.isInteger(fragmentIndex) || fragmentIndex < 0 || fragmentIndex >= normalizedCount) {
+    throw new RangeError(`Fragment selection index ${fragmentIndex} is outside the ${normalizedCount}-piece budget.`);
+  }
+
+  // Sample the 27-piece fracture grid at the middle of each quality-budgeted
+  // bucket. Reduced debris counts stay spread across the block instead of
+  // always spawning the same low-corner pieces.
+  return Math.min(
+    BLOCK_FRAGMENT_COUNT - 1,
+    Math.floor(((fragmentIndex + 0.5) * BLOCK_FRAGMENT_COUNT) / normalizedCount)
+  );
+}
+
+export function normalizeBlockFragmentCount(fragmentCount: number): number {
+  if (!Number.isFinite(fragmentCount)) return 1;
+  return Math.min(BLOCK_FRAGMENT_COUNT, Math.max(1, Math.round(fragmentCount)));
+}
