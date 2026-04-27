@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 const DATABASE_NAME = "voxel-engine";
@@ -13,29 +12,78 @@ const DEFAULT_WORLD_NAME = "Default World";
 const DEFAULT_WORLD_SEED = "";
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
 
-let sharedDatabasePromise = null;
+export type SavedWorld = {
+  readonly id: string;
+  name: string;
+  seed: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export interface SaveDatabase {
+  getMetadata(key: string): Promise<string | null>;
+  setMetadata(key: string, value: string): Promise<void>;
+  listWorlds(): Promise<SavedWorld[]>;
+  getWorld(worldId: string): Promise<SavedWorld | null>;
+  putWorld(world: SavedWorld): Promise<void>;
+  updateWorldTimestamp(worldId: string): Promise<void>;
+  listChunkKeys(worldId: string): Promise<string[]>;
+  loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null>;
+  saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void>;
+  deleteChunk(worldId: string, chunkKey: string): Promise<void>;
+}
+
+export interface ChunkStorage {
+  readonly worldId: string;
+  listChunkKeys(): Promise<string[]>;
+  loadChunk(key: string): Promise<Uint8Array | null>;
+  saveChunk(key: string, blocks: Uint8Array): Promise<void>;
+  deleteChunk(key: string): Promise<void>;
+}
+
+type StoreName = typeof METADATA_STORE | typeof WORLDS_STORE | typeof CHUNKS_STORE;
+
+type MetadataRecord = {
+  key: string;
+  value: string;
+};
+
+type ChunkRecord = {
+  id: string;
+  worldId: string;
+  chunkKey: string;
+  blocks: ArrayBuffer | Uint8Array;
+  updatedAt: number;
+};
+
+let sharedDatabasePromise: Promise<SaveDatabase> | null = null;
 
 // IndexedDB is the real browser save backend. The memory backend keeps smoke tests and
 // restricted/private browser contexts usable without pretending that data is persisted.
-export async function createChunkStorage(worldId = DEFAULT_WORLD_ID, database = openSaveDatabase()) {
+export async function createChunkStorage(
+  worldId = DEFAULT_WORLD_ID,
+  database: SaveDatabase | Promise<SaveDatabase> = openSaveDatabase()
+): Promise<ChunkStorage> {
   return new IndexedDbChunkStorage(await database, worldId);
 }
 
-export function createNullChunkStorage(worldId = DEFAULT_WORLD_ID) {
+export function createNullChunkStorage(worldId = DEFAULT_WORLD_ID): ChunkStorage {
   return new NullChunkStorage(worldId);
 }
 
-export function createMemorySaveDatabase() {
+export function createMemorySaveDatabase(): SaveDatabase {
   return new MemorySaveDatabase();
 }
 
-export async function createWorldRegistry(database = openSaveDatabase()) {
+export async function createWorldRegistry(
+  database: SaveDatabase | Promise<SaveDatabase> = openSaveDatabase()
+): Promise<WorldRegistry> {
   const registry = new WorldRegistry(await database);
   await registry.ensureDefaultWorld();
   return registry;
 }
 
-async function openSaveDatabase() {
+async function openSaveDatabase(): Promise<SaveDatabase> {
   if (!sharedDatabasePromise) {
     sharedDatabasePromise = openIndexedDbSaveDatabase()
       .catch((error) => {
@@ -46,13 +94,13 @@ async function openSaveDatabase() {
   return sharedDatabasePromise;
 }
 
-async function openIndexedDbSaveDatabase() {
+async function openIndexedDbSaveDatabase(): Promise<SaveDatabase> {
   const indexedDb = readIndexedDb();
   if (!indexedDb) {
     throw new Error("IndexedDB is not available.");
   }
 
-  const database = await new Promise((resolve, reject) => {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDb.open(DATABASE_NAME, DATABASE_VERSION);
 
     request.onupgradeneeded = () => {
@@ -81,34 +129,36 @@ async function openIndexedDbSaveDatabase() {
   return new IndexedDbSaveDatabase(database);
 }
 
-class IndexedDbSaveDatabase {
-  constructor(database) {
+class IndexedDbSaveDatabase implements SaveDatabase {
+  private readonly database: IDBDatabase;
+
+  constructor(database: IDBDatabase) {
     this.database = database;
   }
 
-  async getMetadata(key) {
-    const record = await this.getRecord(METADATA_STORE, key);
+  async getMetadata(key: string): Promise<string | null> {
+    const record = await this.getRecord<MetadataRecord>(METADATA_STORE, key);
     return record?.value ?? null;
   }
 
-  async setMetadata(key, value) {
+  async setMetadata(key: string, value: string): Promise<void> {
     await this.putRecord(METADATA_STORE, { key, value });
   }
 
-  async listWorlds() {
-    const worlds = await this.getAllRecords(WORLDS_STORE);
-    return worlds.map(normalizeWorld).filter(Boolean);
+  async listWorlds(): Promise<SavedWorld[]> {
+    const worlds = await this.getAllRecords<unknown>(WORLDS_STORE);
+    return worlds.map(normalizeWorld).filter((world): world is SavedWorld => Boolean(world));
   }
 
-  async getWorld(worldId) {
+  async getWorld(worldId: string): Promise<SavedWorld | null> {
     return normalizeWorld(await this.getRecord(WORLDS_STORE, worldId));
   }
 
-  async putWorld(world) {
-    await this.putRecord(WORLDS_STORE, normalizeWorld(world));
+  async putWorld(world: SavedWorld): Promise<void> {
+    await this.putRecord(WORLDS_STORE, cloneSavedWorld(world));
   }
 
-  async updateWorldTimestamp(worldId) {
+  async updateWorldTimestamp(worldId: string): Promise<void> {
     const world = await this.getWorld(worldId);
     if (!world) return;
 
@@ -116,12 +166,12 @@ class IndexedDbSaveDatabase {
     await this.putWorld(world);
   }
 
-  async listChunkKeys(worldId) {
+  async listChunkKeys(worldId: string): Promise<string[]> {
     const transaction = this.database.transaction(CHUNKS_STORE, "readonly");
     const index = transaction.objectStore(CHUNKS_STORE).index(CHUNK_WORLD_INDEX);
     const done = transactionDone(transaction);
     const request = index.getAllKeys(globalThis.IDBKeyRange.only(worldId));
-    const recordIds = await requestToPromise(request);
+    const recordIds = await requestToPromise<IDBValidKey[]>(request);
     await done;
     const prefix = `${worldId}|`;
 
@@ -132,12 +182,12 @@ class IndexedDbSaveDatabase {
       .map((recordId) => recordId.slice(prefix.length));
   }
 
-  async loadChunk(worldId, chunkKey) {
-    const record = await this.getRecord(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
+  async loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null> {
+    const record = await this.getRecord<ChunkRecord>(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
     return decodeStoredBlocks(record?.blocks);
   }
 
-  async saveChunk(worldId, chunkKey, blocks) {
+  async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
     // Store the raw ArrayBuffer, not base64 text. IndexedDB can clone binary data directly.
     await this.putRecord(CHUNKS_STORE, {
       id: chunkRecordId(worldId, chunkKey),
@@ -149,37 +199,37 @@ class IndexedDbSaveDatabase {
     await this.updateWorldTimestamp(worldId);
   }
 
-  async deleteChunk(worldId, chunkKey) {
+  async deleteChunk(worldId: string, chunkKey: string): Promise<void> {
     await this.deleteRecord(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
     await this.updateWorldTimestamp(worldId);
   }
 
-  async getRecord(storeName, key) {
+  private async getRecord<T>(storeName: StoreName, key: IDBValidKey): Promise<T | null> {
     const transaction = this.database.transaction(storeName, "readonly");
     const done = transactionDone(transaction);
     const request = transaction.objectStore(storeName).get(key);
-    const record = await requestToPromise(request);
+    const record = await requestToPromise<T | undefined>(request);
     await done;
     return record ?? null;
   }
 
-  async getAllRecords(storeName) {
+  private async getAllRecords<T>(storeName: StoreName): Promise<T[]> {
     const transaction = this.database.transaction(storeName, "readonly");
     const done = transactionDone(transaction);
     const request = transaction.objectStore(storeName).getAll();
-    const records = await requestToPromise(request);
+    const records = await requestToPromise<T[]>(request);
     await done;
     return records;
   }
 
-  async putRecord(storeName, record) {
+  private async putRecord(storeName: StoreName, record: unknown): Promise<void> {
     const transaction = this.database.transaction(storeName, "readwrite");
     const done = transactionDone(transaction);
     await requestToPromise(transaction.objectStore(storeName).put(record));
     await done;
   }
 
-  async deleteRecord(storeName, key) {
+  private async deleteRecord(storeName: StoreName, key: IDBValidKey): Promise<void> {
     const transaction = this.database.transaction(storeName, "readwrite");
     const done = transactionDone(transaction);
     await requestToPromise(transaction.objectStore(storeName).delete(key));
@@ -187,75 +237,76 @@ class IndexedDbSaveDatabase {
   }
 }
 
-class MemorySaveDatabase {
-  constructor() {
-    this.metadata = new Map();
-    this.worlds = new Map();
-    this.chunks = new Map();
-  }
+class MemorySaveDatabase implements SaveDatabase {
+  private readonly metadata = new Map<string, string>();
+  private readonly worlds = new Map<string, SavedWorld>();
+  private readonly chunks = new Map<string, Uint8Array>();
 
-  async getMetadata(key) {
+  async getMetadata(key: string): Promise<string | null> {
     return this.metadata.get(key) ?? null;
   }
 
-  async setMetadata(key, value) {
+  async setMetadata(key: string, value: string): Promise<void> {
     this.metadata.set(key, value);
   }
 
-  async listWorlds() {
-    return Array.from(this.worlds.values()).map(cloneWorld);
+  async listWorlds(): Promise<SavedWorld[]> {
+    return Array.from(this.worlds.values()).map(cloneSavedWorld);
   }
 
-  async getWorld(worldId) {
+  async getWorld(worldId: string): Promise<SavedWorld | null> {
     return cloneWorld(this.worlds.get(worldId));
   }
 
-  async putWorld(world) {
-    this.worlds.set(world.id, cloneWorld(world));
+  async putWorld(world: SavedWorld): Promise<void> {
+    this.worlds.set(world.id, cloneSavedWorld(world));
   }
 
-  async updateWorldTimestamp(worldId) {
+  async updateWorldTimestamp(worldId: string): Promise<void> {
     const world = this.worlds.get(worldId);
     if (!world) return;
 
     world.updatedAt = Date.now();
-    this.worlds.set(worldId, cloneWorld(world));
+    this.worlds.set(worldId, cloneSavedWorld(world));
   }
 
-  async listChunkKeys(worldId) {
+  async listChunkKeys(worldId: string): Promise<string[]> {
     const prefix = `${worldId}|`;
     return Array.from(this.chunks.keys())
       .filter((recordId) => recordId.startsWith(prefix))
       .map((recordId) => recordId.slice(prefix.length));
   }
 
-  async loadChunk(worldId, chunkKey) {
+  async loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null> {
     const blocks = this.chunks.get(chunkRecordId(worldId, chunkKey));
     return blocks ? blocks.slice() : null;
   }
 
-  async saveChunk(worldId, chunkKey, blocks) {
+  async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
     this.chunks.set(chunkRecordId(worldId, chunkKey), blocks.slice());
     await this.updateWorldTimestamp(worldId);
   }
 
-  async deleteChunk(worldId, chunkKey) {
+  async deleteChunk(worldId: string, chunkKey: string): Promise<void> {
     this.chunks.delete(chunkRecordId(worldId, chunkKey));
     await this.updateWorldTimestamp(worldId);
   }
 }
 
-class IndexedDbChunkStorage {
-  constructor(database, worldId) {
+class IndexedDbChunkStorage implements ChunkStorage {
+  readonly worldId: string;
+  private readonly database: SaveDatabase;
+
+  constructor(database: SaveDatabase, worldId: string) {
     this.database = database;
     this.worldId = worldId || DEFAULT_WORLD_ID;
   }
 
-  async listChunkKeys() {
+  async listChunkKeys(): Promise<string[]> {
     return this.database.listChunkKeys(this.worldId);
   }
 
-  async loadChunk(key) {
+  async loadChunk(key: string): Promise<Uint8Array | null> {
     try {
       return await this.database.loadChunk(this.worldId, key);
     } catch (error) {
@@ -264,7 +315,7 @@ class IndexedDbChunkStorage {
     }
   }
 
-  async saveChunk(key, blocks) {
+  async saveChunk(key: string, blocks: Uint8Array): Promise<void> {
     try {
       await this.database.saveChunk(this.worldId, key, blocks);
     } catch (error) {
@@ -272,7 +323,7 @@ class IndexedDbChunkStorage {
     }
   }
 
-  async deleteChunk(key) {
+  async deleteChunk(key: string): Promise<void> {
     try {
       await this.database.deleteChunk(this.worldId, key);
     } catch (error) {
@@ -281,46 +332,50 @@ class IndexedDbChunkStorage {
   }
 }
 
-class NullChunkStorage {
+class NullChunkStorage implements ChunkStorage {
+  readonly worldId: string;
+
   constructor(worldId = DEFAULT_WORLD_ID) {
     this.worldId = worldId;
   }
 
-  async listChunkKeys() {
+  async listChunkKeys(): Promise<string[]> {
     return [];
   }
 
-  async loadChunk() {
+  async loadChunk(): Promise<Uint8Array | null> {
     return null;
   }
 
-  async saveChunk() {}
+  async saveChunk(): Promise<void> {}
 
-  async deleteChunk() {}
+  async deleteChunk(): Promise<void> {}
 }
 
-class WorldRegistry {
-  constructor(database) {
+export class WorldRegistry {
+  private readonly database: SaveDatabase;
+
+  constructor(database: SaveDatabase) {
     this.database = database;
   }
 
-  async listWorlds() {
+  async listWorlds(): Promise<SavedWorld[]> {
     const worlds = await this.database.listWorlds();
     // Most recently edited worlds float to the top of the menu.
     return worlds.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async getActiveWorldId() {
+  async getActiveWorldId(): Promise<string> {
     return await this.database.getMetadata(ACTIVE_WORLD_KEY) || DEFAULT_WORLD_ID;
   }
 
-  async getActiveWorld() {
+  async getActiveWorld(): Promise<SavedWorld> {
     const worlds = await this.listWorlds();
     const activeWorldId = await this.getActiveWorldId();
     return worlds.find((world) => world.id === activeWorldId) ?? worlds[0];
   }
 
-  async setActiveWorld(worldId) {
+  async setActiveWorld(worldId: string): Promise<string> {
     const worlds = await this.listWorlds();
     if (!worlds.some((world) => world.id === worldId)) return this.getActiveWorldId();
 
@@ -328,7 +383,7 @@ class WorldRegistry {
     return worldId;
   }
 
-  async createWorld(name, seed) {
+  async createWorld(name: string, seed: string): Promise<SavedWorld> {
     const now = Date.now();
     const world = {
       id: createWorldId(now),
@@ -343,7 +398,7 @@ class WorldRegistry {
     return world;
   }
 
-  async ensureDefaultWorld() {
+  async ensureDefaultWorld(): Promise<void> {
     const defaultWorld = await this.database.getWorld(DEFAULT_WORLD_ID);
     if (defaultWorld) return;
 
@@ -358,7 +413,7 @@ class WorldRegistry {
   }
 }
 
-function readIndexedDb() {
+function readIndexedDb(): IDBFactory | null {
   try {
     return globalThis.indexedDB ?? null;
   } catch {
@@ -366,71 +421,84 @@ function readIndexedDb() {
   }
 }
 
-function requestToPromise(request) {
-  return new Promise((resolve, reject) => {
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed."));
   });
 }
 
-function transactionDone(transaction) {
-  return new Promise((resolve, reject) => {
+function transactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
     transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
     transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
   });
 }
 
-function chunkRecordId(worldId, chunkKey) {
+function chunkRecordId(worldId: string, chunkKey: string): string {
   return `${worldId}|${chunkKey}`;
 }
 
-function createWorldId(now) {
+function createWorldId(now: number): string {
   const random = Math.random().toString(36).slice(2, 8);
   return `world-${now.toString(36)}-${random}`;
 }
 
-function createRandomSeed(now) {
+function createRandomSeed(now: number): string {
   const random = Math.random().toString(36).slice(2, 10);
   return `${now.toString(36)}-${random}`;
 }
 
-function sanitizeWorldName(name) {
+function sanitizeWorldName(name: unknown): string {
   const trimmed = String(name || "").trim();
   return trimmed || "Untitled World";
 }
 
-function sanitizeWorldSeed(seed) {
+function sanitizeWorldSeed(seed: unknown): string {
   return String(seed || "").trim();
 }
 
-function normalizeWorld(world) {
-  if (!world || typeof world.id !== "string") return null;
+function normalizeWorld(world: unknown): SavedWorld | null {
+  if (!isRecord(world) || typeof world.id !== "string") return null;
 
   // Normalize on read so future metadata additions can be optional and backwards-compatible.
   return {
     id: world.id,
     name: sanitizeWorldName(world.name),
     seed: sanitizeWorldSeed(world.seed),
-    createdAt: Number.isFinite(world.createdAt) ? world.createdAt : 0,
-    updatedAt: Number.isFinite(world.updatedAt) ? world.updatedAt : 0
+    createdAt: readTimestamp(world.createdAt),
+    updatedAt: readTimestamp(world.updatedAt)
   };
 }
 
-function cloneWorld(world) {
-  return world ? { ...world } : null;
+function cloneWorld(world: SavedWorld | undefined | null): SavedWorld | null {
+  return world ? cloneSavedWorld(world) : null;
 }
 
-function cloneChunkBuffer(blocks) {
-  return blocks.buffer.slice(blocks.byteOffset, blocks.byteOffset + blocks.byteLength);
+function cloneSavedWorld(world: SavedWorld): SavedWorld {
+  return { ...world };
 }
 
-function decodeStoredBlocks(blocks) {
+function readTimestamp(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function cloneChunkBuffer(blocks: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(blocks.byteLength);
+  copy.set(blocks);
+  return copy.buffer;
+}
+
+function decodeStoredBlocks(blocks: unknown): Uint8Array | null {
   if (!blocks) return null;
 
-  const decoded = blocks instanceof Uint8Array
-    ? blocks.slice()
-    : new Uint8Array(blocks);
+  const decoded = decodeBinaryPayload(blocks);
+  if (!decoded) return null;
 
   if (decoded.length !== CHUNK_BYTE_LENGTH) {
     // A length mismatch means this payload belongs to another chunk shape or a corrupt save.
@@ -438,4 +506,16 @@ function decodeStoredBlocks(blocks) {
   }
 
   return decoded;
+}
+
+function decodeBinaryPayload(payload: unknown): Uint8Array | null {
+  if (payload instanceof Uint8Array) return payload.slice();
+  if (payload instanceof ArrayBuffer) return new Uint8Array(payload.slice(0));
+  if (!ArrayBuffer.isView(payload)) return null;
+
+  // IndexedDB should give us ArrayBuffer/Uint8Array here, but accepting any view keeps
+  // older experimental saves readable if their shape is otherwise correct.
+  const view = payload as ArrayBufferView;
+  const buffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+  return new Uint8Array(buffer);
 }
