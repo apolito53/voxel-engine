@@ -9,7 +9,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Strict TypeScript Vite browser app using native ES modules plus a module Web Worker for chunk CPU work.
 - Three.js handles rendering, camera, materials, lights, and meshes.
 - World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.ts`.
-- The app code owns chunks, terrain generation, voxel meshing, player movement, collision, ray picking, HUD, minimap, impact damage, and simple physics toys.
+- The app code owns chunks, terrain generation, voxel meshing, player movement, collision, ray picking, HUD, minimap, impact damage, debris lifetime, and simple physics toys.
 
 ## Commands
 
@@ -32,7 +32,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Required DOM/canvas lookup helpers: `src/dom.ts`
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering and seed generation: `src/worldMenu.ts`
-- Debug HUD throttling and renderer stats text: `src/debugHud.ts`
+- Debug HUD throttling, frame-spike tracking, and renderer stats text: `src/debugHud.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, health, and placeable palette: `src/blocks.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
@@ -41,12 +41,12 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
-- Chunk ownership, worker scheduling, streaming, reads/writes, sparse block damage: `src/world.ts`
+- Chunk ownership, worker scheduling, streaming, reads/writes, sparse block damage, coalesced chunk-save writes: `src/world.ts`
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
 - First-person movement, pointer lock, voxel collision: `src/player.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
-- Throwable bouncing physics core, impact speed reporting, cube fragments: `src/physics.ts`
+- Throwable bouncing physics core, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
@@ -65,12 +65,13 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded slice that keeps nearby chunks first, then prioritizes chunks inside the camera view.
-7. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
-8. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-9. Each animation frame updates player motion, chunk streaming, physics toys, speed-gated impact damage, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active.
-10. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
-11. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`, then edited chunk snapshots are queued to IndexedDB as raw binary chunk payloads and neighboring chunks are marked dirty when edge blocks change.
-12. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning small loose cube fragments.
+7. Completed worker/storage chunk results are also applied in bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or meshes in one frame.
+8. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
+9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
+10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active.
+11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
+12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
+13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning small loose cube fragments that reuse geometry/materials, avoid shadow casting, sleep when settled, and expire after a short lifetime.
 
 ## Common Change Targets
 
@@ -83,7 +84,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior or impact damage: `src/physics.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
+- Change thrown object behavior, debris budget/lifetime, or impact damage: `src/physics.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyF` and `handlePhysicsImpact` in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
@@ -91,6 +92,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - `rg.exe` may be blocked on this Windows machine; fall back to bounded PowerShell searches.
 - `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
+- Edited chunk saves are debounced and coalesced per chunk so rapid destruction does not spam IndexedDB with intermediate snapshots; call `VoxelWorld.flushStorageWrites()` before switching storage or unloading a world.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
 - Worker meshes treat missing neighbor chunks as temporarily solid so streaming does not draw chunk-edge walls before neighbors load and trigger a remesh.
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.

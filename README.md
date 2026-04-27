@@ -38,8 +38,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Left click` break block
 - `Right click` place block
 - `1-5` select block
-- `F` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into loose cube fragments
-- `F3` toggle debug overlay
+- `F` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into loose cube fragments that sleep/expire to keep debris cheap
+- `F3` toggle debug overlay, including smoothed FPS plus raw/peak frame time for hitch hunting
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
 - `Esc` pause and release mouse
@@ -56,7 +56,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, and world lifecycle orchestration
-- `src/world.ts`: chunk ownership, worker scheduling, streaming, block reads/writes, and sparse block damage
+- `src/world.ts`: chunk ownership, worker scheduling, streaming, block reads/writes, sparse block damage, and coalesced edited-chunk saves
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
@@ -64,7 +64,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/player.ts`: first-person controller and voxel collision
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
-- `src/physics.ts`: simple sphere-vs-voxel rigid bodies, impact reporting, and cube fragments
+- `src/physics.ts`: simple sphere-vs-voxel rigid bodies, impact reporting, and shared-resource cube fragments
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing

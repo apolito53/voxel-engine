@@ -101,6 +101,8 @@ const gpuInfo = readGpuInfo(renderer);
 const shadowBasis = createDirectionalShadowBasis(SUN_OFFSET);
 const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
+const physicsImpacts: PhysicsImpact[] = [];
+const damagedBlockKeysThisFrame = new Set<string>();
 
 const debugHud = new DebugHud({
   panel: debugPanel,
@@ -270,7 +272,8 @@ renderer.domElement.addEventListener("mousedown", (event) => {
 });
 
 function animate(): void {
-  const delta = Math.min(clock.getDelta(), 0.04);
+  const rawDelta = clock.getDelta();
+  const delta = Math.min(rawDelta, 0.04);
 
   if (inWorld) {
     const activeWorld = requireWorld();
@@ -290,19 +293,23 @@ function animate(): void {
       chunkStreamFrustum
     );
 
-    const physicsStepToys = [...toys];
-    const damagedBlocksThisFrame = new Set<string>();
-    for (const toy of physicsStepToys) {
-      const impacts = toy.update(delta, activeWorld);
-      for (const impact of impacts) {
-        handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame);
-      }
+    physicsImpacts.length = 0;
+    damagedBlockKeysThisFrame.clear();
+    const physicsToyCountAtFrameStart = toys.length;
+    for (let index = 0; index < physicsToyCountAtFrameStart; index += 1) {
+      const toy = toys[index];
+      if (!toy) continue;
+      toy.update(delta, activeWorld, physicsImpacts);
     }
+    for (const impact of physicsImpacts) {
+      handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
+    }
+    pruneExpiredToys();
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
     updateHud();
     debugHud.update(
-      delta,
+      rawDelta,
       playerChunk,
       activeWorld.getStats(),
       minimapRenderer.lastUpdateMs
@@ -400,11 +407,26 @@ function addPhysicsToy(toy: PhysicsToy): void {
 
 function enforcePhysicsToyBudget(): void {
   while (toys.length > MAX_PHYSICS_TOYS) {
-    const removedToy = toys.shift();
-    if (!removedToy) return;
-    scene.remove(removedToy.mesh);
-    removedToy.dispose();
+    removePhysicsToyAt(0);
   }
+}
+
+function pruneExpiredToys(): void {
+  for (let index = toys.length - 1; index >= 0; index -= 1) {
+    if (toys[index]?.isExpired) {
+      removePhysicsToyAt(index);
+    }
+  }
+}
+
+function removePhysicsToyAt(index: number): void {
+  const [removedToy] = toys.splice(index, 1);
+  if (!removedToy) {
+    return;
+  }
+
+  scene.remove(removedToy.mesh);
+  removedToy.dispose();
 }
 
 async function refreshHomeWorldList(): Promise<void> {

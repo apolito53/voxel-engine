@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
+import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import { QUALITY_PRESET_ORDER, QUALITY_PRESETS, SUPER_ULTRA_PRESET_ID } from "../src/qualityPresets";
@@ -10,6 +11,7 @@ import {
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "../src/shadows";
+import type { ChunkStorage } from "../src/chunkStorage";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
@@ -199,6 +201,30 @@ test("world fallback streaming loads and unloads bounded chunk windows", () => {
   assertEqual(stats.pendingChunkLoads, 0, "fallback streaming should not leave pending worker loads");
 });
 
+test("world applies completed generated chunks within the frame budget", () => {
+  const world = new VoxelWorld({ seed: "worker-result-budget-test" });
+  const chunkByteLength = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
+
+  for (let cx = 0; cx < 5; cx += 1) {
+    const requestId = cx + 1;
+    const key = world.key(cx, 0);
+    world.pendingChunkKeys.add(key);
+    world.pendingChunkLoads.set(requestId, { key, cx, cz: 0 });
+    world.workerResults.push({
+      type: "generated",
+      requestId,
+      cx,
+      cz: 0,
+      blocks: new Uint8Array(chunkByteLength)
+    } satisfies ChunkGeneratedResult);
+  }
+
+  world.processGeneratedChunkResults(2);
+
+  assertEqual(world.getStats().loadedChunks, 2, "only the budgeted generated chunks should be applied");
+  assertEqual(world.workerResults.length, 3, "extra generated chunks should remain queued for later frames");
+});
+
 test("world block reads, writes, and solidity follow bounds", async () => {
   const world = new VoxelWorld({ seed: "block-test" });
   world.ensureChunksAround(0, 0, 0);
@@ -211,6 +237,42 @@ test("world block reads, writes, and solidity follow bounds", async () => {
 
   await world.flushStorageWrites();
   assertEqual(world.getStats().savedChunks, 1, "edited chunk should be tracked as saved");
+});
+
+test("world coalesces repeated chunk saves before flushing storage", async () => {
+  const savedSnapshots: Uint8Array[] = [];
+  const storage: ChunkStorage = {
+    worldId: "coalesce-test",
+    async listChunkKeys(): Promise<string[]> {
+      return [];
+    },
+    async loadChunk(): Promise<Uint8Array | null> {
+      return null;
+    },
+    async saveChunk(_key: string, blocks: Uint8Array): Promise<void> {
+      savedSnapshots.push(blocks.slice());
+    },
+    async deleteChunk(): Promise<void> {}
+  };
+  const world = new VoxelWorld({ seed: "save-coalesce-test", storage });
+  world.ensureChunksAround(0, 0, 0);
+
+  world.setBlock(1, WORLD_HEIGHT - 2, 3, BLOCK.ember);
+  world.setBlock(1, WORLD_HEIGHT - 2, 4, BLOCK.sand);
+
+  assertEqual(world.getStats().pendingChunkSaves, 1, "multiple edits in one chunk should queue one latest save");
+  assertEqual(savedSnapshots.length, 0, "debounced chunk saves should not write every intermediate edit");
+
+  await world.flushStorageWrites();
+
+  assertEqual(savedSnapshots.length, 1, "flushing should persist the coalesced chunk snapshot once");
+  const snapshot = savedSnapshots[0];
+  assert(snapshot instanceof Uint8Array, "flush should provide a concrete saved chunk snapshot");
+  assertEqual(
+    snapshot[1 + CHUNK_SIZE * (4 + CHUNK_SIZE * (WORLD_HEIGHT - 2))],
+    BLOCK.sand,
+    "coalesced save should contain the latest edit"
+  );
 });
 
 test("block damage tracks health before removing voxels", () => {

@@ -22,6 +22,7 @@ const VIEW_PRIORITY_NEAR_RADIUS = 2;
 const VIEW_PRIORITY_FRONT_DOT = 0.42;
 const VIEW_PRIORITY_SIDE_DOT = -0.15;
 const FRUSTUM_PRIORITY_PADDING = CHUNK_SIZE * 0.5;
+const STORAGE_SAVE_DEBOUNCE_MS = 250;
 
 export type WorldStats = {
   readonly loadedChunks: number;
@@ -40,6 +41,7 @@ export type WorldStats = {
   readonly culledDirtyChunks: number;
   readonly modifiedChunks: number;
   readonly damagedBlocks: number;
+  readonly pendingChunkSaves: number;
 };
 
 export type WorldOptions = {
@@ -121,7 +123,10 @@ export class VoxelWorld implements CollisionWorld {
   workerResults: ChunkWorkerResult[];
   savedChunkResults: SavedChunkLoadResult[];
   storageOperations: Set<Promise<void>>;
+  chunkStorageChains: Map<string, Promise<void>>;
+  pendingSavedChunkWrites: Map<string, Uint8Array>;
   storageGeneration: number;
+  storageFlushTimer: ReturnType<typeof setTimeout> | null;
   workerRequestId: number;
   worker: Worker | null;
   priorityCx: number;
@@ -155,7 +160,10 @@ export class VoxelWorld implements CollisionWorld {
     this.workerResults = [];
     this.savedChunkResults = [];
     this.storageOperations = new Set();
+    this.chunkStorageChains = new Map();
+    this.pendingSavedChunkWrites = new Map();
     this.storageGeneration = 0;
+    this.storageFlushTimer = null;
     this.workerRequestId = 0;
     this.worker = this.createWorker();
     this.priorityCx = 0;
@@ -328,8 +336,11 @@ export class VoxelWorld implements CollisionWorld {
     viewFrustum: THREE.Frustum | null = null
   ): ChunkCoords {
     this.lastLoadedChunks = 0;
-    this.processSavedChunkResults();
-    this.processGeneratedChunkResults();
+    // Worker/storage callbacks can complete in bursts. Apply completed work with
+    // the same budget discipline as new requests so fresh high-distance worlds do
+    // not hitch while the main thread uploads a pile of chunks at once.
+    this.processSavedChunkResults(maxLoads);
+    this.processGeneratedChunkResults(maxLoads);
     const center = this.toChunkCoords(x, z);
     this.setPriority(center.cx, center.cz, viewDirection, viewFrustum);
     this.queueChunksAround(center.cx, center.cz, loadRadius);
@@ -507,10 +518,17 @@ export class VoxelWorld implements CollisionWorld {
       });
   }
 
-  processSavedChunkResults(): void {
+  processSavedChunkResults(maxResults = MAX_CHUNK_LOADS_PER_FRAME): void {
     if (this.savedChunkResults.length === 0) return;
 
+    const remaining: SavedChunkLoadResult[] = [];
+    let processed = 0;
     for (const result of this.savedChunkResults) {
+      if (processed >= maxResults) {
+        remaining.push(result);
+        continue;
+      }
+
       const pending = this.pendingSavedChunkLoads.get(result.key);
       if (!pending || pending.generation !== result.generation) continue;
 
@@ -519,6 +537,7 @@ export class VoxelWorld implements CollisionWorld {
 
       if (!result.blocks) {
         this.forgetSavedChunk(result.key);
+        processed += 1;
         continue;
       }
 
@@ -527,17 +546,23 @@ export class VoxelWorld implements CollisionWorld {
         this.addGeneratedChunk(result.cx, result.cz, result.blocks, true);
         this.lastLoadedChunks += 1;
       }
+      processed += 1;
     }
 
-    this.savedChunkResults.length = 0;
+    this.savedChunkResults = remaining;
   }
 
-  processGeneratedChunkResults(): void {
+  processGeneratedChunkResults(maxResults = MAX_CHUNK_LOADS_PER_FRAME): void {
     if (this.workerResults.length === 0) return;
 
     const remaining: ChunkWorkerResult[] = [];
+    let processed = 0;
     for (const result of this.workerResults) {
       if (result.type !== "generated") {
+        remaining.push(result);
+        continue;
+      }
+      if (processed >= maxResults) {
         remaining.push(result);
         continue;
       }
@@ -551,6 +576,7 @@ export class VoxelWorld implements CollisionWorld {
         this.addGeneratedChunk(result.cx, result.cz, result.blocks);
         this.lastLoadedChunks += 1;
       }
+      processed += 1;
     }
 
     this.workerResults = remaining;
@@ -671,17 +697,22 @@ export class VoxelWorld implements CollisionWorld {
 
   rememberModifiedChunk(key: string, blocks: Uint8Array): void {
     // Copy before saving so later in-memory edits cannot mutate the stored snapshot by reference.
+    // The actual IndexedDB write is debounced/coalesced per chunk; rapid destruction can touch
+    // the same chunk dozens of times in a second, and writing every intermediate snapshot is
+    // wasted main-thread pressure.
     const snapshot = blocks.slice();
     this.savedChunkKeys.add(key);
     this.savedChunks.set(key, snapshot);
-    this.queueStorageOperation(this.storage.saveChunk(key, snapshot));
+    this.pendingSavedChunkWrites.set(key, snapshot);
+    this.schedulePendingChunkSaveFlush();
   }
 
   forgetSavedChunk(key: string): void {
     // Dropping a saved chunk lets terrain generation own that coordinate again.
     this.savedChunkKeys.delete(key);
     this.savedChunks.delete(key);
-    this.queueStorageOperation(this.storage.deleteChunk(key));
+    this.pendingSavedChunkWrites.delete(key);
+    this.queueChunkStorageOperation(key, () => this.storage.deleteChunk(key));
   }
 
   async loadSavedChunkNow(key: string): Promise<Uint8Array | null> {
@@ -698,22 +729,65 @@ export class VoxelWorld implements CollisionWorld {
     return blocks;
   }
 
-  queueStorageOperation(operation: Promise<unknown>): Promise<void> {
-    const trackedOperation = Promise.resolve(operation)
+  schedulePendingChunkSaveFlush(): void {
+    if (this.storageFlushTimer !== null) return;
+
+    this.storageFlushTimer = setTimeout(() => {
+      this.storageFlushTimer = null;
+      this.flushPendingChunkSaves();
+    }, STORAGE_SAVE_DEBOUNCE_MS);
+  }
+
+  flushPendingChunkSaves(): void {
+    if (this.storageFlushTimer !== null) {
+      clearTimeout(this.storageFlushTimer);
+      this.storageFlushTimer = null;
+    }
+    if (this.pendingSavedChunkWrites.size === 0) return;
+
+    const pendingWrites = Array.from(this.pendingSavedChunkWrites.entries());
+    this.pendingSavedChunkWrites.clear();
+
+    for (const [key, snapshot] of pendingWrites) {
+      this.queueChunkStorageOperation(key, () => this.storage.saveChunk(key, snapshot));
+    }
+  }
+
+  queueChunkStorageOperation(
+    key: string,
+    operationFactory: () => Promise<unknown>
+  ): Promise<void> {
+    const previousOperation = this.chunkStorageChains.get(key) ?? Promise.resolve();
+    const trackedOperation = previousOperation
+      .catch((error) => {
+        console.warn("Save storage operation failed", error);
+      })
+      .then(operationFactory)
       .catch((error) => {
         console.warn("Save storage operation failed", error);
       })
       .then(() => undefined);
 
+    this.chunkStorageChains.set(key, trackedOperation);
     this.storageOperations.add(trackedOperation);
     void trackedOperation.finally(() => {
       this.storageOperations.delete(trackedOperation);
+      if (this.chunkStorageChains.get(key) === trackedOperation) {
+        this.chunkStorageChains.delete(key);
+      }
     });
     return trackedOperation;
   }
 
   async flushStorageWrites(): Promise<void> {
-    await Promise.allSettled(Array.from(this.storageOperations));
+    this.flushPendingChunkSaves();
+
+    // Saving can chain per chunk to preserve write order. Loop until both the immediate
+    // operations and edits queued while we were waiting have drained.
+    while (this.storageOperations.size > 0 || this.pendingSavedChunkWrites.size > 0) {
+      this.flushPendingChunkSaves();
+      await Promise.allSettled(Array.from(this.storageOperations));
+    }
   }
 
   unloadChunksOutside(
@@ -756,7 +830,7 @@ export class VoxelWorld implements CollisionWorld {
     maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME
   ): number {
     if (this.worker) {
-      this.processMeshResults(scene, material);
+      this.processMeshResults(scene, material, maxRebuilds);
       this.lastRequestedMeshes = this.requestDirtyMeshBuilds(maxRebuilds);
       return this.lastMeshedChunks;
     }
@@ -775,13 +849,21 @@ export class VoxelWorld implements CollisionWorld {
     return rebuilt;
   }
 
-  processMeshResults(scene: THREE.Scene, material: THREE.Material): void {
+  processMeshResults(
+    scene: THREE.Scene,
+    material: THREE.Material,
+    maxResults = MAX_CHUNK_REBUILDS_PER_FRAME
+  ): void {
     this.lastMeshedChunks = 0;
     if (this.workerResults.length === 0) return;
 
     const remaining: ChunkWorkerResult[] = [];
     for (const result of this.workerResults) {
       if (result.type !== "meshed") {
+        remaining.push(result);
+        continue;
+      }
+      if (this.lastMeshedChunks >= maxResults) {
         remaining.push(result);
         continue;
       }
@@ -1015,7 +1097,8 @@ export class VoxelWorld implements CollisionWorld {
       visibleDirtyChunks,
       culledDirtyChunks: dirtyChunks - visibleDirtyChunks,
       modifiedChunks,
-      damagedBlocks: this.blockDamage.size
+      damagedBlocks: this.blockDamage.size,
+      pendingChunkSaves: this.pendingSavedChunkWrites.size + this.chunkStorageChains.size
     };
   }
 
