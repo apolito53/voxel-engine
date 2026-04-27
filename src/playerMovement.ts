@@ -20,9 +20,11 @@ export const JUMP_SPEED = 8.2 * METERS_PER_BLOCK;
 export const FLIGHT_TOGGLE_KEY = "KeyF";
 export const CROUCH_OR_DESCEND_KEY = "KeyC";
 // Flight uses the same speed tiers as walking, but gets its own acceleration
-// and drag so it feels floaty without drifting forever.
+// and drag so it feels floaty without drifting forever. Boosted flight needs
+// extra acceleration too; otherwise drag keeps it far below its speed cap.
 export const FLIGHT_BOOST_SPEED = SPRINT_SPEED * 2;
 export const FLIGHT_ACCELERATION = 56 * METERS_PER_BLOCK;
+export const FLIGHT_BOOST_ACCELERATION = FLIGHT_ACCELERATION * 4;
 export const FLIGHT_DRAG = 7.5;
 
 // A slide is deliberately a "carry sprint momentum" state, not a separate
@@ -49,12 +51,8 @@ export function getFlightMovementSpeed(sprinting: boolean): number {
   return sprinting ? FLIGHT_BOOST_SPEED : WALK_SPEED;
 }
 
-export function shouldActivateFlightFromAir(
-  flying: boolean,
-  grounded: boolean,
-  repeatedKeyPress: boolean
-): boolean {
-  return !flying && !grounded && !repeatedKeyPress;
+export function getFlightMovementAcceleration(sprinting: boolean): number {
+  return sprinting ? FLIGHT_BOOST_ACCELERATION : FLIGHT_ACCELERATION;
 }
 
 export function shouldPrimeSlide(

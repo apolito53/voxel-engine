@@ -12,16 +12,19 @@ import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
+  FLIGHT_ACCELERATION,
+  FLIGHT_BOOST_ACCELERATION,
   FLIGHT_BOOST_SPEED,
+  FLIGHT_DRAG,
   FLIGHT_TOGGLE_KEY,
   PREVIOUS_SPRINT_SPEED,
   SLIDE_PRIME_SPEED,
   SLIDE_STOP_SPEED,
   SPRINT_SPEED,
   WALK_SPEED,
+  getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
-  shouldActivateFlightFromAir,
   shouldContinueSlide,
   shouldPrimeSlide
 } from "../src/playerMovement";
@@ -234,21 +237,23 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
   assertEqual(getFlightMovementSpeed(false), WALK_SPEED, "plain flight should use walk speed");
   assertEqual(getFlightMovementSpeed(true), FLIGHT_BOOST_SPEED, "boosted flight should use the larger flight cap");
-  assert(
-    shouldActivateFlightFromAir(false, false, false),
-    "fresh Space presses while airborne should enter flight mode"
+  assertEqual(
+    getFlightMovementAcceleration(false),
+    FLIGHT_ACCELERATION,
+    "plain flight should use floaty baseline acceleration"
+  );
+  assertEqual(
+    getFlightMovementAcceleration(true),
+    FLIGHT_BOOST_ACCELERATION,
+    "boosted flight should use enough acceleration to overcome flight drag"
   );
   assert(
-    !shouldActivateFlightFromAir(false, true, false),
-    "grounded Space presses should remain normal jumps"
+    FLIGHT_BOOST_SPEED > SPRINT_SPEED,
+    "boosted flight cap should be faster than ground sprint"
   );
   assert(
-    !shouldActivateFlightFromAir(true, false, false),
-    "Space should not re-toggle flight while already flying"
-  );
-  assert(
-    !shouldActivateFlightFromAir(false, false, true),
-    "key repeat should not repeatedly activate flight"
+    FLIGHT_BOOST_ACCELERATION / FLIGHT_DRAG > FLIGHT_BOOST_SPEED,
+    "boosted flight acceleration should be high enough to actually reach its cap through drag"
   );
 
   assert(

@@ -21,9 +21,9 @@ import {
   SLIDE_PRIME_SPEED,
   SPRINT_SPEED,
   WALK_SPEED,
+  getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
-  shouldActivateFlightFromAir,
   shouldContinueSlide,
   shouldPrimeSlide
 } from "./playerMovement";
@@ -123,14 +123,6 @@ export class PlayerController {
         event.preventDefault();
         this.toggleFlight();
         return;
-      }
-      // Space stays a normal jump on the ground, but becomes an in-air flight rescue.
-      if (
-        event.code === "Space" &&
-        shouldActivateFlightFromAir(this.flying, this.onGround, event.repeat)
-      ) {
-        event.preventDefault();
-        this.setFlightEnabled(true);
       }
       this.keys.add(event.code);
     });
@@ -310,7 +302,7 @@ export class PlayerController {
       this.applyDirectionalAcceleration(
         wish,
         getFlightMovementSpeed(this.isSprintHeld()),
-        FLIGHT_ACCELERATION,
+        getFlightMovementAcceleration(this.isSprintHeld()),
         delta
       );
     }
