@@ -201,6 +201,12 @@ export class PlayerController {
     return this.active;
   }
 
+  isSprintFeedbackActive(): boolean {
+    if (!this.active || !this.isSprintHeld()) return false;
+    if (this.flying) return this.hasFlightMovementInput();
+    return this.isGroundSprintActive(this.onGround) && this.hasHorizontalMovementInput();
+  }
+
   get movementMode(): PlayerMovementMode {
     if (this.flying) return "flight";
     if (this.sliding || this.slideMomentumAirborne) return "slide";
@@ -528,6 +534,19 @@ export class PlayerController {
 
   isCrouchOrDescendHeld(): boolean {
     return this.keys.has(CROUCH_OR_DESCEND_KEY);
+  }
+
+  hasHorizontalMovementInput(): boolean {
+    return (
+      this.keys.has("KeyW") ||
+      this.keys.has("KeyA") ||
+      this.keys.has("KeyS") ||
+      this.keys.has("KeyD")
+    );
+  }
+
+  hasFlightMovementInput(): boolean {
+    return this.hasHorizontalMovementInput() || this.keys.has("Space") || this.isCrouchOrDescendHeld();
   }
 
   moveAxis(axis: MovementAxis, amount: number): void {

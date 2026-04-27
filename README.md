@@ -36,7 +36,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide; hold `W` to glide longer, `Space` to slide-jump
-- `Shift` sprint on ground, or use the stronger flight speed boost
+- `Shift` sprint on ground, or use the stronger flight speed boost; active sprint/boost widens FOV and adds peripheral speed lines
 - `Left click` break block
 - `Right click` place block
 - `1-5` select block
@@ -66,6 +66,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
 - `src/player.ts`: first-person controller and voxel collision
+- `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants

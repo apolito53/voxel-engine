@@ -30,6 +30,12 @@ import {
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "./shadows";
+import {
+  BASE_CAMERA_FOV,
+  SPRINT_FEEDBACK_ACTIVE_CLASS,
+  getSprintFeedbackTargetFov,
+  smoothSprintFeedbackFov
+} from "./sprintFeedback";
 import { TargetBlockHighlighter } from "./targetHighlighter";
 import { VoxelWorld } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
@@ -57,6 +63,7 @@ const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle")
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
 const minimap = requireElement<HTMLCanvasElement>("#minimap");
 const hudTitle = requireElement<HTMLElement>("#hud .title");
+const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -69,7 +76,7 @@ const sceneFog = new THREE.Fog(0x8fb9d8, bootPreset.fogNear, bootPreset.fogFar);
 scene.fog = sceneFog;
 
 const camera = new THREE.PerspectiveCamera(
-  75,
+  BASE_CAMERA_FOV,
   window.innerWidth / window.innerHeight,
   0.05,
   bootPreset.cameraFar
@@ -334,8 +341,10 @@ function animate(): void {
     );
     minimapRenderer.update(delta);
     updateTargetBlockHighlighter();
+    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), delta);
   } else {
     targetBlockHighlighter.hide();
+    updateSprintFeedback(false, delta);
   }
 
   updateSunShadowAnchor();
@@ -354,6 +363,18 @@ function updateHud(): void {
   const movementMode = requirePlayer().movementMode;
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
   hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}${modeSuffix}`;
+}
+
+function updateSprintFeedback(active: boolean, delta: number): void {
+  const targetFov = getSprintFeedbackTargetFov(active);
+  const nextFov = smoothSprintFeedbackFov(camera.fov, targetFov, delta);
+
+  if (camera.fov !== nextFov) {
+    camera.fov = nextFov;
+    camera.updateProjectionMatrix();
+  }
+
+  sprintOverlay.classList.toggle(SPRINT_FEEDBACK_ACTIVE_CLASS, active);
 }
 
 function getTargetBlockHit(): VoxelRaycastHit | null {

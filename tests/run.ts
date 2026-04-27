@@ -60,6 +60,13 @@ import {
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "../src/shadows";
+import {
+  BASE_CAMERA_FOV,
+  SPRINT_FOV_MULTIPLIER,
+  SPRINT_FOV_RESPONSE,
+  getSprintFeedbackTargetFov,
+  smoothSprintFeedbackFov
+} from "../src/sprintFeedback";
 import type { ChunkStorage } from "../src/chunkStorage";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
@@ -353,6 +360,26 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   assert(
     !shouldPreserveSlideJumpMomentum(false, true),
     "normal jumps should not enter slide momentum preservation"
+  );
+});
+
+test("sprint feedback widens FOV smoothly without touching base camera setup", () => {
+  const sprintFov = BASE_CAMERA_FOV * SPRINT_FOV_MULTIPLIER;
+
+  assertEqual(getSprintFeedbackTargetFov(false), BASE_CAMERA_FOV, "inactive sprint feedback should use base FOV");
+  assertEqual(getSprintFeedbackTargetFov(true), sprintFov, "active sprint feedback should widen FOV by 15 percent");
+  assert(SPRINT_FOV_RESPONSE > 0, "sprint feedback FOV smoothing should move toward its target");
+
+  const firstSprintStep = smoothSprintFeedbackFov(BASE_CAMERA_FOV, sprintFov, 1 / 60);
+  assert(
+    firstSprintStep > BASE_CAMERA_FOV && firstSprintStep < sprintFov,
+    "sprint feedback should ease outward instead of snapping"
+  );
+
+  const firstReleaseStep = smoothSprintFeedbackFov(sprintFov, BASE_CAMERA_FOV, 1 / 60);
+  assert(
+    firstReleaseStep > BASE_CAMERA_FOV && firstReleaseStep < sprintFov,
+    "sprint feedback should ease back to base FOV"
   );
 });
 

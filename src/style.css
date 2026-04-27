@@ -312,6 +312,7 @@ body.playing canvas {
 body:not(.in-world) #hud,
 body:not(.in-world) #debug-panel,
 body:not(.in-world) #minimap,
+body:not(.in-world) #sprint-overlay,
 body:not(.in-world) #crosshair {
   display: none;
 }
@@ -376,6 +377,48 @@ body:not(.in-world) #crosshair {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   image-rendering: pixelated;
   pointer-events: none;
+}
+
+#sprint-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 110ms ease-out;
+}
+
+#sprint-overlay.is-active {
+  opacity: 0.72;
+}
+
+#sprint-overlay::before,
+#sprint-overlay::after {
+  content: "";
+  position: absolute;
+  top: 7%;
+  bottom: 7%;
+  width: 34%;
+  background:
+    repeating-linear-gradient(
+      104deg,
+      transparent 0 18px,
+      rgba(255, 255, 255, 0.36) 18px 20px,
+      transparent 20px 56px
+    );
+  filter: drop-shadow(0 1px 5px rgba(0, 0, 0, 0.28));
+  -webkit-mask-image: linear-gradient(to right, #000 0%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to right, #000 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+#sprint-overlay::before {
+  left: -2%;
+}
+
+#sprint-overlay::after {
+  right: -2%;
+  transform: scaleX(-1);
 }
 
 #crosshair {
