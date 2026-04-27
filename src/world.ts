@@ -14,6 +14,9 @@ const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
 const MAX_CHUNK_LOADS_PER_FRAME = 2;
 const MAX_CHUNK_REBUILDS_PER_FRAME = 4;
+const MAX_PENDING_LOAD_MULTIPLIER = 2;
+const MAX_PENDING_MESH_MULTIPLIER = 2;
+const MESH_BACKLOG_LOAD_THROTTLE_MULTIPLIER = 8;
 const VIEW_PRIORITY_NEAR_RADIUS = 2;
 const VIEW_PRIORITY_FRONT_DOT = 0.42;
 const VIEW_PRIORITY_SIDE_DOT = -0.15;
@@ -294,11 +297,14 @@ export class VoxelWorld {
   requestQueuedChunkLoads(centerCx, centerCz, maxLoads = MAX_CHUNK_LOADS_PER_FRAME) {
     if (maxLoads <= 0) return 0;
 
-    const queuedChunks = this.pickNearestQueuedChunks(centerCx, centerCz, maxLoads);
+    const loadSlots = this.availableChunkLoadSlots(maxLoads);
+    if (loadSlots <= 0) return 0;
+
+    const queuedChunks = this.pickNearestQueuedChunks(centerCx, centerCz, loadSlots);
 
     let requested = 0;
     for (const queued of queuedChunks) {
-      if (requested >= maxLoads) break;
+      if (requested >= loadSlots) break;
       const key = this.key(queued.cx, queued.cz);
 
       if (this.savedChunkKeys.has(key) && !this.savedChunks.has(key)) {
@@ -319,6 +325,21 @@ export class VoxelWorld {
     }
 
     return requested;
+  }
+
+  availableChunkLoadSlots(maxLoads) {
+    if (!this.worker) return maxLoads;
+
+    const pendingLoads = this.pendingChunkLoads.size + this.pendingSavedChunkLoads.size;
+    const loadPipelineLimit = Math.max(maxLoads, maxLoads * MAX_PENDING_LOAD_MULTIPLIER);
+    const meshBacklogLimit = Math.max(maxLoads, maxLoads * MESH_BACKLOG_LOAD_THROTTLE_MULTIPLIER);
+
+    // The same worker handles generation and meshing. If we keep feeding generation while
+    // meshes are backed up, the world fills with invisible/temporary chunks before it can
+    // draw them, which shows up as ugly loading holes and boundary flicker at high distances.
+    if (this.countDirtyChunks() > meshBacklogLimit) return 0;
+
+    return Math.max(0, Math.min(maxLoads, loadPipelineLimit - pendingLoads));
   }
 
   pickNearestQueuedChunks(centerCx, centerCz, limit) {
@@ -621,17 +642,25 @@ export class VoxelWorld {
   requestDirtyMeshBuilds(maxBuilds = MAX_CHUNK_REBUILDS_PER_FRAME) {
     if (maxBuilds <= 0) return 0;
 
-    const dirtyChunks = this.pickNearestDirtyChunks(maxBuilds);
+    const buildSlots = this.availableMeshBuildSlots(maxBuilds);
+    if (buildSlots <= 0) return 0;
+
+    const dirtyChunks = this.pickNearestDirtyChunks(buildSlots);
 
     let requested = 0;
     for (const chunk of dirtyChunks) {
       const key = this.key(chunk.cx, chunk.cz);
       this.requestMeshBuild(chunk, key);
       requested += 1;
-      if (requested >= maxBuilds) break;
+      if (requested >= buildSlots) break;
     }
 
     return requested;
+  }
+
+  availableMeshBuildSlots(maxBuilds) {
+    const meshPipelineLimit = Math.max(maxBuilds, maxBuilds * MAX_PENDING_MESH_MULTIPLIER);
+    return Math.max(0, Math.min(maxBuilds, meshPipelineLimit - this.pendingMeshBuilds.size));
   }
 
   pickNearestDirtyChunks(limit) {
@@ -645,6 +674,14 @@ export class VoxelWorld {
     }
 
     return nearest.map((entry) => entry.item);
+  }
+
+  countDirtyChunks() {
+    let dirtyChunks = 0;
+    for (const chunk of this.chunks.values()) {
+      if (chunk.dirty) dirtyChunks += 1;
+    }
+    return dirtyChunks;
   }
 
   insertNearest(nearest, item, centerCx, centerCz, limit) {

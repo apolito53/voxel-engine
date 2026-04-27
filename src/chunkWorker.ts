@@ -312,7 +312,12 @@ function isSolidAt(
 ): boolean {
   if (y < 0) return true;
   if (y >= WORLD_HEIGHT) return false;
-  return BLOCKS[getBlockAt(blocks, neighbors, x, y, z)].solid;
+  const block = getBlockAt(blocks, neighbors, x, y, z);
+
+  // Missing neighbor chunks are unknown, not air. Treat them as solid for this
+  // mesh pass so streaming does not draw temporary chunk-edge walls that vanish
+  // a few frames later when the real neighbor data arrives and marks us dirty.
+  return block === null || BLOCKS[block].solid;
 }
 
 function getBlockAt(
@@ -321,7 +326,7 @@ function getBlockAt(
   x: number,
   y: number,
   z: number
-): number {
+): number | null {
   if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
     return blocks[index(x, y, z)];
   }
@@ -342,7 +347,7 @@ function getBlockAt(
     return neighbors.positiveZ[index(x, y, 0)];
   }
 
-  return BLOCK.air;
+  return null;
 }
 
 function emitGreedyFaces(
