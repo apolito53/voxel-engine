@@ -3,6 +3,11 @@ import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
 import { QUALITY_PRESET_ORDER, QUALITY_PRESETS, SUPER_ULTRA_PRESET_ID } from "../src/qualityPresets";
 import { voxelRaycast } from "../src/raycast";
+import {
+  createDirectionalShadowBasis,
+  getShadowTexelSize,
+  snapShadowAnchorToTexelGrid
+} from "../src/shadows";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
 import { VoxelWorld } from "../src/world";
@@ -162,6 +167,7 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     assert(preset.chunkRebuilds >= 1, `${preset.label} should request at least one chunk rebuild`);
     assert(preset.cameraFar > preset.fogNear, `${preset.label} camera far should exceed fog near`);
     assert(preset.fogFar > preset.fogNear, `${preset.label} fog far should exceed fog near`);
+    assert(isPowerOfTwo(preset.shadowMapSize), `${preset.label} shadow map size should stay GPU-friendly`);
     assert(preset.minimapRowsPerFrame >= 1, `${preset.label} minimap should process at least one row`);
   }
 
@@ -172,6 +178,24 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
 });
 
+test("directional shadow anchor snaps to stable light-space texels", () => {
+  const sunOffset = new THREE.Vector3(18, 132, 10);
+  const basis = createDirectionalShadowBasis(sunOffset);
+  const texelSize = getShadowTexelSize(QUALITY_PRESETS.normal);
+  const anchor = new THREE.Vector3(12.345, 0, -7.89);
+  const snappedAnchor = snapShadowAnchorToTexelGrid(anchor, basis, texelSize);
+  const subTexelAnchor = anchor.clone().addScaledVector(basis.right, texelSize * 0.2);
+  const snappedSubTexelAnchor = snapShadowAnchorToTexelGrid(subTexelAnchor, basis, texelSize);
+
+  assertNearlyInteger(snappedAnchor.dot(basis.right) / texelSize, "right shadow coordinate");
+  assertNearlyInteger(snappedAnchor.dot(basis.up) / texelSize, "up shadow coordinate");
+  assertVectorNearlyEqual(
+    snappedSubTexelAnchor,
+    snappedAnchor,
+    "sub-texel motion should not move the stabilized shadow anchor"
+  );
+});
+
 let passed = 0;
 for (const { name, run } of tests) {
   await run();
@@ -180,3 +204,24 @@ for (const { name, run } of tests) {
 }
 
 console.log(`\n${passed}/${tests.length} engine robustness tests passed`);
+
+function isPowerOfTwo(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && (value & (value - 1)) === 0;
+}
+
+function assertNearlyInteger(value: number, message: string): void {
+  const nearest = Math.round(value);
+  assert(
+    Math.abs(value - nearest) < 0.000001,
+    `${message} should land on an integer texel coordinate`
+  );
+}
+
+function assertVectorNearlyEqual(
+  actual: THREE.Vector3,
+  expected: THREE.Vector3,
+  message: string
+): void {
+  const distance = actual.distanceTo(expected);
+  assert(distance < 0.000001, `${message}. Distance was ${distance}.`);
+}

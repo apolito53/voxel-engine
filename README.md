@@ -65,6 +65,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/raycast.ts`: grid DDA block picking
 - `src/physics.ts`: simple sphere-vs-voxel rigid toy
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
+- `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
 - `src/debugHud.ts`: debug overlay stats formatting and update throttling
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation

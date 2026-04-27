@@ -48,6 +48,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Throwable bouncing physics core: `src/physics.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
+- Directional shadow-map texel snapping helpers: `src/shadows.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
 - Linux/Ubuntu startup helper: `start.sh`
@@ -78,6 +79,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
+- Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach or hit behavior: `src/raycast.ts` and pointer handlers in `src/main.ts`.
 - Change thrown object behavior: `src/physics.ts` plus `KeyF` handling in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.

@@ -15,6 +15,11 @@ import { PhysicsToy } from "./physics";
 import { QualityController } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
+import {
+  createDirectionalShadowBasis,
+  getShadowTexelSize,
+  snapShadowAnchorToTexelGrid
+} from "./shadows";
 import { VoxelWorld } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
@@ -84,6 +89,9 @@ const chunkStreamFrustum = new THREE.Frustum();
 const chunkStreamProjection = new THREE.Matrix4();
 const toys: PhysicsToy[] = [];
 const gpuInfo = readGpuInfo(renderer);
+const shadowBasis = createDirectionalShadowBasis(SUN_OFFSET);
+const desiredShadowAnchor = new THREE.Vector3();
+const stableShadowAnchor = new THREE.Vector3();
 
 const debugHud = new DebugHud({
   panel: debugPanel,
@@ -389,10 +397,22 @@ function clearToys(): void {
 }
 
 function updateSunShadowAnchor(): void {
-  // Keep the directional light stable over the player's local chunk window.
-  sunTarget.position.set(camera.position.x, 0, camera.position.z);
-  sun.position.copy(sunTarget.position).add(SUN_OFFSET);
+  desiredShadowAnchor.set(camera.position.x, 0, camera.position.z);
+  const anchor = qualityController.preset.shadows
+    ? snapShadowAnchorToTexelGrid(
+      desiredShadowAnchor,
+      shadowBasis,
+      getShadowTexelSize(qualityController.preset),
+      stableShadowAnchor
+    )
+    : stableShadowAnchor.copy(desiredShadowAnchor);
+
+  // Move the light and target together so the sun direction stays constant
+  // while the orthographic shadow projection remains stable around the player.
+  sunTarget.position.copy(anchor);
+  sun.position.copy(anchor).add(SUN_OFFSET);
   sunTarget.updateMatrixWorld();
+  sun.updateMatrixWorld();
 }
 
 void startApp();
