@@ -45,6 +45,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
 - First-person movement, pointer lock, voxel collision: `src/player.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
+- Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
 - Throwable bouncing physics core: `src/physics.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions and tuning knobs: `src/qualityPresets.ts`
@@ -80,7 +81,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune movement feel: metric-scaled constants and collision resolution in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
-- Change break/place reach or hit behavior: `src/raycast.ts` and pointer handlers in `src/main.ts`.
+- Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
 - Change thrown object behavior: `src/physics.ts` plus `KeyF` handling in `src/main.ts`.
 - Change HUD/minimap/debug UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, and the orchestration hooks in `src/main.ts`.
 

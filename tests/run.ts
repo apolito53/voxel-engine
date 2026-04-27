@@ -9,6 +9,7 @@ import {
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "../src/shadows";
+import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
 import { VoxelWorld } from "../src/world";
@@ -128,6 +129,59 @@ test("raycast returns hit block and entry face", () => {
     null,
     "raycast should miss when no solid is within reach"
   );
+});
+
+test("raycast handles grid boundaries and exact edge crossings", () => {
+  const boundaryWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return `${x},${y},${z}` === "3,0,0";
+    }
+  };
+
+  assertDeepEqual(
+    voxelRaycast(boundaryWorld, { x: 2, y: 0.5, z: 0.5 }, { x: 1, y: 0, z: 0 }, 8),
+    { block: { x: 3, y: 0, z: 0 }, normal: { x: -1, y: 0, z: 0 }, distance: 1 },
+    "starting exactly on a grid line should not hit the next block at zero distance"
+  );
+
+  const diagonalDirection = new THREE.Vector3(1, 0, 1).normalize();
+  const sideOnlyWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return `${x},${y},${z}` === "0,0,1";
+    }
+  };
+  const diagonalWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return `${x},${y},${z}` === "1,0,1";
+    }
+  };
+
+  assertEqual(
+    voxelRaycast(sideOnlyWorld, { x: 0.5, y: 0.5, z: 0.5 }, diagonalDirection, 2),
+    null,
+    "edge-crossing rays should not hit side-neighbors they only graze"
+  );
+  assertDeepEqual(
+    voxelRaycast(diagonalWorld, { x: 0.5, y: 0.5, z: 0.5 }, diagonalDirection, 2),
+    { block: { x: 1, y: 0, z: 1 }, normal: { x: -1, y: 0, z: 0 }, distance: Math.SQRT1_2 },
+    "edge-crossing rays should advance into the diagonal voxel"
+  );
+});
+
+test("target block highlighter follows targeted block positions", () => {
+  const highlighter = new TargetBlockHighlighter();
+
+  assert(!highlighter.object.visible, "target highlighter should start hidden");
+  highlighter.showBlock({ x: 4, y: 12, z: -3 });
+  assert(highlighter.object.visible, "target highlighter should become visible when a block is targeted");
+  assertVectorNearlyEqual(
+    highlighter.object.position,
+    new THREE.Vector3(4.5, 12.5, -2.5),
+    "target highlighter should sit on the target block center"
+  );
+
+  highlighter.hide();
+  assert(!highlighter.object.visible, "target highlighter should hide when no block is targeted");
 });
 
 test("world fallback streaming loads and unloads bounded chunk windows", () => {

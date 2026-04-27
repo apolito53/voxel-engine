@@ -20,10 +20,12 @@ import {
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "./shadows";
+import { TargetBlockHighlighter } from "./targetHighlighter";
 import { VoxelWorld } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
+const BLOCK_INTERACTION_REACH = 8;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 
 const app = requireElement<HTMLElement>("#app");
@@ -74,6 +76,9 @@ const worldMaterial = new THREE.MeshStandardMaterial({
   roughness: 0.9,
   metalness: 0.0
 });
+
+const targetBlockHighlighter = new TargetBlockHighlighter();
+scene.add(targetBlockHighlighter.object);
 
 let worldRegistry: WorldRegistry | null = null;
 let world: VoxelWorld | null = null;
@@ -242,16 +247,12 @@ renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefa
 renderer.domElement.addEventListener("mousedown", (event) => {
   if (!inWorld) return;
 
-  const activeWorld = requireWorld();
   const activePlayer = requirePlayer();
-  if (!activePlayer.isLooking()) return;
-
-  camera.getWorldDirection(direction);
-  const hit: VoxelRaycastHit | null = voxelRaycast(activeWorld, camera.position, direction, 8);
+  const hit: VoxelRaycastHit | null = getTargetBlockHit();
   if (!hit) return;
 
   if (event.button === 0) {
-    activeWorld.setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
+    requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
   }
 
   if (event.button === 2) {
@@ -262,7 +263,7 @@ renderer.domElement.addEventListener("mousedown", (event) => {
       z: hit.block.z + hit.normal.z
     };
     if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
-    activeWorld.setBlock(target.x, target.y, target.z, block);
+    requireWorld().setBlock(target.x, target.y, target.z, block);
   }
 });
 
@@ -300,6 +301,9 @@ function animate(): void {
       minimapRenderer.lastUpdateMs
     );
     minimapRenderer.update(delta);
+    updateTargetBlockHighlighter();
+  } else {
+    targetBlockHighlighter.hide();
   }
 
   updateSunShadowAnchor();
@@ -316,6 +320,25 @@ function updateChunkStreamFrustum(): void {
 
 function updateHud(): void {
   hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}`;
+}
+
+function getTargetBlockHit(): VoxelRaycastHit | null {
+  if (!inWorld) return null;
+  if (!requirePlayer().isLooking()) return null;
+
+  camera.getWorldDirection(direction);
+  return voxelRaycast(requireWorld(), camera.position, direction, BLOCK_INTERACTION_REACH);
+}
+
+function updateTargetBlockHighlighter(): void {
+  const hit = getTargetBlockHit();
+
+  if (!hit) {
+    targetBlockHighlighter.hide();
+    return;
+  }
+
+  targetBlockHighlighter.showBlock(hit.block);
 }
 
 async function refreshHomeWorldList(): Promise<void> {

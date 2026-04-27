@@ -63,6 +63,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
 - `src/player.ts`: first-person controller and voxel collision
 - `src/raycast.ts`: grid DDA block picking
+- `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/physics.ts`: simple sphere-vs-voxel rigid toy
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
