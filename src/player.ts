@@ -21,7 +21,9 @@ import {
   SLIDE_PRIME_SPEED,
   SPRINT_SPEED,
   WALK_SPEED,
+  getFlightMovementSpeed,
   getGroundMovementSpeed,
+  shouldActivateFlightFromAir,
   shouldContinueSlide,
   shouldPrimeSlide
 } from "./playerMovement";
@@ -121,6 +123,14 @@ export class PlayerController {
         event.preventDefault();
         this.toggleFlight();
         return;
+      }
+      // Space stays a normal jump on the ground, but becomes an in-air flight rescue.
+      if (
+        event.code === "Space" &&
+        shouldActivateFlightFromAir(this.flying, this.onGround, event.repeat)
+      ) {
+        event.preventDefault();
+        this.setFlightEnabled(true);
       }
       this.keys.add(event.code);
     });
@@ -299,13 +309,13 @@ export class PlayerController {
     if (hasWish) {
       this.applyDirectionalAcceleration(
         wish,
-        this.isSprintHeld() ? SPRINT_SPEED : WALK_SPEED,
+        getFlightMovementSpeed(this.isSprintHeld()),
         FLIGHT_ACCELERATION,
         delta
       );
     }
 
-    this.limitDirectionalSpeed(this.isSprintHeld() ? SPRINT_SPEED : WALK_SPEED);
+    this.limitDirectionalSpeed(getFlightMovementSpeed(this.isSprintHeld()));
     this.onGround = false;
     this.moveAxis("x", this.velocity.x * delta);
     this.moveAxis("z", this.velocity.z * delta);
@@ -383,12 +393,18 @@ export class PlayerController {
   }
 
   toggleFlight(): void {
-    this.flying = !this.flying;
+    this.setFlightEnabled(!this.flying);
+  }
+
+  setFlightEnabled(enabled: boolean): void {
+    if (this.flying === enabled) return;
+
+    this.flying = enabled;
     this.velocity.y = 0;
     this.sliding = false;
     this.slidePrimed = false;
 
-    if (this.flying) {
+    if (enabled) {
       this.syncCrouchState(false);
     }
   }

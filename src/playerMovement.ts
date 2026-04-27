@@ -21,6 +21,7 @@ export const FLIGHT_TOGGLE_KEY = "KeyF";
 export const CROUCH_OR_DESCEND_KEY = "KeyC";
 // Flight uses the same speed tiers as walking, but gets its own acceleration
 // and drag so it feels floaty without drifting forever.
+export const FLIGHT_BOOST_SPEED = SPRINT_SPEED * 2;
 export const FLIGHT_ACCELERATION = 56 * METERS_PER_BLOCK;
 export const FLIGHT_DRAG = 7.5;
 
@@ -42,6 +43,18 @@ export function getGroundMovementSpeed(options: GroundMovementSpeedOptions): num
   if (options.sliding || options.slidePrimed) return SPRINT_SPEED;
   if (options.crouching) return CROUCH_SPEED;
   return options.sprinting ? SPRINT_SPEED : WALK_SPEED;
+}
+
+export function getFlightMovementSpeed(sprinting: boolean): number {
+  return sprinting ? FLIGHT_BOOST_SPEED : WALK_SPEED;
+}
+
+export function shouldActivateFlightFromAir(
+  flying: boolean,
+  grounded: boolean,
+  repeatedKeyPress: boolean
+): boolean {
+  return !flying && !grounded && !repeatedKeyPress;
 }
 
 export function shouldPrimeSlide(

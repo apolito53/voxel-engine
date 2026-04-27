@@ -12,13 +12,16 @@ import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
+  FLIGHT_BOOST_SPEED,
   FLIGHT_TOGGLE_KEY,
   PREVIOUS_SPRINT_SPEED,
   SLIDE_PRIME_SPEED,
   SLIDE_STOP_SPEED,
   SPRINT_SPEED,
   WALK_SPEED,
+  getFlightMovementSpeed,
   getGroundMovementSpeed,
+  shouldActivateFlightFromAir,
   shouldContinueSlide,
   shouldPrimeSlide
 } from "../src/playerMovement";
@@ -203,6 +206,7 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   assertEqual(FLIGHT_TOGGLE_KEY, "KeyF", "flight should toggle with the F key");
   assertEqual(CROUCH_OR_DESCEND_KEY, "KeyC", "crouch and flight descent should use the C key");
   assertEqual(SPRINT_SPEED, PREVIOUS_SPRINT_SPEED * 1.5, "sprint speed should be 50 percent faster than before");
+  assertEqual(FLIGHT_BOOST_SPEED, SPRINT_SPEED * 2, "flight boost should be twice the ground sprint speed");
   assertEqual(
     getGroundMovementSpeed({ sprinting: false, crouching: false, sliding: false }),
     WALK_SPEED,
@@ -227,6 +231,24 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     getGroundMovementSpeed({ sprinting: true, crouching: true, sliding: false, slidePrimed: true }),
     SPRINT_SPEED,
     "primed slides should preserve sprint speed until movement input is released"
+  );
+  assertEqual(getFlightMovementSpeed(false), WALK_SPEED, "plain flight should use walk speed");
+  assertEqual(getFlightMovementSpeed(true), FLIGHT_BOOST_SPEED, "boosted flight should use the larger flight cap");
+  assert(
+    shouldActivateFlightFromAir(false, false, false),
+    "fresh Space presses while airborne should enter flight mode"
+  );
+  assert(
+    !shouldActivateFlightFromAir(false, true, false),
+    "grounded Space presses should remain normal jumps"
+  );
+  assert(
+    !shouldActivateFlightFromAir(true, false, false),
+    "Space should not re-toggle flight while already flying"
+  );
+  assert(
+    !shouldActivateFlightFromAir(false, false, true),
+    "key repeat should not repeatedly activate flight"
   );
 
   assert(

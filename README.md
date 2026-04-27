@@ -33,10 +33,10 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
-- `Space` jump, or fly upward while flight mode is active
+- `Space` jump; tap it while airborne to enter flight mode, or fly upward while flight mode is active
 - `C` crouch on foot, or fly downward while flight mode is active
 - `C` while sprinting, then release movement, to slide
-- `Shift` sprint or boost flight speed
+- `Shift` sprint or use the stronger flight speed boost
 - `Left click` break block
 - `Right click` place block
 - `1-5` select block
