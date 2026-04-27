@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
+import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import { QUALITY_PRESET_ORDER, QUALITY_PRESETS, SUPER_ULTRA_PRESET_ID } from "../src/qualityPresets";
 import { voxelRaycast } from "../src/raycast";
 import {
@@ -176,6 +177,15 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.high.distanceScale, 4, "High should remain 4x distance");
   assertEqual(QUALITY_PRESETS.ultra.distanceScale, 6, "Ultra should remain 6x distance");
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
+  assertEqual(
+    QUALITY_PRESET_ORDER.filter(shouldShowSuperUltraOptIn).join(","),
+    "ultra",
+    "Super Ultra opt-in should only appear once normal cycling reaches Ultra"
+  );
+  assert(
+    shouldShowSuperUltraOptIn(SUPER_ULTRA_PRESET_ID),
+    "Super Ultra opt-in should remain visible while active so players can disable it"
+  );
 });
 
 test("directional shadow anchor snaps to stable light-space texels", () => {

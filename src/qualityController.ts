@@ -18,6 +18,7 @@ type QualityControllerOptions = {
   readonly skyLight: THREE.HemisphereLight;
   readonly fog: THREE.Fog;
   readonly qualityButton: HTMLButtonElement;
+  readonly superUltraToggleRow: HTMLElement;
   readonly superUltraToggle: HTMLInputElement;
   readonly updateSunShadowAnchor: () => void;
   readonly onQualityChanged: () => void;
@@ -30,6 +31,7 @@ export class QualityController {
   private readonly skyLight: THREE.HemisphereLight;
   private readonly fog: THREE.Fog;
   private readonly qualityButton: HTMLButtonElement;
+  private readonly superUltraToggleRow: HTMLElement;
   private readonly superUltraToggle: HTMLInputElement;
   private readonly updateSunShadowAnchor: () => void;
   private readonly onQualityChanged: () => void;
@@ -43,6 +45,7 @@ export class QualityController {
     this.skyLight = options.skyLight;
     this.fog = options.fog;
     this.qualityButton = options.qualityButton;
+    this.superUltraToggleRow = options.superUltraToggleRow;
     this.superUltraToggle = options.superUltraToggle;
     this.updateSunShadowAnchor = options.updateSunShadowAnchor;
     this.onQualityChanged = options.onQualityChanged;
@@ -132,6 +135,7 @@ export class QualityController {
     this.qualityButton.textContent = `Quality: ${preset.label}`;
     this.qualityButton.setAttribute("aria-label", `Quality preset: ${preset.label}`);
     document.body.dataset.quality = this.presetId;
+    this.syncSuperUltraToggle();
 
     this.onQualityChanged();
     if (persist) writeQualityPreference(this.presetId);
@@ -144,8 +148,12 @@ export class QualityController {
   }
 
   private syncSuperUltraToggle(): void {
+    const showSuperUltraOptIn = shouldShowSuperUltraOptIn(this.presetId);
+
     this.superUltraToggle.checked = this.superUltraEnabled;
     this.superUltraToggle.setAttribute("aria-checked", String(this.superUltraEnabled));
+    this.superUltraToggleRow.hidden = !showSuperUltraOptIn;
+    this.superUltraToggleRow.setAttribute("aria-hidden", String(!showSuperUltraOptIn));
     document.body.classList.toggle("super-ultra-enabled", this.superUltraEnabled);
   }
 
@@ -195,6 +203,13 @@ export class QualityController {
       return DEFAULT_QUALITY_PRESET;
     }
   }
+}
+
+export function shouldShowSuperUltraOptIn(presetId: QualityPresetId): boolean {
+  // The opt-in should feel like a spicy extension of Ultra, not a warning that
+  // follows the player through every quality tier. Keep it visible in Super
+  // Ultra too so the opt-out does not vanish after the user enables it.
+  return presetId === "ultra" || presetId === SUPER_ULTRA_PRESET_ID;
 }
 
 function isQualityPresetId(presetId: unknown): presetId is QualityPresetId {

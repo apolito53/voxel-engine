@@ -93,7 +93,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Worker meshes treat missing neighbor chunks as temporarily solid so streaming does not draw chunk-edge walls before neighbors load and trigger a remesh.
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
 - Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts on every frame.
-- `Super Ultra` is intentionally gated by a pause-menu opt-in so normal quality cycling tops out at `Ultra`.
+- `Super Ultra` is intentionally gated by a pause-menu opt-in that only appears at `Ultra` or while `Super Ultra` is active.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `npm.cmd run test` bundles `tests/run.ts` into `.test-dist/` with esbuild before running in Node; `.test-dist/` is generated and ignored.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.

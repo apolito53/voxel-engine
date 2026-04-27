@@ -37,6 +37,7 @@ const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
 const qualityButton = requireElement<HTMLButtonElement>("#quality-button");
+const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
 const minimap = requireElement<HTMLCanvasElement>("#minimap");
@@ -115,6 +116,7 @@ qualityController = new QualityController({
   skyLight,
   fog: sceneFog,
   qualityButton,
+  superUltraToggleRow,
   superUltraToggle,
   updateSunShadowAnchor,
   onQualityChanged: () => {

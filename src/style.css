@@ -216,6 +216,10 @@ body.playing canvas {
   padding: 10px 12px;
 }
 
+.danger-toggle[hidden] {
+  display: none;
+}
+
 .danger-copy {
   display: grid;
   gap: 3px;
