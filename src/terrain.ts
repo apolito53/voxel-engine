@@ -1,8 +1,17 @@
-import { BLOCK } from "./blocks";
+import { BLOCK, type BlockId } from "./blocks";
 import { fbm2 } from "./math";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
-export function createTerrainContext(seed = "") {
+export type TerrainContext = {
+  readonly seed: string;
+  readonly continentOffsetX: number;
+  readonly continentOffsetZ: number;
+  readonly detailOffsetX: number;
+  readonly detailOffsetZ: number;
+  readonly heightOffset: number;
+};
+
+export function createTerrainContext(seed = ""): TerrainContext {
   const normalizedSeed = String(seed || "");
   const hash = hashSeed(normalizedSeed);
 
@@ -28,7 +37,11 @@ export function createTerrainContext(seed = "") {
   };
 }
 
-export function generateChunkBlocks(cx, cz, terrain = createTerrainContext()) {
+export function generateChunkBlocks(
+  cx: number,
+  cz: number,
+  terrain = createTerrainContext()
+): Uint8Array {
   const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
@@ -49,7 +62,7 @@ export function generateChunkBlocks(cx, cz, terrain = createTerrainContext()) {
   return blocks;
 }
 
-export function getTerrainHeight(wx, wz, terrain) {
+export function getTerrainHeight(wx: number, wz: number, terrain: TerrainContext): number {
   const continent = fbm2(
     wx * 0.018 + terrain.continentOffsetX,
     wz * 0.018 + terrain.continentOffsetZ,
@@ -64,13 +77,13 @@ export function getTerrainHeight(wx, wz, terrain) {
   return Math.floor(8 + continent * 18 + detail * 5 + terrain.heightOffset);
 }
 
-function getTerrainBlock(y, height) {
+function getTerrainBlock(y: number, height: number): BlockId {
   if (y === height) return height < 14 ? BLOCK.sand : BLOCK.grass;
   if (y > height - 4) return BLOCK.dirt;
   return BLOCK.stone;
 }
 
-function hashSeed(seed) {
+function hashSeed(seed: string): number {
   let hash = 2166136261;
   for (let index = 0; index < seed.length; index += 1) {
     hash ^= seed.charCodeAt(index);
@@ -79,12 +92,12 @@ function hashSeed(seed) {
   return hash >>> 0;
 }
 
-function seededRange(hash, salt, min, max) {
+function seededRange(hash: number, salt: number, min: number, max: number): number {
   const mixed = mixHash(hash + salt);
   return min + (mixed / 0xffffffff) * (max - min);
 }
 
-function mixHash(value) {
+function mixHash(value: number): number {
   let hash = value >>> 0;
   hash ^= hash >>> 16;
   hash = Math.imul(hash, 2246822507);
@@ -94,6 +107,6 @@ function mixHash(value) {
   return hash >>> 0;
 }
 
-function index(x, y, z) {
+function index(x: number, y: number, z: number): number {
   return x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
 }

@@ -1,19 +1,20 @@
-export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+export const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
 
-export function smoothstep(edge0, edge1, value) {
+export function smoothstep(edge0: number, edge1: number, value: number): number {
   const x = clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return x * x * (3 - 2 * x);
 }
 
-export function fract(value) {
+export function fract(value: number): number {
   return value - Math.floor(value);
 }
 
-export function hash2(x, z) {
+export function hash2(x: number, z: number): number {
   return fract(Math.sin(x * 127.1 + z * 311.7) * 43758.5453123);
 }
 
-export function valueNoise2(x, z) {
+export function valueNoise2(x: number, z: number): number {
   const ix = Math.floor(x);
   const iz = Math.floor(z);
   const fx = smoothstep(0, 1, x - ix);
@@ -27,7 +28,7 @@ export function valueNoise2(x, z) {
   return ab + (cd - ab) * fz;
 }
 
-export function fbm2(x, z, octaves = 5) {
+export function fbm2(x: number, z: number, octaves = 5): number {
   let value = 0;
   let amplitude = 0.5;
   let frequency = 1;
