@@ -55,14 +55,14 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Engine Pieces
 
-- `src/world.js`: chunk ownership, worker scheduling, streaming, block reads/writes
-- `src/chunkStorage.js`: IndexedDB adapter for saved worlds and edited chunk persistence
-- `src/terrain.js`: seeded terrain generation shared by main-thread fallback and the worker
-- `src/chunk.js`: voxel storage, sync mesh fallback, worker mesh upload
-- `src/chunkWorker.js`: worker-side terrain generation and greedy mesh building
-- `src/player.js`: first-person controller and voxel collision
-- `src/raycast.js`: grid DDA block picking
-- `src/physics.js`: simple sphere-vs-voxel rigid toy
+- `src/world.ts`: chunk ownership, worker scheduling, streaming, block reads/writes
+- `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
+- `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
+- `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
+- `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
+- `src/player.ts`: first-person controller and voxel collision
+- `src/raycast.ts`: grid DDA block picking
+- `src/physics.ts`: simple sphere-vs-voxel rigid toy
 
 ## TypeScript Migration Prep
 

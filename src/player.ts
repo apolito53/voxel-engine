@@ -1,6 +1,7 @@
+// @ts-nocheck
 import * as THREE from "three";
-import { clamp } from "./math.js";
-import { METERS_PER_BLOCK } from "./voxelConstants.js";
+import { clamp } from "./math";
+import { METERS_PER_BLOCK } from "./voxelConstants";
 
 const PLAYER_HEIGHT = 1.8 * METERS_PER_BLOCK;
 const PLAYER_RADIUS = 0.32 * METERS_PER_BLOCK;

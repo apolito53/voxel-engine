@@ -1,12 +1,13 @@
+// @ts-nocheck
 import * as THREE from "three";
 import "./style.css";
-import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks.js";
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./chunk.js";
-import { createChunkStorage, createWorldRegistry } from "./chunkStorage.js";
-import { PlayerController } from "./player.js";
-import { PhysicsToy } from "./physics.js";
-import { voxelRaycast } from "./raycast.js";
-import { VoxelWorld } from "./world.js";
+import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./chunk";
+import { createChunkStorage, createWorldRegistry } from "./chunkStorage";
+import { PlayerController } from "./player";
+import { PhysicsToy } from "./physics";
+import { voxelRaycast } from "./raycast";
+import { VoxelWorld } from "./world";
 
 const QUALITY_STORAGE_KEY = "voxel-quality-preset";
 const SUPER_ULTRA_STORAGE_KEY = "voxel-super-ultra-enabled";

@@ -1,6 +1,6 @@
-import { BLOCK, BLOCKS } from "./blocks.js";
-import { createTerrainContext, generateChunkBlocks } from "./terrain.js";
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
+import { BLOCK, BLOCKS } from "./blocks";
+import { createTerrainContext, generateChunkBlocks } from "./terrain";
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 const terrainContexts = new Map();
 

@@ -1,7 +1,8 @@
-import { BLOCK } from "./blocks.js";
-import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk.js";
-import { createNullChunkStorage } from "./chunkStorage.js";
-import { createTerrainContext, generateChunkBlocks } from "./terrain.js";
+// @ts-nocheck
+import { BLOCK } from "./blocks";
+import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
+import { createNullChunkStorage } from "./chunkStorage";
+import { createTerrainContext, generateChunkBlocks } from "./terrain";
 
 const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
@@ -115,7 +116,7 @@ export class VoxelWorld {
   createWorker() {
     if (typeof Worker === "undefined") return null;
 
-    const worker = new Worker(new URL("./chunkWorker.js", import.meta.url), {
+    const worker = new Worker(new URL("./chunkWorker.ts", import.meta.url), {
       type: "module"
     });
     worker.onmessage = (event) => {

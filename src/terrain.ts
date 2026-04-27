@@ -1,6 +1,6 @@
-import { BLOCK } from "./blocks.js";
-import { fbm2 } from "./math.js";
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
+import { BLOCK } from "./blocks";
+import { fbm2 } from "./math";
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 export function createTerrainContext(seed = "") {
   const normalizedSeed = String(seed || "");

@@ -1,4 +1,5 @@
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
+// @ts-nocheck
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 const DATABASE_NAME = "voxel-engine";
 const DATABASE_VERSION = 1;

@@ -1,6 +1,7 @@
+// @ts-nocheck
 import * as THREE from "three";
-import { BLOCK, BLOCKS } from "./blocks.js";
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants.js";
+import { BLOCK, BLOCKS } from "./blocks";
+import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 export { CHUNK_SIZE, WORLD_HEIGHT };
 
