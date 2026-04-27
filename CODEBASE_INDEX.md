@@ -19,6 +19,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Dev server: `npm.cmd run dev -- --port 5173`
 - Production build: `npm.cmd run build`
 - Preview build: `npm.cmd run preview -- --port 4173`
+- TypeScript migration plan: `.\scripts\run_python.ps1 .\scripts\ts_migration.py plan`
+- TypeScript migration audit: `.\scripts\run_python.ps1 .\scripts\ts_migration_audit.py`
 
 ## Fast Lookup
 
@@ -38,6 +40,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Clamp, noise, and terrain math helpers: `src/math.js`
 - Windows startup helper: `start.ps1`
 - Linux/Ubuntu startup helper: `start.sh`
+- TypeScript migration helpers: `scripts/ts_migration.py`, `scripts/ts_migration_audit.py`, `scripts/run_python.ps1`, `scripts/run_python.sh`, `scripts/README.md`
 
 ## Runtime Flow
 
@@ -78,3 +81,4 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - Pointer lock behavior is browser-sensitive; test movement changes in the browser, not just with `npm.cmd run build`.
+- TypeScript migration helpers are prep tools only until `scripts/ts_migration.py apply` is run; keep `.ts-migration-manifest.json` around until the migration is committed or rolled back.

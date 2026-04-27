@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .vite/
+__pycache__/
+*.py[cod]
+.ts-migration-manifest.json
 
 .env
 .env.*

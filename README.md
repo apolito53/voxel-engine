@@ -64,6 +64,12 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/raycast.js`: grid DDA block picking
 - `src/physics.js`: simple sphere-vs-voxel rigid toy
 
+## TypeScript Migration Prep
+
+- `.\scripts\run_python.ps1 .\scripts\ts_migration.py plan`: preview the mechanical JS-to-TS rename/import/package changes
+- `.\scripts\run_python.ps1 .\scripts\ts_migration.py apply`: perform the mechanical migration when ready
+- `.\scripts\run_python.ps1 .\scripts\ts_migration_audit.py`: list module hotspots and suggested manual typing order
+
 ## Sensible Next Steps
 
 - Give physics toys voxel damage so thrown objects can punch little craters.
