@@ -50,12 +50,12 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Quality Presets
 
-- `Potato`: 0.5x render distance, no shadows, 32 physics bodies
-- `Low`: current low-end baseline, no shadows, 64 physics bodies
-- `Normal`: 2x render distance, shadows, 96 physics bodies
-- `High`: 4x render distance, shadows, 256 physics bodies
-- `Ultra`: 6x render distance, higher shadow resolution, 512 physics bodies
-- `Super Ultra`: 12x render distance, 1024 physics bodies, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Potato`: 0.5x render distance, no shadows, 64 physics bodies
+- `Low`: current low-end baseline, no shadows, 128 physics bodies
+- `Normal`: 2x render distance, shadows, 192 physics bodies
+- `High`: 4x render distance, shadows, 512 physics bodies
+- `Ultra`: 6x render distance, higher shadow resolution, 1024 physics bodies
+- `Super Ultra`: 12x render distance, 2048 physics bodies, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 
 ## Engine Pieces
 

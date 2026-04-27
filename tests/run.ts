@@ -562,9 +562,14 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.high.distanceScale, 4, "High should remain 4x distance");
   assertEqual(QUALITY_PRESETS.ultra.distanceScale, 6, "Ultra should remain 6x distance");
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
+  assertEqual(QUALITY_PRESETS.potato.physicsObjectBudget, 64, "Potato should allow 64 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.low.physicsObjectBudget, 128, "Low should allow 128 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.high.physicsObjectBudget, 512, "High should allow 512 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.ultra.physicsObjectBudget, 1024, "Ultra should allow 1024 physics bodies by default");
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget,
-    1024,
+    2048,
     "Super Ultra should carry the largest physics-object stress budget"
   );
   assertEqual(

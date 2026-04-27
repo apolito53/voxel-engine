@@ -3,9 +3,9 @@ import type { QualityPresetId } from "./qualityPresets";
 // Budgets are stored per quality preset so Super Ultra can be outrageous
 // without dragging potato mode into the furnace on the next launch.
 export const PHYSICS_OBJECT_BUDGET_STORAGE_PREFIX = "voxel-physics-object-budget:";
-export const DEFAULT_PHYSICS_OBJECT_BUDGET = 96;
+export const DEFAULT_PHYSICS_OBJECT_BUDGET = 192;
 export const MIN_PHYSICS_OBJECT_BUDGET = 32;
-export const MAX_PHYSICS_OBJECT_BUDGET = 1024;
+export const MAX_PHYSICS_OBJECT_BUDGET = 2048;
 export const PHYSICS_OBJECT_BUDGET_STEP = 16;
 
 export type PhysicsBudgetDirection = "decrease" | "increase";
