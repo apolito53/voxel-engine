@@ -38,6 +38,10 @@ export type PlayerBounds = {
   readonly maxZ: number;
 };
 
+type CatchablePointerLockRequest = {
+  catch(onRejected: () => void): unknown;
+};
+
 export class PlayerController {
   readonly camera: THREE.PerspectiveCamera;
   readonly domElement: HTMLElement;
@@ -146,12 +150,16 @@ export class PlayerController {
     this.pendingLock = true;
     this.updateCursor();
 
-    const lockRequest = this.domElement.requestPointerLock();
-    void lockRequest.catch(() => {
-      this.pendingLock = false;
-      this.clearLockTimeout();
-      this.updateCursor();
-    });
+    // Chromium returns a promise here, while Firefox can still return void.
+    // Keep both paths alive so pointer lock failures do not spam console errors.
+    const lockRequest = this.domElement.requestPointerLock() as unknown;
+    if (isCatchablePointerLockRequest(lockRequest)) {
+      void lockRequest.catch(() => {
+        this.pendingLock = false;
+        this.clearLockTimeout();
+        this.updateCursor();
+      });
+    }
 
     this.clearLockTimeout();
     this.lockTimeout = window.setTimeout(() => {
@@ -498,4 +506,11 @@ function shouldPreventGameKeyDefault(code: string): boolean {
     code === CROUCH_OR_DESCEND_KEY ||
     code === FLIGHT_TOGGLE_KEY
   );
+}
+
+export function isCatchablePointerLockRequest(value: unknown): value is CatchablePointerLockRequest {
+  if (typeof value !== "object" || value === null) return false;
+
+  const maybeCatchable = value as { readonly catch?: unknown };
+  return typeof maybeCatchable.catch === "function";
 }

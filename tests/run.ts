@@ -22,6 +22,7 @@ import {
   shouldContinueSlide,
   shouldPrimeSlide
 } from "../src/playerMovement";
+import { isCatchablePointerLockRequest } from "../src/player";
 import {
   DEFAULT_PHYSICS_OBJECT_BUDGET,
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -243,6 +244,25 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   assert(
     !shouldContinueSlide(true, true, true, SLIDE_STOP_SPEED + 0.01),
     "adding movement input should end the hands-off slide state"
+  );
+});
+
+test("pointer lock request detection supports promise and void browser APIs", () => {
+  assert(
+    isCatchablePointerLockRequest(Promise.resolve()),
+    "promise-returning pointer lock requests should attach rejection handling"
+  );
+  assert(
+    isCatchablePointerLockRequest({ catch: () => undefined }),
+    "promise-like pointer lock requests should attach rejection handling"
+  );
+  assert(
+    !isCatchablePointerLockRequest(undefined),
+    "void-returning pointer lock requests should rely on the pending-lock timeout"
+  );
+  assert(
+    !isCatchablePointerLockRequest({ then: () => undefined }),
+    "then-only values should not be treated as catchable pointer lock requests"
   );
 });
 
