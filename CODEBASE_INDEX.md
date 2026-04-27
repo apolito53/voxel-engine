@@ -1,12 +1,12 @@
 # Codebase Index
 
-Last reviewed: 2026-04-26
+Last reviewed: 2026-04-27
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
 ## Stack
 
-- Vite browser app using native ES modules plus a module Web Worker for chunk CPU work.
+- Strict TypeScript Vite browser app using native ES modules plus a module Web Worker for chunk CPU work.
 - Three.js handles rendering, camera, materials, lights, and meshes.
 - World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.ts`.
 - The app code owns chunks, terrain generation, voxel meshing, player movement, collision, ray picking, HUD, minimap, and simple physics toys.
@@ -17,6 +17,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Start on Windows: `.\start.ps1`
 - Start on Linux/Ubuntu: `chmod +x ./start.sh && ./start.sh`
 - Dev server: `npm.cmd run dev -- --port 5173`
+- Strict type check: `npm.cmd run typecheck`
 - Production build: `npm.cmd run build`
 - Preview build: `npm.cmd run preview -- --port 4173`
 - TypeScript migration plan: `python .\scripts\ts_migration.py plan`
@@ -85,4 +86,4 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - Pointer lock behavior is browser-sensitive; test movement changes in the browser, not just with `npm.cmd run build`.
-- TypeScript migration helpers are prep tools only until `scripts/ts_migration.py apply` is run; keep `.ts-migration-manifest.json` around until the migration is committed or rolled back.
+- TypeScript migration helpers are historical prep tools now; source in `src` is expected to stay strict without `@ts-nocheck` or explicit `any`.

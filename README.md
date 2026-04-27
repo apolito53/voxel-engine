@@ -1,6 +1,6 @@
 # Voxel Sandbox Engine
 
-A tiny browser-based voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, block edits, and simple physics toys.
+A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, block edits, and simple physics toys.
 
 World units are metric: `1 block = 1 meter`.
 
@@ -64,11 +64,11 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/raycast.ts`: grid DDA block picking
 - `src/physics.ts`: simple sphere-vs-voxel rigid toy
 
-## TypeScript Migration Prep
+## Development Checks
 
-- `python .\scripts\ts_migration.py plan`: preview the mechanical JS-to-TS rename/import/package changes
-- `python .\scripts\ts_migration.py apply`: perform the mechanical migration when ready
-- `python .\scripts\ts_migration_audit.py`: list module hotspots and suggested manual typing order
+- `npm.cmd run typecheck`: strict TypeScript no-emit validation
+- `npm.cmd run build`: production build smoke test
+- `git diff --check`: whitespace sanity check before commits
 
 ## Sensible Next Steps
 

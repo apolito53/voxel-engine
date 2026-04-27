@@ -513,7 +513,7 @@ function decodeBinaryPayload(payload: unknown): Uint8Array | null {
   if (payload instanceof ArrayBuffer) return new Uint8Array(payload.slice(0));
   if (!ArrayBuffer.isView(payload)) return null;
 
-  // IndexedDB should give us ArrayBuffer/Uint8Array here, but accepting any view keeps
+  // IndexedDB should give us ArrayBuffer/Uint8Array here, but accepting typed-array views keeps
   // older experimental saves readable if their shape is otherwise correct.
   const view = payload as ArrayBufferView;
   const buffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
