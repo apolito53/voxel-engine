@@ -374,19 +374,24 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     "slide entry threshold should still require sprint momentum, not ordinary walking speed"
   );
   assertEqual(
-    getSlideEntrySpeed(SLIDE_PRIME_SPEED),
+    getSlideEntrySpeed(SLIDE_PRIME_SPEED, true),
     SLIDE_PRIME_SPEED + SLIDE_ENTRY_BOOST,
     "starting a slide should add a modest entry shove"
   );
   assertEqual(
-    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP - SLIDE_ENTRY_BOOST * 0.25),
+    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP - SLIDE_ENTRY_BOOST * 0.25, true),
     SLIDE_ENTRY_SPEED_CAP,
     "slide entry shove should cap ordinary entries before becoming a launch exploit"
   );
   assertEqual(
-    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP * 2),
+    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP * 2, true),
     SLIDE_ENTRY_SPEED_CAP * 2,
     "slide entry cap should not cut down speed earned before the slide"
+  );
+  assertEqual(
+    getSlideEntrySpeed(SLIDE_PRIME_SPEED, false),
+    SLIDE_PRIME_SPEED,
+    "landing back into a slide should preserve momentum without awarding another entry boost"
   );
   assertEqual(
     getSlideSpeedLimit(SPRINT_SPEED * 1.25),

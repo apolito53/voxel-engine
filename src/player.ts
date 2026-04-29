@@ -495,7 +495,7 @@ export class PlayerController {
     }
 
     if (shouldStartSlide(wasGrounded, justStartedCrouching, sprinting, holdingForward, horizontalSpeed)) {
-      this.startSlide(horizontalSpeed);
+      this.startSlide(horizontalSpeed, true);
     }
   }
 
@@ -505,15 +505,15 @@ export class PlayerController {
     const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     this.slideMomentumAirborne = false;
     if (!this.sliding && shouldStartLandingSlide(true, this.crouching, horizontalSpeed)) {
-      this.startSlide(horizontalSpeed);
+      this.startSlide(horizontalSpeed, false);
     }
   }
 
-  startSlide(horizontalSpeed: number): void {
+  startSlide(horizontalSpeed: number, applyEntryBoost: boolean): void {
     this.sliding = true;
     this.crouching = true;
     this.slideElapsed = 0;
-    const slideEntrySpeed = getSlideEntrySpeed(horizontalSpeed);
+    const slideEntrySpeed = getSlideEntrySpeed(horizontalSpeed, applyEntryBoost);
     if (horizontalSpeed > 0) {
       const entrySpeedScale = slideEntrySpeed / horizontalSpeed;
       this.velocity.x *= entrySpeedScale;

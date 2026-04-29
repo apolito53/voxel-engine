@@ -122,7 +122,9 @@ export function getSlideFriction(holdingForward: boolean): number {
   return holdingForward ? SLIDE_FORWARD_FRICTION : SLIDE_RELEASE_FRICTION;
 }
 
-export function getSlideEntrySpeed(horizontalSpeed: number): number {
+export function getSlideEntrySpeed(horizontalSpeed: number, applyEntryBoost: boolean): number {
+  if (!applyEntryBoost) return horizontalSpeed;
+
   // Cap only the extra shove for ordinary slide entries. If another movement
   // path already earned more speed, preserve it instead of chopping momentum.
   return Math.max(horizontalSpeed, Math.min(horizontalSpeed + SLIDE_ENTRY_BOOST, SLIDE_ENTRY_SPEED_CAP));
