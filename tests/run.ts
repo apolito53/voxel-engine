@@ -27,6 +27,7 @@ import {
   JUMP_SPEED,
   PREVIOUS_SPRINT_SPEED,
   SLIDE_END_SPEED,
+  SLIDE_DECELERATION_RATE_MULTIPLIER,
   SLIDE_ENTRY_BOOST,
   SLIDE_ENTRY_BOOST_MULTIPLIER,
   SLIDE_ENTRY_SPEED_CAP,
@@ -365,6 +366,21 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
   assertEqual(getSlideFriction(true), SLIDE_FORWARD_FRICTION, "holding forward should keep the longer slide glide");
   assertEqual(getSlideFriction(false), SLIDE_RELEASE_FRICTION, "releasing forward should bleed slide speed faster");
+  assertEqual(SLIDE_DECELERATION_RATE_MULTIPLIER, 2, "slide deceleration should use the half-time tuning pass");
+  assertEqual(
+    SLIDE_FORWARD_FRICTION,
+    0.95 * SLIDE_DECELERATION_RATE_MULTIPLIER,
+    "holding forward should bleed slide speed twice as quickly as the previous tuning"
+  );
+  assertEqual(
+    SLIDE_RELEASE_FRICTION,
+    2.25 * SLIDE_DECELERATION_RATE_MULTIPLIER,
+    "released-input slides should keep the same relative half-time deceleration bump"
+  );
+  assert(
+    SLIDE_RELEASE_FRICTION > SLIDE_FORWARD_FRICTION,
+    "releasing forward should still slow a slide faster than holding forward"
+  );
   assertEqual(SLIDE_MIN_DURATION, 0.5, "slide lock duration should be cut in half");
   assertEqual(
     SLIDE_ENTRY_BOOST_MULTIPLIER,

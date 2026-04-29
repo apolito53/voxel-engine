@@ -45,8 +45,12 @@ export const SLIDE_ENTRY_BOOST = WALK_SPEED * SLIDE_ENTRY_BOOST_MULTIPLIER;
 export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * 1.12;
 export const SLIDE_END_SPEED = CROUCH_SPEED;
 export const SLIDE_MIN_DURATION = 0.5;
-export const SLIDE_FORWARD_FRICTION = 0.95;
-export const SLIDE_RELEASE_FRICTION = 2.25;
+// Friction is proportional to how quickly slide speed bleeds off. Doubling the
+// old tuning cuts the glide-to-crouch-speed time roughly in half while keeping
+// the forward-held slide softer than a released-input slide.
+export const SLIDE_DECELERATION_RATE_MULTIPLIER = 2;
+export const SLIDE_FORWARD_FRICTION = 0.95 * SLIDE_DECELERATION_RATE_MULTIPLIER;
+export const SLIDE_RELEASE_FRICTION = 2.25 * SLIDE_DECELERATION_RATE_MULTIPLIER;
 export const SLIDE_JUMP_SPRING_MULTIPLIER = 1.18;
 export const SLIDE_JUMP_SPEED = JUMP_SPEED * SLIDE_JUMP_SPRING_MULTIPLIER;
 
