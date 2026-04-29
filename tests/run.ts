@@ -28,6 +28,7 @@ import {
   PREVIOUS_SPRINT_SPEED,
   SLIDE_END_SPEED,
   SLIDE_ENTRY_BOOST,
+  SLIDE_ENTRY_BOOST_MULTIPLIER,
   SLIDE_ENTRY_SPEED_CAP,
   SLIDE_FORWARD_FRICTION,
   SLIDE_JUMP_SPEED,
@@ -364,6 +365,17 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
   assertEqual(getSlideFriction(true), SLIDE_FORWARD_FRICTION, "holding forward should keep the longer slide glide");
   assertEqual(getSlideFriction(false), SLIDE_RELEASE_FRICTION, "releasing forward should bleed slide speed faster");
+  assertEqual(SLIDE_MIN_DURATION, 0.5, "slide lock duration should be cut in half");
+  assertEqual(
+    SLIDE_ENTRY_BOOST_MULTIPLIER,
+    0.45 * 1.25,
+    "slide entry shove should be 25 percent stronger than the previous tuning"
+  );
+  assertEqual(
+    SLIDE_ENTRY_BOOST,
+    WALK_SPEED * SLIDE_ENTRY_BOOST_MULTIPLIER,
+    "slide entry shove should derive from walk speed and the documented multiplier"
+  );
   assertEqual(
     GROUND_SPRINT_CRUISE_SPEED,
     GROUND_ACCELERATION / GROUND_FRICTION,
@@ -422,7 +434,10 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     SLIDE_JUMP_SPRING_MULTIPLIER > 1 && SLIDE_JUMP_SPRING_MULTIPLIER < 1.3,
     "slide jump spring should be noticeable without becoming a vertical launch exploit"
   );
-  assert(isSlideMinimumLocked(0.5), "slides should be locked during their first second");
+  assert(
+    isSlideMinimumLocked(SLIDE_MIN_DURATION * 0.5),
+    "slides should be locked during the shortened minimum duration"
+  );
   assert(
     !isSlideMinimumLocked(SLIDE_MIN_DURATION),
     "slide minimum lock should release exactly at the configured duration"

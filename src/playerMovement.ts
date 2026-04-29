@@ -40,10 +40,11 @@ export const FLIGHT_DRAG = 7.5;
 // sprinting below that cap, and using the cap here made C crouch instead.
 export const GROUND_SPRINT_CRUISE_SPEED = GROUND_ACCELERATION / GROUND_FRICTION;
 export const SLIDE_PRIME_SPEED = GROUND_SPRINT_CRUISE_SPEED * 0.9;
-export const SLIDE_ENTRY_BOOST = WALK_SPEED * 0.45;
+export const SLIDE_ENTRY_BOOST_MULTIPLIER = 0.45 * 1.25;
+export const SLIDE_ENTRY_BOOST = WALK_SPEED * SLIDE_ENTRY_BOOST_MULTIPLIER;
 export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * 1.12;
 export const SLIDE_END_SPEED = CROUCH_SPEED;
-export const SLIDE_MIN_DURATION = 1;
+export const SLIDE_MIN_DURATION = 0.5;
 export const SLIDE_FORWARD_FRICTION = 0.95;
 export const SLIDE_RELEASE_FRICTION = 2.25;
 export const SLIDE_JUMP_SPRING_MULTIPLIER = 1.18;
