@@ -40,9 +40,10 @@ export const FLIGHT_DRAG = 7.5;
 // sprinting below that cap, and using the cap here made C crouch instead.
 export const GROUND_SPRINT_CRUISE_SPEED = GROUND_ACCELERATION / GROUND_FRICTION;
 export const SLIDE_PRIME_SPEED = GROUND_SPRINT_CRUISE_SPEED * 0.9;
-export const SLIDE_ENTRY_BOOST_MULTIPLIER = 0.45 * 1.25;
-export const SLIDE_ENTRY_BOOST = WALK_SPEED * SLIDE_ENTRY_BOOST_MULTIPLIER;
-export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * 1.12;
+// Slide entry pop is multiplicative so the shove scales with the momentum the
+// player brought in instead of feeling like the same flat nudge every time.
+export const SLIDE_ENTRY_SPEED_MULTIPLIER = 1.4;
+export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * SLIDE_ENTRY_SPEED_MULTIPLIER;
 export const SLIDE_END_SPEED = CROUCH_SPEED;
 export const SLIDE_MIN_DURATION = 0.5;
 // Friction is proportional to how quickly slide speed bleeds off. Doubling the
@@ -132,9 +133,9 @@ export function getSlideFriction(holdingForward: boolean): number {
 export function getSlideEntrySpeed(horizontalSpeed: number, applyEntryBoost: boolean): number {
   if (!applyEntryBoost) return horizontalSpeed;
 
-  // Cap only the extra shove for ordinary slide entries. If another movement
+  // Cap only the entry pop for ordinary slide entries. If another movement
   // path already earned more speed, preserve it instead of chopping momentum.
-  return Math.max(horizontalSpeed, Math.min(horizontalSpeed + SLIDE_ENTRY_BOOST, SLIDE_ENTRY_SPEED_CAP));
+  return Math.max(horizontalSpeed, Math.min(horizontalSpeed * SLIDE_ENTRY_SPEED_MULTIPLIER, SLIDE_ENTRY_SPEED_CAP));
 }
 
 export function getSlideSpeedLimit(entryHorizontalSpeed: number): number {

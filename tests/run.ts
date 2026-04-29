@@ -28,8 +28,7 @@ import {
   PREVIOUS_SPRINT_SPEED,
   SLIDE_END_SPEED,
   SLIDE_DECELERATION_RATE_MULTIPLIER,
-  SLIDE_ENTRY_BOOST,
-  SLIDE_ENTRY_BOOST_MULTIPLIER,
+  SLIDE_ENTRY_SPEED_MULTIPLIER,
   SLIDE_ENTRY_SPEED_CAP,
   SLIDE_FORWARD_FRICTION,
   SLIDE_JUMP_SPEED,
@@ -383,14 +382,9 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
   assertEqual(SLIDE_MIN_DURATION, 0.5, "slide lock duration should be cut in half");
   assertEqual(
-    SLIDE_ENTRY_BOOST_MULTIPLIER,
-    0.45 * 1.25,
-    "slide entry shove should be 25 percent stronger than the previous tuning"
-  );
-  assertEqual(
-    SLIDE_ENTRY_BOOST,
-    WALK_SPEED * SLIDE_ENTRY_BOOST_MULTIPLIER,
-    "slide entry shove should derive from walk speed and the documented multiplier"
+    SLIDE_ENTRY_SPEED_MULTIPLIER,
+    1.4,
+    "slide entry pop should boost the player's current speed by 40 percent"
   );
   assertEqual(
     GROUND_SPRINT_CRUISE_SPEED,
@@ -407,13 +401,13 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
   assertEqual(
     getSlideEntrySpeed(SLIDE_PRIME_SPEED, true),
-    SLIDE_PRIME_SPEED + SLIDE_ENTRY_BOOST,
-    "starting a slide should add a modest entry shove"
+    SLIDE_PRIME_SPEED * SLIDE_ENTRY_SPEED_MULTIPLIER,
+    "starting a slide should multiply current momentum for a stronger entry pop"
   );
   assertEqual(
-    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP - SLIDE_ENTRY_BOOST * 0.25, true),
+    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP / SLIDE_ENTRY_SPEED_MULTIPLIER + 0.01, true),
     SLIDE_ENTRY_SPEED_CAP,
-    "slide entry shove should cap ordinary entries before becoming a launch exploit"
+    "slide entry pop should cap ordinary entries before becoming a launch exploit"
   );
   assertEqual(
     getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP * 2, true),
