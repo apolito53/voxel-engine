@@ -5,6 +5,7 @@ import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
 import {
   createChunkStorage,
   createWorldRegistry,
+  type SavedWorld,
   type WorldRegistry
 } from "./chunkStorage";
 import { DebugHud } from "./debugHud";
@@ -569,7 +570,7 @@ function removePhysicsToyAt(index: number): void {
 }
 
 async function refreshHomeWorldList(): Promise<void> {
-  await renderHomeWorldList(requireWorldRegistry(), homeWorldList, loadWorld);
+  await renderHomeWorldList(requireWorldRegistry(), homeWorldList, loadWorld, deleteWorldFromHome);
 }
 
 async function createWorldFromForm(event: SubmitEvent): Promise<void> {
@@ -613,6 +614,30 @@ async function loadWorld(worldId: string): Promise<void> {
     debugHud.reset();
     minimapRenderer.reset();
     activePlayer.resume();
+  } finally {
+    worldTransitioning = false;
+  }
+}
+
+async function deleteWorldFromHome(savedWorld: SavedWorld): Promise<void> {
+  if (worldTransitioning) return;
+
+  const confirmed = window.confirm([
+    `Are you SURE you want to delete "${savedWorld.name}"?`,
+    "",
+    "This permanently removes the saved world and every edited chunk stored in this browser.",
+    "Cancel if you are not extremely sure."
+  ].join("\n"));
+  if (!confirmed) return;
+
+  worldTransitioning = true;
+  try {
+    await requireWorld().flushStorageWrites();
+    await requireWorldRegistry().deleteWorld(savedWorld.id);
+    await refreshHomeWorldList();
+  } catch (error) {
+    console.error("Could not delete saved world", error);
+    window.alert("Could not delete that saved world. Your save list was left untouched.");
   } finally {
     worldTransitioning = false;
   }

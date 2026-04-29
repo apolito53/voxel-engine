@@ -27,6 +27,7 @@ export interface SaveDatabase {
   getWorld(worldId: string): Promise<SavedWorld | null>;
   putWorld(world: SavedWorld): Promise<void>;
   updateWorldTimestamp(worldId: string): Promise<void>;
+  deleteWorld(worldId: string): Promise<void>;
   listChunkKeys(worldId: string): Promise<string[]>;
   loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null>;
   saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void>;
@@ -166,6 +167,27 @@ class IndexedDbSaveDatabase implements SaveDatabase {
     await this.putWorld(world);
   }
 
+  async deleteWorld(worldId: string): Promise<void> {
+    const transaction = this.database.transaction([WORLDS_STORE, CHUNKS_STORE], "readwrite");
+    const done = transactionDone(transaction);
+    const chunks = transaction.objectStore(CHUNKS_STORE);
+    const chunkWorldIndex = chunks.index(CHUNK_WORLD_INDEX);
+    const cursorRequest = chunkWorldIndex.openCursor(globalThis.IDBKeyRange.only(worldId));
+
+    // World deletion removes both the metadata row and every edited chunk snapshot.
+    // Using one transaction keeps the save list from drifting away from chunk payloads.
+    transaction.objectStore(WORLDS_STORE).delete(worldId);
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+
+      cursor.delete();
+      cursor.continue();
+    };
+
+    await done;
+  }
+
   async listChunkKeys(worldId: string): Promise<string[]> {
     const transaction = this.database.transaction(CHUNKS_STORE, "readonly");
     const index = transaction.objectStore(CHUNKS_STORE).index(CHUNK_WORLD_INDEX);
@@ -268,6 +290,17 @@ class MemorySaveDatabase implements SaveDatabase {
 
     world.updatedAt = Date.now();
     this.worlds.set(worldId, cloneSavedWorld(world));
+  }
+
+  async deleteWorld(worldId: string): Promise<void> {
+    const prefix = `${worldId}|`;
+    this.worlds.delete(worldId);
+
+    for (const recordId of this.chunks.keys()) {
+      if (recordId.startsWith(prefix)) {
+        this.chunks.delete(recordId);
+      }
+    }
   }
 
   async listChunkKeys(worldId: string): Promise<string[]> {
@@ -396,6 +429,26 @@ export class WorldRegistry {
     await this.database.putWorld(world);
     await this.database.setMetadata(ACTIVE_WORLD_KEY, world.id);
     return world;
+  }
+
+  async deleteWorld(worldId: string): Promise<SavedWorld> {
+    const activeWorldId = await this.getActiveWorldId();
+    await this.database.deleteWorld(worldId);
+
+    let worlds = await this.listWorlds();
+    if (worlds.length === 0) {
+      await this.ensureDefaultWorld();
+      worlds = await this.listWorlds();
+    }
+
+    const activeWorldStillExists = worlds.some((world) => world.id === activeWorldId);
+    const userCreatedWorlds = worlds.filter((world) => world.id !== DEFAULT_WORLD_ID);
+    const nextActiveWorld = activeWorldStillExists
+      ? worlds.find((world) => world.id === activeWorldId) ?? worlds[0]
+      : userCreatedWorlds[0] ?? worlds[0];
+
+    await this.database.setMetadata(ACTIVE_WORLD_KEY, nextActiveWorld.id);
+    return nextActiveWorld;
   }
 
   async ensureDefaultWorld(): Promise<void> {

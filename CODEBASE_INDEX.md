@@ -31,14 +31,14 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Visual styling and overlays: `src/style.css`
 - Required DOM/canvas lookup helpers: `src/dom.ts`
 - WebGL GPU text helpers: `src/gpu.ts`
-- Saved-world list rendering and seed generation: `src/worldMenu.ts`
+- Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Debug HUD throttling, frame-spike tracking, CPU timing buckets, and renderer stats text: `src/debugHud.ts`
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, health, and placeable palette: `src/blocks.ts`
 - Block fracture grid, quality-scaled grid sampling, and debris sizing constants: `src/blockFragments.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
-- IndexedDB storage adapter for saved worlds and edited chunk persistence: `src/chunkStorage.ts`
+- IndexedDB storage adapter for saved worlds, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
 - Seeded terrain generation shared by fallback and worker paths: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
@@ -66,7 +66,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 1. `index.html` loads `src/main.ts`.
 2. `main.ts` creates the Three.js renderer, scene, lights, camera, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
-3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading or creating a world activates a saved-world slot and seed.
+3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, or confirmed deletion updates the saved-world slots and active seed.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded slice that keeps nearby chunks first, then prioritizes chunks inside the camera view.
@@ -83,7 +83,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Add, recolor, or retune block health: update `src/blocks.ts`; inspect mesh color use in `src/chunk.ts` and debris color use in `src/physics.ts`.
 - Tune chunk dimensions: update `src/voxelConstants.ts`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
-- Tune saved worlds or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, and the save/load calls in `src/world.ts`.
+- Tune saved worlds, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.

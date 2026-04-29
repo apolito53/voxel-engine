@@ -134,6 +134,12 @@ body.playing canvas {
   overflow-y: auto;
 }
 
+.world-slot-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 6px;
+}
+
 .world-slot {
   display: grid;
   gap: 3px;
@@ -146,6 +152,23 @@ body.playing canvas {
   font: inherit;
   padding: 8px 10px;
   text-align: left;
+}
+
+.world-delete-button {
+  min-height: 48px;
+  border: 1px solid rgba(255, 112, 112, 0.4);
+  border-radius: 6px;
+  background: rgba(255, 92, 92, 0.13);
+  color: #ffd6d6;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.world-delete-button:hover {
+  border-color: rgba(255, 112, 112, 0.82);
+  background: rgba(255, 92, 92, 0.24);
 }
 
 .world-slot.is-active {
@@ -302,6 +325,7 @@ body.playing canvas {
 
 .menu-button:focus-visible,
 .world-slot:focus-visible,
+.world-delete-button:focus-visible,
 .text-input:focus-visible,
 .stepper-button:focus-visible,
 .toggle-input:focus-visible {

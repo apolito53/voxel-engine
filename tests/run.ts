@@ -68,7 +68,11 @@ import {
   getSprintFeedbackTargetFov,
   smoothSprintFeedbackFov
 } from "../src/sprintFeedback";
-import type { ChunkStorage } from "../src/chunkStorage";
+import {
+  createMemorySaveDatabase,
+  createWorldRegistry,
+  type ChunkStorage
+} from "../src/chunkStorage";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
@@ -553,6 +557,52 @@ test("world coalesces repeated chunk saves before flushing storage", async () =>
     snapshot[1 + CHUNK_SIZE * (4 + CHUNK_SIZE * (WORLD_HEIGHT - 2))],
     BLOCK.sand,
     "coalesced save should contain the latest edit"
+  );
+});
+
+test("world registry deletes saved worlds and their edited chunks", async () => {
+  const database = createMemorySaveDatabase();
+  const registry = await createWorldRegistry(database);
+  const defaultWorld = await registry.getActiveWorld();
+  const firstWorld = await registry.createWorld("Delete Me", "first-seed");
+  const secondWorld = await registry.createWorld("Keep Me", "second-seed");
+  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+  blocks[0] = BLOCK.grass;
+
+  await database.saveChunk(firstWorld.id, "0,0", blocks);
+  await database.saveChunk(secondWorld.id, "1,0", blocks);
+  await registry.setActiveWorld(firstWorld.id);
+
+  const replacementWorld = await registry.deleteWorld(firstWorld.id);
+
+  assertEqual(await database.getWorld(firstWorld.id), null, "deleted world metadata should be removed");
+  assertDeepEqual(
+    await database.listChunkKeys(firstWorld.id),
+    [],
+    "deleted world chunk payloads should be removed with the save"
+  );
+  assertEqual(
+    (await database.listChunkKeys(secondWorld.id)).length,
+    1,
+    "deleting one world should leave other world chunks intact"
+  );
+  assertEqual(
+    replacementWorld.id,
+    secondWorld.id,
+    "deleting the active world should promote the newest remaining world"
+  );
+  assertEqual(
+    await registry.getActiveWorldId(),
+    secondWorld.id,
+    "active-world metadata should follow the promoted world"
+  );
+
+  await registry.deleteWorld(secondWorld.id);
+  await registry.deleteWorld(defaultWorld.id);
+  assertEqual(
+    (await registry.listWorlds()).length,
+    1,
+    "deleting every save should recreate one default world so the menu never goes empty"
   );
 });
 

@@ -1,11 +1,13 @@
 import type { SavedWorld, WorldRegistry } from "./chunkStorage";
 
 export type LoadWorldHandler = (worldId: string) => void | Promise<void>;
+export type DeleteWorldHandler = (world: SavedWorld) => void | Promise<void>;
 
 export async function renderHomeWorldList(
   registry: WorldRegistry,
   container: HTMLElement,
-  onLoadWorld: LoadWorldHandler
+  onLoadWorld: LoadWorldHandler,
+  onDeleteWorld?: DeleteWorldHandler
 ): Promise<void> {
   const activeWorldId = await registry.getActiveWorldId();
   const worlds = await registry.listWorlds();
@@ -13,8 +15,10 @@ export async function renderHomeWorldList(
   // Rebuild visible save rows from registry metadata so storage remains the single source of truth.
   container.replaceChildren(
     ...worlds.map((savedWorld) => {
+      const row = document.createElement("div");
       const button = document.createElement("button");
       const isActive = savedWorld.id === activeWorldId;
+      row.className = "world-slot-row";
       button.type = "button";
       button.className = `world-slot${isActive ? " is-active" : ""}`;
       button.setAttribute("aria-pressed", String(isActive));
@@ -26,7 +30,21 @@ export async function renderHomeWorldList(
         createWorldSlotLine("world-slot-meta", formatWorldMeta(savedWorld, isActive)),
         createWorldSlotLine("world-slot-seed", `Seed: ${savedWorld.seed || "classic"}`)
       );
-      return button;
+      row.append(button);
+
+      if (onDeleteWorld) {
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "world-delete-button";
+        deleteButton.textContent = "Delete";
+        deleteButton.setAttribute("aria-label", `Delete ${savedWorld.name}`);
+        deleteButton.addEventListener("click", () => {
+          void onDeleteWorld(savedWorld);
+        });
+        row.append(deleteButton);
+      }
+
+      return row;
     })
   );
 }
