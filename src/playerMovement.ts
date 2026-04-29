@@ -42,7 +42,7 @@ export const GROUND_SPRINT_CRUISE_SPEED = GROUND_ACCELERATION / GROUND_FRICTION;
 export const SLIDE_PRIME_SPEED = GROUND_SPRINT_CRUISE_SPEED * 0.9;
 // Slide entry pop is multiplicative so the shove scales with the momentum the
 // player brought in instead of feeling like the same flat nudge every time.
-export const SLIDE_ENTRY_SPEED_MULTIPLIER = 1.4;
+export const SLIDE_ENTRY_SPEED_MULTIPLIER = 1.8;
 export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * SLIDE_ENTRY_SPEED_MULTIPLIER;
 export const SLIDE_END_SPEED = CROUCH_SPEED;
 export const SLIDE_MIN_DURATION = 0.5;
@@ -52,7 +52,10 @@ export const SLIDE_MIN_DURATION = 0.5;
 export const SLIDE_DECELERATION_RATE_MULTIPLIER = 2;
 export const SLIDE_FORWARD_FRICTION = 0.95 * SLIDE_DECELERATION_RATE_MULTIPLIER;
 export const SLIDE_RELEASE_FRICTION = 2.25 * SLIDE_DECELERATION_RATE_MULTIPLIER;
-export const SLIDE_JUMP_SPRING_MULTIPLIER = 1.18;
+// The spring bonus is separate from the base 1x jump speed so tuning asks like
+// "another 50%" can strengthen the bonus without turning slide jumps into rockets.
+export const SLIDE_JUMP_SPRING_BONUS = 0.18 * 1.5;
+export const SLIDE_JUMP_SPRING_MULTIPLIER = 1 + SLIDE_JUMP_SPRING_BONUS;
 export const SLIDE_JUMP_SPEED = JUMP_SPEED * SLIDE_JUMP_SPRING_MULTIPLIER;
 
 export type GroundMovementSpeedOptions = {

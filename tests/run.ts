@@ -31,6 +31,7 @@ import {
   SLIDE_ENTRY_SPEED_MULTIPLIER,
   SLIDE_ENTRY_SPEED_CAP,
   SLIDE_FORWARD_FRICTION,
+  SLIDE_JUMP_SPRING_BONUS,
   SLIDE_JUMP_SPEED,
   SLIDE_JUMP_SPRING_MULTIPLIER,
   SLIDE_MIN_DURATION,
@@ -387,8 +388,8 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   assertEqual(SLIDE_MIN_DURATION, 0.5, "slide lock duration should be cut in half");
   assertEqual(
     SLIDE_ENTRY_SPEED_MULTIPLIER,
-    1.4,
-    "slide entry pop should boost the player's current speed by 40 percent"
+    1.8,
+    "slide entry pop should boost the player's current speed by 80 percent"
   );
   assertEqual(
     GROUND_SPRINT_CRUISE_SPEED,
@@ -434,6 +435,16 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     "ordinary slides should still use the sprint cap as their baseline speed limit"
   );
   assertEqual(getJumpSpeed(false), JUMP_SPEED, "normal jumps should use baseline jump speed");
+  assertEqual(
+    SLIDE_JUMP_SPRING_BONUS,
+    0.18 * 1.5,
+    "slide jump spring bonus should be 50 percent stronger than the previous bonus"
+  );
+  assertEqual(
+    SLIDE_JUMP_SPRING_MULTIPLIER,
+    1 + SLIDE_JUMP_SPRING_BONUS,
+    "slide jump spring multiplier should apply the tuned bonus on top of the base jump"
+  );
   assertEqual(
     SLIDE_JUMP_SPEED,
     JUMP_SPEED * SLIDE_JUMP_SPRING_MULTIPLIER,
