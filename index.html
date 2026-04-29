@@ -60,6 +60,29 @@
           </section>
         </div>
       </div>
+      <div
+        id="delete-world-dialog"
+        class="confirm-dialog is-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-world-title"
+        aria-describedby="delete-world-copy"
+      >
+        <div class="confirm-pane">
+          <div id="delete-world-title" class="confirm-title">Delete World?</div>
+          <div id="delete-world-name" class="confirm-name"></div>
+          <p id="delete-world-copy" class="confirm-copy"></p>
+          <div id="delete-world-error" class="confirm-error" aria-live="polite"></div>
+          <div class="confirm-actions">
+            <button id="cancel-delete-world-button" class="menu-button secondary" type="button">
+              Cancel
+            </button>
+            <button id="confirm-delete-world-button" class="menu-button danger" type="button">
+              Delete World
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
     <div id="pause-menu" class="is-hidden">
       <div class="menu-panel">

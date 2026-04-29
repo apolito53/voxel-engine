@@ -32,6 +32,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Required DOM/canvas lookup helpers: `src/dom.ts`
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
+- Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
 - Debug HUD throttling, frame-spike tracking, CPU timing buckets, and renderer stats text: `src/debugHud.ts`
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`

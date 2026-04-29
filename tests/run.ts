@@ -73,6 +73,7 @@ import {
   createWorldRegistry,
   type ChunkStorage
 } from "../src/chunkStorage";
+import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
@@ -604,6 +605,20 @@ test("world registry deletes saved worlds and their edited chunks", async () => 
     1,
     "deleting every save should recreate one default world so the menu never goes empty"
   );
+});
+
+test("delete-world dialog copy names the save and warns about permanence", () => {
+  const copy = createDeleteWorldDialogCopy({
+    id: "world-copy-test",
+    name: "Definitely Important",
+    seed: "copy-seed",
+    createdAt: 1,
+    updatedAt: 2
+  });
+
+  assert(copy.includes("Definitely Important"), "delete confirmation should name the target save");
+  assert(copy.includes("permanently removes"), "delete confirmation should warn about permanent removal");
+  assert(copy.includes("cannot be undone"), "delete confirmation should say the deletion cannot be undone");
 });
 
 test("block damage tracks health before removing voxels", () => {

@@ -29,7 +29,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Controls
 
 - `WASD` move
-- Home screen creates, loads, or deletes a world after confirmation
+- Home screen creates, loads, or deletes a world through an in-app confirmation pane
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing

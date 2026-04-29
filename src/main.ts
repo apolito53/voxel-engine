@@ -8,6 +8,7 @@ import {
   type SavedWorld,
   type WorldRegistry
 } from "./chunkStorage";
+import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
@@ -54,6 +55,12 @@ const worldNameInput = requireElement<HTMLInputElement>("#world-name-input");
 const worldSeedInput = requireElement<HTMLInputElement>("#world-seed-input");
 const randomSeedButton = requireElement<HTMLButtonElement>("#random-seed-button");
 const homeWorldList = requireElement<HTMLElement>("#home-world-list");
+const deleteWorldDialog = requireElement<HTMLElement>("#delete-world-dialog");
+const deleteWorldName = requireElement<HTMLElement>("#delete-world-name");
+const deleteWorldCopy = requireElement<HTMLElement>("#delete-world-copy");
+const deleteWorldError = requireElement<HTMLElement>("#delete-world-error");
+const cancelDeleteWorldButton = requireElement<HTMLButtonElement>("#cancel-delete-world-button");
+const confirmDeleteWorldButton = requireElement<HTMLButtonElement>("#confirm-delete-world-button");
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
@@ -111,6 +118,7 @@ let worldTransitioning = false;
 let selectedBlockIndex = 0;
 let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
+let pendingWorldDeletion: SavedWorld | null = null;
 
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
@@ -235,6 +243,15 @@ function wireMenuControls(): void {
     worldSeedInput.value = createReadableSeed();
     worldSeedInput.focus();
   });
+  cancelDeleteWorldButton.addEventListener("click", closeDeleteWorldDialog);
+  confirmDeleteWorldButton.addEventListener("click", () => {
+    void confirmPendingWorldDeletion();
+  });
+  deleteWorldDialog.addEventListener("pointerdown", (event) => {
+    if (event.target === deleteWorldDialog) {
+      closeDeleteWorldDialog();
+    }
+  });
 }
 
 window.addEventListener("resize", () => {
@@ -245,6 +262,12 @@ window.addEventListener("resize", () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.code === "Escape" && !deleteWorldDialog.classList.contains("is-hidden")) {
+    event.preventDefault();
+    closeDeleteWorldDialog();
+    return;
+  }
+
   if (event.code === "F3") {
     event.preventDefault();
     debugHud.toggle();
@@ -570,7 +593,7 @@ function removePhysicsToyAt(index: number): void {
 }
 
 async function refreshHomeWorldList(): Promise<void> {
-  await renderHomeWorldList(requireWorldRegistry(), homeWorldList, loadWorld, deleteWorldFromHome);
+  await renderHomeWorldList(requireWorldRegistry(), homeWorldList, loadWorld, openDeleteWorldDialog);
 }
 
 async function createWorldFromForm(event: SubmitEvent): Promise<void> {
@@ -619,26 +642,41 @@ async function loadWorld(worldId: string): Promise<void> {
   }
 }
 
-async function deleteWorldFromHome(savedWorld: SavedWorld): Promise<void> {
+function openDeleteWorldDialog(savedWorld: SavedWorld): void {
   if (worldTransitioning) return;
 
-  const confirmed = window.confirm([
-    `Are you SURE you want to delete "${savedWorld.name}"?`,
-    "",
-    "This permanently removes the saved world and every edited chunk stored in this browser.",
-    "Cancel if you are not extremely sure."
-  ].join("\n"));
-  if (!confirmed) return;
+  pendingWorldDeletion = savedWorld;
+  deleteWorldName.textContent = savedWorld.name;
+  deleteWorldCopy.textContent = createDeleteWorldDialogCopy(savedWorld);
+  deleteWorldError.textContent = "";
+  deleteWorldDialog.classList.remove("is-hidden");
+  confirmDeleteWorldButton.focus();
+}
+
+function closeDeleteWorldDialog(): void {
+  pendingWorldDeletion = null;
+  deleteWorldDialog.classList.add("is-hidden");
+  deleteWorldError.textContent = "";
+}
+
+async function confirmPendingWorldDeletion(): Promise<void> {
+  const savedWorld = pendingWorldDeletion;
+  if (!savedWorld || worldTransitioning) return;
 
   worldTransitioning = true;
+  confirmDeleteWorldButton.disabled = true;
+  cancelDeleteWorldButton.disabled = true;
   try {
     await requireWorld().flushStorageWrites();
     await requireWorldRegistry().deleteWorld(savedWorld.id);
+    closeDeleteWorldDialog();
     await refreshHomeWorldList();
   } catch (error) {
     console.error("Could not delete saved world", error);
-    window.alert("Could not delete that saved world. Your save list was left untouched.");
+    deleteWorldError.textContent = "Could not delete that saved world. Your save list was left untouched.";
   } finally {
+    confirmDeleteWorldButton.disabled = false;
+    cancelDeleteWorldButton.disabled = false;
     worldTransitioning = false;
   }
 }
