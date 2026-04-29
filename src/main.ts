@@ -16,7 +16,14 @@ import { readGpuInfo } from "./gpu";
 import { MinimapRenderer } from "./minimap";
 import { PlayerController } from "./player";
 import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
-import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy, type PhysicsImpact } from "./physics";
+import {
+  BLOCK_DAMAGE_IMPACT_SPEED,
+  PhysicsToy,
+  PhysicsToyCollider,
+  createEmptyPhysicsToyCollisionStats,
+  type PhysicsImpact,
+  type PhysicsToyCollisionStats
+} from "./physics";
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
   MIN_PHYSICS_OBJECT_BUDGET,
@@ -134,6 +141,8 @@ const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
 const physicsImpacts: PhysicsImpact[] = [];
 const damagedBlockKeysThisFrame = new Set<string>();
+const physicsToyCollider = new PhysicsToyCollider();
+let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
 
@@ -368,6 +377,7 @@ function animate(): void {
       if (!toy) continue;
       toy.update(delta, activeWorld, physicsImpacts);
     }
+    physicsCollisionStats = physicsToyCollider.resolve(toys);
     for (const impact of physicsImpacts) {
       handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
     }
@@ -411,6 +421,7 @@ function animate(): void {
       debugMinimapMs,
       toys.length,
       physicsObjectBudget,
+      physicsCollisionStats,
       smoothedFrameTimings
     );
   }

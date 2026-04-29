@@ -42,8 +42,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Right click` place block
 - `1-5` select block
 - `F` toggle flight mode
-- `T` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into quality-scaled loose cube fragments that sleep/expire to keep debris cheap
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, and CPU timing buckets for hitch hunting
+- `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, and cores can bump other cores/fragments through a broadphase collision pass
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, and physics collision pair/contact counts for hitch hunting
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Physics Object Budget` stepper changes the current quality preset's physics-body budget
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
@@ -71,7 +71,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
-- `src/physics.ts`: simple sphere-vs-voxel rigid bodies, impact reporting, and shared-resource cube fragments
+- `src/physics.ts`: simple sphere-vs-voxel rigid bodies, broadphase core/debris collision, impact reporting, and shared-resource cube fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/shadows.ts`: directional shadow-map texel snapping helpers

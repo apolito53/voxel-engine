@@ -10,7 +10,12 @@ import {
 import { BLOCK } from "../src/blocks";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
-import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy } from "../src/physics";
+import {
+  BLOCK_DAMAGE_IMPACT_SPEED,
+  PhysicsToy,
+  PhysicsToyCollider,
+  createEmptyPhysicsToyCollisionStats
+} from "../src/physics";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
@@ -854,6 +859,94 @@ test("physics impacts report speed so block damage can be thresholded", () => {
   assert(
     fastImpacts[0].speed > BLOCK_DAMAGE_IMPACT_SPEED,
     "faster impacts should clear the current block damage gate"
+  );
+});
+
+test("physics toy collider resolves nearby core and debris contacts through broadphase", () => {
+  const collider = new PhysicsToyCollider();
+  const leftCore = new PhysicsToy(
+    new THREE.Vector3(0, 2, 0),
+    new THREE.Vector3(6, 0, 0)
+  );
+  const rightCore = new PhysicsToy(
+    new THREE.Vector3(0.6, 2, 0),
+    new THREE.Vector3(-6, 0, 0)
+  );
+
+  const coreStats = collider.resolve([leftCore, rightCore]);
+
+  assertEqual(coreStats.activeBodies, 2, "core-core broadphase should track both active bodies");
+  assertEqual(coreStats.candidatePairs, 1, "overlapping cores should produce one unique candidate pair");
+  assertEqual(coreStats.resolvedContacts, 1, "overlapping cores should resolve one contact");
+  assert(
+    leftCore.velocity.x < 0 && rightCore.velocity.x > 0,
+    "head-on core collision should bounce velocities apart"
+  );
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(0, 2, 0),
+    new THREE.Vector3(6, 0, 0)
+  );
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(0.45, 2, 0),
+    new THREE.Vector3(0, 0, 0)
+  );
+  const fragmentStats = collider.resolve([core, fragment]);
+
+  assertEqual(fragmentStats.candidatePairs, 1, "core-fragment broadphase should produce one candidate pair");
+  assertEqual(fragmentStats.resolvedContacts, 1, "core-fragment contact should resolve");
+  assertEqual(fragmentStats.skippedDebrisPairs, 0, "core-fragment contact should not be treated as debris-debris");
+  assert(
+    fragment.velocity.x > core.velocity.x,
+    "light debris should get shoved harder than the heavier core"
+  );
+});
+
+test("physics toy collider skips debris-debris and far-apart work", () => {
+  const collider = new PhysicsToyCollider();
+  const firstFragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0, 2, 0),
+    new THREE.Vector3(3, 0, 0)
+  );
+  const secondFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.2, 2, 0),
+    new THREE.Vector3(-3, 0, 0)
+  );
+
+  const debrisStats = collider.resolve([firstFragment, secondFragment]);
+
+  assertEqual(debrisStats.candidatePairs, 1, "overlapping debris should still be visible to the broadphase");
+  assertEqual(debrisStats.skippedDebrisPairs, 1, "debris-debris contacts should be skipped for the first pass");
+  assertEqual(debrisStats.resolvedContacts, 0, "debris-debris contacts should not resolve yet");
+  assertEqual(firstFragment.velocity.x, 3, "skipped debris contact should leave first fragment velocity alone");
+  assertEqual(secondFragment.velocity.x, -3, "skipped debris contact should leave second fragment velocity alone");
+
+  const farLeft = new PhysicsToy(
+    new THREE.Vector3(-20, 2, 0),
+    new THREE.Vector3(1, 0, 0)
+  );
+  const farRight = new PhysicsToy(
+    new THREE.Vector3(20, 2, 0),
+    new THREE.Vector3(-1, 0, 0)
+  );
+  const farStats = collider.resolve([farLeft, farRight]);
+
+  assertEqual(farStats.activeBodies, 2, "far broadphase should still count active bodies");
+  assertEqual(farStats.candidatePairs, 0, "far-apart bodies should not become narrowphase work");
+  assertEqual(farStats.resolvedContacts, 0, "far-apart bodies should not resolve contacts");
+  assertDeepEqual(
+    createEmptyPhysicsToyCollisionStats(),
+    {
+      activeBodies: 0,
+      broadphaseCells: 0,
+      candidatePairs: 0,
+      resolvedContacts: 0,
+      skippedDebrisPairs: 0
+    },
+    "empty collision stats should be stable for HUD initialization"
   );
 });
 

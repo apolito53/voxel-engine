@@ -52,7 +52,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Sprint/flight-boost feedback FOV target and smoothing helpers: `src/sprintFeedback.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
-- Throwable bouncing physics core, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
+- Throwable bouncing physics core, broadphase core/debris collision, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions, physics-body defaults, and tuning knobs: `src/qualityPresets.ts`
@@ -76,10 +76,10 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
+10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, a broadphase object-object collision pass, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
 11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
-13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, sleep when settled, and expire after a short lifetime.
+13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, sleep when settled, expire after a short lifetime, and can be shoved by active cores without enabling full debris-debris collision.
 
 ## Common Change Targets
 
@@ -92,7 +92,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior, debris lifetime, debris grid size, quality-scaled debris counts, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT` and `handlePhysicsImpact` in `src/main.ts`.
+- Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `PhysicsToyCollider`, and `handlePhysicsImpact` in `src/main.ts`.
 - Change HUD/minimap/debug/sprint-feedback UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
@@ -110,5 +110,6 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - `npm.cmd run test` bundles `tests/run.ts` into `.test-dist/` with esbuild before running in Node; `.test-dist/` is generated and ignored.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - `vite.config.ts` manually separates Three.js into a `vendor-three` chunk and keeps other dependencies in `vendor`, so production build warnings point at genuinely oversized app code instead of the stable renderer dependency.
+- Object-object physics is intentionally limited: `PhysicsToyCollider` uses a spatial hash, resolves core-core and core-fragment contacts, and skips debris-debris pairs so high debris budgets do not become quadratic contact work.
 - Pointer lock behavior is browser-sensitive; `requestPointerLock()` can return a promise or `void`, so keep the guarded catch path in `src/player.ts` and test movement changes in the browser, not just with `npm.cmd run build`.
 - TypeScript migration helpers are historical prep tools now; source in `src` is expected to stay strict without `@ts-nocheck` or explicit `any`.

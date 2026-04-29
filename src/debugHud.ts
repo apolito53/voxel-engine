@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
+import type { PhysicsToyCollisionStats } from "./physics";
 import type { QualityPreset } from "./qualityPresets";
 import type { ChunkCoords, WorldStats } from "./world";
 
@@ -45,6 +46,7 @@ export class DebugHud {
     lastMinimapMs: number,
     physicsBodyCount: number,
     physicsBodyBudget: number,
+    physicsCollisions: PhysicsToyCollisionStats,
     timings: FrameTimings
   ): void {
     if (!this.visible) return;
@@ -72,7 +74,8 @@ export class DebugHud {
       `view ${stats.visibleChunks}/${stats.loadedChunks} culled ${stats.culledChunks}`,
       `mesh q ${stats.dirtyChunks} view ${stats.visibleDirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
       `saved ${stats.savedChunks} edited ${stats.modifiedChunks} saveq ${stats.pendingChunkSaves} dmg ${stats.damagedBlocks}`,
-      `physics ${physicsBodyCount}/${physicsBodyBudget}`,
+      `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
+      `phys cells ${physicsCollisions.broadphaseCells} active ${physicsCollisions.activeBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,

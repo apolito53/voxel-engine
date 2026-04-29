@@ -9,8 +9,13 @@ import type { CollisionWorld } from "./collision";
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 
 const FRAGMENT_MAX_AGE_SECONDS = 9;
+const FRAGMENT_INVERSE_MASS = 2.5;
 const FRAGMENT_SLEEP_SPEED = 0.18;
 const FRAGMENT_SLEEP_AFTER_SECONDS = 0.35;
+const PHYSICS_TOY_COLLISION_CELL_SIZE = 1;
+const PHYSICS_TOY_COLLISION_RESTITUTION = 0.42;
+const PHYSICS_TOY_COLLISION_DAMPING = 0.995;
+const PHYSICS_TOY_COLLISION_EPSILON = 0.000001;
 
 // Debris cubes all share one tiny geometry and one material per source block.
 // Creating GPU buffers/materials during every explosion is exactly the sort of
@@ -38,6 +43,7 @@ type PhysicsToyOptions = {
   readonly geometry?: THREE.BufferGeometry;
   readonly material?: THREE.MeshStandardMaterial;
   readonly damagesBlocks?: boolean;
+  readonly inverseMass?: number;
   readonly castShadow?: boolean;
   readonly maxAgeSeconds?: number | null;
   readonly sleepSpeed?: number;
@@ -46,8 +52,21 @@ type PhysicsToyOptions = {
   readonly disposeMaterial?: boolean;
 };
 
+export type PhysicsToyCollisionStats = {
+  readonly activeBodies: number;
+  readonly broadphaseCells: number;
+  readonly candidatePairs: number;
+  readonly resolvedContacts: number;
+  readonly skippedDebrisPairs: number;
+};
+
+type MutablePhysicsToyCollisionStats = {
+  -readonly [Key in keyof PhysicsToyCollisionStats]: PhysicsToyCollisionStats[Key];
+};
+
 export class PhysicsToy {
   readonly radius: number;
+  readonly inverseMass: number;
   readonly velocity: THREE.Vector3;
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly damagesBlocks: boolean;
@@ -65,6 +84,7 @@ export class PhysicsToy {
 
   constructor(position: THREE.Vector3, velocity: THREE.Vector3, options: PhysicsToyOptions = {}) {
     this.radius = options.radius ?? 0.35;
+    this.inverseMass = Math.max(0, options.inverseMass ?? 1);
     this.velocity = velocity.clone();
     this.mesh = new THREE.Mesh(
       options.geometry ?? new THREE.SphereGeometry(this.radius, 18, 12),
@@ -91,6 +111,7 @@ export class PhysicsToy {
       geometry: sharedFragmentGeometry,
       material: getFragmentMaterial(block),
       damagesBlocks: false,
+      inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
       maxAgeSeconds: FRAGMENT_MAX_AGE_SECONDS + Math.random() * 3,
       sleepSpeed: FRAGMENT_SLEEP_SPEED,
@@ -102,6 +123,17 @@ export class PhysicsToy {
 
   get isExpired(): boolean {
     return this.expired;
+  }
+
+  get isSleeping(): boolean {
+    return this.sleeping;
+  }
+
+  wakeFromToyCollision(): void {
+    if (!this.sleeping) return;
+
+    this.sleeping = false;
+    this.settledSeconds = 0;
   }
 
   update(delta: number, world: CollisionWorld, impacts: PhysicsImpact[] = []): PhysicsImpact[] {
@@ -188,6 +220,163 @@ export class PhysicsToy {
     // Sleeping debris keeps the visual aftermath without paying collision costs forever.
     this.sleeping = true;
     this.velocity.set(0, 0, 0);
+  }
+}
+
+export function createEmptyPhysicsToyCollisionStats(): PhysicsToyCollisionStats {
+  return {
+    activeBodies: 0,
+    broadphaseCells: 0,
+    candidatePairs: 0,
+    resolvedContacts: 0,
+    skippedDebrisPairs: 0
+  };
+}
+
+export class PhysicsToyCollider {
+  private readonly cells = new Map<string, number[]>();
+  private readonly visitedPairs = new Set<string>();
+  private readonly normal = new THREE.Vector3();
+  private readonly relativeVelocity = new THREE.Vector3();
+  private readonly stats: MutablePhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
+
+  resolve(toys: readonly PhysicsToy[]): PhysicsToyCollisionStats {
+    this.clearBroadphase();
+    this.resetStats();
+
+    for (let index = 0; index < toys.length; index += 1) {
+      const toy = toys[index];
+      if (!toy || toy.isExpired) continue;
+
+      this.stats.activeBodies += 1;
+      this.insertToy(index, toy);
+    }
+
+    this.stats.broadphaseCells = this.cells.size;
+    for (const cellToyIndexes of this.cells.values()) {
+      this.resolveCellPairs(cellToyIndexes, toys);
+    }
+
+    return { ...this.stats };
+  }
+
+  private clearBroadphase(): void {
+    this.cells.clear();
+    this.visitedPairs.clear();
+  }
+
+  private resetStats(): void {
+    this.stats.activeBodies = 0;
+    this.stats.broadphaseCells = 0;
+    this.stats.candidatePairs = 0;
+    this.stats.resolvedContacts = 0;
+    this.stats.skippedDebrisPairs = 0;
+  }
+
+  private insertToy(index: number, toy: PhysicsToy): void {
+    const position = toy.mesh.position;
+    const minX = Math.floor((position.x - toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
+    const maxX = Math.floor((position.x + toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
+    const minY = Math.floor((position.y - toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
+    const maxY = Math.floor((position.y + toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
+    const minZ = Math.floor((position.z - toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
+    const maxZ = Math.floor((position.z + toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const key = `${x},${y},${z}`;
+          const cell = this.cells.get(key);
+          if (cell) {
+            cell.push(index);
+          } else {
+            this.cells.set(key, [index]);
+          }
+        }
+      }
+    }
+  }
+
+  private resolveCellPairs(cellToyIndexes: readonly number[], toys: readonly PhysicsToy[]): void {
+    for (let leftCursor = 0; leftCursor < cellToyIndexes.length - 1; leftCursor += 1) {
+      const leftIndex = cellToyIndexes[leftCursor];
+      for (let rightCursor = leftCursor + 1; rightCursor < cellToyIndexes.length; rightCursor += 1) {
+        const rightIndex = cellToyIndexes[rightCursor];
+        if (leftIndex === undefined || rightIndex === undefined) continue;
+
+        const pairKey = leftIndex < rightIndex
+          ? `${leftIndex}:${rightIndex}`
+          : `${rightIndex}:${leftIndex}`;
+        if (this.visitedPairs.has(pairKey)) continue;
+        this.visitedPairs.add(pairKey);
+        this.stats.candidatePairs += 1;
+
+        const leftToy = toys[leftIndex];
+        const rightToy = toys[rightIndex];
+        if (!leftToy || !rightToy) continue;
+        if (!this.shouldResolvePair(leftToy, rightToy)) continue;
+        if (this.resolvePair(leftToy, rightToy)) {
+          this.stats.resolvedContacts += 1;
+        }
+      }
+    }
+  }
+
+  private shouldResolvePair(leftToy: PhysicsToy, rightToy: PhysicsToy): boolean {
+    if (leftToy.isExpired || rightToy.isExpired) return false;
+    if (!leftToy.damagesBlocks && !rightToy.damagesBlocks) {
+      this.stats.skippedDebrisPairs += 1;
+      return false;
+    }
+
+    // Sleeping debris still lives in the broadphase so an active core can wake
+    // and shove it, but sleeping/sleeping contacts are ignored entirely.
+    return !(leftToy.isSleeping && rightToy.isSleeping);
+  }
+
+  private resolvePair(leftToy: PhysicsToy, rightToy: PhysicsToy): boolean {
+    const leftPosition = leftToy.mesh.position;
+    const rightPosition = rightToy.mesh.position;
+    const combinedRadius = leftToy.radius + rightToy.radius;
+    const combinedRadiusSq = combinedRadius * combinedRadius;
+    const distanceSq = this.normal.subVectors(rightPosition, leftPosition).lengthSq();
+
+    if (distanceSq >= combinedRadiusSq) return false;
+
+    const distance = Math.sqrt(distanceSq);
+    if (distance > PHYSICS_TOY_COLLISION_EPSILON) {
+      this.normal.multiplyScalar(1 / distance);
+    } else {
+      this.normal.copy(rightToy.velocity).sub(leftToy.velocity);
+      if (this.normal.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) {
+        this.normal.set(1, 0, 0);
+      } else {
+        this.normal.normalize();
+      }
+    }
+
+    const inverseMassSum = leftToy.inverseMass + rightToy.inverseMass;
+    if (inverseMassSum <= 0) return false;
+
+    const penetration = combinedRadius - distance;
+    leftPosition.addScaledVector(this.normal, -(penetration * leftToy.inverseMass) / inverseMassSum);
+    rightPosition.addScaledVector(this.normal, (penetration * rightToy.inverseMass) / inverseMassSum);
+
+    this.relativeVelocity.copy(rightToy.velocity).sub(leftToy.velocity);
+    const closingSpeed = this.relativeVelocity.dot(this.normal);
+    if (Math.abs(closingSpeed) > 0.05 || penetration > 0.001) {
+      leftToy.wakeFromToyCollision();
+      rightToy.wakeFromToyCollision();
+    }
+
+    if (closingSpeed >= 0) return true;
+
+    const impulse = (-(1 + PHYSICS_TOY_COLLISION_RESTITUTION) * closingSpeed) / inverseMassSum;
+    leftToy.velocity.addScaledVector(this.normal, -impulse * leftToy.inverseMass);
+    rightToy.velocity.addScaledVector(this.normal, impulse * rightToy.inverseMass);
+    leftToy.velocity.multiplyScalar(PHYSICS_TOY_COLLISION_DAMPING);
+    rightToy.velocity.multiplyScalar(PHYSICS_TOY_COLLISION_DAMPING);
+    return true;
   }
 }
 
