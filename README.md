@@ -33,6 +33,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
+- HUD shows the selected block, movement mode, and current player speed in m/s
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with a 40% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide

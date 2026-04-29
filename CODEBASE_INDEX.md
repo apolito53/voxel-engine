@@ -48,6 +48,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
 - First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, voxel collision: `src/player.ts`
 - Player movement constants and committed slide/landing-slide/air-control/flight/crouch-view tuning helpers: `src/playerMovement.ts`
+- Player velocity magnitude and metric speed readout formatting: `src/playerSpeed.ts`
 - Sprint/flight-boost feedback FOV target and smoothing helpers: `src/sprintFeedback.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`

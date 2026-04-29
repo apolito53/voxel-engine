@@ -15,6 +15,7 @@ import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "
 import { readGpuInfo } from "./gpu";
 import { MinimapRenderer } from "./minimap";
 import { PlayerController } from "./player";
+import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import { BLOCK_DAMAGE_IMPACT_SPEED, PhysicsToy, type PhysicsImpact } from "./physics";
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -73,6 +74,7 @@ const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle")
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
 const minimap = requireElement<HTMLCanvasElement>("#minimap");
 const hudTitle = requireElement<HTMLElement>("#hud .title");
+const playerSpeedReadout = requireElement<HTMLElement>("#player-speed-readout");
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -423,9 +425,11 @@ function updateChunkStreamFrustum(): void {
 }
 
 function updateHud(): void {
-  const movementMode = requirePlayer().movementMode;
+  const activePlayer = requirePlayer();
+  const movementMode = activePlayer.movementMode;
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
   hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}${modeSuffix}`;
+  playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
 }
 
 function updateSprintFeedback(active: boolean, delta: number): void {

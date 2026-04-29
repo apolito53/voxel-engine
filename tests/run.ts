@@ -80,6 +80,10 @@ import {
   smoothSprintFeedbackFov
 } from "../src/sprintFeedback";
 import {
+  formatPlayerSpeedMetersPerSecond,
+  getPlayerSpeedMetersPerSecond
+} from "../src/playerSpeed";
+import {
   createMemorySaveDatabase,
   createWorldRegistry,
   type ChunkStorage
@@ -479,6 +483,26 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
   assert(
     firstReleaseStep > BASE_CAMERA_FOV && firstReleaseStep < sprintFov,
     "sprint feedback should ease back to base FOV"
+  );
+});
+
+test("player speed readout reports velocity in meters per second", () => {
+  const diagonalVelocity = { x: 3, y: 4, z: 12 };
+
+  assertEqual(
+    getPlayerSpeedMetersPerSecond(diagonalVelocity),
+    13,
+    "player speed should use the full velocity magnitude for walk, jump, slide, and flight"
+  );
+  assertEqual(
+    formatPlayerSpeedMetersPerSecond({ x: 1, y: 0, z: 0 }),
+    "1.0 m/s",
+    "HUD speed readout should show one decimal place and metric units"
+  );
+  assertEqual(
+    formatPlayerSpeedMetersPerSecond({ x: Number.POSITIVE_INFINITY, y: 0, z: 0 }),
+    "0.0 m/s",
+    "non-finite velocity samples should fail closed instead of putting nonsense in the HUD"
   );
 });
 
