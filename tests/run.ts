@@ -24,11 +24,14 @@ import {
   GROUND_ACCELERATION,
   GROUND_FRICTION,
   GROUND_SPRINT_CRUISE_SPEED,
+  JUMP_SPEED,
   PREVIOUS_SPRINT_SPEED,
   SLIDE_END_SPEED,
   SLIDE_ENTRY_BOOST,
   SLIDE_ENTRY_SPEED_CAP,
   SLIDE_FORWARD_FRICTION,
+  SLIDE_JUMP_SPEED,
+  SLIDE_JUMP_SPRING_MULTIPLIER,
   SLIDE_MIN_DURATION,
   SLIDE_PRIME_SPEED,
   SLIDE_RELEASE_FRICTION,
@@ -40,6 +43,7 @@ import {
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  getJumpSpeed,
   getSlideEntrySpeed,
   getSlideFriction,
   getSlideSpeedLimit,
@@ -402,6 +406,21 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
     getSlideSpeedLimit(SPRINT_SPEED * 0.75),
     SPRINT_SPEED,
     "ordinary slides should still use the sprint cap as their baseline speed limit"
+  );
+  assertEqual(getJumpSpeed(false), JUMP_SPEED, "normal jumps should use baseline jump speed");
+  assertEqual(
+    SLIDE_JUMP_SPEED,
+    JUMP_SPEED * SLIDE_JUMP_SPRING_MULTIPLIER,
+    "slide jump spring speed should derive from the baseline jump speed"
+  );
+  assertEqual(
+    getJumpSpeed(true),
+    SLIDE_JUMP_SPEED,
+    "jumping out of an active slide should spring a bit higher"
+  );
+  assert(
+    SLIDE_JUMP_SPRING_MULTIPLIER > 1 && SLIDE_JUMP_SPRING_MULTIPLIER < 1.3,
+    "slide jump spring should be noticeable without becoming a vertical launch exploit"
   );
   assert(isSlideMinimumLocked(0.5), "slides should be locked during their first second");
   assert(

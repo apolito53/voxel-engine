@@ -22,6 +22,7 @@ import {
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  getJumpSpeed,
   getSlideEntrySpeed,
   getSlideFriction,
   getSlideSpeedLimit,
@@ -302,7 +303,7 @@ export class PlayerController {
     this.onGround = false;
     if (wasGrounded && this.keys.has("Space")) {
       const jumpingFromSlide = this.sliding;
-      this.velocity.y = JUMP_SPEED;
+      this.velocity.y = getJumpSpeed(jumpingFromSlide);
       this.onGround = false;
       // A slide jump should carry the stored horizontal velocity instead of
       // immediately becoming a normal air-control jump.

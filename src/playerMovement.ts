@@ -46,6 +46,8 @@ export const SLIDE_END_SPEED = CROUCH_SPEED;
 export const SLIDE_MIN_DURATION = 1;
 export const SLIDE_FORWARD_FRICTION = 0.95;
 export const SLIDE_RELEASE_FRICTION = 2.25;
+export const SLIDE_JUMP_SPRING_MULTIPLIER = 1.18;
+export const SLIDE_JUMP_SPEED = JUMP_SPEED * SLIDE_JUMP_SPRING_MULTIPLIER;
 
 export type GroundMovementSpeedOptions = {
   readonly sprinting: boolean;
@@ -132,6 +134,10 @@ export function getSlideEntrySpeed(horizontalSpeed: number, applyEntryBoost: boo
 
 export function getSlideSpeedLimit(entryHorizontalSpeed: number): number {
   return Math.max(SPRINT_SPEED, entryHorizontalSpeed);
+}
+
+export function getJumpSpeed(sliding: boolean): number {
+  return sliding ? SLIDE_JUMP_SPEED : JUMP_SPEED;
 }
 
 export function isSlideMinimumLocked(elapsed: number): boolean {
