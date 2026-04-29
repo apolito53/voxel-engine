@@ -35,7 +35,11 @@ export const FLIGHT_DRAG = 7.5;
 // rocket boost. Entering crouch while sprinting commits to a short forced
 // crouch, adds a small shove, then friction bleeds the stored speed down to
 // normal crouch pace.
-export const SLIDE_PRIME_SPEED = SPRINT_SPEED * 0.55;
+// The trigger threshold must be based on the controller's reachable sustained
+// sprint speed, not the raw sprint cap. Ground friction keeps ordinary flat
+// sprinting below that cap, and using the cap here made C crouch instead.
+export const GROUND_SPRINT_CRUISE_SPEED = GROUND_ACCELERATION / GROUND_FRICTION;
+export const SLIDE_PRIME_SPEED = GROUND_SPRINT_CRUISE_SPEED * 0.9;
 export const SLIDE_ENTRY_BOOST = WALK_SPEED * 0.45;
 export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * 1.12;
 export const SLIDE_END_SPEED = CROUCH_SPEED;
@@ -119,7 +123,9 @@ export function getSlideFriction(holdingForward: boolean): number {
 }
 
 export function getSlideEntrySpeed(horizontalSpeed: number): number {
-  return Math.min(horizontalSpeed + SLIDE_ENTRY_BOOST, SLIDE_ENTRY_SPEED_CAP);
+  // Cap only the extra shove for ordinary slide entries. If another movement
+  // path already earned more speed, preserve it instead of chopping momentum.
+  return Math.max(horizontalSpeed, Math.min(horizontalSpeed + SLIDE_ENTRY_BOOST, SLIDE_ENTRY_SPEED_CAP));
 }
 
 export function getSlideSpeedLimit(entryHorizontalSpeed: number): number {
