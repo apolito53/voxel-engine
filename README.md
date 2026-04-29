@@ -42,7 +42,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `1-5` select block
 - `F` toggle flight mode
 - `T` throw a physics core; impacts above 2 m/s damage blocks, and two damaging hits fracture a block into quality-scaled loose cube fragments that sleep/expire to keep debris cheap
-- `F3` toggle debug overlay, including smoothed FPS plus raw/peak frame time for hitch hunting
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, and CPU timing buckets for hitch hunting
 - `F4` cycle quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Physics Object Budget` stepper changes the current quality preset's physics-body budget
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
@@ -75,7 +75,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
-- `src/debugHud.ts`: debug overlay stats formatting and update throttling
+- `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
+- `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 
 ## Development Checks

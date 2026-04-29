@@ -9,6 +9,7 @@ import {
 } from "./chunkStorage";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
+import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import { MinimapRenderer } from "./minimap";
 import { PlayerController } from "./player";
@@ -37,12 +38,13 @@ import {
   smoothSprintFeedbackFov
 } from "./sprintFeedback";
 import { TargetBlockHighlighter } from "./targetHighlighter";
-import { VoxelWorld } from "./world";
+import { VoxelWorld, type ChunkCoords, type WorldStats } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 const BLOCK_INTERACTION_REACH = 8;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
+type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 
 const app = requireElement<HTMLElement>("#app");
 const homeScreen = requireElement<HTMLElement>("#home-screen");
@@ -121,6 +123,8 @@ const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
 const physicsImpacts: PhysicsImpact[] = [];
 const damagedBlockKeysThisFrame = new Set<string>();
+let smoothedFrameTimings = createEmptyFrameTimings();
+let frameTimingsInitialized = false;
 
 const debugHud = new DebugHud({
   panel: debugPanel,
@@ -295,17 +299,30 @@ renderer.domElement.addEventListener("mousedown", (event) => {
 });
 
 function animate(): void {
+  const frameStartedAt = performance.now();
   const rawDelta = clock.getDelta();
   const delta = Math.min(rawDelta, 0.04);
+  const frameTimingSample = createEmptyFrameTimings();
+  let timingSectionStartedAt = frameStartedAt;
+  let debugPlayerChunk: ChunkCoords | null = null;
+  let debugWorldStats: WorldStats | null = null;
+  let debugMinimapMs = minimapRenderer.lastUpdateMs;
+
+  const recordTimingSection = (section: FrameTimingSection): void => {
+    const now = performance.now();
+    frameTimingSample[section] += now - timingSectionStartedAt;
+    timingSectionStartedAt = now;
+  };
 
   if (inWorld) {
     const activeWorld = requireWorld();
     const activePlayer = requirePlayer();
 
     activePlayer.update(delta);
+    recordTimingSection("playerMs");
     camera.getWorldDirection(chunkStreamDirection);
     updateChunkStreamFrustum();
-    const playerChunk = activeWorld.streamChunksAround(
+    debugPlayerChunk = activeWorld.streamChunksAround(
       camera.position.x,
       camera.position.z,
       scene,
@@ -315,6 +332,7 @@ function animate(): void {
       chunkStreamDirection,
       chunkStreamFrustum
     );
+    recordTimingSection("chunkMs");
 
     physicsImpacts.length = 0;
     damagedBlockKeysThisFrame.clear();
@@ -328,27 +346,48 @@ function animate(): void {
       handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
     }
     pruneExpiredToys();
+    recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
+    recordTimingSection("meshMs");
     updateHud();
-    debugHud.update(
-      rawDelta,
-      playerChunk,
-      activeWorld.getStats(),
-      minimapRenderer.lastUpdateMs,
-      toys.length,
-      physicsObjectBudget
-    );
-    minimapRenderer.update(delta);
     updateTargetBlockHighlighter();
     updateSprintFeedback(activePlayer.isSprintFeedbackActive(), delta);
+    recordTimingSection("otherMs");
+    minimapRenderer.update(delta);
+    debugWorldStats = activeWorld.getStats();
+    debugMinimapMs = minimapRenderer.lastUpdateMs;
+    recordTimingSection("minimapMs");
   } else {
     targetBlockHighlighter.hide();
     updateSprintFeedback(false, delta);
+    recordTimingSection("otherMs");
   }
 
   updateSunShadowAnchor();
+  recordTimingSection("otherMs");
+  const renderStartedAt = performance.now();
   renderer.render(scene, camera);
+  frameTimingSample.renderMs = performance.now() - renderStartedAt;
+  frameTimingSample.frameMs = performance.now() - frameStartedAt;
+  smoothedFrameTimings = smoothFrameTimings(
+    smoothedFrameTimings,
+    frameTimingSample,
+    frameTimingsInitialized
+  );
+  frameTimingsInitialized = true;
+
+  if (inWorld && debugPlayerChunk && debugWorldStats) {
+    debugHud.update(
+      rawDelta,
+      debugPlayerChunk,
+      debugWorldStats,
+      debugMinimapMs,
+      toys.length,
+      physicsObjectBudget,
+      smoothedFrameTimings
+    );
+  }
   requestAnimationFrame(animate);
 }
 

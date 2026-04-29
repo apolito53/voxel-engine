@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-04-27
+Last reviewed: 2026-04-28
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -32,7 +32,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Required DOM/canvas lookup helpers: `src/dom.ts`
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering and seed generation: `src/worldMenu.ts`
-- Debug HUD throttling, frame-spike tracking, and renderer stats text: `src/debugHud.ts`
+- Debug HUD throttling, frame-spike tracking, CPU timing buckets, and renderer stats text: `src/debugHud.ts`
+- Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, health, and placeable palette: `src/blocks.ts`
 - Block fracture grid, quality-scaled grid sampling, and debris sizing constants: `src/blockFragments.ts`
@@ -72,7 +73,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active.
+10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
 11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
 13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, sleep when settled, and expire after a short lifetime.
@@ -89,7 +90,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
 - Change thrown object behavior, debris lifetime, debris grid size, quality-scaled debris counts, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT` and `handlePhysicsImpact` in `src/main.ts`.
-- Change HUD/minimap/debug/sprint-feedback UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
+- Change HUD/minimap/debug/sprint-feedback UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
 

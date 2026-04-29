@@ -69,6 +69,7 @@ import {
   smoothSprintFeedbackFov
 } from "../src/sprintFeedback";
 import type { ChunkStorage } from "../src/chunkStorage";
+import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
@@ -390,6 +391,42 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
   assert(
     firstReleaseStep > BASE_CAMERA_FOV && firstReleaseStep < sprintFov,
     "sprint feedback should ease back to base FOV"
+  );
+});
+
+test("frame timing smoothing keeps debug profiler values readable", () => {
+  const empty = createEmptyFrameTimings();
+  const sample = {
+    playerMs: 2,
+    chunkMs: 4,
+    physicsMs: 8,
+    meshMs: 1,
+    minimapMs: 0.5,
+    renderMs: 3,
+    otherMs: 1.5,
+    frameMs: 20
+  };
+
+  assertDeepEqual(
+    smoothFrameTimings(empty, sample, false),
+    sample,
+    "first timing sample should initialize without smoothing away the numbers"
+  );
+
+  const smoothed = smoothFrameTimings(sample, empty, true, 0.25);
+  assertNearlyEqual(smoothed.playerMs, 1.5, "player timing should ease toward the latest sample");
+  assertNearlyEqual(smoothed.physicsMs, 6, "physics timing should ease toward the latest sample");
+  assertNearlyEqual(smoothed.frameMs, 15, "total frame timing should use the same smoothing");
+
+  assertEqual(
+    smoothFrameTimings(sample, empty, true, 2).frameMs,
+    0,
+    "blend values above one should clamp to the latest sample"
+  );
+  assertEqual(
+    smoothFrameTimings(sample, empty, true, -1).frameMs,
+    sample.frameMs,
+    "blend values below zero should clamp to the previous sample"
   );
 });
 
@@ -780,6 +817,10 @@ function assertNearlyInteger(value: number, message: string): void {
     Math.abs(value - nearest) < 0.000001,
     `${message} should land on an integer texel coordinate`
   );
+}
+
+function assertNearlyEqual(actual: number, expected: number, message: string): void {
+  assert(Math.abs(actual - expected) < 0.000001, `${message}. Expected ${expected}, got ${actual}.`);
 }
 
 function assertVectorNearlyEqual(

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
 import type { QualityPreset } from "./qualityPresets";
 import type { ChunkCoords, WorldStats } from "./world";
@@ -43,7 +44,8 @@ export class DebugHud {
     stats: WorldStats,
     lastMinimapMs: number,
     physicsBodyCount: number,
-    physicsBodyBudget: number
+    physicsBodyBudget: number,
+    timings: FrameTimings
   ): void {
     if (!this.visible) return;
 
@@ -63,6 +65,8 @@ export class DebugHud {
     this.panel.textContent = [
       `fps ${Math.round(this.smoothedFps)}`,
       `frame ${(rawDelta * 1000).toFixed(1)}ms peak ${this.peakFrameMs.toFixed(1)}ms`,
+      `cpu ${timings.frameMs.toFixed(1)}ms player ${timings.playerMs.toFixed(1)} chunk ${timings.chunkMs.toFixed(1)}`,
+      `cpu phys ${timings.physicsMs.toFixed(1)} mesh ${timings.meshMs.toFixed(1)} map ${timings.minimapMs.toFixed(1)} draw ${timings.renderMs.toFixed(1)} other ${timings.otherMs.toFixed(1)}`,
       `chunk ${playerChunk.cx}, ${playerChunk.cz}`,
       `chunks ${stats.loadedChunks} q ${stats.queuedChunks} gen ${stats.loadedThisFrame}/${stats.pendingChunkLoads}`,
       `view ${stats.visibleChunks}/${stats.loadedChunks} culled ${stats.culledChunks}`,
