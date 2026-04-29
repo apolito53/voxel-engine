@@ -23,6 +23,8 @@ import {
   FLIGHT_TOGGLE_KEY,
   PREVIOUS_SPRINT_SPEED,
   SLIDE_END_SPEED,
+  SLIDE_ENTRY_BOOST,
+  SLIDE_ENTRY_SPEED_CAP,
   SLIDE_FORWARD_FRICTION,
   SLIDE_MIN_DURATION,
   SLIDE_PRIME_SPEED,
@@ -35,6 +37,7 @@ import {
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  getSlideEntrySpeed,
   getSlideFriction,
   getSlideSpeedLimit,
   isSlideMinimumLocked,
@@ -314,7 +317,7 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
 
   assert(
     shouldStartSlide(true, true, true, true, SLIDE_PRIME_SPEED),
-    "grounded sprint-crouch movement should prime a slide once speed is high enough"
+    "grounded sprint-crouch movement should prime a slide once speed reaches the sprint-relative threshold"
   );
   assert(
     !shouldStartSlide(true, true, true, true, SLIDE_PRIME_SPEED - 0.01),
@@ -354,6 +357,21 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
   );
   assertEqual(getSlideFriction(true), SLIDE_FORWARD_FRICTION, "holding forward should keep the longer slide glide");
   assertEqual(getSlideFriction(false), SLIDE_RELEASE_FRICTION, "releasing forward should bleed slide speed faster");
+  assertEqual(
+    SLIDE_PRIME_SPEED,
+    SPRINT_SPEED * 0.55,
+    "slide entry threshold should scale with the current sprint tuning"
+  );
+  assertEqual(
+    getSlideEntrySpeed(SLIDE_PRIME_SPEED),
+    SLIDE_PRIME_SPEED + SLIDE_ENTRY_BOOST,
+    "starting a slide should add a modest entry shove"
+  );
+  assertEqual(
+    getSlideEntrySpeed(SLIDE_ENTRY_SPEED_CAP * 2),
+    SLIDE_ENTRY_SPEED_CAP,
+    "slide entry shove should cap before becoming a launch exploit"
+  );
   assertEqual(
     getSlideSpeedLimit(SPRINT_SPEED * 1.25),
     SPRINT_SPEED * 1.25,

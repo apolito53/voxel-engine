@@ -22,6 +22,7 @@ import {
   getFlightMovementAcceleration,
   getFlightMovementSpeed,
   getGroundMovementSpeed,
+  getSlideEntrySpeed,
   getSlideFriction,
   getSlideSpeedLimit,
   smoothCrouchViewOffset,
@@ -512,10 +513,16 @@ export class PlayerController {
     this.sliding = true;
     this.crouching = true;
     this.slideElapsed = 0;
+    const slideEntrySpeed = getSlideEntrySpeed(horizontalSpeed);
+    if (horizontalSpeed > 0) {
+      const entrySpeedScale = slideEntrySpeed / horizontalSpeed;
+      this.velocity.x *= entrySpeedScale;
+      this.velocity.z *= entrySpeedScale;
+    }
     // Preserve the speed the player actually brought into the slide. Without
     // this, high-speed landings or slide jumps can get chopped down by the
     // normal ground movement cap before friction has a chance to feel physical.
-    this.slideSpeedLimit = getSlideSpeedLimit(horizontalSpeed);
+    this.slideSpeedLimit = getSlideSpeedLimit(slideEntrySpeed);
   }
 
   endSlide(): void {

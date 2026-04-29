@@ -33,8 +33,11 @@ export const FLIGHT_DRAG = 7.5;
 
 // A slide is deliberately a "carry sprint momentum" state, not a separate
 // rocket boost. Entering crouch while sprinting commits to a short forced
-// crouch, then friction bleeds the stored speed down to normal crouch pace.
-export const SLIDE_PRIME_SPEED = PREVIOUS_SPRINT_SPEED * 0.9;
+// crouch, adds a small shove, then friction bleeds the stored speed down to
+// normal crouch pace.
+export const SLIDE_PRIME_SPEED = SPRINT_SPEED * 0.55;
+export const SLIDE_ENTRY_BOOST = WALK_SPEED * 0.45;
+export const SLIDE_ENTRY_SPEED_CAP = SPRINT_SPEED * 1.12;
 export const SLIDE_END_SPEED = CROUCH_SPEED;
 export const SLIDE_MIN_DURATION = 1;
 export const SLIDE_FORWARD_FRICTION = 0.95;
@@ -113,6 +116,10 @@ export function shouldContinueSlide(
 
 export function getSlideFriction(holdingForward: boolean): number {
   return holdingForward ? SLIDE_FORWARD_FRICTION : SLIDE_RELEASE_FRICTION;
+}
+
+export function getSlideEntrySpeed(horizontalSpeed: number): number {
+  return Math.min(horizontalSpeed + SLIDE_ENTRY_BOOST, SLIDE_ENTRY_SPEED_CAP);
 }
 
 export function getSlideSpeedLimit(entryHorizontalSpeed: number): number {
