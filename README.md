@@ -44,12 +44,12 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `1-5` select block
 - `F` toggle flight mode
 - `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
-- `X` despawn all active physics cores, loose debris, and rubble cover
+- `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
-- Settings `Despawn Physics Cores` removes thrown cores while keeping loose debris and rubble piles; `Despawn All Objects` matches `X`
+- Settings `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
 - `Esc` pause and release mouse
 

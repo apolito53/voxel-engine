@@ -100,7 +100,6 @@ const physicsBudgetValue = requireElement<HTMLElement>("#physics-budget-value");
 const physicsBudgetDecreaseButton = requireElement<HTMLButtonElement>("#physics-budget-decrease");
 const physicsBudgetIncreaseButton = requireElement<HTMLButtonElement>("#physics-budget-increase");
 const physicsBudgetSlider = requireElement<HTMLInputElement>("#physics-budget-slider");
-const despawnCoresButton = requireElement<HTMLButtonElement>("#despawn-cores-button");
 const despawnObjectsButton = requireElement<HTMLButtonElement>("#despawn-objects-button");
 const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-slider");
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
@@ -289,7 +288,6 @@ function wireMenuControls(): void {
   physicsBudgetDecreaseButton.addEventListener("click", () => changePhysicsObjectBudget("decrease"));
   physicsBudgetIncreaseButton.addEventListener("click", () => changePhysicsObjectBudget("increase"));
   physicsBudgetSlider.addEventListener("input", () => setPhysicsObjectBudget(Number(physicsBudgetSlider.value)));
-  despawnCoresButton.addEventListener("click", clearPhysicsCores);
   despawnObjectsButton.addEventListener("click", clearToys);
   shadowQualitySlider.addEventListener("input", () => {
     qualityController.setShadowQualityLevel(shadowQualitySlider.value);
@@ -366,7 +364,7 @@ document.addEventListener("keydown", (event) => {
 
   if (event.code === "KeyX") {
     event.preventDefault();
-    clearToys();
+    clearPhysicsCores();
     return;
   }
 
@@ -877,9 +875,9 @@ function clearPhysicsCores(): void {
     const toy = toys[index];
     if (!toy || toy.isInstancedFragment || !toy.damagesBlocks) continue;
 
-    // This is intentionally narrower than the X/despawn-all path: when a test
-    // scene is littered with launched cores, the user can clean the big red
-    // projectiles without erasing the rubble piles they were creating.
+    // X is the quick cleanup key: remove the launched cores without erasing the
+    // rubble piles or loose debris the player may be studying. Full cleanup is
+    // intentionally tucked behind the Settings menu's Despawn All Objects button.
     removePhysicsToyAt(index);
   }
 }

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.2 - 2026-05-02
+
+### Changed
+
+- Reassigned `X` to despawn only thrown physics cores, preserving loose debris and settled rubble piles for ongoing destruction tests.
+- Removed the redundant settings-menu core-despawn button; the settings menu now keeps only the drastic `Despawn All Objects` cleanup action.
+- Updated HUD and README control copy so the quick hotkey and full cleanup button describe their different blast radii.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: confirmed HUD says `X despawn cores`, Settings only exposes `Despawn All Objects`, pressed `X`, and checked for fresh console errors.
+
 ## 0.2.1 - 2026-05-02
 
 ### Changed
