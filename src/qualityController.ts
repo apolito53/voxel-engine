@@ -1,15 +1,33 @@
 import * as THREE from "three";
 import {
+  CUSTOM_PRESET_ID,
+  CUSTOM_QUALITY_BASE_STORAGE_KEY,
   DEFAULT_QUALITY_PRESET,
   LEGACY_POTATO_STORAGE_KEY,
   QUALITY_PRESET_ORDER,
   QUALITY_PRESETS,
+  type BuiltInQualityPresetId,
   type QualityPreset,
   type QualityPresetId,
   QUALITY_STORAGE_KEY,
   SUPER_ULTRA_PRESET_ID,
   SUPER_ULTRA_STORAGE_KEY
 } from "./qualityPresets";
+import {
+  readQualitySettingsPreference,
+  writeQualitySettingsPreference,
+  normalizeQualitySettings,
+  normalizeRenderDistance,
+  createDefaultQualitySettings,
+  getShadowMapSizeForQualityLevel,
+  type QualitySettings
+} from "./qualitySettings";
+import { CHUNK_SIZE } from "./voxelConstants";
+
+const FOG_FAR_PER_LOADED_CHUNK = CHUNK_SIZE * 1.85;
+const CAMERA_FAR_PER_LOADED_CHUNK = CHUNK_SIZE * 3.2;
+
+export type QualityChangeSource = "preset" | "settings";
 
 type QualityControllerOptions = {
   readonly renderer: THREE.WebGLRenderer;
@@ -17,11 +35,11 @@ type QualityControllerOptions = {
   readonly sun: THREE.DirectionalLight;
   readonly skyLight: THREE.HemisphereLight;
   readonly fog: THREE.Fog;
-  readonly qualityButton: HTMLButtonElement;
+  readonly qualitySelect: HTMLSelectElement;
   readonly superUltraToggleRow: HTMLElement;
   readonly superUltraToggle: HTMLInputElement;
   readonly updateSunShadowAnchor: () => void;
-  readonly onQualityChanged: () => void;
+  readonly onQualityChanged: (source: QualityChangeSource) => void;
 };
 
 export class QualityController {
@@ -30,13 +48,15 @@ export class QualityController {
   private readonly sun: THREE.DirectionalLight;
   private readonly skyLight: THREE.HemisphereLight;
   private readonly fog: THREE.Fog;
-  private readonly qualityButton: HTMLButtonElement;
+  private readonly qualitySelect: HTMLSelectElement;
   private readonly superUltraToggleRow: HTMLElement;
   private readonly superUltraToggle: HTMLInputElement;
   private readonly updateSunShadowAnchor: () => void;
-  private readonly onQualityChanged: () => void;
+  private readonly onQualityChanged: (source: QualityChangeSource) => void;
   private superUltraEnabled = readSuperUltraPreference();
+  private customBasePresetId: BuiltInQualityPresetId = this.readCustomBasePreference();
   private presetId: QualityPresetId = this.readQualityPreference();
+  private settings: QualitySettings = this.readSettingsForPreset(this.presetId);
 
   constructor(options: QualityControllerOptions) {
     this.renderer = options.renderer;
@@ -44,7 +64,7 @@ export class QualityController {
     this.sun = options.sun;
     this.skyLight = options.skyLight;
     this.fog = options.fog;
-    this.qualityButton = options.qualityButton;
+    this.qualitySelect = options.qualitySelect;
     this.superUltraToggleRow = options.superUltraToggleRow;
     this.superUltraToggle = options.superUltraToggle;
     this.updateSunShadowAnchor = options.updateSunShadowAnchor;
@@ -52,7 +72,7 @@ export class QualityController {
   }
 
   get preset(): QualityPreset {
-    return QUALITY_PRESETS[this.presetId];
+    return this.createEffectivePreset();
   }
 
   get currentPresetId(): QualityPresetId {
@@ -60,7 +80,7 @@ export class QualityController {
   }
 
   get loadRadius(): number {
-    return this.preset.loadRadius;
+    return this.settings.loadRadius;
   }
 
   get initialLoadRadius(): number {
@@ -69,7 +89,7 @@ export class QualityController {
   }
 
   get unloadRadius(): number {
-    return this.preset.unloadRadius;
+    return this.settings.loadRadius + 1;
   }
 
   get chunkLoadBudget(): number {
@@ -92,7 +112,16 @@ export class QualityController {
     return Math.min(window.devicePixelRatio, this.preset.pixelRatioLimit);
   }
 
+  get blockFragmentCount(): number {
+    return this.settings.blockFragmentCount;
+  }
+
+  get shadowMapSize(): number {
+    return this.settings.shadowMapSize;
+  }
+
   initialize(): void {
+    this.syncQualitySelect();
     this.syncSuperUltraToggle();
     this.setPreset(this.presetId, false);
   }
@@ -114,6 +143,14 @@ export class QualityController {
       return;
     }
 
+    if (this.customBasePresetId === SUPER_ULTRA_PRESET_ID) {
+      this.customBasePresetId = "ultra";
+      writeCustomBasePreference(this.customBasePresetId);
+      if (this.presetId === CUSTOM_PRESET_ID) {
+        this.applyCurrentPreset(true, "preset");
+      }
+    }
+
     if (this.presetId === SUPER_ULTRA_PRESET_ID) {
       this.setPreset("ultra");
     }
@@ -121,6 +158,74 @@ export class QualityController {
 
   setPreset(presetId: unknown, persist = true): void {
     this.presetId = this.normalizeQualityPresetId(presetId);
+    this.settings = this.readSettingsForPreset(this.presetId);
+    this.syncQualitySelect();
+    this.applyCurrentPreset(true, "preset");
+    if (persist) writeQualityPreference(this.presetId);
+  }
+
+  setRenderDistance(loadRadius: unknown): void {
+    this.updateSettings({
+      ...this.settings,
+      loadRadius: normalizeRenderDistance(loadRadius, this.settings.loadRadius)
+    }, false);
+  }
+
+  setShadowQualityLevel(level: unknown): void {
+    this.updateSettings({
+      ...this.settings,
+      shadowMapSize: getShadowMapSizeForQualityLevel(level)
+    }, true);
+  }
+
+  setBlockFragmentCount(fragmentCount: unknown): void {
+    this.updateSettings({
+      ...this.settings,
+      blockFragmentCount: Number(fragmentCount)
+    }, false);
+  }
+
+  forkCurrentPresetToCustom(): void {
+    if (this.presetId === CUSTOM_PRESET_ID) return;
+
+    const previousPresetId = this.presetId;
+
+    this.customBasePresetId = previousPresetId;
+    this.settings = normalizeQualitySettings(
+      this.settings,
+      createDefaultQualitySettings(QUALITY_PRESETS[previousPresetId])
+    );
+    writeCustomBasePreference(this.customBasePresetId);
+    writeQualitySettingsPreference(CUSTOM_PRESET_ID, this.settings, QUALITY_PRESETS[previousPresetId]);
+    this.presetId = CUSTOM_PRESET_ID;
+    this.syncQualitySelect();
+    writeQualityPreference(this.presetId);
+    this.applyCurrentPreset(false, "settings");
+  }
+
+  private updateSettings(nextSettings: QualitySettings, resetShadowMap: boolean): void {
+    const previousBasePreset = this.getBasePreset();
+
+    this.settings = normalizeQualitySettings(nextSettings, this.settings);
+
+    if (this.presetId !== CUSTOM_PRESET_ID) {
+      const previousPresetId: BuiltInQualityPresetId = this.presetId;
+
+      // Slider edits fork the currently selected preset into Custom. Built-in
+      // presets stay clean defaults, so a wild tuning session never mutates
+      // "Normal" or "Ultra" behind the player's back.
+      this.customBasePresetId = previousPresetId;
+      writeCustomBasePreference(this.customBasePresetId);
+      this.presetId = CUSTOM_PRESET_ID;
+      this.syncQualitySelect();
+      writeQualityPreference(this.presetId);
+    }
+
+    writeQualitySettingsPreference(CUSTOM_PRESET_ID, this.settings, previousBasePreset);
+    this.applyCurrentPreset(resetShadowMap, "settings");
+  }
+
+  private applyCurrentPreset(resetShadowMap: boolean, source: QualityChangeSource): void {
     const preset = this.preset;
 
     this.renderer.setPixelRatio(this.renderPixelRatio);
@@ -128,7 +233,7 @@ export class QualityController {
     this.renderer.shadowMap.autoUpdate = preset.shadows;
     this.renderer.shadowMap.needsUpdate = true;
     this.sun.intensity = preset.sunIntensity;
-    this.configureSunShadow(preset, true);
+    this.configureSunShadow(preset, resetShadowMap);
     this.skyLight.intensity = preset.skyIntensity;
     this.fog.near = preset.fogNear;
     this.fog.far = preset.fogFar;
@@ -136,19 +241,34 @@ export class QualityController {
     this.camera.updateProjectionMatrix();
     this.updateSunShadowAnchor();
 
-    this.qualityButton.textContent = `Quality: ${preset.label}`;
-    this.qualityButton.setAttribute("aria-label", `Quality preset: ${preset.label}`);
+    this.qualitySelect.value = this.presetId;
+    this.qualitySelect.setAttribute("aria-label", `Quality preset: ${preset.label}`);
     document.body.dataset.quality = this.presetId;
     this.syncSuperUltraToggle();
 
-    this.onQualityChanged();
-    if (persist) writeQualityPreference(this.presetId);
+    this.onQualityChanged(source);
   }
 
-  private getSelectableQualityPresets(): QualityPresetId[] {
+  getSelectableQualityPresets(): QualityPresetId[] {
     return this.superUltraEnabled
-      ? [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID]
-      : [...QUALITY_PRESET_ORDER];
+      ? [CUSTOM_PRESET_ID, ...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID]
+      : [CUSTOM_PRESET_ID, ...QUALITY_PRESET_ORDER];
+  }
+
+  private syncQualitySelect(): void {
+    const selectablePresets = this.getSelectableQualityPresets();
+    const previousValue = this.qualitySelect.value;
+    this.qualitySelect.replaceChildren(
+      ...selectablePresets.map((presetId) => {
+        const option = document.createElement("option");
+        option.value = presetId;
+        option.textContent = QUALITY_PRESETS[presetId].label;
+        return option;
+      })
+    );
+    this.qualitySelect.value = selectablePresets.includes(this.presetId)
+      ? this.presetId
+      : previousValue;
   }
 
   private syncSuperUltraToggle(): void {
@@ -178,6 +298,28 @@ export class QualityController {
     if (resetShadowMap) this.resetSunShadowMap();
   }
 
+  private createEffectivePreset(): QualityPreset {
+    const basePreset = this.getBasePreset();
+    const loadRadius = this.settings.loadRadius;
+    const shadowMapSize = this.settings.shadowMapSize;
+    const shadows = shadowMapSize > 0;
+    const fogFar = Math.max(basePreset.fogFar, loadRadius * FOG_FAR_PER_LOADED_CHUNK);
+    const cameraFar = Math.max(basePreset.cameraFar, loadRadius * CAMERA_FAR_PER_LOADED_CHUNK);
+
+    return {
+      ...basePreset,
+      label: this.presetId === CUSTOM_PRESET_ID ? QUALITY_PRESETS.custom.label : basePreset.label,
+      shadows,
+      shadowMapSize: shadows ? shadowMapSize : basePreset.shadowMapSize,
+      shadowIntensity: shadows ? basePreset.shadowIntensity : 0,
+      loadRadius,
+      unloadRadius: loadRadius + 1,
+      fogFar,
+      cameraFar,
+      blockFragmentCount: this.settings.blockFragmentCount
+    };
+  }
+
   private resetSunShadowMap(): void {
     // Three.js allocates shadow render targets lazily; quality changes need a clean target.
     if (this.sun.shadow.map) {
@@ -196,6 +338,25 @@ export class QualityController {
     return presetId;
   }
 
+  private normalizeBuiltInPresetId(presetId: unknown, fallback: BuiltInQualityPresetId): BuiltInQualityPresetId {
+    if (!isBuiltInQualityPresetId(presetId)) return fallback;
+    if (presetId === SUPER_ULTRA_PRESET_ID && !this.superUltraEnabled) return "ultra";
+    return presetId;
+  }
+
+  private getBasePreset(): QualityPreset {
+    if (this.presetId === CUSTOM_PRESET_ID) return QUALITY_PRESETS[this.customBasePresetId];
+    return QUALITY_PRESETS[this.presetId];
+  }
+
+  private readSettingsForPreset(presetId: QualityPresetId): QualitySettings {
+    if (presetId === CUSTOM_PRESET_ID) {
+      return readQualitySettingsPreference(CUSTOM_PRESET_ID, QUALITY_PRESETS[this.customBasePresetId]);
+    }
+
+    return createDefaultQualitySettings(QUALITY_PRESETS[presetId]);
+  }
+
   private readQualityPreference(): QualityPresetId {
     try {
       const storedPreset = localStorage.getItem(QUALITY_STORAGE_KEY);
@@ -204,6 +365,17 @@ export class QualityController {
       // Keep old sessions intuitive: the previous "potato on" setting is now "low".
       if (localStorage.getItem(LEGACY_POTATO_STORAGE_KEY) === "true") return "low";
       return DEFAULT_QUALITY_PRESET;
+    } catch {
+      return DEFAULT_QUALITY_PRESET;
+    }
+  }
+
+  private readCustomBasePreference(): BuiltInQualityPresetId {
+    try {
+      return this.normalizeBuiltInPresetId(
+        localStorage.getItem(CUSTOM_QUALITY_BASE_STORAGE_KEY),
+        DEFAULT_QUALITY_PRESET
+      );
     } catch {
       return DEFAULT_QUALITY_PRESET;
     }
@@ -222,6 +394,10 @@ function isQualityPresetId(presetId: unknown): presetId is QualityPresetId {
     typeof presetId === "string" &&
     Object.prototype.hasOwnProperty.call(QUALITY_PRESETS, presetId)
   );
+}
+
+function isBuiltInQualityPresetId(presetId: unknown): presetId is BuiltInQualityPresetId {
+  return isQualityPresetId(presetId) && presetId !== CUSTOM_PRESET_ID;
 }
 
 function readSuperUltraPreference(): boolean {
@@ -246,5 +422,13 @@ function writeQualityPreference(presetId: QualityPresetId): void {
     localStorage.removeItem(LEGACY_POTATO_STORAGE_KEY);
   } catch {
     // Local storage is a convenience here; quality changes should still work without it.
+  }
+}
+
+function writeCustomBasePreference(presetId: BuiltInQualityPresetId): void {
+  try {
+    localStorage.setItem(CUSTOM_QUALITY_BASE_STORAGE_KEY, presetId);
+  } catch {
+    // Custom settings still work for this session even if local storage refuses the save.
   }
 }

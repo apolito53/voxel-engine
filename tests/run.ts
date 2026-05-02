@@ -79,7 +79,26 @@ import {
   stepPhysicsObjectBudget
 } from "../src/physicsBudget";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
-import { QUALITY_PRESET_ORDER, QUALITY_PRESETS, SUPER_ULTRA_PRESET_ID } from "../src/qualityPresets";
+import {
+  CUSTOM_PRESET_ID,
+  QUALITY_PRESET_ORDER,
+  QUALITY_PRESETS,
+  SUPER_ULTRA_PRESET_ID
+} from "../src/qualityPresets";
+import {
+  BLOCK_FRAGMENT_MAX_COUNT,
+  RENDER_DISTANCE_MAX,
+  RENDER_DISTANCE_MIN,
+  SHADOW_QUALITY_MAX_LEVEL,
+  createDefaultQualitySettings,
+  formatBlockFragmentCount,
+  formatRenderDistance,
+  formatShadowQuality,
+  getShadowMapSizeForQualityLevel,
+  normalizeQualitySettings,
+  normalizeRenderDistance,
+  normalizeShadowQualityLevel
+} from "../src/qualitySettings";
 import { voxelRaycast } from "../src/raycast";
 import {
   createDirectionalShadowBasis,
@@ -1163,7 +1182,47 @@ test("physics toy collider keeps sleeping debris out of active pair work", () =>
   assertEqual(cleanedStats.sleepingBroadphaseCells, 0, "forgotten debris should leave the static broadphase");
 });
 
+test("quality settings clamp custom menu overrides", () => {
+  const normalDefaults = createDefaultQualitySettings(QUALITY_PRESETS.normal);
+
+  assertDeepEqual(
+    normalDefaults,
+    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 7 },
+    "normal preset should expose its default tunable settings"
+  );
+  assertEqual(normalizeRenderDistance(-20), RENDER_DISTANCE_MIN, "render distance should keep a lower bound");
+  assertEqual(normalizeRenderDistance(999), RENDER_DISTANCE_MAX, "render distance should keep an upper bound");
+  assertEqual(getShadowMapSizeForQualityLevel(0), 0, "shadow quality level zero should disable shadows");
+  assertEqual(
+    getShadowMapSizeForQualityLevel(SHADOW_QUALITY_MAX_LEVEL),
+    8192,
+    "highest shadow quality level should use the largest supported map"
+  );
+  assertEqual(
+    normalizeShadowQualityLevel(99),
+    SHADOW_QUALITY_MAX_LEVEL,
+    "shadow quality level should clamp to the slider range"
+  );
+
+  const normalized = normalizeQualitySettings(
+    { loadRadius: 999, shadowMapSize: 3333, blockFragmentCount: 999 },
+    normalDefaults
+  );
+
+  assertEqual(normalized.loadRadius, RENDER_DISTANCE_MAX, "custom render distance should clamp high");
+  assertEqual(normalized.shadowMapSize, 4096, "custom shadow map size should snap to the nearest option");
+  assertEqual(
+    normalized.blockFragmentCount,
+    BLOCK_FRAGMENT_MAX_COUNT,
+    "custom debris count should clamp to the fracture-grid limit"
+  );
+  assertEqual(formatRenderDistance(6), "6 chunks", "render distance label should stay human-readable");
+  assertEqual(formatShadowQuality(0), "Off", "shadow quality label should call out disabled shadows");
+  assertEqual(formatBlockFragmentCount(0), "1 cube", "debris count label should show the clamped shard count");
+});
+
 test("physics object budget clamps and steps predictably", () => {
+  assertEqual(MAX_PHYSICS_OBJECT_BUDGET, 4096, "physics object slider should expose the new 4096 cap");
   assertEqual(
     normalizePhysicsObjectBudget(null, QUALITY_PRESETS.high.physicsObjectBudget),
     QUALITY_PRESETS.high.physicsObjectBudget,
@@ -1251,6 +1310,12 @@ test("quality presets keep scheduler and render-distance invariants", () => {
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
   assertEqual(QUALITY_PRESETS.normal.distanceScale, 2, "Normal should remain 2x distance");
+  assertEqual(QUALITY_PRESETS[CUSTOM_PRESET_ID].label, "Custom", "Custom preset should be available for slider edits");
+  assertEqual(
+    QUALITY_PRESETS[CUSTOM_PRESET_ID].physicsObjectBudget,
+    QUALITY_PRESETS.normal.physicsObjectBudget,
+    "Custom should start from Normal's practical baseline before slider edits"
+  );
   assertEqual(QUALITY_PRESETS.high.distanceScale, 4, "High should remain 4x distance");
   assertEqual(QUALITY_PRESETS.ultra.distanceScale, 6, "Ultra should remain 6x distance");
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
@@ -1283,7 +1348,7 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   );
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget,
-    2048,
+    4096,
     "Super Ultra should carry the largest physics-object stress budget"
   );
   assertEqual(

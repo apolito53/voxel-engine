@@ -1,12 +1,15 @@
 export const QUALITY_STORAGE_KEY = "voxel-quality-preset";
+export const CUSTOM_QUALITY_BASE_STORAGE_KEY = "voxel-custom-quality-base";
 export const SUPER_ULTRA_STORAGE_KEY = "voxel-super-ultra-enabled";
 export const LEGACY_POTATO_STORAGE_KEY = "voxel-potato-mode";
 export const DEFAULT_QUALITY_PRESET = "normal";
+export const CUSTOM_PRESET_ID = "custom";
 export const SUPER_ULTRA_PRESET_ID = "superUltra";
 export const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"] as const;
 
 export type StandardQualityPresetId = (typeof QUALITY_PRESET_ORDER)[number];
-export type QualityPresetId = StandardQualityPresetId | typeof SUPER_ULTRA_PRESET_ID;
+export type BuiltInQualityPresetId = StandardQualityPresetId | typeof SUPER_ULTRA_PRESET_ID;
+export type QualityPresetId = StandardQualityPresetId | typeof CUSTOM_PRESET_ID | typeof SUPER_ULTRA_PRESET_ID;
 
 export type QualityPreset = {
   readonly label: string;
@@ -113,6 +116,31 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     sunIntensity: 3.45,
     skyIntensity: 1.45
   },
+  custom: {
+    label: "Custom",
+    distanceScale: 2,
+    pixelRatioLimit: 2,
+    shadows: true,
+    shadowMapSize: 2048,
+    shadowCameraSize: 80,
+    shadowCameraFar: 260,
+    shadowBias: -0.00012,
+    shadowNormalBias: 0.055,
+    shadowIntensity: 0.78,
+    fogNear: 55,
+    fogFar: 220,
+    cameraFar: 450,
+    loadRadius: 6,
+    unloadRadius: 7,
+    chunkLoads: 2,
+    chunkRebuilds: 4,
+    physicsObjectBudget: 192,
+    blockFragmentCount: 7,
+    minimapInterval: 0.15,
+    minimapRowsPerFrame: 8,
+    sunIntensity: 3.45,
+    skyIntensity: 1.45
+  },
   high: {
     label: "High",
     distanceScale: 4,
@@ -181,7 +209,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     unloadRadius: 37,
     chunkLoads: 10,
     chunkRebuilds: 10,
-    physicsObjectBudget: 2048,
+    physicsObjectBudget: 4096,
     blockFragmentCount: 27,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,

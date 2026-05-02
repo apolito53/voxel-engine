@@ -28,14 +28,28 @@ import {
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
   MIN_PHYSICS_OBJECT_BUDGET,
+  PHYSICS_OBJECT_BUDGET_STEP,
   normalizePhysicsObjectBudget,
   readPhysicsObjectBudgetPreference,
   stepPhysicsObjectBudget,
   writePhysicsObjectBudgetPreference,
   type PhysicsBudgetDirection
 } from "./physicsBudget";
-import { QualityController } from "./qualityController";
+import { QualityController, type QualityChangeSource } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
+import {
+  BLOCK_FRAGMENT_MAX_COUNT,
+  BLOCK_FRAGMENT_MIN_COUNT,
+  RENDER_DISTANCE_MAX,
+  RENDER_DISTANCE_MIN,
+  RENDER_DISTANCE_STEP,
+  SHADOW_QUALITY_MAX_LEVEL,
+  SHADOW_QUALITY_MIN_LEVEL,
+  formatBlockFragmentCount,
+  formatRenderDistance,
+  formatShadowQuality,
+  getShadowQualityLevel
+} from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
 import {
   createDirectionalShadowBasis,
@@ -73,10 +87,20 @@ const confirmDeleteWorldButton = requireElement<HTMLButtonElement>("#confirm-del
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
-const qualityButton = requireElement<HTMLButtonElement>("#quality-button");
+const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
+const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
+const qualitySelect = requireElement<HTMLSelectElement>("#quality-select");
+const renderDistanceSlider = requireElement<HTMLInputElement>("#render-distance-slider");
+const renderDistanceValue = requireElement<HTMLElement>("#render-distance-value");
 const physicsBudgetValue = requireElement<HTMLElement>("#physics-budget-value");
 const physicsBudgetDecreaseButton = requireElement<HTMLButtonElement>("#physics-budget-decrease");
 const physicsBudgetIncreaseButton = requireElement<HTMLButtonElement>("#physics-budget-increase");
+const physicsBudgetSlider = requireElement<HTMLInputElement>("#physics-budget-slider");
+const despawnObjectsButton = requireElement<HTMLButtonElement>("#despawn-objects-button");
+const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-slider");
+const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
+const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
+const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
@@ -171,17 +195,19 @@ qualityController = new QualityController({
   sun,
   skyLight,
   fog: sceneFog,
-  qualityButton,
+  qualitySelect,
   superUltraToggleRow,
   superUltraToggle,
   updateSunShadowAnchor,
-  onQualityChanged: () => {
+  onQualityChanged: (source: QualityChangeSource) => {
     debugHud.reset();
     minimapRenderer.reset();
-    syncPhysicsBudgetToQuality();
+    if (source === "preset") syncPhysicsBudgetToQuality();
+    updateSettingsControls();
   }
 });
 qualityController.initialize();
+updateSettingsControls();
 updatePhysicsBudgetControls();
 
 function requireWorldRegistry(): WorldRegistry {
@@ -232,22 +258,37 @@ function wireMenuControls(): void {
 
   activePlayer.onPauseChange = (paused: boolean) => {
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
+    if (!paused) setSettingsPanelOpen(false);
   };
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest("button, input, label")) return;
+    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel")) return;
     event.preventDefault();
-    requirePlayer().resume();
+    resumeFromPause();
   });
-  resumeButton.addEventListener("click", () => requirePlayer().resume());
+  resumeButton.addEventListener("click", resumeFromPause);
+  settingsButton.addEventListener("click", () => {
+    setSettingsPanelOpen(pauseSettingsPanel.hidden);
+  });
   // World switching stays on the home screen; the pause menu only exits back there.
   homeButton.addEventListener("click", () => {
     void exitToHome();
   });
-  qualityButton.addEventListener("click", () => qualityController.cycle());
+  qualitySelect.addEventListener("change", () => qualityController.setPreset(qualitySelect.value));
+  renderDistanceSlider.addEventListener("input", () => {
+    qualityController.setRenderDistance(renderDistanceSlider.value);
+  });
   physicsBudgetDecreaseButton.addEventListener("click", () => changePhysicsObjectBudget("decrease"));
   physicsBudgetIncreaseButton.addEventListener("click", () => changePhysicsObjectBudget("increase"));
+  physicsBudgetSlider.addEventListener("input", () => setPhysicsObjectBudget(Number(physicsBudgetSlider.value)));
+  despawnObjectsButton.addEventListener("click", clearToys);
+  shadowQualitySlider.addEventListener("input", () => {
+    qualityController.setShadowQualityLevel(shadowQualitySlider.value);
+  });
+  debrisCountSlider.addEventListener("input", () => {
+    qualityController.setBlockFragmentCount(debrisCountSlider.value);
+  });
   superUltraToggle.addEventListener("change", () => {
     qualityController.setSuperUltraEnabled(superUltraToggle.checked);
   });
@@ -267,6 +308,24 @@ function wireMenuControls(): void {
       closeDeleteWorldDialog();
     }
   });
+}
+
+function resumeFromPause(): void {
+  setSettingsPanelOpen(false);
+  requirePlayer().resume();
+}
+
+function setSettingsPanelOpen(open: boolean): void {
+  pauseSettingsPanel.hidden = !open;
+  settingsButton.setAttribute("aria-expanded", String(open));
+  settingsButton.classList.toggle("is-active", open);
+  settingsButton.textContent = open ? "Back" : "Settings";
+
+  // Treat settings like a sub-menu: while tuning, hide the main pause actions
+  // so "Exit to Home" is not sitting next to throwaway slider experiments.
+  for (const action of document.querySelectorAll<HTMLElement>(".menu-main-action")) {
+    action.classList.toggle("is-hidden", open);
+  }
 }
 
 window.addEventListener("resize", () => {
@@ -296,6 +355,12 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (!inWorld) return;
+
+  if (event.code === "KeyX") {
+    event.preventDefault();
+    clearToys();
+    return;
+  }
 
   if (/^Digit[1-5]$/.test(event.code)) {
     selectedBlockIndex = Number(event.code.slice(-1)) - 1;
@@ -556,6 +621,8 @@ function changePhysicsObjectBudget(direction: PhysicsBudgetDirection): void {
 }
 
 function setPhysicsObjectBudget(nextBudget: number, persist = true): void {
+  if (persist) qualityController.forkCurrentPresetToCustom();
+
   const preset = qualityController.preset;
 
   physicsObjectBudget = normalizePhysicsObjectBudget(nextBudget, preset.physicsObjectBudget);
@@ -586,6 +653,34 @@ function updatePhysicsBudgetControls(): void {
   physicsBudgetValue.textContent = `${physicsObjectBudget} bodies`;
   physicsBudgetDecreaseButton.disabled = physicsObjectBudget <= MIN_PHYSICS_OBJECT_BUDGET;
   physicsBudgetIncreaseButton.disabled = physicsObjectBudget >= MAX_PHYSICS_OBJECT_BUDGET;
+  physicsBudgetSlider.min = String(MIN_PHYSICS_OBJECT_BUDGET);
+  physicsBudgetSlider.max = String(MAX_PHYSICS_OBJECT_BUDGET);
+  physicsBudgetSlider.step = String(PHYSICS_OBJECT_BUDGET_STEP);
+  physicsBudgetSlider.value = String(physicsObjectBudget);
+}
+
+function updateSettingsControls(): void {
+  const preset = qualityController.preset;
+
+  // Presets remain the big safe defaults; these sliders expose the engine knobs
+  // we keep wanting to poke while tuning performance and feel.
+  renderDistanceSlider.min = String(RENDER_DISTANCE_MIN);
+  renderDistanceSlider.max = String(RENDER_DISTANCE_MAX);
+  renderDistanceSlider.step = String(RENDER_DISTANCE_STEP);
+  renderDistanceSlider.value = String(qualityController.loadRadius);
+  renderDistanceValue.textContent = formatRenderDistance(qualityController.loadRadius);
+
+  shadowQualitySlider.min = String(SHADOW_QUALITY_MIN_LEVEL);
+  shadowQualitySlider.max = String(SHADOW_QUALITY_MAX_LEVEL);
+  shadowQualitySlider.step = "1";
+  shadowQualitySlider.value = String(getShadowQualityLevel(preset.shadows ? preset.shadowMapSize : 0));
+  shadowQualityValue.textContent = formatShadowQuality(preset.shadows ? preset.shadowMapSize : 0);
+
+  debrisCountSlider.min = String(BLOCK_FRAGMENT_MIN_COUNT);
+  debrisCountSlider.max = String(BLOCK_FRAGMENT_MAX_COUNT);
+  debrisCountSlider.step = "1";
+  debrisCountSlider.value = String(preset.blockFragmentCount);
+  debrisCountValue.textContent = formatBlockFragmentCount(preset.blockFragmentCount);
 }
 
 function enforcePhysicsToyBudget(): void {
@@ -725,6 +820,7 @@ async function exitToHome(): Promise<void> {
 
 function clearToys(): void {
   for (const toy of toys) {
+    physicsToyCollider.forget(toy);
     scene.remove(toy.mesh);
     toy.dispose();
   }

@@ -57,8 +57,9 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
-- Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
-- Render quality preset definitions, physics-body defaults, and tuning knobs: `src/qualityPresets.ts`
+- Render quality controller, Custom preset for slider edits, persistence, and renderer/light/camera application: `src/qualityController.ts`
+- Custom quality settings storage, slider bounds, and menu label formatting: `src/qualitySettings.ts`
+- Render quality preset definitions, physics-body defaults, Custom baseline, and tuning knobs: `src/qualityPresets.ts`
 - Generated sunlit skybox texture and camera-following sky dome: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
@@ -80,10 +81,10 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks are tracked by key, then use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`; worker and fallback meshes both use `src/blockColors.ts` so deterministic tint buckets do not change between mesh paths.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, a sleep-aware broadphase object-object collision pass, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
+10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, a sleep-aware broadphase object-object collision pass, speed-gated impact damage, quality-scaled and slider-tuned physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
 11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
-13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, sleep when settled, stay cached in a static broadphase, expire after a short lifetime, and can be shoved awake by active cores without enabling full debris-debris collision.
+13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, sleep when settled, stay cached in a static broadphase, expire after a short lifetime, can be shoved awake by active cores without enabling full debris-debris collision, and can all be cleared with `X` or the settings-panel despawn button.
 
 ## Common Change Targets
 
@@ -93,12 +94,12 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune saved worlds, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
-- Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
+- Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, Custom slider bounds/storage in `src/qualitySettings.ts`, the Super Ultra opt-in toggle, settings-menu HTML/CSS in `index.html` and `src/style.css`, and application logic in `src/qualityController.ts`.
 - Tune baked voxel face shading or visible sun direction: update `src/voxelLighting.ts`, `src/lighting.ts`, `src/assets/skybox-sunlit-day.png`, and `src/skybox.ts` together so worker mesh colors, skybox alignment, and shadows agree.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `PhysicsToyCollider`, and `handlePhysicsImpact` in `src/main.ts`.
-- Change HUD/minimap/debug/sprint-feedback UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
+- Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, object budget, despawn controls, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `KeyX`, `PhysicsToyCollider`, `clearToys`, and `handlePhysicsImpact` in `src/main.ts`.
+- Change HUD/minimap/debug/sprint-feedback/settings UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
 
@@ -112,6 +113,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
 - Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts, full chunk-radius queue refreshes, full unload sweeps, or all-loaded-chunk dirty scans on every frame. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work. If code loads or creates chunks directly, keep the unload-window and dirty/modified indexes in sync.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in that only appears at `Ultra` or while `Super Ultra` is active.
+- Pause-menu tuning controls live behind the `Settings` button so normal pause/resume stays quick; opening settings hides `Resume` and the red `Exit to Home` action until the user backs out.
+- Slider edits intentionally fork into the single `Custom` preset instead of mutating built-in presets; named custom preset management is future UI work.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `npm.cmd run test` bundles `tests/run.ts` into `.test-dist/` with esbuild before running in Node; `.test-dist/` is generated and ignored.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.

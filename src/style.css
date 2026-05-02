@@ -88,6 +88,10 @@ body.playing canvas {
   width: auto;
 }
 
+#pause-menu .menu-panel {
+  width: min(460px, calc(100vw - 32px));
+}
+
 .menu-title {
   margin-bottom: 16px;
   font-size: 21px;
@@ -202,6 +206,67 @@ body.playing canvas {
   gap: 10px;
 }
 
+.settings-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-field {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.07);
+  padding: 10px 12px;
+}
+
+.settings-label-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.settings-label {
+  color: #edf4f8;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.settings-value {
+  color: rgba(237, 244, 248, 0.68);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.menu-select {
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(12, 17, 23, 0.82);
+  color: #edf4f8;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.range-input {
+  width: 100%;
+  min-width: 0;
+  accent-color: #f1c453;
+  cursor: pointer;
+}
+
 .menu-button {
   width: 100%;
   height: 42px;
@@ -221,8 +286,17 @@ body.playing canvas {
 }
 
 .menu-button.danger {
+  border: 1px solid rgba(255, 130, 130, 0.44);
   background: #ff6b6b;
   color: #1f0909;
+}
+
+.menu-button.danger:hover {
+  background: #ff8585;
+}
+
+.menu-exit-button {
+  margin-top: 8px;
 }
 
 .menu-button:disabled {
@@ -230,7 +304,12 @@ body.playing canvas {
   opacity: 0.55;
 }
 
-.menu-button.secondary[aria-pressed="true"] {
+.menu-button.is-hidden {
+  display: none;
+}
+
+.menu-button.secondary[aria-pressed="true"],
+.menu-button.secondary.is-active {
   border-color: rgba(126, 210, 145, 0.72);
   background: #7ed291;
   color: #122016;
@@ -246,6 +325,10 @@ body.playing canvas {
   border-radius: 6px;
   background: rgba(237, 244, 248, 0.07);
   padding: 10px 12px;
+}
+
+.budget-slider {
+  grid-column: 1 / -1;
 }
 
 .budget-copy {
@@ -397,6 +480,8 @@ body.playing canvas {
 .world-slot:focus-visible,
 .world-delete-button:focus-visible,
 .text-input:focus-visible,
+.menu-select:focus-visible,
+.range-input:focus-visible,
 .stepper-button:focus-visible,
 .toggle-input:focus-visible {
   outline: 3px solid rgba(241, 196, 83, 0.42);

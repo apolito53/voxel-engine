@@ -34,6 +34,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
 - HUD shows the selected block, movement mode, and current player speed in m/s
+- Pause menu `Settings` opens the tunable engine controls; `Exit to Home` sits at the bottom as the red world-leave action
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with an 80% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide
@@ -43,9 +44,11 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `1-5` select block
 - `F` toggle flight mode
 - `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, and cores can bump other cores/fragments through a broadphase collision pass
+- `X` despawn all active physics cores and debris
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, and active/sleeping physics broadphase counts for hitch hunting
-- `F4` cycle quality: Potato, Low, Normal, High, Ultra
-- Pause menu `Physics Object Budget` stepper changes the current quality preset's physics-body budget
+- `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
+- Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
+- Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
 - `Esc` pause and release mouse
 
@@ -56,7 +59,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Normal`: 2x render distance, shadows, 192 physics bodies, 7 debris shards
 - `High`: 4x render distance, sharper local shadows, 512 physics bodies, 14 debris shards
 - `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 27 debris shards
-- `Super Ultra`: 12x render distance, highest local shadow resolution, 2048 physics bodies, 27 debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
 ## Engine Pieces
 
@@ -77,6 +81,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
+- `src/qualitySettings.ts`: per-preset custom settings storage, slider bounds, and menu label formatting
 - `src/skybox.ts`: generated sunlit equirectangular skybox texture and camera-following sky dome
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
