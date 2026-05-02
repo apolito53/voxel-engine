@@ -246,7 +246,9 @@ export function createEmptyPhysicsToyCollisionStats(): PhysicsToyCollisionStats 
 }
 
 export class PhysicsToyCollider {
-  private readonly activeCells = new Map<string, PhysicsToy[]>();
+  private readonly activeCoreCells = new Map<string, PhysicsToy[]>();
+  private readonly activeFragmentCells = new Map<string, PhysicsToy[]>();
+  private readonly activeFragments: PhysicsToy[] = [];
   private readonly sleepingCells = new Map<string, PhysicsToy[]>();
   private readonly sleepingCellKeys = new WeakMap<PhysicsToy, string[]>();
   private readonly toyIds = new WeakMap<PhysicsToy, number>();
@@ -275,13 +277,26 @@ export class PhysicsToyCollider {
 
       this.removeSleepingToy(toy);
       this.stats.activeBodies += 1;
-      this.insertToyIntoCells(this.activeCells, toy);
+      if (toy.damagesBlocks) {
+        this.insertToyIntoCells(this.activeCoreCells, toy);
+      } else {
+        this.activeFragments.push(toy);
+      }
     }
 
-    this.stats.broadphaseCells = this.activeCells.size;
-    for (const [cellKey, activeCellToys] of this.activeCells) {
-      this.resolveCellPairs(activeCellToys);
-      this.resolveActiveSleepingPairs(activeCellToys, this.sleepingCells.get(cellKey));
+    // Fragments only collide with active cores. If the frame contains debris
+    // but no awake cores, skip fragment broadphase indexing entirely.
+    if (this.activeCoreCells.size > 0) {
+      for (const fragment of this.activeFragments) {
+        this.insertFragmentIntoOverlappingCoreCells(fragment);
+      }
+    }
+
+    this.stats.broadphaseCells = this.countActiveBroadphaseCells();
+    for (const [cellKey, activeCoreToys] of this.activeCoreCells) {
+      this.resolveCellPairs(activeCoreToys);
+      this.resolveActiveFragmentPairs(activeCoreToys, this.activeFragmentCells.get(cellKey));
+      this.resolveActiveSleepingPairs(activeCoreToys, this.sleepingCells.get(cellKey));
     }
     this.stats.sleepingBroadphaseCells = this.sleepingCells.size;
 
@@ -293,7 +308,9 @@ export class PhysicsToyCollider {
   }
 
   private clearFrameBroadphase(): void {
-    this.activeCells.clear();
+    this.activeCoreCells.clear();
+    this.activeFragmentCells.clear();
+    this.activeFragments.length = 0;
     this.visitedPairs.clear();
   }
 
@@ -350,6 +367,19 @@ export class PhysicsToyCollider {
     }
   }
 
+  private insertFragmentIntoOverlappingCoreCells(fragment: PhysicsToy): void {
+    for (const key of this.getToyCellKeys(fragment)) {
+      if (!this.activeCoreCells.has(key)) continue;
+
+      const cell = this.activeFragmentCells.get(key);
+      if (cell) {
+        cell.push(fragment);
+      } else {
+        this.activeFragmentCells.set(key, [fragment]);
+      }
+    }
+  }
+
   private getToyCellKeys(toy: PhysicsToy): string[] {
     const position = toy.mesh.position;
     const minX = Math.floor((position.x - toy.radius) / PHYSICS_TOY_COLLISION_CELL_SIZE);
@@ -370,6 +400,14 @@ export class PhysicsToyCollider {
     return keys;
   }
 
+  private countActiveBroadphaseCells(): number {
+    let count = this.activeCoreCells.size;
+    for (const key of this.activeFragmentCells.keys()) {
+      if (!this.activeCoreCells.has(key)) count += 1;
+    }
+    return count;
+  }
+
   private resolveCellPairs(cellToys: readonly PhysicsToy[]): void {
     for (let leftCursor = 0; leftCursor < cellToys.length - 1; leftCursor += 1) {
       const leftToy = cellToys[leftCursor];
@@ -378,6 +416,20 @@ export class PhysicsToyCollider {
         if (!leftToy || !rightToy) continue;
 
         this.resolveCandidatePair(leftToy, rightToy);
+      }
+    }
+  }
+
+  private resolveActiveFragmentPairs(activeCoreToys: readonly PhysicsToy[], activeFragmentToys?: readonly PhysicsToy[]): void {
+    if (!activeFragmentToys) return;
+
+    // Debris-debris collision is deliberately out of scope for now. Keeping
+    // debris in separate cells means dense fracture piles do not create a
+    // quadratic pile of pairs that we already know we will ignore.
+    for (const coreToy of activeCoreToys) {
+      for (const fragmentToy of activeFragmentToys) {
+        if (!coreToy || !fragmentToy) continue;
+        this.resolveCandidatePair(coreToy, fragmentToy);
       }
     }
   }

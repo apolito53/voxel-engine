@@ -1115,8 +1115,8 @@ test("physics toy collider skips debris-debris and far-apart work", () => {
 
   const debrisStats = collider.resolve([firstFragment, secondFragment]);
 
-  assertEqual(debrisStats.candidatePairs, 1, "overlapping debris should still be visible to the broadphase");
-  assertEqual(debrisStats.skippedDebrisPairs, 1, "debris-debris contacts should be skipped for the first pass");
+  assertEqual(debrisStats.candidatePairs, 0, "overlapping debris should not become narrowphase work");
+  assertEqual(debrisStats.skippedDebrisPairs, 0, "debris-debris contacts should be avoided before pair creation");
   assertEqual(debrisStats.resolvedContacts, 0, "debris-debris contacts should not resolve yet");
   assertEqual(firstFragment.velocity.x, 3, "skipped debris contact should leave first fragment velocity alone");
   assertEqual(secondFragment.velocity.x, -3, "skipped debris contact should leave second fragment velocity alone");
@@ -1146,6 +1146,39 @@ test("physics toy collider skips debris-debris and far-apart work", () => {
       skippedDebrisPairs: 0
     },
     "empty collision stats should be stable for HUD initialization"
+  );
+});
+
+test("physics toy collider avoids quadratic debris piles", () => {
+  const collider = new PhysicsToyCollider();
+  const denseFragments: PhysicsToy[] = [];
+
+  for (let index = 0; index < 80; index += 1) {
+    denseFragments.push(
+      PhysicsToy.createBlockFragment(
+        BLOCK.grass,
+        new THREE.Vector3(0.5 + (index % 4) * 0.02, 2, 0.5 + Math.floor(index / 4) * 0.002),
+        new THREE.Vector3(0, 0, 0)
+      )
+    );
+  }
+
+  const debrisOnlyStats = collider.resolve(denseFragments);
+  assertEqual(debrisOnlyStats.broadphaseCells, 0, "debris-only piles should not build collision buckets");
+  assertEqual(debrisOnlyStats.candidatePairs, 0, "dense debris-only piles should not create pair work");
+  assertEqual(debrisOnlyStats.resolvedContacts, 0, "dense debris-only piles should not resolve contacts");
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(0.5, 2, 0.5),
+    new THREE.Vector3(4, 0, 0)
+  );
+  const coreStats = collider.resolve([core, ...denseFragments]);
+
+  assert(coreStats.broadphaseCells > 0, "active cores should still build broadphase buckets");
+  assertEqual(
+    coreStats.candidatePairs,
+    denseFragments.length,
+    "one core should only query each nearby debris fragment once"
   );
 });
 

@@ -69,6 +69,8 @@ import { VoxelWorld, type ChunkCoords, type WorldStats } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
+const PHYSICS_CORE_SLEEP_SPEED = 0.12;
+const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 
@@ -374,7 +376,14 @@ document.addEventListener("keydown", (event) => {
     camera.getWorldDirection(direction);
     const toy = new PhysicsToy(
       camera.position.clone().addScaledVector(direction, 1.4),
-      direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0))
+      direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0)),
+      {
+        // Cores are the expensive actors once the player spams them. They keep
+        // their damage/collision behavior while moving, then sleep like debris
+        // after settling so old shots stop taxing the frame forever.
+        sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
+        sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
+      }
     );
     addPhysicsToy(toy);
   }
