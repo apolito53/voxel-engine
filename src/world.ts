@@ -76,6 +76,17 @@ type ChunkQueueEntry = {
   readonly cz: number;
 };
 
+type ChunkRadiusOffset = {
+  readonly dx: number;
+  readonly dz: number;
+};
+
+type ChunkQueueWindow = {
+  readonly centerCx: number;
+  readonly centerCz: number;
+  readonly radius: number;
+};
+
 type PendingChunkLoad = ChunkQueueEntry & {
   readonly key: string;
 };
@@ -105,6 +116,14 @@ type PriorityEntry<T extends PriorityItem> = {
   readonly visible: boolean;
   readonly lane: number;
 };
+
+export type ChunkStreamingDiagnostics = {
+  readonly queueWindowRefreshes: number;
+  readonly queueWindowSkips: number;
+  readonly lastQueueCandidateChecks: number;
+};
+
+const chunkRadiusOffsetCache = new Map<number, readonly ChunkRadiusOffset[]>();
 
 export class VoxelWorld implements CollisionWorld {
   chunks: Map<string, Chunk>;
@@ -136,6 +155,10 @@ export class VoxelWorld implements CollisionWorld {
   priorityViewActive: boolean;
   priorityFrustum: THREE.Frustum | null;
   priorityFrustumActive: boolean;
+  private chunkQueueWindow: ChunkQueueWindow | null;
+  private queueWindowRefreshes: number;
+  private queueWindowSkips: number;
+  private lastQueueCandidateChecks: number;
   lastLoadedChunks: number;
   lastRequestedChunkLoads: number;
   lastMeshedChunks: number;
@@ -173,6 +196,10 @@ export class VoxelWorld implements CollisionWorld {
     this.priorityViewActive = false;
     this.priorityFrustum = null;
     this.priorityFrustumActive = false;
+    this.chunkQueueWindow = null;
+    this.queueWindowRefreshes = 0;
+    this.queueWindowSkips = 0;
+    this.lastQueueCandidateChecks = 0;
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
@@ -189,6 +216,7 @@ export class VoxelWorld implements CollisionWorld {
     this.terrain = createTerrainContext(this.seed);
     this.savedChunks.clear();
     this.blockDamage.clear();
+    this.invalidateChunkQueueWindow();
     await this.loadSavedChunkIndex();
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
@@ -211,11 +239,9 @@ export class VoxelWorld implements CollisionWorld {
     const loads: Promise<Uint8Array | null>[] = [];
 
     // Initial spawn gets a blocking preload so saved edits near spawn are visible immediately.
-    for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
-      for (let cx = center.cx - radius; cx <= center.cx + radius; cx += 1) {
-        const key = this.key(cx, cz);
-        if (this.savedChunkKeys.has(key)) loads.push(this.loadSavedChunkNow(key));
-      }
+    for (const offset of getChunkRadiusOffsets(radius)) {
+      const key = this.key(center.cx + offset.dx, center.cz + offset.dz);
+      if (this.savedChunkKeys.has(key)) loads.push(this.loadSavedChunkNow(key));
     }
 
     await Promise.all(loads);
@@ -228,6 +254,7 @@ export class VoxelWorld implements CollisionWorld {
     }
     this.chunks.clear();
     this.chunkLoadQueue.clear();
+    this.invalidateChunkQueueWindow();
     this.pendingChunkLoads.clear();
     this.pendingChunkKeys.clear();
     this.pendingSavedChunkLoads.clear();
@@ -264,6 +291,7 @@ export class VoxelWorld implements CollisionWorld {
       this.pendingChunkKeys.clear();
       this.pendingMeshBuilds.clear();
       this.pendingMeshKeys.clear();
+      this.invalidateChunkQueueWindow();
     };
     return worker;
   }
@@ -317,10 +345,8 @@ export class VoxelWorld implements CollisionWorld {
   ensureChunksAround(x: number, z: number, radius = LOAD_RADIUS): ChunkCoords {
     const center = this.toChunkCoords(x, z);
     this.setPriority(center.cx, center.cz);
-    for (let cz = center.cz - radius; cz <= center.cz + radius; cz += 1) {
-      for (let cx = center.cx - radius; cx <= center.cx + radius; cx += 1) {
-        this.ensureChunk(cx, cz);
-      }
+    for (const offset of getChunkRadiusOffsets(radius)) {
+      this.ensureChunk(center.cx + offset.dx, center.cz + offset.dz);
     }
     return center;
   }
@@ -344,8 +370,10 @@ export class VoxelWorld implements CollisionWorld {
     // it let invisible chunks steal the frame budget and made visible terrain pop.
     this.processSavedChunkResults(maxLoads);
     this.processGeneratedChunkResults(maxLoads);
-    this.queueChunksAround(center.cx, center.cz, loadRadius);
-    this.pruneQueuedChunks(center.cx, center.cz, loadRadius);
+    const refreshedQueueWindow = this.queueChunksAround(center.cx, center.cz, loadRadius);
+    if (refreshedQueueWindow) {
+      this.pruneQueuedChunks(center.cx, center.cz, loadRadius);
+    }
     this.lastRequestedChunkLoads = this.requestQueuedChunkLoads(
       center.cx,
       center.cz,
@@ -355,25 +383,57 @@ export class VoxelWorld implements CollisionWorld {
     return center;
   }
 
-  queueChunksAround(centerCx: number, centerCz: number, radius = LOAD_RADIUS): void {
-    for (let cz = centerCz - radius; cz <= centerCz + radius; cz += 1) {
-      for (let cx = centerCx - radius; cx <= centerCx + radius; cx += 1) {
-        const key = this.key(cx, cz);
-        if (
-          this.chunks.has(key) ||
-          this.chunkLoadQueue.has(key) ||
-          this.pendingChunkKeys.has(key) ||
-          this.pendingSavedChunkKeys.has(key)
-        ) {
-          continue;
-        }
-
-        this.chunkLoadQueue.set(key, {
-          cx,
-          cz
-        });
-      }
+  queueChunksAround(centerCx: number, centerCz: number, radius = LOAD_RADIUS): boolean {
+    const normalizedRadius = normalizeChunkRadius(radius);
+    if (this.chunkQueueWindowMatches(centerCx, centerCz, normalizedRadius)) {
+      this.queueWindowSkips += 1;
+      this.lastQueueCandidateChecks = 0;
+      return false;
     }
+
+    const offsets = getChunkRadiusOffsets(normalizedRadius);
+    this.queueWindowRefreshes += 1;
+    this.lastQueueCandidateChecks = offsets.length;
+
+    // The radius window changes only when the player crosses a chunk boundary or
+    // quality changes. Reusing this cached offset list avoids rebuilding the same
+    // thousands of Super Ultra coordinates every animation frame.
+    for (const offset of offsets) {
+      const cx = centerCx + offset.dx;
+      const cz = centerCz + offset.dz;
+      const key = this.key(cx, cz);
+      if (
+        this.chunks.has(key) ||
+        this.chunkLoadQueue.has(key) ||
+        this.pendingChunkKeys.has(key) ||
+        this.pendingSavedChunkKeys.has(key)
+      ) {
+        continue;
+      }
+
+      this.chunkLoadQueue.set(key, {
+        cx,
+        cz
+      });
+    }
+
+    this.chunkQueueWindow = {
+      centerCx,
+      centerCz,
+      radius: normalizedRadius
+    };
+    return true;
+  }
+
+  private chunkQueueWindowMatches(centerCx: number, centerCz: number, radius: number): boolean {
+    return this.chunkQueueWindow?.centerCx === centerCx &&
+      this.chunkQueueWindow.centerCz === centerCz &&
+      this.chunkQueueWindow.radius === radius;
+  }
+
+  private invalidateChunkQueueWindow(): void {
+    this.chunkQueueWindow = null;
+    this.lastQueueCandidateChecks = 0;
   }
 
   pruneQueuedChunks(centerCx: number, centerCz: number, radius = LOAD_RADIUS): void {
@@ -713,6 +773,7 @@ export class VoxelWorld implements CollisionWorld {
     this.savedChunkKeys.delete(key);
     this.savedChunks.delete(key);
     this.pendingSavedChunkWrites.delete(key);
+    this.invalidateChunkQueueWindow();
     this.queueChunkStorageOperation(key, () => this.storage.deleteChunk(key));
   }
 
@@ -1156,6 +1217,14 @@ export class VoxelWorld implements CollisionWorld {
     };
   }
 
+  getStreamingDiagnostics(): ChunkStreamingDiagnostics {
+    return {
+      queueWindowRefreshes: this.queueWindowRefreshes,
+      queueWindowSkips: this.queueWindowSkips,
+      lastQueueCandidateChecks: this.lastQueueCandidateChecks
+    };
+  }
+
   highestSolidY(x: number, z: number): number {
     return this.getTopBlock(x, z).y;
   }
@@ -1164,6 +1233,27 @@ export class VoxelWorld implements CollisionWorld {
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     return this.getChunk(cx, cz)?.getTopLocal(lx, lz) ?? { block: BLOCK.air, y: 0 };
   }
+}
+
+function getChunkRadiusOffsets(radius: number): readonly ChunkRadiusOffset[] {
+  const normalizedRadius = normalizeChunkRadius(radius);
+  const cachedOffsets = chunkRadiusOffsetCache.get(normalizedRadius);
+  if (cachedOffsets) return cachedOffsets;
+
+  const offsets: ChunkRadiusOffset[] = [];
+  for (let dz = -normalizedRadius; dz <= normalizedRadius; dz += 1) {
+    for (let dx = -normalizedRadius; dx <= normalizedRadius; dx += 1) {
+      offsets.push({ dx, dz });
+    }
+  }
+
+  chunkRadiusOffsetCache.set(normalizedRadius, offsets);
+  return offsets;
+}
+
+function normalizeChunkRadius(radius: number): number {
+  if (!Number.isFinite(radius)) return 0;
+  return Math.max(0, Math.floor(radius));
 }
 
 function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {

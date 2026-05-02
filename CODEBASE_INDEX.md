@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-04-28
+Last reviewed: 2026-05-02
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -44,7 +44,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
-- Chunk ownership, worker scheduling, streaming, reads/writes, sparse block damage, coalesced chunk-save writes: `src/world.ts`
+- Chunk ownership, worker scheduling, cached chunk-window streaming, reads/writes, sparse block damage, coalesced chunk-save writes: `src/world.ts`
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
 - First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, voxel collision: `src/player.ts`
 - Player movement constants and committed slide/landing-slide/air-control/flight/crouch-view tuning helpers: `src/playerMovement.ts`
@@ -72,7 +72,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, or confirmed deletion updates the saved-world slots and active seed.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
-6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; chunk generation queues are picked as a bounded slice that keeps nearby chunks first, then prioritizes chunks inside the camera view.
+6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; cached chunk-radius offsets populate the queue only when the player crosses a chunk boundary or the load radius changes, then chunk generation queues are picked as a bounded slice that keeps nearby chunks first and prioritizes chunks inside the camera view.
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
@@ -104,7 +104,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
 - Worker meshes treat missing neighbor chunks as temporarily solid so streaming does not draw chunk-edge walls before neighbors load and trigger a remesh.
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
-- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts on every frame.
+- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts or full chunk-radius queue refreshes on every frame. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in that only appears at `Ultra` or while `Super Ultra` is active.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
 - `npm.cmd run test` bundles `tests/run.ts` into `.test-dist/` with esbuild before running in Node; `.test-dist/` is generated and ignored.

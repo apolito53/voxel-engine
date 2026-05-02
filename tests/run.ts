@@ -607,6 +607,46 @@ test("world fallback streaming loads and unloads bounded chunk windows", () => {
   assertEqual(stats.pendingChunkLoads, 0, "fallback streaming should not leave pending worker loads");
 });
 
+test("world reuses queued chunk windows while player stays in the same chunk", () => {
+  const world = new VoxelWorld({ seed: "stream-window-cache-test" });
+  const scene = new THREE.Scene();
+  const loadRadius = 3;
+  const expectedCandidateChecks = (loadRadius * 2 + 1) ** 2;
+
+  world.streamChunksAround(0, 0, scene, loadRadius, loadRadius + 1, 1);
+  let diagnostics = world.getStreamingDiagnostics();
+  const queuedAfterFirstFrame = world.getStats().queuedChunks;
+
+  assertEqual(diagnostics.queueWindowRefreshes, 1, "first stream frame should populate the queue window");
+  assertEqual(diagnostics.queueWindowSkips, 0, "first stream frame should not be treated as reusable");
+  assertEqual(
+    diagnostics.lastQueueCandidateChecks,
+    expectedCandidateChecks,
+    "initial queue fill should scan the cached radius offsets once"
+  );
+
+  world.streamChunksAround(CHUNK_SIZE * 0.5, CHUNK_SIZE * 0.25, scene, loadRadius, loadRadius + 1, 1);
+  diagnostics = world.getStreamingDiagnostics();
+
+  assertEqual(diagnostics.queueWindowRefreshes, 1, "same chunk center should reuse the existing queue window");
+  assertEqual(diagnostics.queueWindowSkips, 1, "same chunk center should count as a skipped queue refresh");
+  assertEqual(diagnostics.lastQueueCandidateChecks, 0, "reused queue window should avoid radius candidate checks");
+  assert(
+    world.getStats().queuedChunks < queuedAfterFirstFrame,
+    "unchanged-center streaming should still drain already-queued chunk work"
+  );
+
+  world.streamChunksAround(CHUNK_SIZE, 0, scene, loadRadius, loadRadius + 1, 1);
+  diagnostics = world.getStreamingDiagnostics();
+
+  assertEqual(diagnostics.queueWindowRefreshes, 2, "crossing into a new chunk should refresh the queue window");
+  assertEqual(
+    diagnostics.lastQueueCandidateChecks,
+    expectedCandidateChecks,
+    "new chunk center should scan the cached radius offsets again"
+  );
+});
+
 test("world applies completed generated chunks within the frame budget", () => {
   const world = new VoxelWorld({ seed: "worker-result-budget-test" });
   const chunkByteLength = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
