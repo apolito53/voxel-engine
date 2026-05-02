@@ -315,6 +315,10 @@ body.playing canvas {
   color: #122016;
 }
 
+.settings-utility-button {
+  margin-top: 4px;
+}
+
 .budget-control {
   display: grid;
   grid-template-columns: 1fr auto;
