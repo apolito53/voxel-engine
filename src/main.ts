@@ -47,6 +47,7 @@ import {
   getSprintFeedbackTargetFov,
   smoothSprintFeedbackFov
 } from "./sprintFeedback";
+import { createSkybox } from "./skybox";
 import { TargetBlockHighlighter } from "./targetHighlighter";
 import { VoxelWorld, type ChunkCoords, type WorldStats } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
@@ -109,6 +110,9 @@ scene.add(sun);
 
 const skyLight = new THREE.HemisphereLight(0xb9d9ff, 0x394228, bootPreset.skyIntensity);
 scene.add(skyLight);
+
+const skybox = createSkybox(SUN_OFFSET);
+scene.add(skybox.object);
 
 const worldMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
@@ -401,6 +405,7 @@ function animate(): void {
   }
 
   updateSunShadowAnchor();
+  skybox.update(camera);
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
   renderer.render(scene, camera);

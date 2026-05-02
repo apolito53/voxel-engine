@@ -75,6 +75,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware broadphase core/debris collision, impact reporting, and shared-resource cube fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
+- `src/skybox.ts`: generated sunlit equirectangular skybox texture and camera-following sky dome
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling

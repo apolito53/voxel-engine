@@ -57,6 +57,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions, physics-body defaults, and tuning knobs: `src/qualityPresets.ts`
+- Generated sunlit skybox texture and camera-following sky dome: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
@@ -69,7 +70,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 ## Runtime Flow
 
 1. `index.html` loads `src/main.ts`.
-2. `main.ts` creates the Three.js renderer, scene, lights, camera, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
+2. `main.ts` creates the Three.js renderer, scene, lights, camera-following generated skybox, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
 3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, or confirmed deletion updates the saved-world slots and active seed.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
@@ -91,6 +92,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
+- Tune the visible sky or sun-direction readability: update `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`, and the light direction in `src/main.ts` if the visual sun needs to track a different shadow direction.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
 - Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `PhysicsToyCollider`, and `handlePhysicsImpact` in `src/main.ts`.
