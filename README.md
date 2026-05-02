@@ -75,6 +75,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware broadphase core/debris collision, impact reporting, and shared-resource cube fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
+- `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/skybox.ts`: generated sunlit equirectangular skybox texture and camera-following sky dome
 - `src/shadows.ts`: directional shadow-map texel snapping helpers

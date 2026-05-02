@@ -107,6 +107,7 @@ import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
+import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
 import { VoxelWorld } from "../src/world";
 import { getSkyboxAlignedSunDirection } from "../src/skybox";
@@ -1310,6 +1311,21 @@ test("skybox sun direction lines up with the real directional light", () => {
     sunElevation > 35 && sunElevation < 45,
     `sun elevation should stay visually readable instead of overhead; got ${sunElevation.toFixed(2)} degrees`
   );
+});
+
+test("voxel face shading follows the real sun direction", () => {
+  const top = getSunlitFaceShade([0, 1, 0]);
+  const bottom = getSunlitFaceShade([0, -1, 0]);
+  const sunwardEast = getSunlitFaceShade([1, 0, 0]);
+  const shadedWest = getSunlitFaceShade([-1, 0, 0]);
+  const sunwardNorth = getSunlitFaceShade([0, 0, -1]);
+  const shadedSouth = getSunlitFaceShade([0, 0, 1]);
+
+  assert(top > sunwardEast, "top faces should keep the strongest sky fill");
+  assert(sunwardEast > shadedWest, "east-facing walls should be brighter because the sun has positive X");
+  assert(sunwardNorth > shadedSouth, "north-facing walls should be brighter because the sun has negative Z");
+  assert(shadedWest > bottom, "undersides should stay darker than walls");
+  assert(top <= 1 && bottom >= 0.42, "face shading should remain inside the vertex-color safety range");
 });
 
 test("directional shadow anchor snaps to stable light-space texels", () => {

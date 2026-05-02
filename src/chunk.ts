@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { BLOCK, BLOCKS } from "./blocks";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import type { ChunkMeshData } from "./chunkProtocol";
+import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 export { CHUNK_SIZE, WORLD_HEIGHT };
@@ -458,7 +459,7 @@ function addQuad(
   corners: readonly QuadCorner[]
 ): void {
   const base = positions.length / 3;
-  const shade = normal[1] > 0 ? 1 : normal[1] < 0 ? 0.45 : 0.72;
+  const shade = getSunlitFaceShade(normal);
   const color = getTintedBlockColor(meshKey, shade);
 
   for (const corner of corners) {

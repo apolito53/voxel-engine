@@ -10,6 +10,7 @@ import type {
 } from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
 import type { TerrainContext } from "./terrain";
+import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 const terrainContexts = new Map<string, TerrainContext>();
@@ -415,7 +416,7 @@ function addQuad(
   corners: readonly (readonly [number, number, number])[]
 ): void {
   const base = positions.length / 3;
-  const shade = normal[1] > 0 ? 1 : normal[1] < 0 ? 0.45 : 0.72;
+  const shade = getSunlitFaceShade(normal);
   const color = getTintedBlockColor(meshKey, shade);
 
   for (const corner of corners) {

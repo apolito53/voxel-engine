@@ -56,6 +56,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Throwable bouncing physics core, sleep-aware broadphase core/debris collision, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
+- Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
 - Render quality controller, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Render quality preset definitions, physics-body defaults, and tuning knobs: `src/qualityPresets.ts`
 - Generated sunlit skybox texture and camera-following sky dome: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
@@ -93,7 +94,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, the Super Ultra opt-in toggle, and application logic in `src/qualityController.ts`.
-- Tune the visible sky or sun-direction readability: update `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`, and `src/lighting.ts` if the visual sun needs to track a different shadow direction.
+- Tune baked voxel face shading or visible sun direction: update `src/voxelLighting.ts`, `src/lighting.ts`, `src/assets/skybox-sunlit-day.png`, and `src/skybox.ts` together so worker mesh colors, skybox alignment, and shadows agree.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
 - Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, object budget, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `PhysicsToyCollider`, and `handlePhysicsImpact` in `src/main.ts`.
