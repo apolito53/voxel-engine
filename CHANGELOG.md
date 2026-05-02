@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.5 - 2026-05-02
+
+### Changed
+
+- Raised the rubble-to-terrain promotion threshold from 36 to 48 pieces, making compacted `Rubble` blocks require roughly two high-quality block fractures worth of material.
+- Kept the visual rubble pile cap at 36 pieces while allowing hidden pile material to continue accumulating toward terrain compaction.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.2.4 - 2026-05-02
 
 ### Changed

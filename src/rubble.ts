@@ -4,9 +4,10 @@ import { BLOCK_DAMAGE_IMPACT_SPEED, getFragmentMaterial, type PhysicsToy } from 
 
 const RUBBLE_CELL_SIZE = 1;
 const RUBBLE_MAX_VISUAL_PIECES = 36;
-// Promotion intentionally needs more material than a single 27-piece block
-// fracture, otherwise fresh craters seal themselves as soon as debris settles.
-export const RUBBLE_BLOCK_PROMOTION_PIECES = RUBBLE_MAX_VISUAL_PIECES;
+// Promotion intentionally needs more material than the visible pile cap and a
+// single 27-piece block fracture. Piles can keep accruing hidden material after
+// the proxy mesh stops growing, so craters do not seal from one normal break.
+export const RUBBLE_BLOCK_PROMOTION_PIECES = 48;
 const RUBBLE_PIECE_HEALTH = 1;
 const RUBBLE_MIN_WIDTH = 0.36;
 const RUBBLE_MAX_WIDTH = 1.18;
