@@ -37,6 +37,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, health, and placeable palette: `src/blocks.ts`
+- Deterministic per-block tint buckets used by worker and fallback meshing: `src/blockColors.ts`
 - Block fracture grid, quality-scaled grid sampling, and debris sizing constants: `src/blockFragments.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
 - IndexedDB storage adapter for saved worlds, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
@@ -74,7 +75,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; cached chunk-radius offsets populate the queue only when the player crosses a chunk boundary or the load radius changes, unchanged unload windows skip loaded-chunk sweeps, then chunk generation queues are picked as a bounded slice that keeps nearby chunks first and prioritizes chunks inside the camera view.
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
-8. Dirty chunks are tracked by key, then use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`.
+8. Dirty chunks are tracked by key, then use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`; worker and fallback meshes both use `src/blockColors.ts` so deterministic tint buckets do not change between mesh paths.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
 10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, a sleep-aware broadphase object-object collision pass, speed-gated impact damage, quality-scaled physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
 11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
@@ -83,7 +84,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 ## Common Change Targets
 
-- Add, recolor, or retune block health: update `src/blocks.ts`; inspect mesh color use in `src/chunk.ts` and debris color use in `src/physics.ts`.
+- Add, recolor, or retune block health: update `src/blocks.ts`; inspect deterministic tinting in `src/blockColors.ts`, mesh color use in `src/chunk.ts`, and debris color use in `src/physics.ts`.
 - Tune chunk dimensions: update `src/voxelConstants.ts`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
 - Tune saved worlds, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
@@ -102,6 +103,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
 - Edited chunk saves are debounced and coalesced per chunk so rapid destruction does not spam IndexedDB with intermediate snapshots; call `VoxelWorld.flushStorageWrites()` before switching storage or unloading a world.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
+- Block tint variation is part of the greedy mesh key. Keep worker and fallback meshing on the shared `src/blockColors.ts` helpers so tint buckets stay deterministic and chunks do not repaint between mesh paths.
 - Worker meshes treat missing neighbor chunks as temporarily solid so streaming does not draw chunk-edge walls before neighbors load and trigger a remesh.
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
 - Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts, full chunk-radius queue refreshes, full unload sweeps, or all-loaded-chunk dirty scans on every frame. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work. If code loads or creates chunks directly, keep the unload-window and dirty/modified indexes in sync.

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BLOCK, BLOCKS } from "./blocks";
+import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import type { ChunkMeshData } from "./chunkProtocol";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
@@ -395,7 +396,7 @@ function exposedBlock(
 ): number {
   const block = chunk.getLocal(x, y, z);
   if (!BLOCKS[block].solid || world.isSolid(nx, ny, nz)) return BLOCK.air;
-  return block;
+  return createBlockMeshKey(block, nx - _normalX, ny - _normalY, nz - _normalZ);
 }
 
 function emitGreedyFaces(
@@ -411,14 +412,14 @@ function emitGreedyFaces(
       const index = u + v * width;
       if (consumed[index]) continue;
 
-      const block = getBlock(u, v);
-      if (block === BLOCK.air) continue;
+      const meshKey = getBlock(u, v);
+      if (meshKey === BLOCK.air) continue;
 
       let runWidth = 1;
       while (
         u + runWidth < width &&
         !consumed[u + runWidth + v * width] &&
-        getBlock(u + runWidth, v) === block
+        getBlock(u + runWidth, v) === meshKey
       ) {
         runWidth += 1;
       }
@@ -428,7 +429,7 @@ function emitGreedyFaces(
       while (v + runHeight < height && canGrow) {
         for (let du = 0; du < runWidth; du += 1) {
           const nextIndex = u + du + (v + runHeight) * width;
-          if (consumed[nextIndex] || getBlock(u + du, v + runHeight) !== block) {
+          if (consumed[nextIndex] || getBlock(u + du, v + runHeight) !== meshKey) {
             canGrow = false;
             break;
           }
@@ -442,7 +443,7 @@ function emitGreedyFaces(
         }
       }
 
-      emit(u, v, runWidth, runHeight, block);
+      emit(u, v, runWidth, runHeight, meshKey);
     }
   }
 }
@@ -452,13 +453,13 @@ function addQuad(
   normals: MeshNumberBuffer,
   colors: MeshNumberBuffer,
   indices: MeshNumberBuffer,
-  block: number,
+  meshKey: number,
   normal: FaceNormal,
   corners: readonly QuadCorner[]
 ): void {
   const base = positions.length / 3;
   const shade = normal[1] > 0 ? 1 : normal[1] < 0 ? 0.45 : 0.72;
-  const color = BLOCKS[block].color.map((channel) => channel * shade);
+  const color = getTintedBlockColor(meshKey, shade);
 
   for (const corner of corners) {
     positions.push(corner[0], corner[1], corner[2]);

@@ -8,6 +8,14 @@ import {
   normalizeBlockFragmentCount
 } from "../src/blockFragments";
 import { BLOCK } from "../src/blocks";
+import {
+  BLOCK_COLOR_VARIANT_COUNT,
+  createBlockMeshKey,
+  getBlockColorVariant,
+  getBlockColorVariantFromMeshKey,
+  getBlockFromMeshKey,
+  getTintedBlockColor
+} from "../src/blockColors";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import {
@@ -191,6 +199,37 @@ test("terrain generation is deterministic by seed", () => {
   const betaChunk = generateChunkBlocks(1, -2, betaTerrain);
   assertUint8ArraysEqual(alphaChunkA, alphaChunkB, "same seed should generate identical chunk blocks");
   assert(hasAnyDifference(alphaChunkA, betaChunk), "different seed should generate a different chunk payload");
+});
+
+test("block color variants are deterministic and stay tied to block identity", () => {
+  const firstKey = createBlockMeshKey(BLOCK.grass, 12, 7, -4);
+  const secondKey = createBlockMeshKey(BLOCK.grass, 12, 7, -4);
+  const sampledVariants = new Set<number>();
+
+  for (let x = 0; x < 24; x += 1) {
+    sampledVariants.add(getBlockColorVariant(BLOCK.grass, x, 7, -4));
+  }
+
+  assertEqual(firstKey, secondKey, "same block coordinate should always produce the same mesh key");
+  assertEqual(getBlockFromMeshKey(firstKey), BLOCK.grass, "mesh key should preserve the block id");
+  assert(
+    getBlockColorVariantFromMeshKey(firstKey) >= 0 &&
+      getBlockColorVariantFromMeshKey(firstKey) < BLOCK_COLOR_VARIANT_COUNT,
+    "mesh key variant should stay inside the configured variant bucket range"
+  );
+  assert(sampledVariants.size > 1, "nearby blocks should receive visible color variation buckets");
+
+  const darkGrass = getTintedBlockColor(BLOCK.grass | (0 << 8), 1);
+  const brightGrass = getTintedBlockColor(BLOCK.grass | ((BLOCK_COLOR_VARIANT_COUNT - 1) << 8), 1);
+
+  assert(
+    darkGrass.some((channel, index) => Math.abs(channel - brightGrass[index]) > 0.01),
+    "different variant buckets should produce different rendered colors"
+  );
+  assert(
+    [...darkGrass, ...brightGrass].every((channel) => channel >= 0 && channel <= 1),
+    "tinted vertex colors should remain valid normalized color channels"
+  );
 });
 
 test("raycast returns hit block and entry face", () => {

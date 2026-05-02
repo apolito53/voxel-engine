@@ -70,6 +70,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
+- `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware broadphase core/debris collision, impact reporting, and shared-resource cube fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers

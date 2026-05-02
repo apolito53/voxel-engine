@@ -1,4 +1,5 @@
 import { BLOCK, BLOCKS } from "./blocks";
+import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import type {
   ChunkGeneratedResult,
   ChunkMeshData,
@@ -131,7 +132,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, x, y, z, x + 1, y, z),
+      (y, z) => exposedBlock(blocks, neighbors, x, y, z, x + 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -153,7 +154,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, x, y, z, x - 1, y, z),
+      (y, z) => exposedBlock(blocks, neighbors, x, y, z, x - 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -188,7 +189,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, x, y, z, x, y + 1, z),
+      (x, z) => exposedBlock(blocks, neighbors, x, y, z, x, y + 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -210,7 +211,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, x, y, z, x, y - 1, z),
+      (x, z) => exposedBlock(blocks, neighbors, x, y, z, x, y - 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -245,7 +246,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, x, y, z, x, y, z + 1),
+      (x, y) => exposedBlock(blocks, neighbors, x, y, z, x, y, z + 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -267,7 +268,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, x, y, z, x, y, z - 1),
+      (x, y) => exposedBlock(blocks, neighbors, x, y, z, x, y, z - 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -296,13 +297,16 @@ function exposedBlock(
   z: number,
   nx: number,
   ny: number,
-  nz: number
+  nz: number,
+  worldX: number,
+  worldY: number,
+  worldZ: number
 ): number {
   const block = blocks[index(x, y, z)];
   if (!BLOCKS[block].solid || isSolidAt(blocks, neighbors, nx, ny, nz)) {
     return BLOCK.air;
   }
-  return block;
+  return createBlockMeshKey(block, worldX, worldY, worldZ);
 }
 
 function isSolidAt(
@@ -365,14 +369,14 @@ function emitGreedyFaces(
       const consumedIndex = u + v * width;
       if (consumed[consumedIndex]) continue;
 
-      const block = getBlock(u, v);
-      if (block === BLOCK.air) continue;
+      const meshKey = getBlock(u, v);
+      if (meshKey === BLOCK.air) continue;
 
       let runWidth = 1;
       while (
         u + runWidth < width &&
         !consumed[u + runWidth + v * width] &&
-        getBlock(u + runWidth, v) === block
+        getBlock(u + runWidth, v) === meshKey
       ) {
         runWidth += 1;
       }
@@ -382,7 +386,7 @@ function emitGreedyFaces(
       while (v + runHeight < height && canGrow) {
         for (let du = 0; du < runWidth; du += 1) {
           const nextIndex = u + du + (v + runHeight) * width;
-          if (consumed[nextIndex] || getBlock(u + du, v + runHeight) !== block) {
+          if (consumed[nextIndex] || getBlock(u + du, v + runHeight) !== meshKey) {
             canGrow = false;
             break;
           }
@@ -396,7 +400,7 @@ function emitGreedyFaces(
         }
       }
 
-      emit(u, v, runWidth, runHeight, block);
+      emit(u, v, runWidth, runHeight, meshKey);
     }
   }
 }
@@ -406,13 +410,13 @@ function addQuad(
   normals: number[],
   colors: number[],
   indices: number[],
-  block: number,
+  meshKey: number,
   normal: readonly [number, number, number],
   corners: readonly (readonly [number, number, number])[]
 ): void {
   const base = positions.length / 3;
   const shade = normal[1] > 0 ? 1 : normal[1] < 0 ? 0.45 : 0.72;
-  const color = BLOCKS[block].color.map((channel) => channel * shade);
+  const color = getTintedBlockColor(meshKey, shade);
 
   for (const corner of corners) {
     positions.push(corner[0], corner[1], corner[2]);
