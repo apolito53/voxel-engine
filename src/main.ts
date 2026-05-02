@@ -25,6 +25,7 @@ import {
   type PhysicsImpact,
   type PhysicsToyCollisionStats
 } from "./physics";
+import { PhysicsFragmentInstancer } from "./physicsInstancing";
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
   MIN_PHYSICS_OBJECT_BUDGET,
@@ -170,6 +171,7 @@ const stableShadowAnchor = new THREE.Vector3();
 const physicsImpacts: PhysicsImpact[] = [];
 const damagedBlockKeysThisFrame = new Set<string>();
 const physicsToyCollider = new PhysicsToyCollider();
+const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
@@ -451,6 +453,7 @@ function animate(): void {
       handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
     }
     pruneExpiredToys();
+    physicsFragmentInstancer.update(toys);
     recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
@@ -492,6 +495,7 @@ function animate(): void {
       toys.length,
       physicsObjectBudget,
       physicsCollisionStats,
+      physicsFragmentInstancer.getStats(),
       smoothedFrameTimings
     );
   }
@@ -610,7 +614,9 @@ function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
 
 function addPhysicsToy(toy: PhysicsToy): void {
   toys.push(toy);
-  scene.add(toy.mesh);
+  if (!toy.isInstancedFragment) {
+    scene.add(toy.mesh);
+  }
   enforcePhysicsToyBudget();
 }
 
@@ -704,7 +710,9 @@ function removePhysicsToyAt(index: number): void {
   }
 
   physicsToyCollider.forget(removedToy);
-  scene.remove(removedToy.mesh);
+  if (!removedToy.isInstancedFragment) {
+    scene.remove(removedToy.mesh);
+  }
   removedToy.dispose();
 }
 
@@ -821,10 +829,13 @@ async function exitToHome(): Promise<void> {
 function clearToys(): void {
   for (const toy of toys) {
     physicsToyCollider.forget(toy);
-    scene.remove(toy.mesh);
+    if (!toy.isInstancedFragment) {
+      scene.remove(toy.mesh);
+    }
     toy.dispose();
   }
   toys.length = 0;
+  physicsFragmentInstancer.clear();
 }
 
 function updateSunShadowAnchor(): void {

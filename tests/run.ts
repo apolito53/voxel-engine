@@ -24,6 +24,7 @@ import {
   PhysicsToyCollider,
   createEmptyPhysicsToyCollisionStats
 } from "../src/physics";
+import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
@@ -988,6 +989,43 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
     QUALITY_PRESETS.high.blockFragmentCount,
     "high-quality debris should choose unique grid indexes"
   );
+});
+
+test("block fragments render through instanced batches instead of scene children", () => {
+  const scene = new THREE.Scene();
+  const instancer = new PhysicsFragmentInstancer(scene);
+  const grassFragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(0, 2, 0),
+    new THREE.Vector3(0, 0, 0)
+  );
+  const secondGrassFragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(1, 2, 0),
+    new THREE.Vector3(0, 0, 0)
+  );
+  const stoneFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(2, 2, 0),
+    new THREE.Vector3(0, 0, 0)
+  );
+
+  assert(grassFragment.isInstancedFragment, "block debris should opt into instanced rendering");
+  assertEqual(grassFragment.fragmentBlock, BLOCK.grass, "fragment should remember its source block");
+  instancer.update([grassFragment, secondGrassFragment, stoneFragment]);
+
+  const instancedMeshes = scene.children.filter((child) => child instanceof THREE.InstancedMesh);
+  assertEqual(instancedMeshes.length, 2, "fragments should batch into one instanced mesh per block type");
+  assertDeepEqual(
+    instancer.getStats(),
+    { batches: 2, instances: 3, capacity: 3 },
+    "instanced renderer should report visible fragment pressure"
+  );
+
+  instancer.clear();
+  assertEqual(instancer.getStats().instances, 0, "clearing should hide all fragment instances");
+  instancer.dispose();
+  assertEqual(scene.children.length, 0, "disposing should remove all instanced fragment batches from the scene");
 });
 
 test("physics impacts report speed so block damage can be thresholded", () => {

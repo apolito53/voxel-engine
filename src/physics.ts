@@ -42,6 +42,7 @@ type PhysicsToyOptions = {
   readonly radius?: number;
   readonly geometry?: THREE.BufferGeometry;
   readonly material?: THREE.MeshStandardMaterial;
+  readonly fragmentBlock?: number | null;
   readonly damagesBlocks?: boolean;
   readonly inverseMass?: number;
   readonly castShadow?: boolean;
@@ -72,6 +73,7 @@ export class PhysicsToy {
   readonly velocity: THREE.Vector3;
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly damagesBlocks: boolean;
+  readonly fragmentBlock: number | null;
   private readonly closestPoint = new THREE.Vector3();
   private readonly centerDelta = new THREE.Vector3();
   private readonly disposeGeometry: boolean;
@@ -97,6 +99,7 @@ export class PhysicsToy {
         emissive: 0x330008
       })
     );
+    this.fragmentBlock = options.fragmentBlock ?? null;
     this.damagesBlocks = options.damagesBlocks ?? true;
     this.disposeGeometry = options.disposeGeometry ?? true;
     this.disposeMaterial = options.disposeMaterial ?? true;
@@ -110,8 +113,9 @@ export class PhysicsToy {
   static createBlockFragment(block: number, position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
     return new PhysicsToy(position, velocity, {
       radius: BLOCK_FRAGMENT_COLLISION_RADIUS,
-      geometry: sharedFragmentGeometry,
+      geometry: getSharedFragmentGeometry(),
       material: getFragmentMaterial(block),
+      fragmentBlock: block,
       damagesBlocks: false,
       inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
@@ -129,6 +133,10 @@ export class PhysicsToy {
 
   get isSleeping(): boolean {
     return this.sleeping;
+  }
+
+  get isInstancedFragment(): boolean {
+    return this.fragmentBlock !== null;
   }
 
   wakeFromToyCollision(): void {
@@ -485,7 +493,11 @@ function clampToBlock(value: number, blockCoordinate: number): number {
   return Math.max(blockCoordinate, Math.min(value, blockCoordinate + 1));
 }
 
-function getFragmentMaterial(block: number): THREE.MeshStandardMaterial {
+export function getSharedFragmentGeometry(): THREE.BoxGeometry {
+  return sharedFragmentGeometry;
+}
+
+export function getFragmentMaterial(block: number): THREE.MeshStandardMaterial {
   const cachedMaterial = sharedFragmentMaterials.get(block);
   if (cachedMaterial) return cachedMaterial;
 

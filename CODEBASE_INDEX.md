@@ -33,7 +33,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
-- Debug HUD throttling, frame-spike tracking, CPU timing buckets, and renderer stats text: `src/debugHud.ts`
+- Debug HUD throttling, frame-spike tracking, CPU timing buckets, fragment instancing stats, and renderer stats text: `src/debugHud.ts`
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, health, and placeable palette: `src/blocks.ts`
@@ -54,6 +54,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, sleep-aware broadphase core/debris collision, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
+- Instanced debris rendering batches keyed by source block material: `src/physicsInstancing.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
@@ -81,7 +82,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks are tracked by key, then use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`; worker and fallback meshes both use `src/blockColors.ts` so deterministic tint buckets do not change between mesh paths.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, a sleep-aware broadphase object-object collision pass, speed-gated impact damage, quality-scaled and slider-tuned physics body budgets, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, and miscellaneous work.
+10. Each animation frame updates player motion, chunk streaming, physics toys with reusable impact buffers, a sleep-aware broadphase object-object collision pass, speed-gated impact damage, quality-scaled and slider-tuned physics body budgets, instanced debris render batches, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; the debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, miscellaneous work, and fragment instancing pressure.
 11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
 13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, sleep when settled, stay cached in a static broadphase, expire after a short lifetime, can be shoved awake by active cores without enabling full debris-debris collision, and can all be cleared with `X` or the settings-panel despawn button.
@@ -98,7 +99,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune baked voxel face shading or visible sun direction: update `src/voxelLighting.ts`, `src/lighting.ts`, `src/assets/skybox-sunlit-day.png`, and `src/skybox.ts` together so worker mesh colors, skybox alignment, and shadows agree.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change break/place reach, hit behavior, or target outline: `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
-- Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, object budget, despawn controls, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `KeyX`, `PhysicsToyCollider`, `clearToys`, and `handlePhysicsImpact` in `src/main.ts`.
+- Change thrown object behavior, core/debris collision, debris lifetime, debris grid size, quality-scaled debris counts, instanced debris rendering, object budget, despawn controls, or impact damage: `src/blockFragments.ts`, `src/physics.ts`, `src/physicsInstancing.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus `KeyT`, `KeyX`, `PhysicsToyCollider`, `clearToys`, and `handlePhysicsImpact` in `src/main.ts`.
 - Change HUD/minimap/debug/sprint-feedback/settings UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
@@ -120,5 +121,6 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - `vite.config.ts` manually separates Three.js into a `vendor-three` chunk and keeps other dependencies in `vendor`, so production build warnings point at genuinely oversized app code instead of the stable renderer dependency.
 - Object-object physics is intentionally limited: `PhysicsToyCollider` rebuilds only the active spatial hash each frame, caches sleeping debris in a static hash, resolves core-core and core-fragment contacts, and skips debris-debris pairs so high debris budgets do not become quadratic contact work. Call `PhysicsToyCollider.forget()` before disposing a sleeping toy so the static hash does not keep stale references.
+- Debris fragments are rendered through per-block `THREE.InstancedMesh` batches in `src/physicsInstancing.ts`; fragment physics still uses `PhysicsToy.mesh.position`, but fragment meshes are not added to the scene individually.
 - Pointer lock behavior is browser-sensitive; `requestPointerLock()` can return a promise or `void`, so keep the guarded catch path in `src/player.ts` and test movement changes in the browser, not just with `npm.cmd run build`.
 - TypeScript migration helpers are historical prep tools now; source in `src` is expected to stay strict without `@ts-nocheck` or explicit `any`.
