@@ -1,8 +1,10 @@
 import * as THREE from "three";
+import { BLOCK } from "./blocks";
 import { BLOCK_DAMAGE_IMPACT_SPEED, getFragmentMaterial, type PhysicsToy } from "./physics";
 
 const RUBBLE_CELL_SIZE = 1;
 const RUBBLE_MAX_VISUAL_PIECES = 36;
+export const RUBBLE_BLOCK_PROMOTION_PIECES = 18;
 const RUBBLE_PIECE_HEALTH = 1;
 const RUBBLE_MIN_WIDTH = 0.36;
 const RUBBLE_MAX_WIDTH = 1.18;
@@ -20,13 +22,19 @@ type RubbleCell = {
 
 type RubbleCluster = {
   readonly id: number;
-  readonly key: string;
+  key: string;
   readonly block: number;
-  readonly cell: RubbleCell;
+  cell: RubbleCell;
   readonly mesh: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
   readonly bounds: THREE.Box3;
   pieces: number;
   health: number;
+};
+
+export type RubbleFieldWorld = {
+  getBlock(x: number, y: number, z: number): number;
+  setBlock(x: number, y: number, z: number, block: number): void;
+  isSolid(x: number, y: number, z: number): boolean;
 };
 
 export type RubbleFieldStats = {
@@ -97,6 +105,43 @@ export class RubbleField {
     cluster.health += RUBBLE_PIECE_HEALTH;
     this.updateClusterMesh(cluster);
     this.refreshStats();
+  }
+
+  settle(world: RubbleFieldWorld): void {
+    const clusters = Array.from(this.clustersByKey.values()).sort((left, right) => left.cell.y - right.cell.y);
+    let changed = false;
+
+    for (const cluster of clusters) {
+      if (this.clustersByKey.get(cluster.key) !== cluster) continue;
+
+      if (this.hasTerrainSupport(world, cluster)) {
+        changed = this.promoteClusterIfLargeEnough(world, cluster) || changed;
+        continue;
+      }
+
+      const belowCell = getRubbleCellBelow(cluster.cell);
+      const mergeTarget = this.getMergeTargetInCell(belowCell, cluster);
+      if (mergeTarget) {
+        // Falling onto an existing pile makes the pile larger instead of
+        // creating stacked proxy boxes. That gives us the cover-gameplay result
+        // without doing debris/debris physics for every settled cube.
+        this.mergeClusters(mergeTarget, cluster);
+        this.promoteClusterIfLargeEnough(world, mergeTarget);
+        changed = true;
+        continue;
+      }
+
+      // Unsupported rubble falls one voxel cell per frame. It is intentionally
+      // discrete for now: cheap, deterministic, and easy to replace later with
+      // smoother motion if rubble becomes a centerpiece mechanic.
+      const movedCluster = this.moveClusterToCell(cluster, belowCell);
+      changed = true;
+      if (movedCluster && this.hasTerrainSupport(world, movedCluster)) {
+        this.promoteClusterIfLargeEnough(world, movedCluster);
+      }
+    }
+
+    if (changed) this.refreshStats();
   }
 
   resolveCoreCollision(core: PhysicsToy): boolean {
@@ -276,6 +321,48 @@ export class RubbleField {
     this.removeClusterFromCellIndex(cluster);
   }
 
+  private hasTerrainSupport(world: RubbleFieldWorld, cluster: RubbleCluster): boolean {
+    return world.isSolid(cluster.cell.x, cluster.cell.y - 1, cluster.cell.z);
+  }
+
+  private promoteClusterIfLargeEnough(world: RubbleFieldWorld, cluster: RubbleCluster): boolean {
+    if (cluster.pieces < RUBBLE_BLOCK_PROMOTION_PIECES) return false;
+    if (world.getBlock(cluster.cell.x, cluster.cell.y, cluster.cell.z) !== BLOCK.air) return false;
+
+    // Once enough settled debris occupies one meter cell, it graduates back
+    // into the voxel terrain. That lets later terrain systems treat it like a
+    // normal solid block while small piles remain cheap cover proxies.
+    world.setBlock(cluster.cell.x, cluster.cell.y, cluster.cell.z, BLOCK.rubble);
+    this.removeCluster(cluster);
+    return true;
+  }
+
+  private mergeClusters(target: RubbleCluster, source: RubbleCluster): void {
+    target.pieces += source.pieces;
+    target.health += source.health;
+    this.removeCluster(source);
+    this.updateClusterMesh(target);
+  }
+
+  private moveClusterToCell(cluster: RubbleCluster, cell: RubbleCell): RubbleCluster | null {
+    this.removeClusterFromCellIndex(cluster);
+    this.clustersByKey.delete(cluster.key);
+
+    const nextKey = getRubbleCellKey(cell, cluster.block);
+    const existingCluster = this.clustersByKey.get(nextKey);
+    if (existingCluster && existingCluster !== cluster) {
+      this.mergeClusters(existingCluster, cluster);
+      return existingCluster;
+    }
+
+    cluster.cell = cell;
+    cluster.key = nextKey;
+    this.clustersByKey.set(nextKey, cluster);
+    this.addClusterToCellIndex(cluster);
+    this.updateClusterMesh(cluster);
+    return cluster;
+  }
+
   private getNearbyClusters(position: THREE.Vector3, radius: number): RubbleCluster[] {
     const minX = Math.floor((position.x - radius) / RUBBLE_CELL_SIZE);
     const maxX = Math.floor((position.x + radius) / RUBBLE_CELL_SIZE);
@@ -300,6 +387,16 @@ export class RubbleField {
 
   private getClustersForCell(cell: RubbleCell): RubbleCluster[] {
     return this.clustersByCell.get(getRubbleCellCoordinateKey(cell)) ?? [];
+  }
+
+  private getMergeTargetInCell(cell: RubbleCell, fallingCluster: RubbleCluster): RubbleCluster | null {
+    const clusters = this.getClustersForCell(cell).filter((cluster) => cluster !== fallingCluster);
+    if (clusters.length === 0) return null;
+
+    // Prefer preserving material identity when possible. If a different
+    // material pile is already there, combine into it anyway; gameplay wants
+    // one pile in that cell more than it wants perfect material accounting.
+    return clusters.find((cluster) => cluster.block === fallingCluster.block) ?? clusters[0] ?? null;
   }
 
   private addClusterToCellIndex(cluster: RubbleCluster): void {
@@ -348,6 +445,14 @@ function getRubbleCell(position: THREE.Vector3): RubbleCell {
     x: Math.floor(position.x / RUBBLE_CELL_SIZE),
     y: Math.floor(position.y / RUBBLE_CELL_SIZE),
     z: Math.floor(position.z / RUBBLE_CELL_SIZE)
+  };
+}
+
+function getRubbleCellBelow(cell: RubbleCell): RubbleCell {
+  return {
+    x: cell.x,
+    y: cell.y - 1,
+    z: cell.z
   };
 }
 

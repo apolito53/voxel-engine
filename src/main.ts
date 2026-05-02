@@ -465,6 +465,7 @@ function animate(): void {
     for (const impact of physicsImpacts) {
       handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
     }
+    rubbleField.settle(activeWorld);
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
     recordTimingSection("physicsMs");

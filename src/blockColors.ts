@@ -9,7 +9,8 @@ const BLOCK_COLOR_VARIATION_STRENGTH: Record<number, number> = {
   [BLOCK.dirt]: 0.12,
   [BLOCK.stone]: 0.10,
   [BLOCK.sand]: 0.09,
-  [BLOCK.ember]: 0.18
+  [BLOCK.ember]: 0.18,
+  [BLOCK.rubble]: 0.14
 };
 
 export function createBlockMeshKey(block: number, worldX: number, worldY: number, worldZ: number): number {

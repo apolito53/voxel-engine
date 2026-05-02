@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.3 - 2026-05-02
+
+### Added
+
+- Added a generated `Rubble` terrain block that compacted rubble piles can promote into once a cell gathers enough settled pieces.
+- Added rubble support checks: unsupported rubble piles fall one voxel cell at a time, and falling piles merge into piles directly below them.
+- Added tests for falling/merging rubble piles and promotion from cover proxy into solid terrain.
+
+### Changed
+
+- Rubble settlement now runs each active frame after physics impacts, so destroying support blocks can make existing piles drop or compact.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: loaded a world, toggled debug HUD, confirmed the rubble stats line renders, and checked for fresh console errors.
+
 ## 0.2.2 - 2026-05-02
 
 ### Changed
