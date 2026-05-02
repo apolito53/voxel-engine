@@ -4,6 +4,7 @@ import { compactText, type GpuInfo } from "./gpu";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { QualityPreset } from "./qualityPresets";
+import type { RubbleFieldStats } from "./rubble";
 import type { ChunkCoords, WorldStats } from "./world";
 
 type DebugHudOptions = {
@@ -49,6 +50,7 @@ export class DebugHud {
     physicsBodyBudget: number,
     physicsCollisions: PhysicsToyCollisionStats,
     fragmentRenderStats: PhysicsFragmentRenderStats,
+    rubbleStats: RubbleFieldStats,
     timings: FrameTimings
   ): void {
     if (!this.visible) return;
@@ -79,6 +81,7 @@ export class DebugHud {
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
       `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
       `frag inst ${fragmentRenderStats.instances} batches ${fragmentRenderStats.batches} cap ${fragmentRenderStats.capacity}`,
+      `rubble ${rubbleStats.clusters} piles ${rubbleStats.pieces} pcs cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,

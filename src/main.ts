@@ -52,6 +52,7 @@ import {
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
+import { RubbleField } from "./rubble";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -174,6 +175,7 @@ const physicsImpacts: PhysicsImpact[] = [];
 const damagedBlockKeysThisFrame = new Set<string>();
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
+const rubbleField = new RubbleField(scene);
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
@@ -456,7 +458,9 @@ function animate(): void {
       const toy = toys[index];
       if (!toy) continue;
       toy.update(delta, activeWorld, physicsImpacts);
+      rubbleField.resolveCoreCollision(toy);
     }
+    absorbSleepingFragmentsIntoRubble();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
     for (const impact of physicsImpacts) {
       handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
@@ -505,6 +509,7 @@ function animate(): void {
       physicsObjectBudget,
       physicsCollisionStats,
       physicsFragmentInstancer.getStats(),
+      rubbleField.getStats(),
       smoothedFrameTimings
     );
   }
@@ -704,6 +709,19 @@ function enforcePhysicsToyBudget(): void {
   }
 }
 
+function absorbSleepingFragmentsIntoRubble(): void {
+  for (let index = toys.length - 1; index >= 0; index -= 1) {
+    const toy = toys[index];
+    if (!toy?.isInstancedFragment || !toy.isSleeping) continue;
+
+    // Once debris has settled, it graduates from "expensive little physics
+    // shard" into a cheap cover proxy. The visible rubble remains, but the
+    // per-shard physics body leaves the hot loop.
+    rubbleField.absorbFragment(toy);
+    removePhysicsToyAt(index);
+  }
+}
+
 function pruneExpiredToys(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     if (toys[index]?.isExpired) {
@@ -845,6 +863,7 @@ function clearToys(): void {
   }
   toys.length = 0;
   physicsFragmentInstancer.clear();
+  rubbleField.clear();
 }
 
 function updateSunShadowAnchor(): void {

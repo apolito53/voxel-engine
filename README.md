@@ -43,9 +43,9 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Right click` place block
 - `1-5` select block
 - `F` toggle flight mode
-- `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, and moving cores can bump other cores/fragments through a broadphase collision pass before settling to sleep
-- `X` despawn all active physics cores and debris
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, and instanced debris render counts for hitch hunting
+- `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- `X` despawn all active physics cores, loose debris, and rubble cover
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
@@ -78,6 +78,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments so thousands of shards do not become thousands of scene meshes
+- `src/rubble.ts`: persistent destructible rubble cover proxies created from settled debris fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading

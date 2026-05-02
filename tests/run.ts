@@ -25,6 +25,7 @@ import {
   createEmptyPhysicsToyCollisionStats
 } from "../src/physics";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
+import { RubbleField } from "../src/rubble";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
@@ -1026,6 +1027,70 @@ test("block fragments render through instanced batches instead of scene children
   assertEqual(instancer.getStats().instances, 0, "clearing should hide all fragment instances");
   instancer.dispose();
   assertEqual(scene.children.length, 0, "disposing should remove all instanced fragment batches from the scene");
+});
+
+test("rubble field absorbs settled fragments into cover proxies", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+  const firstFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.35, 0.2, 0.35),
+    new THREE.Vector3(0, 0, 0)
+  );
+  const secondFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.72, 0.24, 0.65),
+    new THREE.Vector3(0, 0, 0)
+  );
+
+  assert(rubble.absorbFragment(firstFragment), "settled debris should be eligible for rubble absorption");
+  assert(rubble.absorbFragment(secondFragment), "nearby debris of the same block should merge into one pile");
+  assertEqual(scene.children.length, 1, "merged rubble should render as one cheap cover proxy");
+  const rubbleStats = rubble.getStats();
+  assertEqual(rubbleStats.clusters, 1, "absorbed fragments should merge into one cluster");
+  assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
+  assertEqual(rubbleStats.health, 2, "absorbed fragments should add destructible cover health");
+  assert(
+    Math.abs(rubbleStats.maxCoverHeight - 0.164) < 0.000001,
+    "absorbed fragments should report gameplay cover pressure"
+  );
+
+  const hit = rubble.raycast(
+    new THREE.Vector3(0.5, 0.08, -2),
+    new THREE.Vector3(0, 0, 1),
+    6
+  );
+  assert(hit, "rubble cover proxies should participate in future line-of-sight checks");
+  assertEqual(hit.block, BLOCK.stone, "rubble hit should preserve the source material");
+
+  assert(rubble.damageNearest(new THREE.Vector3(0.5, 0.1, 0.5), 2), "rubble should be destructible by gameplay damage");
+  assertEqual(rubble.getStats().clusters, 0, "destroyed rubble should leave the scene and cover index");
+  assertEqual(scene.children.length, 0, "destroyed rubble should remove its visible proxy");
+});
+
+test("rubble field lets moving cores collide with and chip cover proxies", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+  for (let index = 0; index < 6; index += 1) {
+    rubble.absorb(
+      BLOCK.dirt,
+      new THREE.Vector3(0.48 + index * 0.01, 0.18, 0.52)
+    );
+  }
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(0.5, 0.18, 0.2),
+    new THREE.Vector3(0, 0, 6)
+  );
+  const healthBefore = rubble.getStats().health;
+  const collided = rubble.resolveCoreCollision(core);
+
+  assert(collided, "moving cores should collide with rubble cover");
+  assert(core.velocity.z < 0, "core should bounce away from the rubble proxy");
+  assert(
+    rubble.getStats().health < healthBefore,
+    "meaningful core impacts should chip destructible rubble"
+  );
 });
 
 test("physics impacts report speed so block damage can be thresholded", () => {
