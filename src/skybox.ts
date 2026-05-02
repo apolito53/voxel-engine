@@ -2,6 +2,13 @@ import * as THREE from "three";
 
 const SKYBOX_TEXTURE_URL = new URL("./assets/skybox-sunlit-day.png", import.meta.url).href;
 const SKYBOX_RADIUS_METERS = 96;
+const SKYBOX_UP_AXIS = new THREE.Vector3(0, 1, 0);
+
+// Measured from the generated panorama's brightest sun-disc centroid. Three's
+// SphereGeometry maps horizontal UVs with 0.25 at +Z, 0.5 at +X, and 0.75 at
+// -Z, so these asset-space values need a real conversion before yaw alignment.
+const GENERATED_SKYBOX_SUN_U = 0.7637;
+const GENERATED_SKYBOX_SUN_TOP_V = 0.2756;
 
 export type Skybox = {
   readonly object: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
@@ -47,11 +54,35 @@ export function createSkybox(sunOffset: THREE.Vector3): Skybox {
   };
 }
 
-function getSkyboxYawForSunDirection(sunOffset: THREE.Vector3): number {
-  // The generated equirectangular texture has its sun in the right half of the
-  // panorama. Rotating that longitude toward the real directional-light vector
-  // makes the visible sun read as the source of the current shadows.
-  const targetAzimuth = Math.atan2(sunOffset.x, sunOffset.z);
-  const generatedSunAzimuth = Math.PI * 0.5;
+export function getSkyboxYawForSunDirection(sunOffset: THREE.Vector3): number {
+  const targetAzimuth = getHorizontalAzimuth(sunOffset);
+  const generatedSunAzimuth = getHorizontalAzimuth(getGeneratedSkyboxSunDirection());
   return targetAzimuth - generatedSunAzimuth;
+}
+
+export function getSkyboxAlignedSunDirection(
+  sunOffset: THREE.Vector3,
+  target = new THREE.Vector3()
+): THREE.Vector3 {
+  return getGeneratedSkyboxSunDirection(target)
+    .applyAxisAngle(SKYBOX_UP_AXIS, getSkyboxYawForSunDirection(sunOffset))
+    .normalize();
+}
+
+function getGeneratedSkyboxSunDirection(target = new THREE.Vector3()): THREE.Vector3 {
+  const phi = GENERATED_SKYBOX_SUN_U * Math.PI * 2;
+  const theta = GENERATED_SKYBOX_SUN_TOP_V * Math.PI;
+  const horizontal = Math.sin(theta);
+
+  return target
+    .set(
+      -Math.cos(phi) * horizontal,
+      Math.cos(theta),
+      Math.sin(phi) * horizontal
+    )
+    .normalize();
+}
+
+function getHorizontalAzimuth(direction: THREE.Vector3): number {
+  return Math.atan2(direction.x, direction.z);
 }

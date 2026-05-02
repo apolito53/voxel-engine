@@ -18,6 +18,7 @@ export type QualityPreset = {
   readonly shadowCameraFar: number;
   readonly shadowBias: number;
   readonly shadowNormalBias: number;
+  readonly shadowIntensity: number;
   readonly fogNear: number;
   readonly fogFar: number;
   readonly cameraFar: number;
@@ -47,6 +48,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowCameraFar: 180,
     shadowBias: -0.00015,
     shadowNormalBias: 0.035,
+    shadowIntensity: 0,
     fogNear: 18,
     fogFar: 44,
     cameraFar: 120,
@@ -71,6 +73,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowCameraFar: 220,
     shadowBias: -0.00015,
     shadowNormalBias: 0.035,
+    shadowIntensity: 0,
     fogNear: 35,
     fogFar: 68,
     cameraFar: 180,
@@ -91,10 +94,11 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     pixelRatioLimit: 2,
     shadows: true,
     shadowMapSize: 2048,
-    shadowCameraSize: 112,
-    shadowCameraFar: 280,
-    shadowBias: -0.00035,
-    shadowNormalBias: 0.14,
+    shadowCameraSize: 80,
+    shadowCameraFar: 260,
+    shadowBias: -0.00012,
+    shadowNormalBias: 0.055,
+    shadowIntensity: 0.78,
     fogNear: 55,
     fogFar: 220,
     cameraFar: 450,
@@ -106,19 +110,20 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 7,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
-    sunIntensity: 3.2,
-    skyIntensity: 1.65
+    sunIntensity: 3.45,
+    skyIntensity: 1.45
   },
   high: {
     label: "High",
     distanceScale: 4,
     pixelRatioLimit: 2,
     shadows: true,
-    shadowMapSize: 2048,
-    shadowCameraSize: 176,
-    shadowCameraFar: 420,
-    shadowBias: -0.00032,
-    shadowNormalBias: 0.16,
+    shadowMapSize: 4096,
+    shadowCameraSize: 88,
+    shadowCameraFar: 360,
+    shadowBias: -0.0001,
+    shadowNormalBias: 0.06,
+    shadowIntensity: 0.8,
     fogNear: 95,
     fogFar: 440,
     cameraFar: 900,
@@ -130,8 +135,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 14,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 10,
-    sunIntensity: 3.35,
-    skyIntensity: 1.72
+    sunIntensity: 3.55,
+    skyIntensity: 1.5
   },
   ultra: {
     label: "Ultra",
@@ -139,10 +144,11 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     pixelRatioLimit: 2,
     shadows: true,
     shadowMapSize: 4096,
-    shadowCameraSize: 240,
-    shadowCameraFar: 560,
-    shadowBias: -0.0003,
-    shadowNormalBias: 0.18,
+    shadowCameraSize: 96,
+    shadowCameraFar: 520,
+    shadowBias: -0.00008,
+    shadowNormalBias: 0.065,
+    shadowIntensity: 0.82,
     fogNear: 135,
     fogFar: 660,
     cameraFar: 1300,
@@ -154,19 +160,20 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 27,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 12,
-    sunIntensity: 3.5,
-    skyIntensity: 1.78
+    sunIntensity: 3.65,
+    skyIntensity: 1.55
   },
   [SUPER_ULTRA_PRESET_ID]: {
     label: "Super Ultra",
     distanceScale: 12,
     pixelRatioLimit: 2,
     shadows: true,
-    shadowMapSize: 4096,
-    shadowCameraSize: 360,
-    shadowCameraFar: 820,
-    shadowBias: -0.00028,
-    shadowNormalBias: 0.2,
+    shadowMapSize: 8192,
+    shadowCameraSize: 112,
+    shadowCameraFar: 720,
+    shadowBias: -0.00008,
+    shadowNormalBias: 0.07,
+    shadowIntensity: 0.82,
     fogNear: 270,
     fogFar: 1320,
     cameraFar: 2600,
@@ -178,7 +185,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 27,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,
-    sunIntensity: 3.6,
-    skyIntensity: 1.82
+    sunIntensity: 3.75,
+    skyIntensity: 1.6
   }
 };

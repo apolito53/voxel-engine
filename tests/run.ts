@@ -104,10 +104,12 @@ import {
 } from "../src/chunkStorage";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
+import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
 import { VoxelWorld } from "../src/world";
+import { getSkyboxAlignedSunDirection } from "../src/skybox";
 
 type TestCase = {
   readonly name: string;
@@ -1205,6 +1207,22 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     assert(preset.cameraFar > preset.fogNear, `${preset.label} camera far should exceed fog near`);
     assert(preset.fogFar > preset.fogNear, `${preset.label} fog far should exceed fog near`);
     assert(isPowerOfTwo(preset.shadowMapSize), `${preset.label} shadow map size should stay GPU-friendly`);
+    if (preset.shadows) {
+      assert(
+        getShadowTexelSize(preset) <= 0.12,
+        `${preset.label} shadow texel size should stay tight enough for readable nearby block shadows`
+      );
+      assert(
+        preset.shadowNormalBias <= 0.08,
+        `${preset.label} normal bias should avoid visibly detached block shadows`
+      );
+      assert(
+        preset.shadowIntensity > 0 && preset.shadowIntensity <= 1,
+        `${preset.label} shadow intensity should be explicit and normalized`
+      );
+    } else {
+      assertEqual(preset.shadowIntensity, 0, `${preset.label} disabled shadows should not keep an intensity`);
+    }
     assert(preset.minimapRowsPerFrame >= 1, `${preset.label} minimap should process at least one row`);
     assert(
       preset.physicsObjectBudget >= MIN_PHYSICS_OBJECT_BUDGET,
@@ -1240,6 +1258,18 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 physics bodies by default");
   assertEqual(QUALITY_PRESETS.high.physicsObjectBudget, 512, "High should allow 512 physics bodies by default");
   assertEqual(QUALITY_PRESETS.ultra.physicsObjectBudget, 1024, "Ultra should allow 1024 physics bodies by default");
+  assert(
+    getShadowTexelSize(QUALITY_PRESETS.high) < getShadowTexelSize(QUALITY_PRESETS.normal),
+    "High should spend more shadow texels near the player than Normal"
+  );
+  assert(
+    getShadowTexelSize(QUALITY_PRESETS.ultra) < getShadowTexelSize(QUALITY_PRESETS.normal),
+    "Ultra should spend more shadow texels near the player than Normal"
+  );
+  assert(
+    getShadowTexelSize(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID]) < getShadowTexelSize(QUALITY_PRESETS.ultra),
+    "Super Ultra should have the sharpest nearby shadows"
+  );
   assertEqual(QUALITY_PRESETS.potato.blockFragmentCount, 2, "Potato should spawn only two shards per destroyed block");
   assertEqual(QUALITY_PRESETS.low.blockFragmentCount, 4, "Low should spawn four shards per destroyed block");
   assertEqual(QUALITY_PRESETS.normal.blockFragmentCount, 7, "Normal should spawn seven shards per destroyed block");
@@ -1266,13 +1296,28 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   );
 });
 
+test("skybox sun direction lines up with the real directional light", () => {
+  const realSunDirection = SUN_OFFSET.clone().normalize();
+  const skyboxSunDirection = getSkyboxAlignedSunDirection(SUN_OFFSET);
+  const sunElevation = getSunElevationDegrees(SUN_OFFSET);
+
+  assertVectorNearlyEqual(
+    skyboxSunDirection,
+    realSunDirection,
+    "generated skybox sun should align with the directional light vector"
+  );
+  assert(
+    sunElevation > 35 && sunElevation < 45,
+    `sun elevation should stay visually readable instead of overhead; got ${sunElevation.toFixed(2)} degrees`
+  );
+});
+
 test("directional shadow anchor snaps to stable light-space texels", () => {
-  const sunOffset = new THREE.Vector3(18, 132, 10);
-  const basis = createDirectionalShadowBasis(sunOffset);
+  const basis = createDirectionalShadowBasis(SUN_OFFSET);
   const texelSize = getShadowTexelSize(QUALITY_PRESETS.normal);
   const anchor = new THREE.Vector3(12.345, 0, -7.89);
   const snappedAnchor = snapShadowAnchorToTexelGrid(anchor, basis, texelSize);
-  const subTexelAnchor = anchor.clone().addScaledVector(basis.right, texelSize * 0.2);
+  const subTexelAnchor = snappedAnchor.clone().addScaledVector(basis.right, texelSize * 0.2);
   const snappedSubTexelAnchor = snapShadowAnchorToTexelGrid(subTexelAnchor, basis, texelSize);
 
   assertNearlyInteger(snappedAnchor.dot(basis.right) / texelSize, "right shadow coordinate");

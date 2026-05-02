@@ -173,6 +173,7 @@ export class QualityController {
     this.sun.shadow.camera.updateProjectionMatrix();
     this.sun.shadow.bias = preset.shadowBias;
     this.sun.shadow.normalBias = preset.shadowNormalBias;
+    this.sun.shadow.intensity = preset.shadowIntensity;
 
     if (resetShadowMap) this.resetSunShadowMap();
   }

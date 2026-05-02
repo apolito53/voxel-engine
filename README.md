@@ -54,9 +54,9 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 2 debris shards
 - `Low`: current low-end baseline, no shadows, 128 physics bodies, 4 debris shards
 - `Normal`: 2x render distance, shadows, 192 physics bodies, 7 debris shards
-- `High`: 4x render distance, shadows, 512 physics bodies, 14 debris shards
-- `Ultra`: 6x render distance, higher shadow resolution, 1024 physics bodies, 27 debris shards
-- `Super Ultra`: 12x render distance, 2048 physics bodies, 27 debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `High`: 4x render distance, sharper local shadows, 512 physics bodies, 14 debris shards
+- `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 27 debris shards
+- `Super Ultra`: 12x render distance, highest local shadow resolution, 2048 physics bodies, 27 debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 
 ## Engine Pieces
 
@@ -74,6 +74,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware broadphase core/debris collision, impact reporting, and shared-resource cube fragments
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
+- `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/skybox.ts`: generated sunlit equirectangular skybox texture and camera-following sky dome
 - `src/shadows.ts`: directional shadow-map texel snapping helpers

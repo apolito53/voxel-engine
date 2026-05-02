@@ -13,6 +13,7 @@ import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
+import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { PlayerController } from "./player";
 import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
@@ -52,7 +53,6 @@ import { TargetBlockHighlighter } from "./targetHighlighter";
 import { VoxelWorld, type ChunkCoords, type WorldStats } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
-const SUN_OFFSET = new THREE.Vector3(18, 132, 10);
 const BLOCK_INTERACTION_REACH = 8;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
