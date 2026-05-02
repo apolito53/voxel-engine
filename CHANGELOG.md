@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.4 - 2026-05-02
+
+### Changed
+
+- Doubled the rubble-to-terrain promotion threshold from 18 to 36 pieces, so one full 27-piece block fracture remains destructible cover instead of immediately refilling the hole it came from.
+- Updated rubble docs to describe compaction as a dense-pile behavior rather than a normal one-block break result.
+
+### Added
+
+- Added a regression test proving one maximum-quality block fracture stays as a rubble proxy while larger accumulated piles can still compact into generated `Rubble` terrain.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, and checked for fresh console errors.
+
 ## 0.2.3 - 2026-05-02
 
 ### Added

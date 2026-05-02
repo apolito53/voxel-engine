@@ -1161,6 +1161,29 @@ test("unsupported rubble piles fall and merge with piles below", () => {
   assertEqual(world.getBlock(0, 1, 0), BLOCK.air, "small merged piles should stay as proxies, not terrain");
 });
 
+test("one full block worth of rubble stays as cover instead of refilling terrain", () => {
+  const scene = new THREE.Scene();
+  const world = new TestRubbleWorld();
+  const rubble = new RubbleField(scene);
+  world.setBlock(0, 0, 0, BLOCK.stone);
+
+  assert(
+    RUBBLE_BLOCK_PROMOTION_PIECES > BLOCK_FRAGMENT_COUNT,
+    "rubble promotion should require more pieces than one maximum-quality block fracture"
+  );
+
+  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
+    rubble.absorb(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5));
+  }
+
+  rubble.settle(world);
+
+  assertEqual(world.getBlock(0, 1, 0), BLOCK.air, "one destroyed block should leave an open space");
+  assertEqual(rubble.getStats().clusters, 1, "sub-threshold rubble should remain as a cover proxy");
+  assertEqual(rubble.getStats().pieces, BLOCK_FRAGMENT_COUNT, "the proxy should keep the full debris count");
+  assertEqual(scene.children.length, 1, "sub-threshold rubble should keep its proxy mesh");
+});
+
 test("large supported rubble piles compact into terrain blocks", () => {
   const scene = new THREE.Scene();
   const world = new TestRubbleWorld();
