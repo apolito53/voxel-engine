@@ -124,6 +124,8 @@ import {
   type ChunkStorage
 } from "../src/chunkStorage";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
+import { createEngineEventBus } from "../src/engineEvents";
+import { EventBus } from "../src/eventBus";
 import {
   IDLE_RESUME_GAP_SECONDS,
   MAX_SIMULATION_DELTA_SECONDS,
@@ -132,7 +134,8 @@ import {
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
-import { createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
+import { NovaPilot, createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
+import { NovaPilotReactions, type NovaPilotMessageTarget } from "../src/novaPilotReactions";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { getSunlitFaceShade } from "../src/voxelLighting";
@@ -187,6 +190,94 @@ function hasAnyDifference(left: Uint8Array, right: Uint8Array): boolean {
   }
   return false;
 }
+
+function createFakeNovaMessageTarget(): NovaPilotMessageTarget & { readonly isVisible: () => boolean } {
+  const classes = new Set<string>();
+  return {
+    textContent: "",
+    classList: {
+      add(token: string): void {
+        classes.add(token);
+      },
+      remove(token: string): void {
+        classes.delete(token);
+      }
+    },
+    isVisible(): boolean {
+      return classes.has("is-visible");
+    }
+  };
+}
+
+test("event bus emits typed payloads and unregisters handlers", () => {
+  type CounterEvents = {
+    "counter:add": { readonly amount: number };
+  };
+  const bus = new EventBus<CounterEvents>();
+  let total = 0;
+
+  const unsubscribe = bus.on("counter:add", (event) => {
+    total += event.amount;
+  });
+
+  bus.emit("counter:add", { amount: 3 });
+  unsubscribe();
+  bus.emit("counter:add", { amount: 7 });
+
+  assertEqual(total, 3, "unsubscribed handlers should not receive later events");
+});
+
+test("nova pilot reactions turn engine events into rate-limited HUD messages", () => {
+  let now = 1000;
+  const events = createEngineEventBus();
+  const pilot = new NovaPilot();
+  const target = createFakeNovaMessageTarget();
+  const reactions = new NovaPilotReactions({
+    events,
+    pilot,
+    output: target,
+    getNow: () => now
+  });
+
+  events.emit("world:loaded", {
+    worldId: "default",
+    name: "Default World",
+    seed: "classic"
+  });
+  assert(
+    target.textContent?.includes("Nova online in Default World"),
+    "world load should surface a Nova status message"
+  );
+  assert(target.isVisible(), "Nova messages should become visible");
+
+  const initialMessage = target.textContent;
+  events.emit("block:destroyed", {
+    position: { x: 1, y: 2, z: 3 },
+    block: BLOCK.stone,
+    impactSpeed: 4,
+    fragmentCount: 7
+  });
+  assertEqual(target.textContent, initialMessage, "non-forced reactions should respect the message gap");
+
+  now += 2000;
+  events.emit("block:destroyed", {
+    position: { x: 1, y: 2, z: 3 },
+    block: BLOCK.stone,
+    impactSpeed: 4,
+    fragmentCount: 7
+  });
+  assert(
+    target.textContent?.includes("Stone chose fragments"),
+    "later destruction events should produce contextual chatter"
+  );
+
+  now += 5000;
+  reactions.update();
+  assert(!target.isVisible(), "expired Nova messages should hide themselves");
+
+  reactions.dispose();
+  pilot.dispose();
+});
 
 test("world chunk coordinates wrap cleanly across zero", () => {
   const world = new VoxelWorld({ seed: "coord-test" });

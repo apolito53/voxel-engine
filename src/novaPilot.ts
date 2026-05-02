@@ -13,6 +13,8 @@ const NOVA_PILOT_BOB_SPEED = 1.7;
 const NOVA_PILOT_BOB_HEIGHT = 0.32;
 const NOVA_PILOT_THROW_SPEED = 15;
 const NOVA_PILOT_THROW_UP_SPEED = 2.8;
+const NOVA_PILOT_PULSE_DECAY = 3.6;
+const NOVA_PILOT_BASE_GLOW_OPACITY = 0.5;
 
 export type NovaPilotWorld = {
   highestSolidY(x: number, z: number): number;
@@ -91,12 +93,14 @@ export class NovaPilot {
   private readonly glowGeometry = new THREE.SphereGeometry(0.48, 16, 10);
   private readonly ringGeometry = new THREE.TorusGeometry(0.55, 0.018, 8, 48);
   private readonly noseGeometry = new THREE.ConeGeometry(0.13, 0.34, 10);
+  private readonly glowMesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   private readonly velocity = new THREE.Vector3();
   private readonly desiredPosition = new THREE.Vector3();
   private readonly steering = new THREE.Vector3();
   private readonly aimDirection = new THREE.Vector3(0, 0, -1);
   private readonly lookTarget = new THREE.Vector3();
   private timeSeconds = 0;
+  private pulseStrength = 0;
   private enabled = false;
 
   constructor() {
@@ -104,10 +108,10 @@ export class NovaPilot {
     this.object.name = "Nova Pilot";
     this.object.visible = false;
 
-    const glow = new THREE.Mesh(this.glowGeometry, this.glowMaterial);
-    glow.name = "Nova pilot glow";
-    glow.scale.set(1, 0.72, 1);
-    this.object.add(glow);
+    this.glowMesh = new THREE.Mesh(this.glowGeometry, this.glowMaterial);
+    this.glowMesh.name = "Nova pilot glow";
+    this.glowMesh.scale.set(1, 0.72, 1);
+    this.object.add(this.glowMesh);
 
     const body = new THREE.Mesh(this.bodyGeometry, this.bodyMaterial);
     body.name = "Nova pilot core";
@@ -136,6 +140,11 @@ export class NovaPilot {
     this.object.visible = active;
     if (!active) {
       this.velocity.set(0, 0, 0);
+      this.pulseStrength = 0;
+      this.glowMaterial.opacity = NOVA_PILOT_BASE_GLOW_OPACITY;
+      this.bodyMaterial.emissiveIntensity = 1;
+      this.accentMaterial.emissiveIntensity = 1;
+      this.object.scale.setScalar(1);
       return;
     }
 
@@ -160,10 +169,15 @@ export class NovaPilot {
     return this.enabled;
   }
 
+  pulse(strength = 1): void {
+    this.pulseStrength = Math.max(this.pulseStrength, Math.max(0, strength));
+  }
+
   update(delta: number, playerPosition: THREE.Vector3, playerForward: THREE.Vector3, world: NovaPilotWorld): void {
     if (!this.enabled || delta <= 0) return;
 
     this.timeSeconds += delta;
+    this.updatePulse(delta);
     this.desiredPosition.copy(
       getNovaPilotDesiredPosition(
         playerPosition,
@@ -200,6 +214,15 @@ export class NovaPilot {
   createCoreLaunch(): NovaPilotCoreLaunch | null {
     if (!this.enabled) return null;
     return createNovaPilotCoreLaunch(this.object.position, this.aimDirection, this.velocity);
+  }
+
+  private updatePulse(delta: number): void {
+    this.pulseStrength = Math.max(0, this.pulseStrength - delta * NOVA_PILOT_PULSE_DECAY);
+    const easedPulse = this.pulseStrength * this.pulseStrength;
+    this.glowMaterial.opacity = NOVA_PILOT_BASE_GLOW_OPACITY + easedPulse * 0.24;
+    this.bodyMaterial.emissiveIntensity = 1 + easedPulse * 1.1;
+    this.accentMaterial.emissiveIntensity = 1 + easedPulse * 0.85;
+    this.object.scale.setScalar(1 + easedPulse * 0.08);
   }
 
   dispose(): void {

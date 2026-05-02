@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.10 - 2026-05-02
+
+### Added
+
+- Added a typed in-browser engine event bus for decoupled gameplay events such as world load, Nova toggles, physics core throws, block damage/destruction, rubble formation, quality/settings changes, palette selection, core cleanup, and frame spikes.
+- Added Nova Pilot reactions as the first event-bus consumer: Nova now pulses and shows short rate-limited HUD messages when meaningful engine events happen.
+- Added regression coverage for event-bus unsubscribe behavior and Nova reaction throttling/expiration.
+
+### Changed
+
+- Routed existing main-loop events through the event bus instead of baking all future companion/gameplay reactions directly into `main.ts`.
+- Added a lightweight `#nova-message` HUD panel for companion chatter.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, confirmed the Nova message panel shows on world load, toggled Nova off/on with `N`, triggered the Nova-thrown core reaction with `B`, and checked for fresh app console errors.
+
 ## 0.2.9 - 2026-05-02
 
 ### Added

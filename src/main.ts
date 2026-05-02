@@ -11,12 +11,14 @@ import {
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
+import { createEngineEventBus } from "./engineEvents";
 import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
+import { NovaPilotReactions } from "./novaPilotReactions";
 import { PlayerController } from "./player";
 import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import {
@@ -74,6 +76,7 @@ import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 const BLOCK_INTERACTION_REACH = 8;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
+const FRAME_SPIKE_EVENT_MS = 45;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 
@@ -113,6 +116,7 @@ const debugPanel = requireElement<HTMLElement>("#debug-panel");
 const minimap = requireElement<HTMLCanvasElement>("#minimap");
 const hudTitle = requireElement<HTMLElement>("#hud .title");
 const playerSpeedReadout = requireElement<HTMLElement>("#player-speed-readout");
+const novaMessage = requireElement<HTMLElement>("#nova-message");
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -163,6 +167,7 @@ let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
 let pendingWorldDeletion: SavedWorld | null = null;
 
+const engineEvents = createEngineEventBus();
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const chunkStreamDirection = new THREE.Vector3();
@@ -180,6 +185,11 @@ const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
+const novaPilotReactions = new NovaPilotReactions({
+  events: engineEvents,
+  pilot: novaPilot,
+  output: novaMessage
+});
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
@@ -214,6 +224,7 @@ qualityController = new QualityController({
     minimapRenderer.reset();
     if (source === "preset") syncPhysicsBudgetToQuality();
     updateSettingsControls();
+    emitQualityChanged(source);
   }
 });
 qualityController.initialize();
@@ -375,13 +386,18 @@ document.addEventListener("keydown", (event) => {
   if (event.code === NOVA_PILOT_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
     camera.getWorldDirection(direction);
-    novaPilot.toggle(camera.position, direction, requireWorld());
+    const active = novaPilot.toggle(camera.position, direction, requireWorld());
+    engineEvents.emit("nova:toggled", { active });
     updateHud();
     return;
   }
 
   if (/^Digit[1-5]$/.test(event.code)) {
     selectedBlockIndex = Number(event.code.slice(-1)) - 1;
+    engineEvents.emit("palette:selected", {
+      block: PLACEABLE_BLOCKS[selectedBlockIndex],
+      name: BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name
+    });
   }
 
   const activePlayer = requirePlayer();
@@ -505,11 +521,18 @@ function animate(): void {
 
   updateSunShadowAnchor();
   skybox.update(camera);
+  novaPilotReactions.update();
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
   renderer.render(scene, camera);
   frameTimingSample.renderMs = performance.now() - renderStartedAt;
   frameTimingSample.frameMs = performance.now() - frameStartedAt;
+  if (inWorld && frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
+    engineEvents.emit("performance:frame-spike", {
+      frameMs: frameTimingSample.frameMs,
+      timings: frameTimingSample
+    });
+  }
   smoothedFrameTimings = smoothFrameTimings(
     smoothedFrameTimings,
     frameTimingSample,
@@ -610,7 +633,23 @@ function handlePhysicsImpact(
   damagedBlocksThisFrame.add(damageKey);
 
   const result = activeWorld.damageBlock(impact.block.x, impact.block.y, impact.block.z, 1);
-  if (!result?.destroyed) return;
+  if (!result) return;
+
+  engineEvents.emit("block:damaged", {
+    position: result.position,
+    block: result.block,
+    impactSpeed: impact.speed,
+    remainingHealth: result.remainingHealth
+  });
+
+  if (!result.destroyed) return;
+
+  engineEvents.emit("block:destroyed", {
+    position: result.position,
+    block: result.block,
+    impactSpeed: impact.speed,
+    fragmentCount: qualityController.preset.blockFragmentCount
+  });
 
   spawnBlockFragments(result.block, result.position, impact);
 }
@@ -672,12 +711,14 @@ function throwPlayerCore(): void {
     camera.position.clone().addScaledVector(direction, 1.4),
     direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0))
   ));
+  engineEvents.emit("physics:core-thrown", { source: "player" });
 }
 
 function throwNovaPilotCore(): void {
   const launch = novaPilot.createCoreLaunch();
   if (!launch) return;
   addPhysicsToy(createPhysicsCore(launch.position, launch.velocity));
+  engineEvents.emit("physics:core-thrown", { source: "nova" });
 }
 
 function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
@@ -720,6 +761,11 @@ function setPhysicsObjectBudget(nextBudget: number, persist = true): void {
 
   updatePhysicsBudgetControls();
   enforcePhysicsToyBudget();
+  if (persist) {
+    engineEvents.emit("settings:physics-budget-changed", {
+      physicsObjectBudget
+    });
+  }
 }
 
 function syncPhysicsBudgetToQuality(): void {
@@ -741,6 +787,18 @@ function updatePhysicsBudgetControls(): void {
   physicsBudgetSlider.max = String(MAX_PHYSICS_OBJECT_BUDGET);
   physicsBudgetSlider.step = String(PHYSICS_OBJECT_BUDGET_STEP);
   physicsBudgetSlider.value = String(physicsObjectBudget);
+}
+
+function emitQualityChanged(source: QualityChangeSource): void {
+  const preset = qualityController.preset;
+  engineEvents.emit("quality:changed", {
+    presetId: qualityController.currentPresetId,
+    label: preset.label,
+    source,
+    renderDistance: qualityController.loadRadius,
+    physicsObjectBudget,
+    blockFragmentCount: preset.blockFragmentCount
+  });
 }
 
 function updateSettingsControls(): void {
@@ -781,7 +839,17 @@ function absorbSleepingFragmentsIntoRubble(): void {
     // Once debris has settled, it graduates from "expensive little physics
     // shard" into a cheap cover proxy. The visible rubble remains, but the
     // per-shard physics body leaves the hot loop.
-    rubbleField.absorbFragment(toy);
+    if (rubbleField.absorbFragment(toy)) {
+      engineEvents.emit("rubble:formed", {
+        position: {
+          x: toy.mesh.position.x,
+          y: toy.mesh.position.y,
+          z: toy.mesh.position.z
+        },
+        block: toy.fragmentBlock ?? 0,
+        pieces: 1
+      });
+    }
     removePhysicsToyAt(index);
   }
 }
@@ -851,6 +919,11 @@ async function loadWorld(worldId: string): Promise<void> {
     pauseMenu.classList.add("is-hidden");
     document.body.classList.add("in-world");
     inWorld = true;
+    engineEvents.emit("world:loaded", {
+      worldId: activeWorldId,
+      name: savedWorld.name,
+      seed: savedWorld.seed
+    });
     debugHud.reset();
     minimapRenderer.reset();
     activePlayer.resume();
@@ -912,6 +985,7 @@ async function exitToHome(): Promise<void> {
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
     inWorld = false;
+    engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
     pauseMenu.classList.add("is-hidden");
     homeScreen.classList.remove("is-hidden");
@@ -937,6 +1011,7 @@ function clearToys(): void {
 }
 
 function clearPhysicsCores(): void {
+  let clearedCores = 0;
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     const toy = toys[index];
     if (!toy || toy.isInstancedFragment || !toy.damagesBlocks) continue;
@@ -945,6 +1020,11 @@ function clearPhysicsCores(): void {
     // rubble piles or loose debris the player may be studying. Full cleanup is
     // intentionally tucked behind the Settings menu's Despawn All Objects button.
     removePhysicsToyAt(index);
+    clearedCores += 1;
+  }
+
+  if (clearedCores > 0) {
+    engineEvents.emit("physics:cores-cleared", { count: clearedCores });
   }
 }
 

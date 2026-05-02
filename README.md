@@ -67,6 +67,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, and world lifecycle orchestration
+- `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
+- `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals
 - `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, and coalesced edited-chunk saves
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
@@ -90,6 +92,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
 - `src/novaPilot.ts`: visible companion pilot, follow/orbit behavior, and Nova-thrown core launch helpers
+- `src/novaPilotReactions.ts`: event-driven Nova chatter, pulse reactions, and message throttling
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
