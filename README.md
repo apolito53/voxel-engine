@@ -61,7 +61,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, and world lifecycle orchestration
-- `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming, block reads/writes, sparse block damage, and coalesced edited-chunk saves
+- `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, and coalesced edited-chunk saves
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload

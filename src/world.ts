@@ -121,6 +121,11 @@ export type ChunkStreamingDiagnostics = {
   readonly queueWindowRefreshes: number;
   readonly queueWindowSkips: number;
   readonly lastQueueCandidateChecks: number;
+  readonly unloadWindowRefreshes: number;
+  readonly unloadWindowSkips: number;
+  readonly lastUnloadCandidateChecks: number;
+  readonly trackedDirtyChunks: number;
+  readonly trackedModifiedChunks: number;
 };
 
 const chunkRadiusOffsetCache = new Map<number, readonly ChunkRadiusOffset[]>();
@@ -156,9 +161,15 @@ export class VoxelWorld implements CollisionWorld {
   priorityFrustum: THREE.Frustum | null;
   priorityFrustumActive: boolean;
   private chunkQueueWindow: ChunkQueueWindow | null;
+  private chunkUnloadWindow: ChunkQueueWindow | null;
   private queueWindowRefreshes: number;
   private queueWindowSkips: number;
   private lastQueueCandidateChecks: number;
+  private unloadWindowRefreshes: number;
+  private unloadWindowSkips: number;
+  private lastUnloadCandidateChecks: number;
+  private readonly dirtyChunkKeys: Set<string>;
+  private readonly modifiedChunkKeys: Set<string>;
   lastLoadedChunks: number;
   lastRequestedChunkLoads: number;
   lastMeshedChunks: number;
@@ -197,9 +208,15 @@ export class VoxelWorld implements CollisionWorld {
     this.priorityFrustum = null;
     this.priorityFrustumActive = false;
     this.chunkQueueWindow = null;
+    this.chunkUnloadWindow = null;
     this.queueWindowRefreshes = 0;
     this.queueWindowSkips = 0;
     this.lastQueueCandidateChecks = 0;
+    this.unloadWindowRefreshes = 0;
+    this.unloadWindowSkips = 0;
+    this.lastUnloadCandidateChecks = 0;
+    this.dirtyChunkKeys = new Set();
+    this.modifiedChunkKeys = new Set();
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
@@ -217,6 +234,7 @@ export class VoxelWorld implements CollisionWorld {
     this.savedChunks.clear();
     this.blockDamage.clear();
     this.invalidateChunkQueueWindow();
+    this.invalidateChunkUnloadWindow();
     await this.loadSavedChunkIndex();
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
@@ -255,6 +273,7 @@ export class VoxelWorld implements CollisionWorld {
     this.chunks.clear();
     this.chunkLoadQueue.clear();
     this.invalidateChunkQueueWindow();
+    this.invalidateChunkUnloadWindow();
     this.pendingChunkLoads.clear();
     this.pendingChunkKeys.clear();
     this.pendingSavedChunkLoads.clear();
@@ -264,6 +283,8 @@ export class VoxelWorld implements CollisionWorld {
     this.workerResults.length = 0;
     this.savedChunkResults.length = 0;
     this.blockDamage.clear();
+    this.dirtyChunkKeys.clear();
+    this.modifiedChunkKeys.clear();
   }
 
   key(cx: number, cz: number): string {
@@ -292,6 +313,7 @@ export class VoxelWorld implements CollisionWorld {
       this.pendingMeshBuilds.clear();
       this.pendingMeshKeys.clear();
       this.invalidateChunkQueueWindow();
+      this.invalidateChunkUnloadWindow();
     };
     return worker;
   }
@@ -310,6 +332,7 @@ export class VoxelWorld implements CollisionWorld {
         this.generateChunk(chunk);
       }
       this.chunks.set(key, chunk);
+      this.trackLoadedChunk(key, chunk);
       this.chunkLoadQueue.delete(key);
       this.markNeighborChunksDirty(cx, cz);
     }
@@ -319,7 +342,7 @@ export class VoxelWorld implements CollisionWorld {
   populateChunk(chunk: Chunk, blocks: Uint8Array): void {
     chunk.blocks.set(blocks);
     chunk.refreshTopColumns();
-    chunk.dirty = true;
+    this.markChunkDirty(chunk);
     chunk.revision = 0;
   }
 
@@ -332,6 +355,7 @@ export class VoxelWorld implements CollisionWorld {
     this.populateChunk(chunk, blocks);
     chunk.modified = modified;
     this.chunks.set(key, chunk);
+    this.trackLoadedChunk(key, chunk);
     this.chunkLoadQueue.delete(key);
     this.pendingChunkKeys.delete(key);
     this.markNeighborChunksDirty(cx, cz);
@@ -434,6 +458,45 @@ export class VoxelWorld implements CollisionWorld {
   private invalidateChunkQueueWindow(): void {
     this.chunkQueueWindow = null;
     this.lastQueueCandidateChecks = 0;
+  }
+
+  private chunkUnloadWindowMatches(centerCx: number, centerCz: number, radius: number): boolean {
+    return this.chunkUnloadWindow?.centerCx === centerCx &&
+      this.chunkUnloadWindow.centerCz === centerCz &&
+      this.chunkUnloadWindow.radius === radius;
+  }
+
+  private invalidateChunkUnloadWindow(): void {
+    this.chunkUnloadWindow = null;
+    this.lastUnloadCandidateChecks = 0;
+  }
+
+  private trackLoadedChunk(key: string, chunk: Chunk): void {
+    if (chunk.dirty) {
+      this.dirtyChunkKeys.add(key);
+    } else {
+      this.dirtyChunkKeys.delete(key);
+    }
+
+    if (chunk.modified) {
+      this.modifiedChunkKeys.add(key);
+    } else {
+      this.modifiedChunkKeys.delete(key);
+    }
+
+    // A newly loaded chunk can come from a stale worker result, direct edit, or
+    // fallback path. Force one unload pass before trusting the cached unload window.
+    this.invalidateChunkUnloadWindow();
+  }
+
+  private markChunkDirty(chunk: Chunk): void {
+    chunk.dirty = true;
+    this.dirtyChunkKeys.add(this.key(chunk.cx, chunk.cz));
+  }
+
+  private markChunkClean(chunk: Chunk): void {
+    chunk.dirty = false;
+    this.dirtyChunkKeys.delete(this.key(chunk.cx, chunk.cz));
   }
 
   pruneQueuedChunks(centerCx: number, centerCz: number, radius = LOAD_RADIUS): void {
@@ -651,8 +714,9 @@ export class VoxelWorld implements CollisionWorld {
   generateChunk(chunk: Chunk): void {
     this.clearDamageForChunk(chunk.cx, chunk.cz);
     chunk.blocks.set(generateChunkBlocks(chunk.cx, chunk.cz, this.terrain));
-    chunk.dirty = true;
+    this.markChunkDirty(chunk);
     chunk.modified = false;
+    this.modifiedChunkKeys.delete(this.key(chunk.cx, chunk.cz));
     chunk.revision = 0;
     chunk.refreshTopColumns();
   }
@@ -685,6 +749,8 @@ export class VoxelWorld implements CollisionWorld {
     }
     this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
     chunk.modified = true;
+    this.dirtyChunkKeys.add(key);
+    this.modifiedChunkKeys.add(key);
     this.rememberModifiedChunk(key, chunk.blocks);
 
     if (lx === 0) this.markDirty(cx - 1, cz);
@@ -745,7 +811,7 @@ export class VoxelWorld implements CollisionWorld {
 
     // Neighbor loads and edge edits can invalidate a mesh even when this chunk's
     // blocks did not change, so bump the revision to reject stale worker results.
-    chunk.dirty = true;
+    this.markChunkDirty(chunk);
     chunk.revision += 1;
   }
 
@@ -858,12 +924,23 @@ export class VoxelWorld implements CollisionWorld {
     unloadRadius: number,
     scene: THREE.Scene
   ): void {
-    for (const [key, chunk] of Array.from(this.chunks.entries())) {
+    const normalizedRadius = normalizeChunkRadius(unloadRadius);
+    if (this.chunkUnloadWindowMatches(centerCx, centerCz, normalizedRadius)) {
+      this.unloadWindowSkips += 1;
+      this.lastUnloadCandidateChecks = 0;
+      return;
+    }
+
+    const chunkEntries = Array.from(this.chunks.entries());
+    this.unloadWindowRefreshes += 1;
+    this.lastUnloadCandidateChecks = chunkEntries.length;
+
+    for (const [key, chunk] of chunkEntries) {
       const distance = Math.max(
         Math.abs(chunk.cx - centerCx),
         Math.abs(chunk.cz - centerCz)
       );
-      if (distance <= unloadRadius) continue;
+      if (distance <= normalizedRadius) continue;
 
       if (chunk.modified) {
         this.rememberModifiedChunk(key, chunk.blocks);
@@ -874,10 +951,18 @@ export class VoxelWorld implements CollisionWorld {
       chunk.disposeMesh(scene);
       this.chunks.delete(key);
       this.chunkLoadQueue.delete(key);
+      this.dirtyChunkKeys.delete(key);
+      this.modifiedChunkKeys.delete(key);
       this.pendingMeshKeys.delete(key);
       this.clearDamageForChunk(chunk.cx, chunk.cz);
       this.markNeighborChunksDirty(chunk.cx, chunk.cz);
     }
+
+    this.chunkUnloadWindow = {
+      centerCx,
+      centerCz,
+      radius: normalizedRadius
+    };
   }
 
   isSolid(x: number, y: number, z: number): boolean {
@@ -903,6 +988,7 @@ export class VoxelWorld implements CollisionWorld {
     const dirtyChunks = this.pickNearestDirtyChunks(maxRebuilds);
     for (const chunk of dirtyChunks) {
       const mesh = chunk.rebuildMesh(this, material);
+      this.markChunkClean(chunk);
       if (!mesh.parent) scene.add(mesh);
       rebuilt += 1;
       if (rebuilt >= maxRebuilds) break;
@@ -935,7 +1021,7 @@ export class VoxelWorld implements CollisionWorld {
       if (!chunk || chunk.revision !== result.revision) {
         this.pendingMeshBuilds.delete(result.requestId);
         this.pendingMeshKeys.delete(pending.key);
-        if (chunk) chunk.dirty = true;
+        if (chunk) this.markChunkDirty(chunk);
         continue;
       }
 
@@ -956,6 +1042,7 @@ export class VoxelWorld implements CollisionWorld {
         },
         material
       );
+      this.markChunkClean(chunk);
       if (!mesh.parent) scene.add(mesh);
       this.lastMeshedChunks += 1;
     }
@@ -1038,10 +1125,15 @@ export class VoxelWorld implements CollisionWorld {
   pickNearestDirtyChunks(limit: number): Chunk[] {
     const nearest: PriorityEntry<Chunk>[] = [];
 
-    // Mesh budgets are tiny compared with loaded chunks, so avoid sorting the whole world.
-    for (const chunk of this.chunks.values()) {
-      const key = this.key(chunk.cx, chunk.cz);
-      if (!chunk.dirty || this.pendingMeshKeys.has(key)) continue;
+    // Mesh budgets are tiny compared with loaded chunks, so keep the search on
+    // chunks known to be dirty instead of sweeping every loaded chunk each frame.
+    for (const key of this.dirtyChunkKeys) {
+      const chunk = this.chunks.get(key);
+      if (!chunk || !chunk.dirty) {
+        this.dirtyChunkKeys.delete(key);
+        continue;
+      }
+      if (this.pendingMeshKeys.has(key)) continue;
       this.insertNearest(nearest, chunk, this.priorityCx, this.priorityCz, limit);
     }
 
@@ -1049,11 +1141,7 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   countDirtyChunks(): number {
-    let dirtyChunks = 0;
-    for (const chunk of this.chunks.values()) {
-      if (chunk.dirty) dirtyChunks += 1;
-    }
-    return dirtyChunks;
+    return this.dirtyChunkKeys.size;
   }
 
   insertNearest<T extends PriorityItem>(
@@ -1184,16 +1272,20 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   getStats(): WorldStats {
-    let dirtyChunks = 0;
-    let modifiedChunks = 0;
     let visibleChunks = 0;
-    let visibleDirtyChunks = 0;
     for (const chunk of this.chunks.values()) {
-      if (chunk.dirty) dirtyChunks += 1;
-      if (chunk.modified) modifiedChunks += 1;
       if (!this.chunkIntersectsFrustum(chunk.cx, chunk.cz)) continue;
       visibleChunks += 1;
-      if (chunk.dirty) visibleDirtyChunks += 1;
+    }
+
+    let visibleDirtyChunks = 0;
+    for (const key of this.dirtyChunkKeys) {
+      const chunk = this.chunks.get(key);
+      if (!chunk || !chunk.dirty) {
+        this.dirtyChunkKeys.delete(key);
+        continue;
+      }
+      if (this.chunkIntersectsFrustum(chunk.cx, chunk.cz)) visibleDirtyChunks += 1;
     }
 
     return {
@@ -1208,10 +1300,10 @@ export class VoxelWorld implements CollisionWorld {
       meshedThisFrame: this.lastMeshedChunks,
       requestedMeshesThisFrame: this.lastRequestedMeshes,
       pendingMeshBuilds: this.pendingMeshBuilds.size,
-      dirtyChunks,
+      dirtyChunks: this.dirtyChunkKeys.size,
       visibleDirtyChunks,
-      culledDirtyChunks: dirtyChunks - visibleDirtyChunks,
-      modifiedChunks,
+      culledDirtyChunks: this.dirtyChunkKeys.size - visibleDirtyChunks,
+      modifiedChunks: this.modifiedChunkKeys.size,
       damagedBlocks: this.blockDamage.size,
       pendingChunkSaves: this.pendingSavedChunkWrites.size + this.chunkStorageChains.size
     };
@@ -1221,7 +1313,12 @@ export class VoxelWorld implements CollisionWorld {
     return {
       queueWindowRefreshes: this.queueWindowRefreshes,
       queueWindowSkips: this.queueWindowSkips,
-      lastQueueCandidateChecks: this.lastQueueCandidateChecks
+      lastQueueCandidateChecks: this.lastQueueCandidateChecks,
+      unloadWindowRefreshes: this.unloadWindowRefreshes,
+      unloadWindowSkips: this.unloadWindowSkips,
+      lastUnloadCandidateChecks: this.lastUnloadCandidateChecks,
+      trackedDirtyChunks: this.dirtyChunkKeys.size,
+      trackedModifiedChunks: this.modifiedChunkKeys.size
     };
   }
 

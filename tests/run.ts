@@ -647,6 +647,63 @@ test("world reuses queued chunk windows while player stays in the same chunk", (
   );
 });
 
+test("world skips unload scans while player stays in a settled chunk window", () => {
+  const world = new VoxelWorld({ seed: "unload-window-cache-test" });
+  const scene = new THREE.Scene();
+
+  world.streamChunksAround(0, 0, scene, 1, 2, 32);
+  let diagnostics = world.getStreamingDiagnostics();
+  assertEqual(diagnostics.unloadWindowRefreshes, 1, "first stream frame should scan loaded chunks for unloads");
+  assertEqual(diagnostics.lastUnloadCandidateChecks, 9, "radius-one settled window should check nine loaded chunks");
+
+  world.streamChunksAround(CHUNK_SIZE * 0.25, CHUNK_SIZE * 0.25, scene, 1, 2, 32);
+  diagnostics = world.getStreamingDiagnostics();
+  assertEqual(diagnostics.unloadWindowRefreshes, 1, "same chunk center should reuse the unload window");
+  assertEqual(diagnostics.unloadWindowSkips, 1, "same chunk center should count as a skipped unload scan");
+  assertEqual(diagnostics.lastUnloadCandidateChecks, 0, "reused unload window should not scan loaded chunks");
+
+  world.streamChunksAround(CHUNK_SIZE * 8, 0, scene, 1, 2, 32);
+  diagnostics = world.getStreamingDiagnostics();
+  assertEqual(diagnostics.unloadWindowRefreshes, 2, "moving to a new chunk window should rescan unload candidates");
+  assert(
+    diagnostics.lastUnloadCandidateChecks > 9,
+    "chunk-window move should scan old and new loaded chunks before pruning"
+  );
+  assertEqual(world.getStats().loadedChunks, 9, "unload pruning should still keep the loaded window bounded");
+});
+
+test("world tracks dirty and modified chunks with chunk-key indexes", () => {
+  const world = new VoxelWorld({ seed: "dirty-index-test" });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshBasicMaterial();
+
+  world.ensureChunksAround(0, 0, 0);
+  assertEqual(world.getStats().dirtyChunks, 1, "newly generated chunk should start dirty");
+  assertEqual(world.getStreamingDiagnostics().trackedDirtyChunks, 1, "dirty index should track generated chunks");
+
+  world.rebuildDirty(scene, material, 1);
+  assertEqual(world.getStats().dirtyChunks, 0, "rebuilt chunk should leave the dirty count");
+  assertEqual(world.getStreamingDiagnostics().trackedDirtyChunks, 0, "dirty index should clear rebuilt chunks");
+
+  world.setBlock(1, WORLD_HEIGHT - 1, 1, BLOCK.ember);
+  let diagnostics = world.getStreamingDiagnostics();
+  let stats = world.getStats();
+  assertEqual(stats.dirtyChunks, 1, "editing a clean chunk should mark it dirty");
+  assertEqual(stats.modifiedChunks, 1, "editing a clean chunk should mark it modified");
+  assertEqual(diagnostics.trackedDirtyChunks, 1, "dirty index should track edited chunks");
+  assertEqual(diagnostics.trackedModifiedChunks, 1, "modified index should track edited chunks");
+
+  world.rebuildDirty(scene, material, 1);
+  diagnostics = world.getStreamingDiagnostics();
+  stats = world.getStats();
+  assertEqual(stats.dirtyChunks, 0, "rebuilt edited chunk should no longer be dirty");
+  assertEqual(stats.modifiedChunks, 1, "rebuilt edited chunk should remain modified for saving");
+  assertEqual(diagnostics.trackedDirtyChunks, 0, "dirty index should clear rebuilt edited chunks");
+  assertEqual(diagnostics.trackedModifiedChunks, 1, "modified index should keep rebuilt edited chunks");
+
+  material.dispose();
+});
+
 test("world applies completed generated chunks within the frame budget", () => {
   const world = new VoxelWorld({ seed: "worker-result-budget-test" });
   const chunkByteLength = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
