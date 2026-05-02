@@ -124,6 +124,12 @@ import {
   type ChunkStorage
 } from "../src/chunkStorage";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
+import {
+  IDLE_RESUME_GAP_SECONDS,
+  MAX_SIMULATION_DELTA_SECONDS,
+  clampSimulationDelta,
+  shouldSkipExpensiveFrame
+} from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
@@ -621,6 +627,32 @@ test("frame timing smoothing keeps debug profiler values readable", () => {
   );
 });
 
+test("frame loop clamps simulation time and skips overnight resume frames", () => {
+  assertEqual(clampSimulationDelta(-1), 0, "negative frame deltas should fail closed");
+  assertEqual(
+    clampSimulationDelta(Number.NaN),
+    0,
+    "non-finite frame deltas should not enter simulation state"
+  );
+  assertEqual(
+    clampSimulationDelta(MAX_SIMULATION_DELTA_SECONDS * 4),
+    MAX_SIMULATION_DELTA_SECONDS,
+    "simulation should keep the existing fixed upper delta clamp"
+  );
+  assert(
+    shouldSkipExpensiveFrame(true, 1 / 60),
+    "hidden pages should skip chunk, physics, minimap, and render work"
+  );
+  assert(
+    shouldSkipExpensiveFrame(false, IDLE_RESUME_GAP_SECONDS + 0.01),
+    "long resume gaps should skip one expensive frame even if visibility events were throttled"
+  );
+  assert(
+    !shouldSkipExpensiveFrame(false, 1 / 30),
+    "normal visible frames should continue through the engine loop"
+  );
+});
+
 test("pointer lock request detection supports promise and void browser APIs", () => {
   assert(
     isCatchablePointerLockRequest(Promise.resolve()),
@@ -1027,6 +1059,19 @@ test("block fragments render through instanced batches instead of scene children
   assertEqual(instancer.getStats().instances, 0, "clearing should hide all fragment instances");
   instancer.dispose();
   assertEqual(scene.children.length, 0, "disposing should remove all instanced fragment batches from the scene");
+
+  const freshFragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(3, 2, 0),
+    new THREE.Vector3(0, 0, 0)
+  );
+  instancer.update([freshFragment]);
+  assertEqual(
+    scene.children.filter((child) => child instanceof THREE.InstancedMesh).length,
+    1,
+    "disposed fragment batches should lazily recreate when new debris appears"
+  );
+  instancer.dispose();
 });
 
 test("block fragments lose ground speed and sleep near the fracture site", () => {

@@ -89,6 +89,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
+- `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 

@@ -11,6 +11,7 @@ import {
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
+import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import { SUN_OFFSET } from "./lighting";
@@ -391,6 +392,10 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+document.addEventListener("visibilitychange", drainFrameClockAfterIdle);
+window.addEventListener("focus", drainFrameClockAfterIdle);
+window.addEventListener("pageshow", drainFrameClockAfterIdle);
+
 renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
 renderer.domElement.addEventListener("mousedown", (event) => {
   if (!inWorld) return;
@@ -418,7 +423,13 @@ renderer.domElement.addEventListener("mousedown", (event) => {
 function animate(): void {
   const frameStartedAt = performance.now();
   const rawDelta = clock.getDelta();
-  const delta = Math.min(rawDelta, 0.04);
+  if (shouldSkipExpensiveFrame(document.hidden, rawDelta)) {
+    resetFrameMetersAfterIdle();
+    requestAnimationFrame(animate);
+    return;
+  }
+
+  const delta = clampSimulationDelta(rawDelta);
   const frameTimingSample = createEmptyFrameTimings();
   let timingSectionStartedAt = frameStartedAt;
   let debugPlayerChunk: ChunkCoords | null = null;
@@ -515,6 +526,23 @@ function animate(): void {
     );
   }
   requestAnimationFrame(animate);
+}
+
+function resetFrameMetersAfterIdle(): void {
+  // Long background gaps should not pollute the HUD's smoothing window or force
+  // the minimap to resume halfway through an old slice.
+  smoothedFrameTimings = createEmptyFrameTimings();
+  frameTimingsInitialized = false;
+  debugHud.reset();
+  minimapRenderer.reset();
+}
+
+function drainFrameClockAfterIdle(): void {
+  // `THREE.Clock` accumulates while the browser is hidden, minimized, or asleep.
+  // Drain it when the tab becomes active again so the first playable frame sees
+  // normal frame time instead of the whole absence.
+  clock.getDelta();
+  resetFrameMetersAfterIdle();
 }
 
 function updateChunkStreamFrustum(): void {
@@ -867,7 +895,9 @@ function clearToys(): void {
     toy.dispose();
   }
   toys.length = 0;
-  physicsFragmentInstancer.clear();
+  // Full cleanup is allowed to be heavy-handed: release the high-water instanced
+  // debris batches so long stress tests do not keep oversized GPU buffers alive.
+  physicsFragmentInstancer.dispose();
   rubbleField.clear();
 }
 

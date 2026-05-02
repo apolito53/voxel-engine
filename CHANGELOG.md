@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.7 - 2026-05-02
+
+### Changed
+
+- Added hidden-tab and overnight-resume frame guards so chunk streaming, physics, minimap, and rendering skip expensive work while the page is hidden or recovering from a long frame gap.
+- Reset debug timing and minimap meters after visibility/focus resumes so stale overnight deltas do not poison the HUD smoothing window.
+- Made `Despawn All Objects` release high-water instanced debris batches instead of only hiding fragment instances, allowing long stress tests to give those GPU buffers back.
+
+### Added
+
+- Added regression coverage for frame delta clamping, hidden/resume frame skipping, and lazy recreation of disposed fragment instancing batches.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, confirmed the debug HUD rendered with `frag inst 0 batches 0 cap 0`, and checked for fresh app console errors.
+
 ## 0.2.6 - 2026-05-02
 
 ### Changed
