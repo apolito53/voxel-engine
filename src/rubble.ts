@@ -15,8 +15,11 @@ const RUBBLE_MIN_HEIGHT = 0.08;
 const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.055;
 const RUBBLE_HEIGHT_VARIATION = 0.035;
 const RUBBLE_MAX_HEIGHT = 0.5;
-const RUBBLE_CORE_RESTITUTION = 1.15;
-const RUBBLE_CORE_DAMPING = 0.82;
+// Rubble should behave like rough cover, but cores are still supposed to read
+// as bouncy projectiles. Keep the rebound near terrain-block bounce strength
+// so piles feel physical without turning the launcher into a glue gun.
+const RUBBLE_CORE_RESTITUTION = 1.55;
+const RUBBLE_CORE_DAMPING = 0.95;
 const RUBBLE_COLLISION_EPSILON = 0.000001;
 
 type RubbleCell = {

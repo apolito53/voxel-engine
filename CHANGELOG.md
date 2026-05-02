@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.8 - 2026-05-02
+
+### Changed
+
+- Reworked sprint/flight boost lines from side-mounted parallel streaks into faint center-out radial spokes that are masked toward the screen edges.
+- Softened boost overlay opacity and transition timing so the FOV pop remains readable without the overlay dominating the view.
+- Restored physics-core rebounds against rubble cover so cores bounce with meaningful speed instead of dying on settled debris.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, confirmed the HUD/debug overlay rendered, and checked for fresh app console errors.
+
 ## 0.2.7 - 2026-05-02
 
 ### Changed

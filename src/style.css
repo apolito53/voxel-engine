@@ -569,39 +569,54 @@ body:not(.in-world) #crosshair {
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  transition: opacity 110ms ease-out;
+  transition: opacity 140ms ease-out;
 }
 
 #sprint-overlay.is-active {
-  opacity: 0.72;
+  opacity: 0.48;
 }
 
 #sprint-overlay::before,
 #sprint-overlay::after {
   content: "";
   position: absolute;
-  top: 7%;
-  bottom: 7%;
-  width: 34%;
-  background:
-    repeating-linear-gradient(
-      104deg,
-      transparent 0 18px,
-      rgba(255, 255, 255, 0.36) 18px 20px,
-      transparent 20px 56px
-    );
-  filter: drop-shadow(0 1px 5px rgba(0, 0, 0, 0.28));
-  -webkit-mask-image: linear-gradient(to right, #000 0%, rgba(0, 0, 0, 0) 100%);
-  mask-image: linear-gradient(to right, #000 0%, rgba(0, 0, 0, 0) 100%);
-}
-
-#sprint-overlay::before {
-  left: -2%;
+  inset: -18%;
+  background: repeating-conic-gradient(
+    from -4deg at 50% 50%,
+    transparent 0deg 7.25deg,
+    rgba(255, 255, 255, 0.26) 7.35deg 7.48deg,
+    rgba(255, 255, 255, 0.08) 7.58deg 7.76deg,
+    transparent 7.95deg 15deg
+  );
+  filter: blur(0.25px) drop-shadow(0 1px 5px rgba(0, 0, 0, 0.22));
+  /* Conic stripes create true center-out spokes; the radial mask keeps the
+     middle of the screen clean so the cue only whispers at the edges. */
+  -webkit-mask-image: radial-gradient(
+    ellipse at center,
+    transparent 0 38%,
+    rgba(0, 0, 0, 0.08) 52%,
+    rgba(0, 0, 0, 0.72) 68%,
+    #000 100%
+  );
+  mask-image: radial-gradient(
+    ellipse at center,
+    transparent 0 38%,
+    rgba(0, 0, 0, 0.08) 52%,
+    rgba(0, 0, 0, 0.72) 68%,
+    #000 100%
+  );
 }
 
 #sprint-overlay::after {
-  right: -2%;
-  transform: scaleX(-1);
+  inset: -22%;
+  background: repeating-conic-gradient(
+    from 2deg at 50% 50%,
+    transparent 0deg 11deg,
+    rgba(255, 255, 255, 0.14) 11.1deg 11.22deg,
+    transparent 11.36deg 22deg
+  );
+  opacity: 0.55;
+  transform: rotate(3deg);
 }
 
 #crosshair {

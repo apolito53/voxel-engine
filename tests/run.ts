@@ -1176,7 +1176,7 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   const collided = rubble.resolveCoreCollision(core);
 
   assert(collided, "moving cores should collide with rubble cover");
-  assert(core.velocity.z < 0, "core should bounce away from the rubble proxy");
+  assert(core.velocity.z < -2.5, "core should bounce away from the rubble proxy with meaningful rebound speed");
   assert(
     rubble.getStats().health < healthBefore,
     "meaningful core impacts should chip destructible rubble"
