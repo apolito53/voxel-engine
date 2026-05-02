@@ -876,6 +876,7 @@ test("physics toy collider resolves nearby core and debris contacts through broa
   const coreStats = collider.resolve([leftCore, rightCore]);
 
   assertEqual(coreStats.activeBodies, 2, "core-core broadphase should track both active bodies");
+  assertEqual(coreStats.sleepingBodies, 0, "awake core-core broadphase should not count sleeping bodies");
   assertEqual(coreStats.candidatePairs, 1, "overlapping cores should produce one unique candidate pair");
   assertEqual(coreStats.resolvedContacts, 1, "overlapping cores should resolve one contact");
   assert(
@@ -941,13 +942,86 @@ test("physics toy collider skips debris-debris and far-apart work", () => {
     createEmptyPhysicsToyCollisionStats(),
     {
       activeBodies: 0,
+      sleepingBodies: 0,
       broadphaseCells: 0,
+      sleepingBroadphaseCells: 0,
       candidatePairs: 0,
       resolvedContacts: 0,
       skippedDebrisPairs: 0
     },
     "empty collision stats should be stable for HUD initialization"
   );
+});
+
+test("physics toy collider keeps sleeping debris out of active pair work", () => {
+  const collider = new PhysicsToyCollider();
+  const floorWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return x === 0 && y === 0 && z === 0;
+    }
+  };
+  const sleepingFragment = new PhysicsToy(
+    new THREE.Vector3(0.5, 1.1, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    {
+      radius: 0.16,
+      damagesBlocks: false,
+      sleepSpeed: 100,
+      sleepAfterSeconds: 0.01,
+      castShadow: false
+    }
+  );
+  sleepingFragment.update(0.02, floorWorld);
+  const sleepingNeighbor = new PhysicsToy(
+    new THREE.Vector3(0.5, 1.1, 0.9),
+    new THREE.Vector3(0, 0, 0),
+    {
+      radius: 0.16,
+      damagesBlocks: false,
+      sleepSpeed: 100,
+      sleepAfterSeconds: 0.01,
+      castShadow: false
+    }
+  );
+  sleepingNeighbor.update(0.02, floorWorld);
+
+  assert(sleepingFragment.isSleeping, "test fragment should settle into sleep before broadphase indexing");
+  assert(sleepingNeighbor.isSleeping, "neighbor fragment should also settle into sleep before broadphase indexing");
+
+  const sleepingOnlyStats = collider.resolve([sleepingFragment, sleepingNeighbor]);
+
+  assertEqual(sleepingOnlyStats.activeBodies, 0, "sleeping-only resolve should not build active bodies");
+  assertEqual(sleepingOnlyStats.sleepingBodies, 2, "sleeping-only resolve should count cached sleeping debris");
+  assertEqual(sleepingOnlyStats.candidatePairs, 0, "sleeping-only debris should not produce contact pairs");
+  assert(
+    sleepingOnlyStats.sleepingBroadphaseCells > 0,
+    "sleeping debris should live in the static broadphase for later wakeup"
+  );
+
+  const farCore = new PhysicsToy(
+    new THREE.Vector3(12, 2, 12),
+    new THREE.Vector3(0, 0, 0)
+  );
+  const farStats = collider.resolve([sleepingFragment, sleepingNeighbor, farCore]);
+
+  assertEqual(farStats.candidatePairs, 0, "far active bodies should not query sleeping debris cells");
+  assert(sleepingFragment.isSleeping, "far active bodies should leave sleeping debris asleep");
+
+  const nearCore = new PhysicsToy(
+    new THREE.Vector3(0.5, 1.1, 0.16),
+    new THREE.Vector3(0, 0, 4)
+  );
+  const wakeStats = collider.resolve([sleepingFragment, sleepingNeighbor, nearCore]);
+
+  assertEqual(wakeStats.candidatePairs, 2, "near active body should consider every sleeping toy in the shared cell");
+  assertEqual(wakeStats.resolvedContacts, 1, "near active body should resolve contact with sleeping debris");
+  assert(!sleepingFragment.isSleeping, "resolved contact should wake sleeping debris for later frames");
+  assert(sleepingNeighbor.isSleeping, "non-overlapping sleeping debris should stay asleep after the shared-cell query");
+
+  collider.forget(sleepingFragment);
+  collider.forget(sleepingNeighbor);
+  const cleanedStats = collider.resolve([nearCore]);
+  assertEqual(cleanedStats.sleepingBroadphaseCells, 0, "forgotten debris should leave the static broadphase");
 });
 
 test("physics object budget clamps and steps predictably", () => {

@@ -75,7 +75,7 @@ export class DebugHud {
       `mesh q ${stats.dirtyChunks} view ${stats.visibleDirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
       `saved ${stats.savedChunks} edited ${stats.modifiedChunks} saveq ${stats.pendingChunkSaves} dmg ${stats.damagedBlocks}`,
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
-      `phys cells ${physicsCollisions.broadphaseCells} active ${physicsCollisions.activeBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
+      `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,

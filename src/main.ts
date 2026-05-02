@@ -603,6 +603,7 @@ function removePhysicsToyAt(index: number): void {
     return;
   }
 
+  physicsToyCollider.forget(removedToy);
   scene.remove(removedToy.mesh);
   removedToy.dispose();
 }
