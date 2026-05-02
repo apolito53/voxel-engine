@@ -44,6 +44,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `1-5` select block
 - `F` toggle flight mode
 - `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
@@ -88,6 +89,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/skybox.ts`: generated sunlit equirectangular skybox texture and camera-following sky dome
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
+- `src/novaPilot.ts`: visible companion pilot, follow/orbit behavior, and Nova-thrown core launch helpers
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.9 - 2026-05-02
+
+### Added
+
+- Added the Nova Pilot companion as a visible in-world hover pilot that starts alongside loaded worlds, orbits near the player, stays above nearby terrain, and can be toggled with `N`.
+- Added `B` as a Nova-thrown physics-core launch, using the pilot's position and aim direction instead of the player's camera muzzle.
+- Added regression coverage for Nova's companion positioning fallback and pilot-thrown core launch direction.
+
+### Changed
+
+- Shared player-thrown and Nova-thrown physics-core construction through one helper so sleep/damage tuning stays consistent.
+- Updated HUD, README, and codebase index entries for the new companion controls and module ownership.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, confirmed the HUD rendered `| Nova`, toggled Nova off/on with `N`, spawned a Nova core with `B`, spawned a player core with `T`, cleared active cores with `X`, and checked for fresh app console errors.
+
 ## 0.2.8 - 2026-05-02
 
 ### Changed

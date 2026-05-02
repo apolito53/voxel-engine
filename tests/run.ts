@@ -132,6 +132,7 @@ import {
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
+import { createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
 import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
 import { getSunlitFaceShade } from "../src/voxelLighting";
@@ -686,6 +687,39 @@ test("target block highlighter follows targeted block positions", () => {
 
   highlighter.hide();
   assert(!highlighter.object.visible, "target highlighter should hide when no block is targeted");
+});
+
+test("nova pilot keeps a readable companion offset and throws forward", () => {
+  const playerPosition = new THREE.Vector3(10, 20, 10);
+  const desired = getNovaPilotDesiredPosition(
+    playerPosition,
+    new THREE.Vector3(0, 0, -1),
+    18,
+    1.25
+  );
+
+  assert(desired.distanceTo(playerPosition) > 2, "Nova should hover visibly away from the player");
+  assert(desired.y > 21, "Nova should stay above the player or nearby terrain");
+
+  const fallbackDesired = getNovaPilotDesiredPosition(
+    playerPosition,
+    new THREE.Vector3(0, 1, 0),
+    0,
+    0
+  );
+  assert(
+    Number.isFinite(fallbackDesired.x) && Number.isFinite(fallbackDesired.z),
+    "Nova should choose a stable side position even when the player looks straight up"
+  );
+
+  const launch = createNovaPilotCoreLaunch(
+    new THREE.Vector3(1, 2, 3),
+    new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(2, 0, 0)
+  );
+  assert(launch.position.z < 3, "Nova-thrown cores should spawn in front of the pilot");
+  assert(launch.velocity.z < -10, "Nova-thrown cores should travel along the pilot aim direction");
+  assert(launch.velocity.x > 0, "Nova-thrown cores should inherit a little pilot movement");
 });
 
 test("world fallback streaming loads and unloads bounded chunk windows", () => {

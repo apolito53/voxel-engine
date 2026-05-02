@@ -16,6 +16,7 @@ import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "
 import { readGpuInfo } from "./gpu";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
+import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { PlayerController } from "./player";
 import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import {
@@ -177,6 +178,8 @@ const damagedBlockKeysThisFrame = new Set<string>();
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
+const novaPilot = new NovaPilot();
+scene.add(novaPilot.object);
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
@@ -369,26 +372,28 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.code === NOVA_PILOT_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    camera.getWorldDirection(direction);
+    novaPilot.toggle(camera.position, direction, requireWorld());
+    updateHud();
+    return;
+  }
+
   if (/^Digit[1-5]$/.test(event.code)) {
     selectedBlockIndex = Number(event.code.slice(-1)) - 1;
   }
 
   const activePlayer = requirePlayer();
+  if (event.code === NOVA_PILOT_THROW_KEY && activePlayer.isLooking() && !event.repeat) {
+    event.preventDefault();
+    throwNovaPilotCore();
+    return;
+  }
+
   if (event.code === "KeyT" && activePlayer.isLooking()) {
     event.preventDefault();
-    camera.getWorldDirection(direction);
-    const toy = new PhysicsToy(
-      camera.position.clone().addScaledVector(direction, 1.4),
-      direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0)),
-      {
-        // Cores are the expensive actors once the player spams them. They keep
-        // their damage/collision behavior while moving, then sleep like debris
-        // after settling so old shots stop taxing the frame forever.
-        sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
-        sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
-      }
-    );
-    addPhysicsToy(toy);
+    throwPlayerCore();
   }
 });
 
@@ -447,8 +452,9 @@ function animate(): void {
     const activePlayer = requirePlayer();
 
     activePlayer.update(delta);
-    recordTimingSection("playerMs");
     camera.getWorldDirection(chunkStreamDirection);
+    novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
+    recordTimingSection("playerMs");
     updateChunkStreamFrustum();
     debugPlayerChunk = activeWorld.streamChunksAround(
       camera.position.x,
@@ -556,7 +562,8 @@ function updateHud(): void {
   const activePlayer = requirePlayer();
   const movementMode = activePlayer.movementMode;
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
-  hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}${modeSuffix}`;
+  const novaSuffix = novaPilot.active ? " | Nova" : "";
+  hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}${modeSuffix}${novaSuffix}`;
   playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
 }
 
@@ -657,6 +664,30 @@ function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
     randomDirection.set(0, 1, 0);
   }
   return randomDirection.normalize();
+}
+
+function throwPlayerCore(): void {
+  camera.getWorldDirection(direction);
+  addPhysicsToy(createPhysicsCore(
+    camera.position.clone().addScaledVector(direction, 1.4),
+    direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0))
+  ));
+}
+
+function throwNovaPilotCore(): void {
+  const launch = novaPilot.createCoreLaunch();
+  if (!launch) return;
+  addPhysicsToy(createPhysicsCore(launch.position, launch.velocity));
+}
+
+function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
+  return new PhysicsToy(position, velocity, {
+    // Thrown cores are the expensive, gameplay-relevant actors. Keep their
+    // damage/collision behavior while moving, then let them sleep after
+    // settling so old shots stop taxing the frame forever.
+    sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
+    sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
+  });
 }
 
 function addPhysicsToy(toy: PhysicsToy): void {
@@ -813,6 +844,8 @@ async function loadWorld(worldId: string): Promise<void> {
     activeWorld.ensureChunksAround(0, 0, qualityController.initialLoadRadius);
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
     camera.position.set(2, activeWorld.highestSolidY(2, 2) + 5, 2);
+    camera.getWorldDirection(direction);
+    novaPilot.setActive(true, camera.position, direction, activeWorld);
     updateSunShadowAnchor();
     homeScreen.classList.add("is-hidden");
     pauseMenu.classList.add("is-hidden");
@@ -873,6 +906,8 @@ async function exitToHome(): Promise<void> {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
     const activeWorld = requireWorld();
     requirePlayer().pause(true);
+    camera.getWorldDirection(direction);
+    novaPilot.setActive(false, camera.position, direction, activeWorld);
     clearToys();
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
