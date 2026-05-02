@@ -1075,7 +1075,7 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
   assertEqual(rubbleStats.health, 2, "absorbed fragments should add destructible cover health");
   assert(
-    Math.abs(rubbleStats.maxCoverHeight - 0.164) < 0.000001,
+    rubbleStats.maxCoverHeight > 0.12 && rubbleStats.maxCoverHeight < 0.2,
     "absorbed fragments should report gameplay cover pressure"
   );
 
@@ -1090,6 +1090,27 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assert(rubble.damageNearest(new THREE.Vector3(0.5, 0.1, 0.5), 2), "rubble should be destructible by gameplay damage");
   assertEqual(rubble.getStats().clusters, 0, "destroyed rubble should leave the scene and cover index");
   assertEqual(scene.children.length, 0, "destroyed rubble should remove its visible proxy");
+});
+
+test("adjacent rubble cells merge into one broad patch", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5));
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.5, 0.2, 0.5));
+
+  const rubbleStats = rubble.getStats();
+  assertEqual(rubbleStats.clusters, 1, "neighboring rubble cells should become one patch");
+  assertEqual(rubbleStats.pieces, 2, "merged patches should keep the total material count");
+  assertEqual(scene.children.length, 1, "multi-cell rubble patches should render as one mesh");
+
+  const hit = rubble.raycast(
+    new THREE.Vector3(1.5, 0.08, -2),
+    new THREE.Vector3(0, 0, 1),
+    6
+  );
+  assert(hit, "the merged patch should still cover the neighboring cell");
+  assertEqual(hit.block, BLOCK.dirt, "merged patches should preserve their source material");
 });
 
 test("rubble field lets moving cores collide with and chip cover proxies", () => {

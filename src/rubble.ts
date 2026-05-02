@@ -8,11 +8,13 @@ const RUBBLE_MAX_VISUAL_PIECES = 36;
 // single 27-piece block fracture. Piles can keep accruing hidden material after
 // the proxy mesh stops growing, so craters do not seal from one normal break.
 export const RUBBLE_BLOCK_PROMOTION_PIECES = 48;
+const RUBBLE_MAX_PATCH_CELLS = 18;
 const RUBBLE_PIECE_HEALTH = 1;
-const RUBBLE_MIN_WIDTH = 0.36;
-const RUBBLE_MAX_WIDTH = 1.18;
-const RUBBLE_MIN_HEIGHT = 0.12;
-const RUBBLE_MAX_HEIGHT = 0.9;
+const RUBBLE_NEARBY_SEARCH_PADDING = 1.25;
+const RUBBLE_MIN_HEIGHT = 0.08;
+const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.055;
+const RUBBLE_HEIGHT_VARIATION = 0.035;
+const RUBBLE_MAX_HEIGHT = 0.5;
 const RUBBLE_CORE_RESTITUTION = 1.15;
 const RUBBLE_CORE_DAMPING = 0.82;
 const RUBBLE_COLLISION_EPSILON = 0.000001;
@@ -23,16 +25,23 @@ type RubbleCell = {
   readonly z: number;
 };
 
+type RubbleCellPile = {
+  readonly cell: RubbleCell;
+  pieces: number;
+  health: number;
+};
+
 type RubbleCluster = {
   readonly id: number;
-  key: string;
   readonly block: number;
-  cell: RubbleCell;
-  readonly mesh: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
+  readonly cells: Map<string, RubbleCellPile>;
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly bounds: THREE.Box3;
   pieces: number;
   health: number;
 };
+
+type RubbleQuadVertex = readonly [number, number, number];
 
 export type RubbleFieldWorld = {
   getBlock(x: number, y: number, z: number): number;
@@ -61,12 +70,22 @@ const EMPTY_RUBBLE_STATS: RubbleFieldStats = {
   maxCoverHeight: 0
 };
 
-const rubbleGeometry = new THREE.BoxGeometry(1, 1, 1);
+const HORIZONTAL_NEIGHBOR_OFFSETS: readonly RubbleCell[] = [
+  { x: -1, y: 0, z: -1 },
+  { x: 0, y: 0, z: -1 },
+  { x: 1, y: 0, z: -1 },
+  { x: -1, y: 0, z: 0 },
+  { x: 1, y: 0, z: 0 },
+  { x: -1, y: 0, z: 1 },
+  { x: 0, y: 0, z: 1 },
+  { x: 1, y: 0, z: 1 }
+];
 
 export class RubbleField {
   private readonly scene: THREE.Scene;
-  private readonly clustersByKey = new Map<string, RubbleCluster>();
-  private readonly clustersByCell = new Map<string, RubbleCluster[]>();
+  private readonly clustersById = new Map<number, RubbleCluster>();
+  private readonly clustersByCell = new Map<string, RubbleCluster>();
+  private readonly dirtyClusters = new Set<RubbleCluster>();
   private readonly sphereClosestPoint = new THREE.Vector3();
   private readonly sphereDelta = new THREE.Vector3();
   private readonly fallbackNormal = new THREE.Vector3(0, 1, 0);
@@ -79,6 +98,8 @@ export class RubbleField {
   }
 
   getStats(): RubbleFieldStats {
+    this.flushDirtyClusterMeshes();
+    this.refreshStats();
     return this.stats;
   }
 
@@ -92,55 +113,46 @@ export class RubbleField {
   }
 
   absorb(block: number, position: THREE.Vector3): void {
-    // Rubble is grouped into meter-ish cells so many tiny settled shards become
-    // one gameplay object: cover can be queried, damaged, and rendered cheaply.
-    const cell = getRubbleCell(position);
-    const key = getRubbleCellKey(cell, block);
-    let cluster = this.clustersByKey.get(key);
-
-    if (!cluster) {
-      cluster = this.createCluster(key, block, cell);
-      this.clustersByKey.set(key, cluster);
-      this.addClusterToCellIndex(cluster);
-    }
-
-    cluster.pieces += 1;
-    cluster.health += RUBBLE_PIECE_HEALTH;
-    this.updateClusterMesh(cluster);
+    // Settled shards become cell piles, and adjacent piles are stitched into a
+    // capped patch. That keeps rubble readable as debris fields instead of
+    // rendering hundreds of tiny standalone boxes.
+    this.absorbPileAtCell(block, getRubbleCell(position), 1, RUBBLE_PIECE_HEALTH);
     this.refreshStats();
   }
 
   settle(world: RubbleFieldWorld): void {
-    const clusters = Array.from(this.clustersByKey.values()).sort((left, right) => left.cell.y - right.cell.y);
+    this.flushDirtyClusterMeshes();
+    const clusters = Array.from(this.clustersById.values()).sort(compareClustersForFalling);
     let changed = false;
 
     for (const cluster of clusters) {
-      if (this.clustersByKey.get(cluster.key) !== cluster) continue;
+      if (!this.clustersById.has(cluster.id)) continue;
 
-      if (this.hasTerrainSupport(world, cluster)) {
-        changed = this.promoteClusterIfLargeEnough(world, cluster) || changed;
+      const unsupportedPiles = Array.from(cluster.cells.values()).filter(
+        (pile) => !this.hasPileTerrainSupport(world, pile)
+      );
+
+      if (unsupportedPiles.length === 0) {
+        changed = this.promoteLargePiles(world, cluster) || changed;
         continue;
       }
 
-      const belowCell = getRubbleCellBelow(cluster.cell);
-      const mergeTarget = this.getMergeTargetInCell(belowCell, cluster);
-      if (mergeTarget) {
-        // Falling onto an existing pile makes the pile larger instead of
-        // creating stacked proxy boxes. That gives us the cover-gameplay result
-        // without doing debris/debris physics for every settled cube.
-        this.mergeClusters(mergeTarget, cluster);
-        this.promoteClusterIfLargeEnough(world, mergeTarget);
+      for (const pile of unsupportedPiles) {
+        if (this.clustersByCell.get(getRubbleCellCoordinateKey(pile.cell)) !== cluster) continue;
+
+        // Unsupported parts of a broad patch break away one cell at a time.
+        // This keeps falling rubble cheap while preventing giant multi-cell
+        // sheets from hovering when only part of their support was destroyed.
+        const fallingPile = clonePile(pile);
+        this.detachPile(cluster, pile);
+        const landedCluster = this.absorbPileAtCell(
+          cluster.block,
+          getRubbleCellBelow(fallingPile.cell),
+          fallingPile.pieces,
+          fallingPile.health
+        );
+        this.promoteLargePiles(world, landedCluster);
         changed = true;
-        continue;
-      }
-
-      // Unsupported rubble falls one voxel cell per frame. It is intentionally
-      // discrete for now: cheap, deterministic, and easy to replace later with
-      // smoother motion if rubble becomes a centerpiece mechanic.
-      const movedCluster = this.moveClusterToCell(cluster, belowCell);
-      changed = true;
-      if (movedCluster && this.hasTerrainSupport(world, movedCluster)) {
-        this.promoteClusterIfLargeEnough(world, movedCluster);
       }
     }
 
@@ -152,12 +164,14 @@ export class RubbleField {
       return false;
     }
 
+    this.flushDirtyClusterMeshes();
+
     // Only thrown cores interact with rubble for this first gameplay pass.
     // Debris settling into debris would recreate the expensive pile behavior
-    // we just removed from the physics broadphase.
+    // we removed from the physics broadphase.
     let collided = false;
     const corePosition = core.mesh.position;
-    for (const cluster of this.getNearbyClusters(corePosition, core.radius + RUBBLE_MAX_WIDTH)) {
+    for (const cluster of this.getNearbyClusters(corePosition, core.radius + RUBBLE_NEARBY_SEARCH_PADDING)) {
       if (this.resolveCoreClusterCollision(core, cluster)) {
         collided = true;
       }
@@ -166,13 +180,14 @@ export class RubbleField {
   }
 
   damageNearest(position: THREE.Vector3, amount: number, radius = 1.2): boolean {
+    this.flushDirtyClusterMeshes();
     let nearestCluster: RubbleCluster | null = null;
     let nearestDistanceSq = radius * radius;
 
     // This is the future-facing destructibility hook: bullets/explosions can
     // chip the nearest cover proxy without needing to know about visual shards.
-    for (const cluster of this.getNearbyClusters(position, radius + RUBBLE_MAX_WIDTH)) {
-      const distanceSq = cluster.mesh.position.distanceToSquared(position);
+    for (const cluster of this.getNearbyClusters(position, radius + RUBBLE_NEARBY_SEARCH_PADDING)) {
+      const distanceSq = getPointBoxDistanceSq(position, cluster.bounds);
       if (distanceSq > nearestDistanceSq) continue;
 
       nearestDistanceSq = distanceSq;
@@ -185,6 +200,7 @@ export class RubbleField {
   }
 
   raycast(origin: THREE.Vector3, direction: THREE.Vector3, maxDistance: number): RubbleRaycastHit | null {
+    this.flushDirtyClusterMeshes();
     let closestHit: RubbleRaycastHit | null = null;
 
     // The shooter-facing contract is intentionally simple: cover proxies can
@@ -195,7 +211,7 @@ export class RubbleField {
       direction.z === 0 ? Number.POSITIVE_INFINITY : 1 / direction.z
     );
 
-    for (const cluster of this.clustersByKey.values()) {
+    for (const cluster of this.clustersById.values()) {
       const distance = intersectRayWithBox(
         origin,
         direction,
@@ -218,11 +234,9 @@ export class RubbleField {
   }
 
   clear(): void {
-    for (const cluster of this.clustersByKey.values()) {
-      this.scene.remove(cluster.mesh);
+    for (const cluster of Array.from(this.clustersById.values())) {
+      this.removeCluster(cluster);
     }
-    this.clustersByKey.clear();
-    this.clustersByCell.clear();
     this.stats = EMPTY_RUBBLE_STATS;
   }
 
@@ -230,46 +244,182 @@ export class RubbleField {
     this.clear();
   }
 
-  private createCluster(key: string, block: number, cell: RubbleCell): RubbleCluster {
-    const mesh = new THREE.Mesh(rubbleGeometry, getFragmentMaterial(block));
+  private createCluster(block: number): RubbleCluster {
+    const id = this.nextClusterId;
+    this.nextClusterId += 1;
+
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), getFragmentMaterial(block));
     mesh.castShadow = false;
     mesh.receiveShadow = true;
-    mesh.name = `Rubble cover ${key}`;
+    mesh.name = `Rubble patch ${id}`;
     this.scene.add(mesh);
 
     const cluster: RubbleCluster = {
-      id: this.nextClusterId,
-      key,
+      id,
       block,
-      cell,
+      cells: new Map(),
       mesh,
       bounds: new THREE.Box3(),
       pieces: 0,
       health: 0
     };
-    this.nextClusterId += 1;
+    this.clustersById.set(cluster.id, cluster);
     return cluster;
   }
 
-  private updateClusterMesh(cluster: RubbleCluster): void {
-    // The pile grows sublinearly: a few pieces form a little ankle-high mess,
-    // while many settled pieces become a crouch-cover shape instead of a full
-    // replacement block.
-    const visualWeight = Math.min(RUBBLE_MAX_VISUAL_PIECES, Math.max(1, cluster.pieces));
-    const width = Math.min(RUBBLE_MAX_WIDTH, RUBBLE_MIN_WIDTH + Math.sqrt(visualWeight) * 0.14);
-    const height = Math.min(RUBBLE_MAX_HEIGHT, RUBBLE_MIN_HEIGHT + visualWeight * 0.022);
-    const depth = width;
-    const centerX = (cluster.cell.x + 0.5) * RUBBLE_CELL_SIZE;
-    const baseY = cluster.cell.y * RUBBLE_CELL_SIZE;
-    const centerZ = (cluster.cell.z + 0.5) * RUBBLE_CELL_SIZE;
+  private absorbPileAtCell(block: number, cell: RubbleCell, pieces: number, health: number): RubbleCluster {
+    const existingCluster = this.clustersByCell.get(getRubbleCellCoordinateKey(cell));
+    if (existingCluster) {
+      this.addPileToCluster(existingCluster, cell, pieces, health);
+      this.mergeAdjacentClusters(existingCluster);
+      return existingCluster;
+    }
 
-    cluster.mesh.scale.set(width, height, depth);
-    cluster.mesh.position.set(centerX, baseY + height / 2, centerZ);
+    const mergeCandidates = this.getAdjacentClustersForCell(cell)
+      .filter((cluster) => this.canAddNewCell(cluster, cell));
+    const targetCluster = chooseRubbleMergeTarget(mergeCandidates, block) ?? this.createCluster(block);
+
+    this.addPileToCluster(targetCluster, cell, pieces, health);
+    this.mergeAdjacentClusters(targetCluster);
+    return targetCluster;
+  }
+
+  private addPileToCluster(cluster: RubbleCluster, cell: RubbleCell, pieces: number, health: number): void {
+    const key = getRubbleCellCoordinateKey(cell);
+    const pile = cluster.cells.get(key);
+    if (pile) {
+      pile.pieces += pieces;
+      pile.health += health;
+    } else {
+      cluster.cells.set(key, { cell, pieces, health });
+      this.clustersByCell.set(key, cluster);
+    }
+
+    cluster.pieces += pieces;
+    cluster.health += health;
+    this.markClusterDirty(cluster);
+  }
+
+  private mergeAdjacentClusters(target: RubbleCluster): void {
+    let merged = true;
+
+    // Re-run until stable because adding one neighbor can expose another.
+    // The cap keeps a whole crater from becoming one enormous inaccurate AABB.
+    while (merged) {
+      merged = false;
+      for (const candidate of this.getAdjacentClustersForCluster(target)) {
+        if (candidate === target) continue;
+        if (!this.canMergeClusters(target, candidate)) continue;
+
+        this.mergeClusters(target, candidate);
+        merged = true;
+        break;
+      }
+    }
+  }
+
+  private updateClusterMesh(cluster: RubbleCluster): void {
+    const geometry = new THREE.BufferGeometry();
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const indices: number[] = [];
+    const bounds = new THREE.Box3();
+
+    // Build one low patch mesh out of all occupied cells. Internal vertical
+    // faces are skipped, so adjacent piles read as connected rubble instead of
+    // separate stacked tiles.
+    for (const pile of cluster.cells.values()) {
+      const height = getRubblePileVisualHeight(pile);
+      const minX = pile.cell.x * RUBBLE_CELL_SIZE;
+      const maxX = minX + RUBBLE_CELL_SIZE;
+      const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+      const topY = baseY + height;
+      const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
+      const maxZ = minZ + RUBBLE_CELL_SIZE;
+
+      bounds.expandByPoint(new THREE.Vector3(minX, baseY, minZ));
+      bounds.expandByPoint(new THREE.Vector3(maxX, topY, maxZ));
+
+      addQuad(
+        positions,
+        normals,
+        indices,
+        [minX, topY, minZ],
+        [minX, topY, maxZ],
+        [maxX, topY, maxZ],
+        [maxX, topY, minZ],
+        [0, 1, 0]
+      );
+      addQuad(
+        positions,
+        normals,
+        indices,
+        [minX, baseY, minZ],
+        [maxX, baseY, minZ],
+        [maxX, baseY, maxZ],
+        [minX, baseY, maxZ],
+        [0, -1, 0]
+      );
+
+      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z - 1 }))) {
+        addQuad(
+          positions,
+          normals,
+          indices,
+          [minX, baseY, minZ],
+          [minX, topY, minZ],
+          [maxX, topY, minZ],
+          [maxX, baseY, minZ],
+          [0, 0, -1]
+        );
+      }
+      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z + 1 }))) {
+        addQuad(
+          positions,
+          normals,
+          indices,
+          [minX, baseY, maxZ],
+          [maxX, baseY, maxZ],
+          [maxX, topY, maxZ],
+          [minX, topY, maxZ],
+          [0, 0, 1]
+        );
+      }
+      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x - 1, y: pile.cell.y, z: pile.cell.z }))) {
+        addQuad(
+          positions,
+          normals,
+          indices,
+          [minX, baseY, minZ],
+          [minX, baseY, maxZ],
+          [minX, topY, maxZ],
+          [minX, topY, minZ],
+          [-1, 0, 0]
+        );
+      }
+      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x + 1, y: pile.cell.y, z: pile.cell.z }))) {
+        addQuad(
+          positions,
+          normals,
+          indices,
+          [maxX, baseY, minZ],
+          [maxX, topY, minZ],
+          [maxX, topY, maxZ],
+          [maxX, baseY, maxZ],
+          [1, 0, 0]
+        );
+      }
+    }
+
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setIndex(indices);
+    geometry.computeBoundingSphere();
+
+    cluster.mesh.geometry.dispose();
+    cluster.mesh.geometry = geometry;
     cluster.mesh.updateMatrixWorld();
-    cluster.bounds.setFromCenterAndSize(
-      cluster.mesh.position,
-      this.sphereDelta.set(width, height, depth)
-    );
+    cluster.bounds.copy(bounds);
   }
 
   private resolveCoreClusterCollision(core: PhysicsToy, cluster: RubbleCluster): boolean {
@@ -307,63 +457,105 @@ export class RubbleField {
   }
 
   private damageCluster(cluster: RubbleCluster, amount: number): void {
-    cluster.health = Math.max(0, cluster.health - amount);
-    cluster.pieces = Math.ceil(cluster.health / RUBBLE_PIECE_HEALTH);
+    let remainingDamage = amount;
+    const piles = Array.from(cluster.cells.values()).sort((left, right) => right.health - left.health);
 
-    if (cluster.health <= 0 || cluster.pieces <= 0) {
+    for (const pile of piles) {
+      if (remainingDamage <= 0) break;
+
+      const damage = Math.min(pile.health, remainingDamage);
+      pile.health -= damage;
+      remainingDamage -= damage;
+      pile.pieces = Math.ceil(pile.health / RUBBLE_PIECE_HEALTH);
+      if (pile.health <= RUBBLE_COLLISION_EPSILON || pile.pieces <= 0) {
+        const key = getRubbleCellCoordinateKey(pile.cell);
+        cluster.cells.delete(key);
+        if (this.clustersByCell.get(key) === cluster) {
+          this.clustersByCell.delete(key);
+        }
+      }
+    }
+
+    if (cluster.cells.size === 0) {
       this.removeCluster(cluster);
     } else {
-      this.updateClusterMesh(cluster);
+      this.recomputeClusterTotals(cluster);
+      this.markClusterDirty(cluster);
     }
     this.refreshStats();
   }
 
   private removeCluster(cluster: RubbleCluster): void {
     this.scene.remove(cluster.mesh);
-    this.clustersByKey.delete(cluster.key);
-    this.removeClusterFromCellIndex(cluster);
+    cluster.mesh.geometry.dispose();
+    this.clustersById.delete(cluster.id);
+    this.dirtyClusters.delete(cluster);
+    for (const key of cluster.cells.keys()) {
+      if (this.clustersByCell.get(key) === cluster) {
+        this.clustersByCell.delete(key);
+      }
+    }
   }
 
-  private hasTerrainSupport(world: RubbleFieldWorld, cluster: RubbleCluster): boolean {
-    return world.isSolid(cluster.cell.x, cluster.cell.y - 1, cluster.cell.z);
+  private detachPile(cluster: RubbleCluster, pile: RubbleCellPile): void {
+    const key = getRubbleCellCoordinateKey(pile.cell);
+    cluster.cells.delete(key);
+    if (this.clustersByCell.get(key) === cluster) {
+      this.clustersByCell.delete(key);
+    }
+
+    if (cluster.cells.size === 0) {
+      this.removeCluster(cluster);
+    } else {
+      this.recomputeClusterTotals(cluster);
+      this.markClusterDirty(cluster);
+    }
   }
 
-  private promoteClusterIfLargeEnough(world: RubbleFieldWorld, cluster: RubbleCluster): boolean {
-    if (cluster.pieces < RUBBLE_BLOCK_PROMOTION_PIECES) return false;
-    if (world.getBlock(cluster.cell.x, cluster.cell.y, cluster.cell.z) !== BLOCK.air) return false;
+  private hasPileTerrainSupport(world: RubbleFieldWorld, pile: RubbleCellPile): boolean {
+    return world.isSolid(pile.cell.x, pile.cell.y - 1, pile.cell.z);
+  }
 
-    // Once enough settled debris occupies one meter cell, it graduates back
-    // into the voxel terrain. That lets later terrain systems treat it like a
-    // normal solid block while small piles remain cheap cover proxies.
-    world.setBlock(cluster.cell.x, cluster.cell.y, cluster.cell.z, BLOCK.rubble);
-    this.removeCluster(cluster);
+  private promoteLargePiles(world: RubbleFieldWorld, cluster: RubbleCluster): boolean {
+    let changed = false;
+
+    for (const pile of Array.from(cluster.cells.values())) {
+      if (pile.pieces < RUBBLE_BLOCK_PROMOTION_PIECES) continue;
+      if (!this.hasPileTerrainSupport(world, pile)) continue;
+      if (world.getBlock(pile.cell.x, pile.cell.y, pile.cell.z) !== BLOCK.air) continue;
+
+      // Promotion is per occupied cell, not per patch. A broad patch can keep
+      // acting as cover while only truly dense cells graduate into terrain.
+      world.setBlock(pile.cell.x, pile.cell.y, pile.cell.z, BLOCK.rubble);
+      const key = getRubbleCellCoordinateKey(pile.cell);
+      cluster.cells.delete(key);
+      if (this.clustersByCell.get(key) === cluster) {
+        this.clustersByCell.delete(key);
+      }
+      changed = true;
+    }
+
+    if (!changed) return false;
+    if (cluster.cells.size === 0) {
+      this.removeCluster(cluster);
+    } else {
+      this.recomputeClusterTotals(cluster);
+      this.markClusterDirty(cluster);
+    }
     return true;
   }
 
   private mergeClusters(target: RubbleCluster, source: RubbleCluster): void {
-    target.pieces += source.pieces;
-    target.health += source.health;
-    this.removeCluster(source);
-    this.updateClusterMesh(target);
-  }
-
-  private moveClusterToCell(cluster: RubbleCluster, cell: RubbleCell): RubbleCluster | null {
-    this.removeClusterFromCellIndex(cluster);
-    this.clustersByKey.delete(cluster.key);
-
-    const nextKey = getRubbleCellKey(cell, cluster.block);
-    const existingCluster = this.clustersByKey.get(nextKey);
-    if (existingCluster && existingCluster !== cluster) {
-      this.mergeClusters(existingCluster, cluster);
-      return existingCluster;
+    for (const [key, pile] of source.cells.entries()) {
+      target.cells.set(key, pile);
+      this.clustersByCell.set(key, target);
     }
-
-    cluster.cell = cell;
-    cluster.key = nextKey;
-    this.clustersByKey.set(nextKey, cluster);
-    this.addClusterToCellIndex(cluster);
-    this.updateClusterMesh(cluster);
-    return cluster;
+    this.recomputeClusterTotals(target);
+    this.scene.remove(source.mesh);
+    source.mesh.geometry.dispose();
+    this.clustersById.delete(source.id);
+    this.dirtyClusters.delete(source);
+    this.markClusterDirty(target);
   }
 
   private getNearbyClusters(position: THREE.Vector3, radius: number): RubbleCluster[] {
@@ -373,54 +565,73 @@ export class RubbleField {
     const maxY = Math.floor((position.y + radius) / RUBBLE_CELL_SIZE);
     const minZ = Math.floor((position.z - radius) / RUBBLE_CELL_SIZE);
     const maxZ = Math.floor((position.z + radius) / RUBBLE_CELL_SIZE);
-    const clusters: RubbleCluster[] = [];
+    const clusters = new Set<RubbleCluster>();
 
     for (let y = minY; y <= maxY; y += 1) {
       for (let z = minZ; z <= maxZ; z += 1) {
         for (let x = minX; x <= maxX; x += 1) {
-          for (const cluster of this.getClustersForCell({ x, y, z })) {
-            clusters.push(cluster);
-          }
+          const cluster = this.clustersByCell.get(getRubbleCellCoordinateKey({ x, y, z }));
+          if (cluster) clusters.add(cluster);
         }
       }
     }
 
-    return clusters;
+    return Array.from(clusters);
   }
 
-  private getClustersForCell(cell: RubbleCell): RubbleCluster[] {
-    return this.clustersByCell.get(getRubbleCellCoordinateKey(cell)) ?? [];
+  private getAdjacentClustersForCell(cell: RubbleCell): RubbleCluster[] {
+    const clusters = new Set<RubbleCluster>();
+    for (const offset of HORIZONTAL_NEIGHBOR_OFFSETS) {
+      const cluster = this.clustersByCell.get(getRubbleCellCoordinateKey({
+        x: cell.x + offset.x,
+        y: cell.y,
+        z: cell.z + offset.z
+      }));
+      if (cluster) clusters.add(cluster);
+    }
+    return Array.from(clusters);
   }
 
-  private getMergeTargetInCell(cell: RubbleCell, fallingCluster: RubbleCluster): RubbleCluster | null {
-    const clusters = this.getClustersForCell(cell).filter((cluster) => cluster !== fallingCluster);
-    if (clusters.length === 0) return null;
-
-    // Prefer preserving material identity when possible. If a different
-    // material pile is already there, combine into it anyway; gameplay wants
-    // one pile in that cell more than it wants perfect material accounting.
-    return clusters.find((cluster) => cluster.block === fallingCluster.block) ?? clusters[0] ?? null;
+  private getAdjacentClustersForCluster(target: RubbleCluster): RubbleCluster[] {
+    const clusters = new Set<RubbleCluster>();
+    for (const pile of target.cells.values()) {
+      for (const candidate of this.getAdjacentClustersForCell(pile.cell)) {
+        if (candidate !== target) clusters.add(candidate);
+      }
+    }
+    return Array.from(clusters);
   }
 
-  private addClusterToCellIndex(cluster: RubbleCluster): void {
-    const key = getRubbleCellCoordinateKey(cluster.cell);
-    const clusters = this.clustersByCell.get(key);
-    if (clusters) {
-      clusters.push(cluster);
-    } else {
-      this.clustersByCell.set(key, [cluster]);
+  private canAddNewCell(cluster: RubbleCluster, cell: RubbleCell): boolean {
+    return cluster.cells.has(getRubbleCellCoordinateKey(cell)) || cluster.cells.size < RUBBLE_MAX_PATCH_CELLS;
+  }
+
+  private canMergeClusters(target: RubbleCluster, source: RubbleCluster): boolean {
+    return target.cells.size + source.cells.size <= RUBBLE_MAX_PATCH_CELLS;
+  }
+
+  private recomputeClusterTotals(cluster: RubbleCluster): void {
+    let pieces = 0;
+    let health = 0;
+    for (const pile of cluster.cells.values()) {
+      pieces += pile.pieces;
+      health += pile.health;
+    }
+    cluster.pieces = pieces;
+    cluster.health = health;
+  }
+
+  private markClusterDirty(cluster: RubbleCluster): void {
+    if (this.clustersById.has(cluster.id)) {
+      this.dirtyClusters.add(cluster);
     }
   }
 
-  private removeClusterFromCellIndex(cluster: RubbleCluster): void {
-    const key = getRubbleCellCoordinateKey(cluster.cell);
-    const clusters = this.clustersByCell.get(key);
-    if (!clusters) return;
-
-    const index = clusters.indexOf(cluster);
-    if (index >= 0) clusters.splice(index, 1);
-    if (clusters.length === 0) {
-      this.clustersByCell.delete(key);
+  private flushDirtyClusterMeshes(): void {
+    for (const cluster of Array.from(this.dirtyClusters)) {
+      this.dirtyClusters.delete(cluster);
+      if (!this.clustersById.has(cluster.id)) continue;
+      this.updateClusterMesh(cluster);
     }
   }
 
@@ -428,14 +639,16 @@ export class RubbleField {
     let pieces = 0;
     let health = 0;
     let maxCoverHeight = 0;
-    for (const cluster of this.clustersByKey.values()) {
+    for (const cluster of this.clustersById.values()) {
       pieces += cluster.pieces;
       health += cluster.health;
-      maxCoverHeight = Math.max(maxCoverHeight, cluster.mesh.scale.y);
+      for (const pile of cluster.cells.values()) {
+        maxCoverHeight = Math.max(maxCoverHeight, getRubblePileVisualHeight(pile));
+      }
     }
 
     this.stats = {
-      clusters: this.clustersByKey.size,
+      clusters: this.clustersById.size,
       pieces,
       health,
       maxCoverHeight
@@ -459,12 +672,76 @@ function getRubbleCellBelow(cell: RubbleCell): RubbleCell {
   };
 }
 
-function getRubbleCellKey(cell: RubbleCell, block: number): string {
-  return `${cell.x},${cell.y},${cell.z}:${block}`;
+function clonePile(pile: RubbleCellPile): RubbleCellPile {
+  return {
+    cell: pile.cell,
+    pieces: pile.pieces,
+    health: pile.health
+  };
 }
 
 function getRubbleCellCoordinateKey(cell: RubbleCell): string {
   return `${cell.x},${cell.y},${cell.z}`;
+}
+
+function chooseRubbleMergeTarget(clusters: readonly RubbleCluster[], block: number): RubbleCluster | null {
+  const sameMaterial = clusters
+    .filter((cluster) => cluster.block === block)
+    .sort((left, right) => right.cells.size - left.cells.size)[0];
+  if (sameMaterial) return sameMaterial;
+
+  return clusters.slice().sort((left, right) => right.cells.size - left.cells.size)[0] ?? null;
+}
+
+function compareClustersForFalling(left: RubbleCluster, right: RubbleCluster): number {
+  return getLowestClusterCellY(left) - getLowestClusterCellY(right);
+}
+
+function getLowestClusterCellY(cluster: RubbleCluster): number {
+  let lowestY = Number.POSITIVE_INFINITY;
+  for (const pile of cluster.cells.values()) {
+    lowestY = Math.min(lowestY, pile.cell.y);
+  }
+  return lowestY;
+}
+
+function getRubblePileVisualHeight(pile: RubbleCellPile): number {
+  const visualWeight = Math.min(RUBBLE_MAX_VISUAL_PIECES, Math.max(1, pile.pieces));
+  const height = RUBBLE_MIN_HEIGHT
+    + Math.sqrt(visualWeight) * RUBBLE_HEIGHT_PER_ROOT_PIECE
+    + (getCellNoise(pile.cell) - 0.5) * RUBBLE_HEIGHT_VARIATION;
+  return clamp(height, RUBBLE_MIN_HEIGHT, RUBBLE_MAX_HEIGHT);
+}
+
+function getCellNoise(cell: RubbleCell): number {
+  const value = Math.sin(cell.x * 12.9898 + cell.y * 78.233 + cell.z * 37.719) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function addQuad(
+  positions: number[],
+  normals: number[],
+  indices: number[],
+  first: RubbleQuadVertex,
+  second: RubbleQuadVertex,
+  third: RubbleQuadVertex,
+  fourth: RubbleQuadVertex,
+  normal: RubbleQuadVertex
+): void {
+  const startIndex = positions.length / 3;
+  positions.push(...first, ...second, ...third, ...fourth);
+  normals.push(...normal, ...normal, ...normal, ...normal);
+  indices.push(startIndex, startIndex + 1, startIndex + 2, startIndex, startIndex + 2, startIndex + 3);
+}
+
+function getPointBoxDistanceSq(point: THREE.Vector3, box: THREE.Box3): number {
+  const closestX = clamp(point.x, box.min.x, box.max.x);
+  const closestY = clamp(point.y, box.min.y, box.max.y);
+  const closestZ = clamp(point.z, box.min.z, box.max.z);
+  const dx = point.x - closestX;
+  const dy = point.y - closestY;
+  const dz = point.z - closestZ;
+  return dx * dx + dy * dy + dz * dz;
 }
 
 function clamp(value: number, min: number, max: number): number {

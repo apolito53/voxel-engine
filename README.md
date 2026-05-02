@@ -43,7 +43,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Right click` place block
 - `1-5` select block
 - `F` toggle flight mode
-- `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
 - `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
@@ -79,7 +79,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments so thousands of shards do not become thousands of scene meshes
-- `src/rubble.ts`: persistent destructible rubble cover proxies, support/fall/merge rules, and promotion into generated `Rubble` terrain blocks
+- `src/rubble.ts`: persistent destructible rubble cover patches, multi-cell merge rules, support/fall behavior, and promotion into generated `Rubble` terrain blocks
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading

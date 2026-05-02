@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.6 - 2026-05-02
+
+### Changed
+
+- Reworked settled rubble from one proxy mesh per occupied cell into bounded multi-cell patches, so neighboring piles read as connected debris fields instead of scattered floor tiles.
+- Lowered rubble patch height and skipped internal patch side faces, reducing the blocky slab look while keeping rubble queryable for cover and core collision.
+- Updated the debug HUD label from rubble `piles` to rubble `patches`.
+
+### Added
+
+- Added a regression test proving adjacent rubble cells merge into one rendered patch while still raycasting as cover.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, confirmed the debug HUD reports rubble `patches`, and checked for fresh app console errors.
+
 ## 0.2.5 - 2026-05-02
 
 ### Changed

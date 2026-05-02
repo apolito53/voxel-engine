@@ -81,7 +81,7 @@ export class DebugHud {
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
       `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
       `frag inst ${fragmentRenderStats.instances} batches ${fragmentRenderStats.batches} cap ${fragmentRenderStats.capacity}`,
-      `rubble ${rubbleStats.clusters} piles ${rubbleStats.pieces} pcs cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
+      `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces} pcs cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,
