@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.1 - 2026-05-02
+
+### Changed
+
+- Tuned block-fragment launch speeds downward so destroyed blocks break into nearby debris instead of spraying pieces far from the fracture site.
+- Split fragment block-collision response from thrown-core collision response: fragments now lose horizontal speed on ground contact, bounce less, and settle into rubble piles faster.
+- Added a settings-menu `Despawn Physics Cores` button for clearing thrown cores without deleting loose debris or rubble piles.
+- Added a regression test that keeps grounded fragments from skating away before they become rubble cover.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.2.0 - 2026-05-02
 
 ### Added

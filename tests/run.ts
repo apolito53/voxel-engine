@@ -1029,6 +1029,30 @@ test("block fragments render through instanced batches instead of scene children
   assertEqual(scene.children.length, 0, "disposing should remove all instanced fragment batches from the scene");
 });
 
+test("block fragments lose ground speed and sleep near the fracture site", () => {
+  const floorWorld = {
+    isSolid(_x: number, y: number, _z: number): boolean {
+      return y === 0;
+    }
+  };
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 1.08, 0.5),
+    new THREE.Vector3(3, 0, 0)
+  );
+
+  for (let frame = 0; frame < 90 && !fragment.isSleeping; frame += 1) {
+    fragment.update(1 / 60, floorWorld);
+  }
+
+  assert(fragment.isSleeping, "grounded block fragments should settle quickly enough to become rubble");
+  assert(
+    fragment.mesh.position.x < 1.2,
+    "ground friction should keep fragments close enough to visibly clump into nearby piles"
+  );
+  assertEqual(fragment.velocity.lengthSq(), 0, "sleeping fragments should stop contributing motion");
+});
+
 test("rubble field absorbs settled fragments into cover proxies", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);

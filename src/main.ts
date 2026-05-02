@@ -100,6 +100,7 @@ const physicsBudgetValue = requireElement<HTMLElement>("#physics-budget-value");
 const physicsBudgetDecreaseButton = requireElement<HTMLButtonElement>("#physics-budget-decrease");
 const physicsBudgetIncreaseButton = requireElement<HTMLButtonElement>("#physics-budget-increase");
 const physicsBudgetSlider = requireElement<HTMLInputElement>("#physics-budget-slider");
+const despawnCoresButton = requireElement<HTMLButtonElement>("#despawn-cores-button");
 const despawnObjectsButton = requireElement<HTMLButtonElement>("#despawn-objects-button");
 const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-slider");
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
@@ -288,6 +289,7 @@ function wireMenuControls(): void {
   physicsBudgetDecreaseButton.addEventListener("click", () => changePhysicsObjectBudget("decrease"));
   physicsBudgetIncreaseButton.addEventListener("click", () => changePhysicsObjectBudget("increase"));
   physicsBudgetSlider.addEventListener("input", () => setPhysicsObjectBudget(Number(physicsBudgetSlider.value)));
+  despawnCoresButton.addEventListener("click", clearPhysicsCores);
   despawnObjectsButton.addEventListener("click", clearToys);
   shadowQualitySlider.addEventListener("input", () => {
     qualityController.setShadowQualityLevel(shadowQualitySlider.value);
@@ -584,7 +586,7 @@ function spawnBlockFragments(
   position: { readonly x: number; readonly y: number; readonly z: number },
   impact: PhysicsImpact
 ): void {
-  const fragmentBaseSpeed = Math.min(9, impact.speed * 0.72);
+  const fragmentBaseSpeed = Math.min(4.5, impact.speed * 0.42);
   const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
 
   const fragmentCount = qualityController.preset.blockFragmentCount;
@@ -597,11 +599,15 @@ function spawnBlockFragments(
       fragmentOffset.y,
       fragmentOffset.z
     );
-    const scatter = createFragmentScatterDirection(offset).multiplyScalar(1.7 + Math.random() * 1.4);
+    // The first rubble pass was too dramatic: pieces launched like shrapnel,
+    // slid through each other, and rarely settled into the clump system where
+    // they become useful cover. Keep a short burst of breakup motion, but bias
+    // the fragments toward nearby pile formation.
+    const scatter = createFragmentScatterDirection(offset).multiplyScalar(0.55 + Math.random() * 0.65);
     const velocity = impact.normal.clone()
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
-      .add(new THREE.Vector3(0, 2.4 + Math.random() * 1.8, 0));
+      .add(new THREE.Vector3(0, 0.8 + Math.random() * 1.1, 0));
 
     addPhysicsToy(PhysicsToy.createBlockFragment(block, blockCenter.clone().add(offset), velocity));
   }
@@ -864,6 +870,18 @@ function clearToys(): void {
   toys.length = 0;
   physicsFragmentInstancer.clear();
   rubbleField.clear();
+}
+
+function clearPhysicsCores(): void {
+  for (let index = toys.length - 1; index >= 0; index -= 1) {
+    const toy = toys[index];
+    if (!toy || toy.isInstancedFragment || !toy.damagesBlocks) continue;
+
+    // This is intentionally narrower than the X/despawn-all path: when a test
+    // scene is littered with launched cores, the user can clean the big red
+    // projectiles without erasing the rubble piles they were creating.
+    removePhysicsToyAt(index);
+  }
 }
 
 function updateSunShadowAnchor(): void {

@@ -10,8 +10,14 @@ export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 
 const FRAGMENT_MAX_AGE_SECONDS = 9;
 const FRAGMENT_INVERSE_MASS = 2.5;
-const FRAGMENT_SLEEP_SPEED = 0.18;
-const FRAGMENT_SLEEP_AFTER_SECONDS = 0.35;
+const FRAGMENT_SLEEP_SPEED = 1.25;
+const FRAGMENT_SLEEP_AFTER_SECONDS = 0.18;
+const FRAGMENT_COLLISION_RESTITUTION = 0.38;
+const FRAGMENT_GROUND_HORIZONTAL_DAMPING = 0.52;
+const FRAGMENT_GROUND_VERTICAL_DAMPING = 0.36;
+const FRAGMENT_WALL_DAMPING = 0.74;
+const CORE_COLLISION_RESTITUTION = 1.55;
+const CORE_COLLISION_DAMPING = 0.985;
 const PHYSICS_TOY_COLLISION_CELL_SIZE = 1;
 const PHYSICS_TOY_COLLISION_RESTITUTION = 0.42;
 const PHYSICS_TOY_COLLISION_DAMPING = 0.995;
@@ -197,8 +203,7 @@ export class PhysicsToy {
                 position: p.clone()
               });
             }
-            this.velocity.addScaledVector(normal, -impact * 1.55);
-            this.velocity.multiplyScalar(0.985);
+            this.resolveBlockBounce(normal, impact);
           }
         }
       }
@@ -211,6 +216,27 @@ export class PhysicsToy {
   dispose(): void {
     if (this.disposeGeometry) this.mesh.geometry.dispose();
     if (this.disposeMaterial) this.mesh.material.dispose();
+  }
+
+  private resolveBlockBounce(normal: THREE.Vector3, impact: number): void {
+    if (!this.isInstancedFragment) {
+      this.velocity.addScaledVector(normal, -impact * CORE_COLLISION_RESTITUTION);
+      this.velocity.multiplyScalar(CORE_COLLISION_DAMPING);
+      return;
+    }
+
+    // Loose debris should feel like chunks of material losing energy against
+    // terrain, not like tiny rubber balls. We still let cores shove it around,
+    // but block contact bleeds horizontal speed quickly so nearby pieces can
+    // settle into the visible rubble piles.
+    this.velocity.addScaledVector(normal, -impact * FRAGMENT_COLLISION_RESTITUTION);
+    if (normal.y > 0.45) {
+      this.velocity.x *= FRAGMENT_GROUND_HORIZONTAL_DAMPING;
+      this.velocity.z *= FRAGMENT_GROUND_HORIZONTAL_DAMPING;
+      this.velocity.y *= FRAGMENT_GROUND_VERTICAL_DAMPING;
+    } else {
+      this.velocity.multiplyScalar(FRAGMENT_WALL_DAMPING);
+    }
   }
 
   private updateSleepState(delta: number, touchedSolidBlock: boolean): void {
