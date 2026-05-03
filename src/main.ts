@@ -5,6 +5,7 @@ import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
 import {
   createChunkStorage,
   createWorldRegistry,
+  type SavedPlayerStateSnapshot,
   type SavedWorld,
   type WorldRegistry
 } from "./chunkStorage";
@@ -20,6 +21,7 @@ import { MinimapRenderer } from "./minimap";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { PlayerController } from "./player";
+import { PLAYER_HEIGHT } from "./playerMovement";
 import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
@@ -77,6 +79,10 @@ const BLOCK_INTERACTION_REACH = 8;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
 const FRAME_SPIKE_EVENT_MS = 45;
+const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
+const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
+const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
+const PLAYER_LOCATION_SAVE_PRECISION = 1000;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 
@@ -166,6 +172,9 @@ let selectedBlockIndex = 0;
 let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
 let pendingWorldDeletion: SavedWorld | null = null;
+let lastSavedPlayerLocation: SavedPlayerStateSnapshot | null = null;
+let nextPlayerLocationAutosaveAt = 0;
+let playerLocationSaveChain: Promise<void> = Promise.resolve();
 
 const engineEvents = createEngineEventBus();
 const clock = new THREE.Clock();
@@ -279,6 +288,7 @@ function wireMenuControls(): void {
 
   activePlayer.onPauseChange = (paused: boolean) => {
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
+    if (paused) void queueActivePlayerLocationSave(true);
     if (!paused) setSettingsPanelOpen(false);
   };
 
@@ -413,9 +423,15 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-document.addEventListener("visibilitychange", drainFrameClockAfterIdle);
+document.addEventListener("visibilitychange", () => {
+  drainFrameClockAfterIdle();
+  if (document.hidden) void queueActivePlayerLocationSave(true);
+});
 window.addEventListener("focus", drainFrameClockAfterIdle);
 window.addEventListener("pageshow", drainFrameClockAfterIdle);
+window.addEventListener("pagehide", () => {
+  void queueActivePlayerLocationSave(true);
+});
 
 renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
 renderer.domElement.addEventListener("mousedown", (event) => {
@@ -468,6 +484,7 @@ function animate(): void {
     const activePlayer = requirePlayer();
 
     activePlayer.update(delta);
+    maybeAutosavePlayerLocation(frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
     novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
     recordTimingSection("playerMs");
@@ -904,16 +921,27 @@ async function loadWorld(worldId: string): Promise<void> {
     const activeWorldId = await registry.setActiveWorld(worldId);
     const savedWorld = await registry.getActiveWorld();
     const chunkStorage = await createChunkStorage(activeWorldId);
+    const loadOrigin = savedWorld.playerState?.feetPosition ?? { x: 2, z: 2 };
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed);
-    // For now every world starts near the origin; player-position saves can layer on later.
-    await activeWorld.preloadSavedChunksAround(0, 0, qualityController.initialLoadRadius);
-    activeWorld.ensureChunksAround(0, 0, qualityController.initialLoadRadius);
+    await activeWorld.preloadSavedChunksAround(
+      loadOrigin.x,
+      loadOrigin.z,
+      qualityController.initialLoadRadius
+    );
+    activeWorld.ensureChunksAround(
+      loadOrigin.x,
+      loadOrigin.z,
+      qualityController.initialLoadRadius
+    );
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
-    camera.position.set(2, activeWorld.highestSolidY(2, 2) + 5, 2);
+    const loadState = createPlayerLoadState(activeWorld, savedWorld);
+    placePlayerAtSavedLocation(activePlayer, activeWorld, loadState);
     camera.getWorldDirection(direction);
     novaPilot.setActive(true, camera.position, direction, activeWorld);
+    lastSavedPlayerLocation = capturePlayerLocationSnapshot();
+    nextPlayerLocationAutosaveAt = performance.now() + PLAYER_LOCATION_AUTOSAVE_MS;
     updateSunShadowAnchor();
     homeScreen.classList.add("is-hidden");
     pauseMenu.classList.add("is-hidden");
@@ -978,6 +1006,7 @@ async function exitToHome(): Promise<void> {
   try {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
     const activeWorld = requireWorld();
+    await queueActivePlayerLocationSave(true);
     requirePlayer().pause(true);
     camera.getWorldDirection(direction);
     novaPilot.setActive(false, camera.position, direction, activeWorld);
@@ -993,6 +1022,118 @@ async function exitToHome(): Promise<void> {
   } finally {
     worldTransitioning = false;
   }
+}
+
+function createPlayerLoadState(activeWorld: VoxelWorld, savedWorld: SavedWorld): SavedPlayerStateSnapshot {
+  return savedWorld.playerState ?? createDefaultPlayerLocation(activeWorld, 2, 2);
+}
+
+function createDefaultPlayerLocation(activeWorld: VoxelWorld, x: number, z: number): SavedPlayerStateSnapshot {
+  return {
+    feetPosition: {
+      x,
+      // Preserve the old "start a few meters over the terrain" feel while still
+      // storing a stable physical player location instead of camera height.
+      y: activeWorld.highestSolidY(x, z) + 5 - PLAYER_HEIGHT,
+      z
+    },
+    yaw: 0,
+    pitch: 0
+  };
+}
+
+function placePlayerAtSavedLocation(
+  activePlayer: PlayerController,
+  activeWorld: VoxelWorld,
+  loadState: SavedPlayerStateSnapshot
+): void {
+  activePlayer.teleportToFeetPosition(loadState.feetPosition, loadState.yaw, loadState.pitch);
+  if (!activePlayer.collides()) return;
+
+  // Saves should not become traps. If terrain edits somehow occupy the old
+  // body space, keep the X/Z location but pop the player to a safe height above
+  // that column instead of letting them reload inside voxels.
+  const safeLocation = createDefaultPlayerLocation(
+    activeWorld,
+    loadState.feetPosition.x,
+    loadState.feetPosition.z
+  );
+  activePlayer.teleportToFeetPosition(safeLocation.feetPosition, loadState.yaw, loadState.pitch);
+}
+
+function maybeAutosavePlayerLocation(now: number): void {
+  if (now < nextPlayerLocationAutosaveAt) return;
+
+  const snapshot = capturePlayerLocationSnapshot();
+  if (!snapshot || !hasPlayerLocationMeaningfullyChanged(snapshot)) {
+    nextPlayerLocationAutosaveAt = now + PLAYER_LOCATION_AUTOSAVE_MS;
+    return;
+  }
+
+  nextPlayerLocationAutosaveAt = now + PLAYER_LOCATION_AUTOSAVE_MS;
+  void queuePlayerLocationSave(snapshot, false);
+}
+
+function queueActivePlayerLocationSave(force = false): Promise<void> {
+  const snapshot = capturePlayerLocationSnapshot();
+  return snapshot ? queuePlayerLocationSave(snapshot, force) : Promise.resolve();
+}
+
+function queuePlayerLocationSave(snapshot: SavedPlayerStateSnapshot, force: boolean): Promise<void> {
+  if (!force && !hasPlayerLocationMeaningfullyChanged(snapshot)) return Promise.resolve();
+
+  const registry = worldRegistry;
+  const activeWorld = world;
+  if (!registry || !activeWorld) return Promise.resolve();
+
+  const worldId = activeWorld.storage.worldId;
+  lastSavedPlayerLocation = snapshot;
+  playerLocationSaveChain = playerLocationSaveChain
+    .catch(() => {
+      // Keep the chain alive after a previous failure; the warning is emitted by
+      // the failing write below where the original error is still available.
+    })
+    .then(async () => {
+      await registry.updatePlayerState(worldId, snapshot);
+    })
+    .catch((error) => {
+      console.warn("Could not persist player location", error);
+    });
+
+  return playerLocationSaveChain;
+}
+
+function capturePlayerLocationSnapshot(): SavedPlayerStateSnapshot | null {
+  if (!inWorld || !player) return null;
+
+  return {
+    feetPosition: {
+      x: roundPlayerLocationNumber(camera.position.x),
+      y: roundPlayerLocationNumber(player.getFeetY()),
+      z: roundPlayerLocationNumber(camera.position.z)
+    },
+    yaw: roundPlayerLocationNumber(player.yaw),
+    pitch: roundPlayerLocationNumber(player.pitch)
+  };
+}
+
+function hasPlayerLocationMeaningfullyChanged(snapshot: SavedPlayerStateSnapshot): boolean {
+  const previous = lastSavedPlayerLocation;
+  if (!previous) return true;
+
+  const dx = snapshot.feetPosition.x - previous.feetPosition.x;
+  const dy = snapshot.feetPosition.y - previous.feetPosition.y;
+  const dz = snapshot.feetPosition.z - previous.feetPosition.z;
+  const movedEnough = dx * dx + dy * dy + dz * dz >= PLAYER_LOCATION_POSITION_EPSILON ** 2;
+  const lookedEnough = (
+    Math.abs(snapshot.yaw - previous.yaw) >= PLAYER_LOCATION_LOOK_EPSILON ||
+    Math.abs(snapshot.pitch - previous.pitch) >= PLAYER_LOCATION_LOOK_EPSILON
+  );
+  return movedEnough || lookedEnough;
+}
+
+function roundPlayerLocationNumber(value: number): number {
+  return Math.round(value * PLAYER_LOCATION_SAVE_PRECISION) / PLAYER_LOCATION_SAVE_PRECISION;
 }
 
 function clearToys(): void {

@@ -4,8 +4,8 @@ A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rende
 
 World units are metric: `1 block = 1 meter`.
 
-Edited chunks persist in IndexedDB browser storage. Clear this site's browser data to reset saved worlds.
-The home screen creates and loads local saved worlds. New worlds store a name and seed.
+Edited chunks and the last player location persist in IndexedDB browser storage. Clear this site's browser data to reset saved worlds.
+The home screen creates and loads local saved worlds. New worlds store a name, seed, and resume location once played.
 
 ## Run
 
@@ -30,6 +30,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 - `WASD` move
 - Home screen creates, loads, or deletes a world through an in-app confirmation pane
+- Loading a world restores the last saved player location and look direction
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
@@ -70,7 +71,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
 - `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals
 - `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, and coalesced edited-chunk saves
-- `src/chunkStorage.ts`: IndexedDB adapter for saved worlds and edited chunk persistence
+- `src/chunkStorage.ts`: IndexedDB adapter for saved worlds, player resume location, and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building

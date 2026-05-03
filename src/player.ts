@@ -45,6 +45,12 @@ export type PlayerBounds = {
   readonly maxZ: number;
 };
 
+export type PlayerFeetPosition = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
 type CatchablePointerLockRequest = {
   catch(onRejected: () => void): unknown;
 };
@@ -230,6 +236,28 @@ export class PlayerController {
       document.exitPointerLock?.();
     }
     this.updateCursor();
+  }
+
+  teleportToFeetPosition(position: PlayerFeetPosition, yaw = this.yaw, pitch = this.pitch): void {
+    // Save/load uses feet position rather than raw camera height so a player who
+    // exits while crouched does not reload with their standing collision hull sunk
+    // into the terrain. Teleporting is also a clean movement-state reset.
+    this.velocity.set(0, 0, 0);
+    this.keys.clear();
+    this.onGround = false;
+    this.flying = false;
+    this.crouching = false;
+    this.slideMomentumAirborne = false;
+    this.endSlide();
+    this.crouchViewOffset = 0;
+    this.yaw = Number.isFinite(yaw) ? yaw : 0;
+    this.pitch = clamp(
+      Number.isFinite(pitch) ? pitch : 0,
+      -Math.PI / 2 + 0.02,
+      Math.PI / 2 - 0.02
+    );
+    this.camera.position.set(position.x, position.y + this.getVisualEyeHeight(), position.z);
+    this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
   }
 
   updateCursor(): void {

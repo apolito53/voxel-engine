@@ -42,7 +42,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Deterministic per-block tint buckets used by worker and fallback meshing: `src/blockColors.ts`
 - Block fracture grid, quality-scaled grid sampling, and debris sizing constants: `src/blockFragments.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
-- IndexedDB storage adapter for saved worlds, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
+- IndexedDB storage adapter for saved worlds, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
 - Seeded terrain generation shared by fallback and worker paths: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
@@ -81,7 +81,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 1. `index.html` loads `src/main.ts`.
 2. `main.ts` creates the Three.js renderer, scene, lights, camera-following generated skybox, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
-3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, or confirmed deletion updates the saved-world slots and active seed.
+3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, or confirmed deletion updates the saved-world slots, active seed, and optional player resume location.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; cached chunk-radius offsets populate the queue only when the player crosses a chunk boundary or the load radius changes, unchanged unload windows skip loaded-chunk sweeps, then chunk generation queues are picked as a bounded slice that keeps nearby chunks first and prioritizes chunks inside the camera view.
@@ -89,7 +89,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 8. Dirty chunks are tracked by key, then use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`; worker and fallback meshes both use `src/blockColors.ts` so deterministic tint buckets do not change between mesh paths.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
 10. Each visible animation frame updates player motion, Nova Pilot companion motion/reactions, chunk streaming, physics toys with reusable impact buffers, rubble-core collision, settled-fragment rubble absorption, rubble patch merge/support/fall/terrain-promotion rules, a sleep-aware split core/debris broadphase object-object collision pass, speed-gated impact damage, quality-scaled and slider-tuned physics body budgets, instanced debris render batches, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active; hidden tabs and long resume gaps skip the expensive frame once and reset profiler/minimap meters before play continues. The debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, miscellaneous work, fragment instancing pressure, and rubble cover pressure.
-11. `Exit to Home` flushes async chunk writes and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
+11. `Exit to Home` saves the player feet position plus look angles, flushes async chunk writes, and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
 13. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, and become persistent destructible rubble cover patches after settling, rather than staying as long-lived individual physics bodies. Rubble patches merge across neighboring same-height cells up to a bounded patch size, skip internal mesh faces so they read as connected debris, and check support each active frame: unsupported cells fall one voxel cell, falling cells merge into piles below, and dense supported cells compact into the generated solid `Rubble` block only after well over one full block-fracture worth of debris accumulates. Active cores can still shove loose fragments, collide with rubble patches, and chip rubble health without enabling debris-debris pair generation; `X` removes only thrown cores so rubble experiments can stay in place, while the settings-panel `Despawn All Objects` button clears cores, loose debris, and rubble. Cores also sleep after settling so old shots do not keep paying per-frame voxel collision cost forever.
 
@@ -98,7 +98,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Add, recolor, or retune block health: update `src/blocks.ts`; inspect deterministic tinting in `src/blockColors.ts`, mesh color use in `src/chunk.ts`, rubble promotion in `src/rubble.ts`, and debris color use in `src/physics.ts`.
 - Tune chunk dimensions: update `src/voxelConstants.ts`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
-- Tune saved worlds, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
+- Tune saved worlds, player resume location, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
 - Change Nova's companion behavior or pilot-thrown cores: `src/novaPilot.ts`, `KeyN`/`KeyB` hooks in `src/main.ts`, and shared physics-core construction in `createPhysicsCore`.
@@ -115,6 +115,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - `rg.exe` may be blocked on this Windows machine; fall back to bounded PowerShell searches.
 - `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
+- Player resume location is saved as feet position plus yaw/pitch in saved-world metadata; avoid storing raw camera height or crouch view offsets, or crouched exits can reload into terrain.
 - Edited chunk saves are debounced and coalesced per chunk so rapid destruction does not spam IndexedDB with intermediate snapshots; call `VoxelWorld.flushStorageWrites()` before switching storage or unloading a world.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.
 - Block tint variation is part of the greedy mesh key. Keep worker and fallback meshing on the shared `src/blockColors.ts` helpers so tint buckets stay deterministic and chunks do not repaint between mesh paths.

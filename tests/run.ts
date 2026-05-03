@@ -1047,6 +1047,41 @@ test("world registry deletes saved worlds and their edited chunks", async () => 
   );
 });
 
+test("world registry stores player location with saved-world metadata", async () => {
+  const database = createMemorySaveDatabase();
+  const registry = await createWorldRegistry(database);
+  const world = await registry.createWorld("Location Test", "location-seed");
+
+  await registry.updatePlayerState(world.id, {
+    feetPosition: { x: 12.5, y: 32.25, z: -7.75 },
+    yaw: 1.125,
+    pitch: -0.35
+  });
+
+  const savedWorld = await registry.getActiveWorld();
+  const playerState = savedWorld.playerState;
+  assert(playerState, "player-state save should be attached to the active world");
+  assertDeepEqual(
+    playerState.feetPosition,
+    { x: 12.5, y: 32.25, z: -7.75 },
+    "saved location should preserve player feet position"
+  );
+  assertEqual(playerState.yaw, 1.125, "saved location should preserve horizontal look angle");
+  assertEqual(playerState.pitch, -0.35, "saved location should preserve vertical look angle");
+  assert(playerState.savedAt > 0, "saved location should include a write timestamp");
+  assert(
+    savedWorld.updatedAt >= playerState.savedAt,
+    "saving player location should refresh the world's updated timestamp"
+  );
+
+  (playerState as unknown as { feetPosition: { x: number } }).feetPosition.x = 99;
+  assertEqual(
+    (await registry.getActiveWorld()).playerState?.feetPosition.x,
+    12.5,
+    "registry reads should deep-clone player location metadata"
+  );
+});
+
 test("delete-world dialog copy names the save and warns about permanence", () => {
   const copy = createDeleteWorldDialogCopy({
     id: "world-copy-test",

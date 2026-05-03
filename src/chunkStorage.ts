@@ -18,6 +18,23 @@ export type SavedWorld = {
   seed: string;
   createdAt: number;
   updatedAt: number;
+  playerState?: SavedPlayerState;
+};
+
+export type SavedPlayerPosition = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
+export type SavedPlayerStateSnapshot = {
+  readonly feetPosition: SavedPlayerPosition;
+  readonly yaw: number;
+  readonly pitch: number;
+};
+
+export type SavedPlayerState = SavedPlayerStateSnapshot & {
+  readonly savedAt: number;
 };
 
 export interface SaveDatabase {
@@ -27,6 +44,7 @@ export interface SaveDatabase {
   getWorld(worldId: string): Promise<SavedWorld | null>;
   putWorld(world: SavedWorld): Promise<void>;
   updateWorldTimestamp(worldId: string): Promise<void>;
+  updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null>;
   deleteWorld(worldId: string): Promise<void>;
   listChunkKeys(worldId: string): Promise<string[]>;
   loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null>;
@@ -160,11 +178,18 @@ class IndexedDbSaveDatabase implements SaveDatabase {
   }
 
   async updateWorldTimestamp(worldId: string): Promise<void> {
-    const world = await this.getWorld(worldId);
-    if (!world) return;
+    await this.updateWorldRecord(worldId, (world) => ({
+      ...world,
+      updatedAt: Date.now()
+    }));
+  }
 
-    world.updatedAt = Date.now();
-    await this.putWorld(world);
+  async updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null> {
+    return this.updateWorldRecord(worldId, (world) => ({
+      ...world,
+      playerState: cloneSavedPlayerState(playerState),
+      updatedAt: Date.now()
+    }));
   }
 
   async deleteWorld(worldId: string): Promise<void> {
@@ -257,6 +282,27 @@ class IndexedDbSaveDatabase implements SaveDatabase {
     await requestToPromise(transaction.objectStore(storeName).delete(key));
     await done;
   }
+
+  private async updateWorldRecord(
+    worldId: string,
+    update: (world: SavedWorld) => SavedWorld
+  ): Promise<SavedWorld | null> {
+    const transaction = this.database.transaction(WORLDS_STORE, "readwrite");
+    const done = transactionDone(transaction);
+    const store = transaction.objectStore(WORLDS_STORE);
+    const currentWorld = normalizeWorld(await requestToPromise(store.get(worldId)));
+    if (!currentWorld) {
+      await done;
+      return null;
+    }
+
+    // Keep metadata mutations in one readwrite transaction so chunk-save timestamp
+    // touches cannot accidentally overwrite player-location saves from a stale read.
+    const nextWorld = update(currentWorld);
+    await requestToPromise(store.put(cloneSavedWorld(nextWorld)));
+    await done;
+    return cloneSavedWorld(nextWorld);
+  }
 }
 
 class MemorySaveDatabase implements SaveDatabase {
@@ -288,8 +334,23 @@ class MemorySaveDatabase implements SaveDatabase {
     const world = this.worlds.get(worldId);
     if (!world) return;
 
-    world.updatedAt = Date.now();
-    this.worlds.set(worldId, cloneSavedWorld(world));
+    this.worlds.set(worldId, cloneSavedWorld({
+      ...world,
+      updatedAt: Date.now()
+    }));
+  }
+
+  async updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null> {
+    const world = this.worlds.get(worldId);
+    if (!world) return null;
+
+    const updatedWorld = cloneSavedWorld({
+      ...world,
+      playerState: cloneSavedPlayerState(playerState),
+      updatedAt: Date.now()
+    });
+    this.worlds.set(worldId, updatedWorld);
+    return cloneSavedWorld(updatedWorld);
   }
 
   async deleteWorld(worldId: string): Promise<void> {
@@ -464,6 +525,16 @@ export class WorldRegistry {
       updatedAt: now
     });
   }
+
+  async updatePlayerState(
+    worldId: string,
+    snapshot: SavedPlayerStateSnapshot
+  ): Promise<SavedWorld | null> {
+    const playerState = createSavedPlayerState(snapshot);
+    if (!playerState) return null;
+
+    return this.database.updateWorldPlayerState(worldId, playerState);
+  }
 }
 
 function readIndexedDb(): IDBFactory | null {
@@ -516,13 +587,18 @@ function normalizeWorld(world: unknown): SavedWorld | null {
   if (!isRecord(world) || typeof world.id !== "string") return null;
 
   // Normalize on read so future metadata additions can be optional and backwards-compatible.
-  return {
+  const normalizedWorld: SavedWorld = {
     id: world.id,
     name: sanitizeWorldName(world.name),
     seed: sanitizeWorldSeed(world.seed),
     createdAt: readTimestamp(world.createdAt),
     updatedAt: readTimestamp(world.updatedAt)
   };
+
+  const playerState = normalizeSavedPlayerState(world.playerState);
+  if (playerState) normalizedWorld.playerState = playerState;
+
+  return normalizedWorld;
 }
 
 function cloneWorld(world: SavedWorld | undefined | null): SavedWorld | null {
@@ -530,7 +606,9 @@ function cloneWorld(world: SavedWorld | undefined | null): SavedWorld | null {
 }
 
 function cloneSavedWorld(world: SavedWorld): SavedWorld {
-  return { ...world };
+  const clonedWorld: SavedWorld = { ...world };
+  if (world.playerState) clonedWorld.playerState = cloneSavedPlayerState(world.playerState);
+  return clonedWorld;
 }
 
 function readTimestamp(value: unknown): number {
@@ -539,6 +617,54 @@ function readTimestamp(value: unknown): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function createSavedPlayerState(snapshot: SavedPlayerStateSnapshot): SavedPlayerState | null {
+  const normalizedSnapshot = normalizeSavedPlayerState({
+    ...snapshot,
+    savedAt: Date.now()
+  });
+  return normalizedSnapshot;
+}
+
+function normalizeSavedPlayerState(value: unknown): SavedPlayerState | null {
+  if (!isRecord(value)) return null;
+
+  // The persisted point is the player's feet, not the camera. That keeps crouch
+  // view smoothing from turning into a corrupted spawn height after reload.
+  const rawFeetPosition = isRecord(value.feetPosition)
+    ? value.feetPosition
+    : isRecord(value.position)
+      ? value.position
+      : null;
+  if (!rawFeetPosition) return null;
+
+  const x = readFiniteNumber(rawFeetPosition.x);
+  const y = readFiniteNumber(rawFeetPosition.y);
+  const z = readFiniteNumber(rawFeetPosition.z);
+  const yaw = readFiniteNumber(value.yaw);
+  const pitch = readFiniteNumber(value.pitch);
+  if (x === null || y === null || z === null || yaw === null || pitch === null) return null;
+
+  return {
+    feetPosition: { x, y, z },
+    yaw,
+    pitch,
+    savedAt: readTimestamp(value.savedAt)
+  };
+}
+
+function cloneSavedPlayerState(playerState: SavedPlayerState): SavedPlayerState {
+  return {
+    feetPosition: { ...playerState.feetPosition },
+    yaw: playerState.yaw,
+    pitch: playerState.pitch,
+    savedAt: playerState.savedAt
+  };
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function cloneChunkBuffer(blocks: Uint8Array): ArrayBuffer {

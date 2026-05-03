@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.11 - 2026-05-02
+
+### Added
+
+- Saved worlds now remember the player's last feet position plus yaw/pitch look direction, restoring that location when the world is loaded again.
+- Added a bounded player-location autosave path that writes periodically during play and also saves on pause, page hide, and `Exit to Home`.
+- Added regression coverage for player-location metadata persistence and deep cloning in the saved-world registry.
+
+### Changed
+
+- World loading now preloads and ensures chunks around the saved player location instead of always starting around the origin.
+- Player teleports now reset movement/crouch/slide state from a feet-position anchor so crouched exits do not reload the camera inside terrain.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app, loaded `Default World`, paused to trigger the player-location save path, and confirmed no fresh app console errors.
+
 ## 0.2.10 - 2026-05-02
 
 ### Added
