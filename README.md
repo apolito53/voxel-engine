@@ -67,7 +67,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
-Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality. Debris is temporary: nearby fractures share a short settling region, visible cubes tumble, briefly stack, and clump for a moment, then the region finalizes into the cheap persistent rubble field instead of keeping thousands of little physics bodies alive.
+Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality. Debris is temporary: nearby fractures share a short settling region, visible cubes tumble, briefly stack, and clump until they go quiet, then the region finalizes into the cheap persistent rubble field instead of keeping thousands of little physics bodies alive.
 
 ## Engine Pieces
 

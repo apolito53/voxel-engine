@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 - 2026-05-03
+
+### Fixed
+
+- Settling regions now wait for visible fragments to go quiet before soft finalization, preventing mid-bounce debris poses from being frozen into permanent rubble.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.0 - 2026-05-03
 
 ### Added

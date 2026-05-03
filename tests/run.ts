@@ -131,6 +131,7 @@ import {
   DEBRIS_REGION_FINALIZE_SECONDS,
   DEBRIS_REGION_MAX_SECONDS,
   DEBRIS_REGION_PAIR_BUDGET,
+  DEBRIS_REGION_SETTLED_FINALIZE_SECONDS,
   DebrisSettler
 } from "../src/debrisSettler";
 import { createEngineEventBus } from "../src/engineEvents";
@@ -1639,6 +1640,31 @@ function createTestFragment(
   );
 }
 
+function sleepTestFragment(fragment: PhysicsToy): void {
+  const floorY = Math.floor(fragment.mesh.position.y) - 1;
+  const floorWorld = {
+    isSolid(_x: number, y: number, _z: number): boolean {
+      return y === floorY;
+    }
+  };
+
+  // Put the sphere-ish fragment in a tiny, stable floor overlap and let the
+  // real sleep logic trip. Tests should use the same "settled" signal as the
+  // browser loop instead of poking private settler state.
+  fragment.mesh.position.y = floorY + 1 + fragment.radius * 0.5;
+  fragment.velocity.set(0, 0, 0);
+  for (let frame = 0; frame < 30 && !fragment.isSleeping; frame += 1) {
+    fragment.update(1 / 60, floorWorld);
+  }
+  assert(fragment.isSleeping, "test fragment should reach the same sleeping state as settled browser debris");
+}
+
+function sleepTestFragments(fragments: readonly PhysicsToy[]): void {
+  for (const fragment of fragments) {
+    sleepTestFragment(fragment);
+  }
+}
+
 test("debris settler merges adjacent fractures into one region", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -1743,8 +1769,10 @@ test("debris settler finalizes potato fragments into full rubble material", () =
       getBlockFragmentMaterialUnits(index, fragmentCount)
     ));
   }
+  sleepTestFragments(fragments);
 
   settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), fragments);
+  settler.update(0, rubble);
   const beforeFinalize = settler.update(DEBRIS_REGION_FINALIZE_SECONDS - 0.01, rubble);
   assertEqual(beforeFinalize.finalizedBatches, 0, "region should stay visible before the finalize delay");
 
@@ -1759,6 +1787,34 @@ test("debris settler finalizes potato fragments into full rubble material", () =
   );
   settler.forget(fragments[0]);
   assert(!settler.owns(fragments[0]), "normal toy removal should clear the stale finalized-fragment ownership marker");
+});
+
+test("debris settler waits for quiet fragments before soft finalization", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const fragments = [
+    createTestFragment(BLOCK.dirt, 0.5, 1.2, 0.5),
+    createTestFragment(BLOCK.dirt, 0.6, 1.2, 0.5)
+  ];
+  fragments[0]?.velocity.set(1.2, 0.4, 0);
+  fragments[1]?.velocity.set(-1.2, 0.4, 0);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.2, 0.5), fragments);
+  const afterSoftDeadline = settler.update(DEBRIS_REGION_FINALIZE_SECONDS + 0.02, rubble);
+  assertEqual(
+    afterSoftDeadline.finalizedBatches,
+    0,
+    "active debris should not freeze into rubble just because the fracture timer elapsed"
+  );
+
+  sleepTestFragments(fragments);
+  const settledFrame = settler.update(0, rubble);
+  assertEqual(settledFrame.finalizedBatches, 0, "settle detection should mark quiet debris without finalizing immediately");
+  const justSettled = settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS - 0.01, rubble);
+  assertEqual(justSettled.finalizedBatches, 0, "newly quiet debris should get a short settle grace");
+
+  const afterQuietGrace = settler.update(0.02, rubble);
+  assertEqual(afterQuietGrace.finalizedBatches, 1, "quiet debris should finalize after the settle grace");
 });
 
 test("debris settler hard-caps region lifetime after repeated nearby fractures", () => {

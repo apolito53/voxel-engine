@@ -7,6 +7,7 @@ export const DEBRIS_REGION_HORIZONTAL_MERGE_RADIUS = 2.5;
 export const DEBRIS_REGION_VERTICAL_MERGE_RADIUS = 1.5;
 export const DEBRIS_REGION_COLLISION_SECONDS = 0.55;
 export const DEBRIS_REGION_FINALIZE_SECONDS = 0.6;
+export const DEBRIS_REGION_SETTLED_FINALIZE_SECONDS = 0.15;
 export const DEBRIS_REGION_MAX_SECONDS = 1.2;
 export const DEBRIS_REGION_PAIR_BUDGET = 768;
 
@@ -30,6 +31,7 @@ type SettlingRegion = {
   collisionUntil: number;
   finalizeAt: number;
   maxFinalizeAt: number;
+  settledAt: number | null;
 };
 
 export type DebrisSettlerStats = {
@@ -148,7 +150,8 @@ export class DebrisSettler {
       fractureCount: 0,
       collisionUntil: this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS,
       finalizeAt: this.elapsedSeconds + DEBRIS_REGION_FINALIZE_SECONDS,
-      maxFinalizeAt: this.elapsedSeconds + DEBRIS_REGION_MAX_SECONDS
+      maxFinalizeAt: this.elapsedSeconds + DEBRIS_REGION_MAX_SECONDS,
+      settledAt: null
     };
     this.nextRegionId += 1;
     this.regionsById.set(region.id, region);
@@ -172,6 +175,7 @@ export class DebrisSettler {
       region.collisionUntil,
       this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS
     );
+    region.settledAt = null;
     region.finalizeAt = Math.min(
       this.elapsedSeconds + DEBRIS_REGION_FINALIZE_SECONDS,
       region.maxFinalizeAt
@@ -227,6 +231,7 @@ export class DebrisSettler {
       target.collisionUntil = Math.max(target.collisionUntil, source.collisionUntil);
       target.maxFinalizeAt = Math.min(target.maxFinalizeAt, source.maxFinalizeAt);
       target.finalizeAt = Math.min(Math.max(target.finalizeAt, source.finalizeAt), target.maxFinalizeAt);
+      target.settledAt = null;
 
       for (const fragment of source.fragments) {
         target.fragments.add(fragment);
@@ -246,10 +251,36 @@ export class DebrisSettler {
   private finalizeDueRegions(rubbleField: RubbleField): void {
     for (const region of this.getRegionsOldestFirst()) {
       if (!this.regionsById.has(region.id)) continue;
-      if (this.elapsedSeconds < region.finalizeAt && this.elapsedSeconds < region.maxFinalizeAt) continue;
+      this.updateRegionFinalizationDeadline(region);
 
-      this.finalizeRegion(region, rubbleField, false);
+      const reachedHardCap = this.elapsedSeconds >= region.maxFinalizeAt;
+      const reachedSettledDeadline = region.settledAt !== null && this.elapsedSeconds >= region.finalizeAt;
+      if (!reachedHardCap && !reachedSettledDeadline) continue;
+
+      this.finalizeRegion(region, rubbleField, reachedHardCap);
     }
+  }
+
+  private updateRegionFinalizationDeadline(region: SettlingRegion): void {
+    const liveFragments = [...region.fragments].filter((fragment) => !fragment.isExpired);
+    const regionIsQuiet = liveFragments.length === 0 || liveFragments.every((fragment) => fragment.isSleeping);
+    if (!regionIsQuiet) {
+      region.settledAt = null;
+      return;
+    }
+
+    if (region.settledAt === null) {
+      region.settledAt = this.elapsedSeconds;
+    }
+
+    // The original fracture timer is still the "show the little cubes for a
+    // beat" floor, but late-bouncing debris now waits until it actually sleeps.
+    // This keeps us from freezing a chaotic mid-bounce pose into permanent
+    // rubble while the hard cap still prevents immortal region bookkeeping.
+    region.finalizeAt = Math.min(
+      Math.max(region.finalizeAt, region.settledAt + DEBRIS_REGION_SETTLED_FINALIZE_SECONDS),
+      region.maxFinalizeAt
+    );
   }
 
   private enforcePairBudget(rubbleField: RubbleField): void {
