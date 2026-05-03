@@ -11,20 +11,33 @@ export const DEBRIS_REGION_SETTLED_FINALIZE_SECONDS = 0.15;
 export const DEBRIS_REGION_MAX_SECONDS = 1.2;
 export const DEBRIS_REGION_PAIR_BUDGET = 768;
 
-const DEBRIS_REGION_COLLISION_RESTITUTION = 0.18;
-const DEBRIS_REGION_COLLISION_DAMPING = 0.82;
+const DEBRIS_REGION_COLLISION_RESTITUTION = 0.06;
+const DEBRIS_REGION_COLLISION_DAMPING = 0.74;
 const DEBRIS_REGION_COLLISION_EPSILON = 0.000001;
 const DEBRIS_REGION_FRAGMENT_RADIUS_SCALE = 0.78;
-const DEBRIS_REGION_COHESION_ACCELERATION = 6.5;
+const DEBRIS_REGION_COHESION_ACCELERATION = 9.5;
+const DEBRIS_REGION_GLUE_CAPTURE_SLOP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.18;
+const DEBRIS_REGION_STICKY_RETAINED_OVERLAP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.18;
+const DEBRIS_REGION_STICKY_HORIZONTAL_BLEND = 0.72;
+const DEBRIS_REGION_STICKY_VERTICAL_BLEND = 0.35;
+const DEBRIS_REGION_GLUE_POSITION_RESPONSE = 0.7;
+const DEBRIS_REGION_MAX_GLUE_LINKS = 192;
 const DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.95;
 const DEBRIS_REGION_STACK_VERTICAL_RANGE = BLOCK_FRAGMENT_VISUAL_SIZE * 1.8;
 const DEBRIS_REGION_STACK_CENTER_SEPARATION = BLOCK_FRAGMENT_VISUAL_SIZE * 0.96;
 const RUBBLE_SAMPLE_JITTER_RADIUS = 0.24;
 
+type DebrisGlueLink = {
+  readonly left: PhysicsToy;
+  readonly right: PhysicsToy;
+  readonly restOffset: THREE.Vector3;
+};
+
 type SettlingRegion = {
   readonly id: number;
   readonly center: THREE.Vector3;
   readonly fragments: Set<PhysicsToy>;
+  readonly glueLinks: Map<string, DebrisGlueLink>;
   readonly materialUnitsByBlock: Map<number, number>;
   createdAt: number;
   fractureCount: number;
@@ -80,7 +93,9 @@ export class DebrisSettler {
   private readonly scratchPosition = new THREE.Vector3();
   private readonly finalizedBatches: DebrisSettledBatch[] = [];
   private readonly stats: MutableDebrisSettlerStats = createEmptyDebrisSettlerStats();
+  private readonly fragmentIds = new WeakMap<PhysicsToy, number>();
   private nextRegionId = 1;
+  private nextFragmentId = 1;
   private elapsedSeconds = 0;
 
   registerFracture(
@@ -129,6 +144,7 @@ export class DebrisSettler {
     if (!region) return;
 
     region.fragments.delete(toy);
+    this.removeGlueLinksForFragment(region, toy);
     if (region.fragments.size === 0) {
       this.regionsById.delete(region.id);
     }
@@ -145,6 +161,7 @@ export class DebrisSettler {
       id: this.nextRegionId,
       center: center.clone(),
       fragments: new Set(),
+      glueLinks: new Map(),
       materialUnitsByBlock: new Map(),
       createdAt: this.elapsedSeconds,
       fractureCount: 0,
@@ -237,6 +254,9 @@ export class DebrisSettler {
         target.fragments.add(fragment);
         this.fragmentRegionIds.set(fragment, target.id);
       }
+      for (const link of source.glueLinks.values()) {
+        target.glueLinks.set(this.getGlueLinkKey(link.left, link.right), link);
+      }
       for (const [block, materialUnits] of source.materialUnitsByBlock) {
         target.materialUnitsByBlock.set(
           block,
@@ -303,6 +323,7 @@ export class DebrisSettler {
 
       const fragments = this.getLiveFragments(region);
       this.applyRegionCohesion(region, fragments, delta);
+      this.enforceGlueLinks(region);
       for (let leftIndex = 0; leftIndex < fragments.length - 1; leftIndex += 1) {
         const left = fragments[leftIndex];
         if (!left) continue;
@@ -319,6 +340,7 @@ export class DebrisSettler {
           }
         }
       }
+      this.enforceGlueLinks(region);
     }
   }
 
@@ -331,27 +353,21 @@ export class DebrisSettler {
       BLOCK_FRAGMENT_VISUAL_SIZE,
       (left.radius + right.radius) * DEBRIS_REGION_FRAGMENT_RADIUS_SCALE
     );
+    const glueContactRadius = combinedRadius + DEBRIS_REGION_GLUE_CAPTURE_SLOP;
     const distanceSq = this.normal.subVectors(rightPosition, leftPosition).lengthSq();
-    if (distanceSq >= combinedRadius * combinedRadius) return false;
+    if (distanceSq >= glueContactRadius * glueContactRadius) return false;
 
     const distance = Math.sqrt(distanceSq);
-    if (distance > DEBRIS_REGION_COLLISION_EPSILON) {
-      this.normal.multiplyScalar(1 / distance);
-    } else {
-      this.normal.copy(right.velocity).sub(left.velocity);
-      if (this.normal.lengthSq() <= DEBRIS_REGION_COLLISION_EPSILON) {
-        this.normal.set(1, 0, 0);
-      } else {
-        this.normal.normalize();
-      }
-    }
+    this.normalizePairNormal(left, right, distance);
 
     const inverseMassSum = left.inverseMass + right.inverseMass;
     if (inverseMassSum <= 0) return false;
 
-    const penetration = combinedRadius - distance;
-    leftPosition.addScaledVector(this.normal, -(penetration * left.inverseMass) / inverseMassSum);
-    rightPosition.addScaledVector(this.normal, (penetration * right.inverseMass) / inverseMassSum);
+    const penetration = Math.max(0, combinedRadius - distance);
+    const retainedOverlap = Math.min(penetration, DEBRIS_REGION_STICKY_RETAINED_OVERLAP);
+    const correction = Math.max(0, penetration - retainedOverlap);
+    leftPosition.addScaledVector(this.normal, -(correction * left.inverseMass) / inverseMassSum);
+    rightPosition.addScaledVector(this.normal, (correction * right.inverseMass) / inverseMassSum);
 
     this.relativeVelocity.copy(right.velocity).sub(left.velocity);
     const closingSpeed = this.relativeVelocity.dot(this.normal);
@@ -365,10 +381,131 @@ export class DebrisSettler {
     }
 
     this.resolveStackContact(left, right);
+    this.applyStickyVelocityBlend(left, right);
+    this.glueFragmentPair(left, right);
 
     left.velocity.multiplyScalar(DEBRIS_REGION_COLLISION_DAMPING);
     right.velocity.multiplyScalar(DEBRIS_REGION_COLLISION_DAMPING);
     return true;
+  }
+
+  private normalizePairNormal(left: PhysicsToy, right: PhysicsToy, distance: number): void {
+    if (distance > DEBRIS_REGION_COLLISION_EPSILON) {
+      this.normal.multiplyScalar(1 / distance);
+      return;
+    }
+
+    this.normal.copy(right.velocity).sub(left.velocity);
+    if (this.normal.lengthSq() <= DEBRIS_REGION_COLLISION_EPSILON) {
+      this.normal.set(1, 0, 0);
+    } else {
+      this.normal.normalize();
+    }
+  }
+
+  private applyStickyVelocityBlend(left: PhysicsToy, right: PhysicsToy): void {
+    const averageX = (left.velocity.x + right.velocity.x) * 0.5;
+    const averageY = (left.velocity.y + right.velocity.y) * 0.5;
+    const averageZ = (left.velocity.z + right.velocity.z) * 0.5;
+
+    left.velocity.x += (averageX - left.velocity.x) * DEBRIS_REGION_STICKY_HORIZONTAL_BLEND;
+    right.velocity.x += (averageX - right.velocity.x) * DEBRIS_REGION_STICKY_HORIZONTAL_BLEND;
+    left.velocity.z += (averageZ - left.velocity.z) * DEBRIS_REGION_STICKY_HORIZONTAL_BLEND;
+    right.velocity.z += (averageZ - right.velocity.z) * DEBRIS_REGION_STICKY_HORIZONTAL_BLEND;
+
+    // Vertical glue stays weaker so a top fragment can still look like it is
+    // tumbling down onto the pile instead of every cube becoming one welded
+    // clump in mid-air.
+    left.velocity.y += (averageY - left.velocity.y) * DEBRIS_REGION_STICKY_VERTICAL_BLEND;
+    right.velocity.y += (averageY - right.velocity.y) * DEBRIS_REGION_STICKY_VERTICAL_BLEND;
+  }
+
+  private glueFragmentPair(left: PhysicsToy, right: PhysicsToy): void {
+    const regionId = this.fragmentRegionIds.get(left);
+    if (regionId === undefined || this.fragmentRegionIds.get(right) !== regionId) return;
+
+    const region = this.regionsById.get(regionId);
+    if (!region || region.glueLinks.size >= DEBRIS_REGION_MAX_GLUE_LINKS) return;
+
+    const linkKey = this.getGlueLinkKey(left, right);
+    if (region.glueLinks.has(linkKey)) return;
+
+    const restOffset = right.mesh.position.clone().sub(left.mesh.position);
+    if (restOffset.lengthSq() <= DEBRIS_REGION_COLLISION_EPSILON) {
+      restOffset.copy(this.normal).multiplyScalar(BLOCK_FRAGMENT_VISUAL_SIZE);
+    }
+
+    // Contact glue is the visible lie the player asked for: once two chunks
+    // touch during the short settling window, they stop spinning independently
+    // and behave like a tiny joined clump until the region becomes cheap rubble.
+    region.glueLinks.set(linkKey, { left, right, restOffset });
+    left.angularVelocity.set(0, 0, 0);
+    right.angularVelocity.set(0, 0, 0);
+    this.applyStickyVelocityBlend(left, right);
+  }
+
+  private enforceGlueLinks(region: SettlingRegion): void {
+    for (const [linkKey, link] of region.glueLinks) {
+      if (
+        link.left.isExpired ||
+        link.right.isExpired ||
+        link.left.isSleeping ||
+        link.right.isSleeping ||
+        !region.fragments.has(link.left) ||
+        !region.fragments.has(link.right)
+      ) {
+        region.glueLinks.delete(linkKey);
+        continue;
+      }
+
+      link.left.angularVelocity.set(0, 0, 0);
+      link.right.angularVelocity.set(0, 0, 0);
+      this.applyStickyVelocityBlend(link.left, link.right);
+
+      const inverseMassSum = link.left.inverseMass + link.right.inverseMass;
+      if (inverseMassSum <= 0) continue;
+
+      this.scratchPosition
+        .copy(link.right.mesh.position)
+        .sub(link.left.mesh.position)
+        .sub(link.restOffset)
+        .multiplyScalar(DEBRIS_REGION_GLUE_POSITION_RESPONSE);
+
+      link.left.mesh.position.addScaledVector(
+        this.scratchPosition,
+        (link.left.inverseMass) / inverseMassSum
+      );
+      link.right.mesh.position.addScaledVector(
+        this.scratchPosition,
+        -(link.right.inverseMass) / inverseMassSum
+      );
+    }
+  }
+
+  private removeGlueLinksForFragment(region: SettlingRegion, toy: PhysicsToy): void {
+    for (const [linkKey, link] of region.glueLinks) {
+      if (link.left === toy || link.right === toy) {
+        region.glueLinks.delete(linkKey);
+      }
+    }
+  }
+
+  private getGlueLinkKey(left: PhysicsToy, right: PhysicsToy): string {
+    const leftId = this.getFragmentId(left);
+    const rightId = this.getFragmentId(right);
+    return leftId < rightId
+      ? `${leftId}:${rightId}`
+      : `${rightId}:${leftId}`;
+  }
+
+  private getFragmentId(fragment: PhysicsToy): number {
+    const existingId = this.fragmentIds.get(fragment);
+    if (existingId !== undefined) return existingId;
+
+    const id = this.nextFragmentId;
+    this.nextFragmentId += 1;
+    this.fragmentIds.set(fragment, id);
+    return id;
   }
 
   private resolveStackContact(left: PhysicsToy, right: PhysicsToy): void {

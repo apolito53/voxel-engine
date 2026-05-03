@@ -45,7 +45,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, and fracturing destroyed terrain into quality-scaled tumbling cube fragments that briefly collide, stack, and clump inside nearby settling regions before becoming sloped, walkable rubble cover patches; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, and fracturing destroyed terrain into quality-scaled tumbling cube fragments that briefly collide, glue together on contact, stack, and clump inside nearby settling regions before becoming sloped, walkable rubble cover patches; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -67,7 +67,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
-Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality. Debris is temporary: nearby fractures share a short settling region, visible cubes tumble, briefly stack, and clump until they go quiet, then the region finalizes into the cheap persistent rubble field instead of keeping thousands of little physics bodies alive.
+Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality. Debris is temporary: nearby fractures share a short settling region, visible cubes tumble, glue together on contact, stack, and clump until they go quiet, then the region finalizes into the cheap persistent rubble field. Final rubble keeps bounded surface samples from the settled fragments and renders a low-poly sheet draped over those samples instead of keeping thousands of little physics bodies alive.
 
 ## Engine Pieces
 
@@ -85,13 +85,13 @@ Lower visible debris counts are only a rendering/performance compromise. Destroy
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
-- `src/debrisSettler.ts`: short-lived settling regions, same-region debris clumping, pair-budget pressure relief, and batched debris-to-rubble finalization
+- `src/debrisSettler.ts`: short-lived settling regions, same-region debris glue links, pair-budget pressure relief, and batched debris-to-rubble finalization
 - `src/fragmentRubble.ts`: settled/expired debris-to-rubble eligibility rules that keep low-quality debris cleanup from deleting gameplay material
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, cube-fragment tumble state, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments, including per-fragment tumble rotation, so thousands of shards do not become thousands of scene meshes
-- `src/rubble.ts`: persistent sloped destructible rubble cover patches, batched absorption, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
+- `src/rubble.ts`: persistent draped destructible rubble cover patches, batched absorption, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading

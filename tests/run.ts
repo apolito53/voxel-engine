@@ -1732,6 +1732,40 @@ test("debris settler resolves same-region fragments but not cross-region fragmen
   assertEqual(crossRegionStats.resolvedPairs, 0, "cross-region debris should remain cheap");
 });
 
+test("debris settler glue contacts arrest rotation and hold same-region fragments together", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  left.velocity.set(-1.5, 0, 0);
+  right.velocity.set(1.5, 0, 0);
+  left.angularVelocity.set(3, 1, 0);
+  right.angularVelocity.set(-2, 0, 1);
+
+  const distanceBefore = left.mesh.position.distanceTo(right.mesh.position);
+  const relativeSpeedBefore = right.velocity.clone().sub(left.velocity).length();
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  const stats = settler.update(0.01, rubble);
+  const distanceAfter = left.mesh.position.distanceTo(right.mesh.position);
+  const relativeSpeedAfter = right.velocity.clone().sub(left.velocity).length();
+
+  assertEqual(stats.pairChecks, 1, "near-touching same-region debris should still get one local pair check");
+  assertEqual(stats.resolvedPairs, 1, "near-touching same-region debris should resolve as a sticky contact");
+  assert(
+    distanceAfter <= distanceBefore,
+    "glued debris contacts should not let touching fragments drift apart before rubble finalization"
+  );
+  assert(
+    relativeSpeedAfter < relativeSpeedBefore * 0.5,
+    "glued debris contacts should bleed separating speed so fragments clump instead of skating apart"
+  );
+  assertEqual(
+    left.angularVelocity.lengthSq() + right.angularVelocity.lengthSq(),
+    0,
+    "glued debris contacts should stop independent cube spin once fragments stick together"
+  );
+});
+
 test("debris settler supports short-lived stacked fragment contacts", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -1920,8 +1954,8 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
   assertEqual(rubbleStats.health, 2, "absorbed fragments should add destructible cover health");
   assert(
-    rubbleStats.maxCoverHeight > 0.12 && rubbleStats.maxCoverHeight < 0.2,
-    "absorbed fragments should report gameplay cover pressure"
+    rubbleStats.maxCoverHeight > 0.2 && rubbleStats.maxCoverHeight < 0.4,
+    "absorbed fragments should report the draped surface height over the visible debris"
   );
 
   const hit = rubble.raycast(

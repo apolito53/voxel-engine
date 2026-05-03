@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2 - 2026-05-03
+
+### Changed
+
+- Same-region block debris now uses temporary glue contacts: fragments that touch during the settling window share velocity, stop independent rotation, and hold a tiny link until the region finalizes.
+- Rubble finalization now keeps bounded surface samples from the settled debris and builds a draped, jagged top surface over those samples instead of flattening each pile into a simple cell lid.
+- Lowered temporary debris-debris bounce during settling so rubble formation reads more like tumbling material and less like loose rubber cubes.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.1 - 2026-05-03
 
 ### Fixed
