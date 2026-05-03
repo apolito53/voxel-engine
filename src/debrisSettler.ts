@@ -10,9 +10,14 @@ export const DEBRIS_REGION_FINALIZE_SECONDS = 0.6;
 export const DEBRIS_REGION_SETTLED_FINALIZE_SECONDS = 0.15;
 export const DEBRIS_REGION_MAX_SECONDS = 1.2;
 export const DEBRIS_REGION_PAIR_BUDGET = 768;
+export const DEBRIS_REGION_GLUE_BREAKUP_SECONDS = 0.14;
 
+const DEBRIS_REGION_QUIET_SPEED = 0.65;
+const DEBRIS_REGION_QUIET_ANGULAR_SPEED = 1.25;
 const DEBRIS_REGION_COLLISION_RESTITUTION = 0.06;
 const DEBRIS_REGION_COLLISION_DAMPING = 0.74;
+const DEBRIS_REGION_BREAKUP_RESTITUTION = 0.24;
+const DEBRIS_REGION_BREAKUP_DAMPING = 0.96;
 const DEBRIS_REGION_COLLISION_EPSILON = 0.000001;
 const DEBRIS_REGION_FRAGMENT_RADIUS_SCALE = 0.78;
 const DEBRIS_REGION_COHESION_ACCELERATION = 9.5;
@@ -42,6 +47,7 @@ type SettlingRegion = {
   createdAt: number;
   fractureCount: number;
   collisionUntil: number;
+  glueAfter: number;
   finalizeAt: number;
   maxFinalizeAt: number;
   settledAt: number | null;
@@ -120,9 +126,15 @@ export class DebrisSettler {
   update(delta: number, rubbleField: RubbleField): DebrisSettlerStats {
     this.elapsedSeconds += Math.max(0, delta);
     this.resetFrameStats();
-    this.finalizeDueRegions(rubbleField);
+
+    // Pair checks are short-lived, but glue links must keep shaping the heap
+    // until the region converts. Otherwise the old per-fragment physics path
+    // pulls a nice clump back down into one flat floor layer before absorption.
+    this.enforceExistingGlueLinks();
     this.enforcePairBudget(rubbleField);
     this.resolveActiveRegionCollisions(Math.max(0, delta));
+    this.enforceExistingGlueLinks();
+    this.finalizeDueRegions(rubbleField);
     this.refreshLiveStats();
     return { ...this.stats };
   }
@@ -166,6 +178,7 @@ export class DebrisSettler {
       createdAt: this.elapsedSeconds,
       fractureCount: 0,
       collisionUntil: this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS,
+      glueAfter: this.elapsedSeconds + DEBRIS_REGION_GLUE_BREAKUP_SECONDS,
       finalizeAt: this.elapsedSeconds + DEBRIS_REGION_FINALIZE_SECONDS,
       maxFinalizeAt: this.elapsedSeconds + DEBRIS_REGION_MAX_SECONDS,
       settledAt: null
@@ -191,6 +204,10 @@ export class DebrisSettler {
     region.collisionUntil = Math.max(
       region.collisionUntil,
       this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS
+    );
+    region.glueAfter = Math.max(
+      region.glueAfter,
+      this.elapsedSeconds + DEBRIS_REGION_GLUE_BREAKUP_SECONDS
     );
     region.settledAt = null;
     region.finalizeAt = Math.min(
@@ -246,6 +263,7 @@ export class DebrisSettler {
       target.fractureCount = combinedFractures;
       target.createdAt = Math.min(target.createdAt, source.createdAt);
       target.collisionUntil = Math.max(target.collisionUntil, source.collisionUntil);
+      target.glueAfter = Math.max(target.glueAfter, source.glueAfter);
       target.maxFinalizeAt = Math.min(target.maxFinalizeAt, source.maxFinalizeAt);
       target.finalizeAt = Math.min(Math.max(target.finalizeAt, source.finalizeAt), target.maxFinalizeAt);
       target.settledAt = null;
@@ -283,7 +301,7 @@ export class DebrisSettler {
 
   private updateRegionFinalizationDeadline(region: SettlingRegion): void {
     const liveFragments = [...region.fragments].filter((fragment) => !fragment.isExpired);
-    const regionIsQuiet = liveFragments.length === 0 || liveFragments.every((fragment) => fragment.isSleeping);
+    const regionIsQuiet = this.isRegionQuietForFinalization(region, liveFragments);
     if (!regionIsQuiet) {
       region.settledAt = null;
       return;
@@ -301,6 +319,28 @@ export class DebrisSettler {
       Math.max(region.finalizeAt, region.settledAt + DEBRIS_REGION_SETTLED_FINALIZE_SECONDS),
       region.maxFinalizeAt
     );
+  }
+
+  private isRegionQuietForFinalization(
+    region: SettlingRegion,
+    liveFragments: readonly PhysicsToy[]
+  ): boolean {
+    if (liveFragments.length === 0) return true;
+    if (liveFragments.every((fragment) => fragment.isSleeping)) return true;
+
+    const hasGroundedAnchor = liveFragments.some((fragment) => fragment.isSleeping);
+    if (!hasGroundedAnchor || region.glueLinks.size === 0) return false;
+
+    // Glued upper shards often never satisfy PhysicsToy's old "touched solid"
+    // sleep rule because they are resting on other debris, not terrain. Treat
+    // the region as quiet once those linked shards have mostly stopped moving.
+    return liveFragments.every((fragment) => (
+      fragment.isSleeping ||
+      (
+        fragment.velocity.lengthSq() <= DEBRIS_REGION_QUIET_SPEED ** 2 &&
+        fragment.angularVelocity.lengthSq() <= DEBRIS_REGION_QUIET_ANGULAR_SPEED ** 2
+      )
+    ));
   }
 
   private enforcePairBudget(rubbleField: RubbleField): void {
@@ -335,7 +375,7 @@ export class DebrisSettler {
           if (!right) continue;
 
           this.stats.pairChecks += 1;
-          if (this.resolveFragmentPair(left, right)) {
+          if (this.resolveFragmentPair(region, left, right)) {
             this.stats.resolvedPairs += 1;
           }
         }
@@ -344,7 +384,13 @@ export class DebrisSettler {
     }
   }
 
-  private resolveFragmentPair(left: PhysicsToy, right: PhysicsToy): boolean {
+  private enforceExistingGlueLinks(): void {
+    for (const region of this.regionsById.values()) {
+      this.enforceGlueLinks(region);
+    }
+  }
+
+  private resolveFragmentPair(region: SettlingRegion, left: PhysicsToy, right: PhysicsToy): boolean {
     if (left.isExpired || right.isExpired || left.isSleeping || right.isSleeping) return false;
 
     const leftPosition = left.mesh.position;
@@ -363,8 +409,11 @@ export class DebrisSettler {
     const inverseMassSum = left.inverseMass + right.inverseMass;
     if (inverseMassSum <= 0) return false;
 
+    const glueReady = this.elapsedSeconds >= region.glueAfter;
     const penetration = Math.max(0, combinedRadius - distance);
-    const retainedOverlap = Math.min(penetration, DEBRIS_REGION_STICKY_RETAINED_OVERLAP);
+    const retainedOverlap = glueReady
+      ? Math.min(penetration, DEBRIS_REGION_STICKY_RETAINED_OVERLAP)
+      : 0;
     const correction = Math.max(0, penetration - retainedOverlap);
     leftPosition.addScaledVector(this.normal, -(correction * left.inverseMass) / inverseMassSum);
     rightPosition.addScaledVector(this.normal, (correction * right.inverseMass) / inverseMassSum);
@@ -372,7 +421,10 @@ export class DebrisSettler {
     this.relativeVelocity.copy(right.velocity).sub(left.velocity);
     const closingSpeed = this.relativeVelocity.dot(this.normal);
     if (closingSpeed < 0) {
-      const impulse = (-(1 + DEBRIS_REGION_COLLISION_RESTITUTION) * closingSpeed) / inverseMassSum;
+      const restitution = glueReady
+        ? DEBRIS_REGION_COLLISION_RESTITUTION
+        : DEBRIS_REGION_BREAKUP_RESTITUTION;
+      const impulse = (-(1 + restitution) * closingSpeed) / inverseMassSum;
       left.velocity.addScaledVector(this.normal, -impulse * left.inverseMass);
       right.velocity.addScaledVector(this.normal, impulse * right.inverseMass);
       const tumbleSpeed = Math.min(8, Math.abs(closingSpeed) + penetration * 8);
@@ -380,12 +432,16 @@ export class DebrisSettler {
       right.addTumbleImpulse(this.normal, tumbleSpeed);
     }
 
-    this.resolveStackContact(left, right);
-    this.applyStickyVelocityBlend(left, right);
-    this.glueFragmentPair(left, right);
+    if (glueReady) {
+      this.resolveStackContact(left, right);
+      this.glueFragmentPair(left, right);
+    }
 
-    left.velocity.multiplyScalar(DEBRIS_REGION_COLLISION_DAMPING);
-    right.velocity.multiplyScalar(DEBRIS_REGION_COLLISION_DAMPING);
+    const damping = glueReady
+      ? DEBRIS_REGION_COLLISION_DAMPING
+      : DEBRIS_REGION_BREAKUP_DAMPING;
+    left.velocity.multiplyScalar(damping);
+    right.velocity.multiplyScalar(damping);
     return true;
   }
 
@@ -426,6 +482,7 @@ export class DebrisSettler {
 
     const region = this.regionsById.get(regionId);
     if (!region || region.glueLinks.size >= DEBRIS_REGION_MAX_GLUE_LINKS) return;
+    if (this.elapsedSeconds < region.glueAfter) return;
 
     const linkKey = this.getGlueLinkKey(left, right);
     if (region.glueLinks.has(linkKey)) return;
@@ -449,8 +506,6 @@ export class DebrisSettler {
       if (
         link.left.isExpired ||
         link.right.isExpired ||
-        link.left.isSleeping ||
-        link.right.isSleeping ||
         !region.fragments.has(link.left) ||
         !region.fragments.has(link.right)
       ) {

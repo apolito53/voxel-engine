@@ -250,10 +250,11 @@ const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
-const playerCollisionWorld: CollisionWorld = {
-  // The player still collides against full terrain blocks through VoxelWorld.
-  // Partial-height cover such as rubble is layered in as an optional support
-  // height so it can be walked on without promoting every pile to a solid voxel.
+const terrainAndRubbleCollisionWorld: CollisionWorld = {
+  // Full terrain blocks still come from VoxelWorld. Partial-height cover such
+  // as rubble is layered in through the optional support-height query so both
+  // player feet and loose debris can treat piles as surfaces without promoting
+  // every patch to a solid voxel.
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
   getSupportHeight: (bounds) => rubbleField.getSupportHeight(bounds)
 };
@@ -354,7 +355,7 @@ async function startApp(): Promise<void> {
     await world.loadSavedChunkIndex();
 
     camera.position.set(2, 24, 2);
-    player = new PlayerController(camera, renderer.domElement, playerCollisionWorld);
+    player = new PlayerController(camera, renderer.domElement, terrainAndRubbleCollisionWorld);
     wireMenuControls();
     worldSeedInput.value = createReadableSeed();
     await refreshHomeWorldList();
@@ -680,7 +681,7 @@ function animate(): void {
     for (let index = 0; index < physicsToyCountAtFrameStart; index += 1) {
       const toy = toys[index];
       if (!toy) continue;
-      toy.update(delta, activeWorld, physicsImpacts);
+      toy.update(delta, terrainAndRubbleCollisionWorld, physicsImpacts);
       rubbleField.resolveCoreCollision(toy);
     }
     debrisSettlerStats = debrisSettler.update(delta, rubbleField);
@@ -910,7 +911,7 @@ function spawnBlockFragments(
   position: { readonly x: number; readonly y: number; readonly z: number },
   impact: PhysicsImpact
 ): void {
-  const fragmentBaseSpeed = Math.min(4.5, impact.speed * 0.42);
+  const fragmentBaseSpeed = Math.min(5.8, impact.speed * 0.55);
   const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
 
   const fragmentCount = qualityController.preset.blockFragmentCount;
@@ -924,20 +925,21 @@ function spawnBlockFragments(
       fragmentOffset.y,
       fragmentOffset.z
     );
-    // The first rubble pass was too dramatic: pieces launched like shrapnel,
-    // slid through each other, and rarely settled into the clump system where
-    // they become useful cover. Keep a short burst of breakup motion, but bias
-    // the fragments toward nearby pile formation.
-    const scatter = createFragmentScatterDirection(offset).multiplyScalar(0.55 + Math.random() * 0.65);
+    // Break the perfect 3x3x3 silhouette before contact glue can form. The
+    // player should see fragments tumble out of the voxel, not a shrunken copy
+    // of the original block politely waiting to become rubble.
+    const spawnJitter = createFragmentSpawnJitter();
+    const scatter = createFragmentScatterDirection(offset).multiplyScalar(1.35 + Math.random() * 1.65);
     const velocity = impact.normal.clone()
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
-      .add(new THREE.Vector3(0, 0.8 + Math.random() * 1.1, 0));
+      .add(spawnJitter.clone().multiplyScalar(9.5))
+      .add(new THREE.Vector3(0, 0.75 + Math.random() * 1.25, 0));
     const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
 
     const fragment = PhysicsToy.createBlockFragment(
       block,
-      blockCenter.clone().add(offset),
+      blockCenter.clone().add(offset).add(spawnJitter),
       velocity,
       rubbleMaterialUnits
     );
@@ -965,6 +967,17 @@ function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
     randomDirection.set(0, 1, 0);
   }
   return randomDirection.normalize();
+}
+
+function createFragmentSpawnJitter(): THREE.Vector3 {
+  // Tiny position noise is enough to stop the fracture grid from reading as an
+  // intact cube, while staying small enough that the debris still lands in the
+  // same local settling region and becomes one coherent rubble patch.
+  return new THREE.Vector3(
+    (Math.random() - 0.5) * 0.12,
+    (Math.random() - 0.5) * 0.06,
+    (Math.random() - 0.5) * 0.12
+  );
 }
 
 function throwPlayerCore(): void {

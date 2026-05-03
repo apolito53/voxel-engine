@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   BLOCK_FRAGMENT_COUNT,
+  BLOCK_FRAGMENT_COLLISION_RADIUS,
   BLOCK_FRAGMENT_GRID_SIZE,
   BLOCK_FRAGMENT_SPACING,
   BLOCK_RUBBLE_MATERIAL_UNITS,
@@ -20,6 +21,7 @@ import {
 } from "../src/blockColors";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
+import type { CollisionBounds } from "../src/collision";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
@@ -128,7 +130,9 @@ import {
 } from "../src/chunkStorage";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import {
+  DEBRIS_REGION_COLLISION_SECONDS,
   DEBRIS_REGION_FINALIZE_SECONDS,
+  DEBRIS_REGION_GLUE_BREAKUP_SECONDS,
   DEBRIS_REGION_MAX_SECONDS,
   DEBRIS_REGION_PAIR_BUDGET,
   DEBRIS_REGION_SETTLED_FINALIZE_SECONDS,
@@ -1732,6 +1736,24 @@ test("debris settler resolves same-region fragments but not cross-region fragmen
   assertEqual(crossRegionStats.resolvedPairs, 0, "cross-region debris should remain cheap");
 });
 
+test("debris settler lets fresh fractures break silhouette before glue can form", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  left.angularVelocity.set(3, 0, 0);
+  right.angularVelocity.set(0, 3, 0);
+
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  const stats = settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS - 0.02, rubble);
+
+  assertEqual(stats.resolvedPairs, 1, "fresh near-touching debris should still use local contact resolution");
+  assert(
+    left.angularVelocity.lengthSq() + right.angularVelocity.lengthSq() > 0,
+    "fresh debris should keep tumbling briefly instead of gluing into the original block silhouette"
+  );
+});
+
 test("debris settler glue contacts arrest rotation and hold same-region fragments together", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -1745,7 +1767,7 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   const distanceBefore = left.mesh.position.distanceTo(right.mesh.position);
   const relativeSpeedBefore = right.velocity.clone().sub(left.velocity).length();
   settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
-  const stats = settler.update(0.01, rubble);
+  const stats = settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble);
   const distanceAfter = left.mesh.position.distanceTo(right.mesh.position);
   const relativeSpeedAfter = right.velocity.clone().sub(left.velocity).length();
 
@@ -1766,6 +1788,30 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   );
 });
 
+test("debris settler keeps glue links shaping the heap after pair checks stop", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  left.velocity.set(-0.4, 0, 0);
+  right.velocity.set(0.4, 0, 0);
+
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble);
+
+  const linkedDistance = left.mesh.position.distanceTo(right.mesh.position);
+  right.mesh.position.x += 0.35;
+  const stretchedDistance = left.mesh.position.distanceTo(right.mesh.position);
+  const afterPairWindow = settler.update(DEBRIS_REGION_COLLISION_SECONDS + 0.02, rubble);
+  const repairedDistance = left.mesh.position.distanceTo(right.mesh.position);
+
+  assertEqual(afterPairWindow.pairChecks, 0, "old settling regions should stop doing new pair checks");
+  assert(
+    repairedDistance < stretchedDistance && repairedDistance <= linkedDistance + 0.2,
+    "existing glue links should keep the clump from melting flat after the pair window closes"
+  );
+});
+
 test("debris settler supports short-lived stacked fragment contacts", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -1774,7 +1820,7 @@ test("debris settler supports short-lived stacked fragment contacts", () => {
   upper.velocity.set(0, -2, 0);
 
   settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.0, 0.5), [lower, upper]);
-  const stats = settler.update(0.01, rubble);
+  const stats = settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble);
 
   assertEqual(stats.resolvedPairs, 1, "stacked same-region debris should use the local pair pass");
   assert(
@@ -2051,6 +2097,27 @@ test("rubble damage targets the impacted pile instead of the healthiest neighbor
   assertEqual(rubble.getStats().pieces, 6, "remaining rubble material should belong to the neighboring pile");
 });
 
+test("single-piece rubble stays in a local footprint instead of filling the whole cell", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
+
+  const centerHit = rubble.raycast(
+    new THREE.Vector3(0.5, 0.08, -2),
+    new THREE.Vector3(0, 0, 1),
+    6
+  );
+  const edgeHit = rubble.raycast(
+    new THREE.Vector3(0.08, 0.08, -2),
+    new THREE.Vector3(0, 0, 1),
+    6
+  );
+
+  assert(centerHit, "a lone rubble shard should still leave a visible/collidable mound where it landed");
+  assertEqual(edgeHit, null, "one shard should not inflate into a full-cell bumpy pile");
+});
+
 test("rubble field lets moving cores collide with and chip cover proxies", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
@@ -2103,6 +2170,67 @@ class TestRubbleWorld implements RubbleFieldWorld {
   }
 }
 
+test("block fragments rest on rubble support instead of sinking into finalized piles", () => {
+  const scene = new THREE.Scene();
+  const world = new TestRubbleWorld();
+  const rubble = new RubbleField(scene);
+  world.setBlock(0, 0, 0, BLOCK.stone);
+
+  for (let index = 0; index < 12; index += 1) {
+    const row = Math.floor(index / 4);
+    const column = index % 4;
+    rubble.absorb(
+      BLOCK.dirt,
+      new THREE.Vector3(0.42 + column * 0.05, 1.1, 0.42 + row * 0.06)
+    );
+  }
+  rubble.settle(world);
+
+  const supportBounds = {
+    minX: 0.44,
+    maxX: 0.56,
+    minY: 1,
+    maxY: 2.8,
+    minZ: 0.44,
+    maxZ: 0.56
+  };
+  const supportY = rubble.getSupportHeight(supportBounds);
+  assert(supportY !== null, "setup should create a partial-height rubble support surface");
+
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, supportY + BLOCK_FRAGMENT_COLLISION_RADIUS + 0.03, 0.5),
+    new THREE.Vector3(0, -2, 0)
+  );
+  const collisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return world.isSolid(x, y, z);
+    },
+    getSupportHeight(bounds: CollisionBounds): number | null {
+      return rubble.getSupportHeight(bounds);
+    }
+  };
+  let lowestBottomY = Number.POSITIVE_INFINITY;
+
+  // This is the regression the browser showed: loose debris could visually
+  // land on a finalized pile, then gravity kept pulling it down because only
+  // full voxel blocks counted as toy support.
+  for (let frame = 0; frame < 90 && !fragment.isSleeping; frame += 1) {
+    fragment.update(1 / 60, collisionWorld);
+    lowestBottomY = Math.min(lowestBottomY, fragment.mesh.position.y - fragment.radius);
+  }
+
+  assert(fragment.isSleeping, "debris should settle on rubble support instead of falling through it");
+  assert(
+    lowestBottomY >= supportY - 0.04,
+    "debris should not visibly clip down into finalized rubble while settling"
+  );
+  assert(
+    fragment.mesh.position.y - fragment.radius >= supportY - 0.02,
+    "sleeping debris should finish on top of the rubble surface"
+  );
+});
+
 test("rubble support height produces walkable slopes toward nearby terrain", () => {
   const scene = new THREE.Scene();
   const world = new TestRubbleWorld();
@@ -2114,16 +2242,16 @@ test("rubble support height produces walkable slopes toward nearby terrain", () 
   rubble.settle(world);
 
   const westSupportY = rubble.getSupportHeight({
-    minX: 0.05,
-    maxX: 0.15,
+    minX: 0.25,
+    maxX: 0.35,
     minY: 1,
     maxY: 2.8,
     minZ: 0.45,
     maxZ: 0.55
   });
   const eastSupportY = rubble.getSupportHeight({
-    minX: 0.85,
-    maxX: 0.95,
+    minX: 0.65,
+    maxX: 0.75,
     minY: 1,
     maxY: 2.8,
     minZ: 0.45,
@@ -2141,7 +2269,7 @@ test("rubble support height produces walkable slopes toward nearby terrain", () 
   assert(westSupportY !== null, "rubble should expose support on the low side of a pile");
   assert(eastSupportY !== null, "rubble should expose support on the side facing nearby terrain");
   assert(
-    eastSupportY > westSupportY + 0.02,
+    eastSupportY > westSupportY + 0.01,
     "rubble support should slope upward toward a neighboring solid block instead of staying flat"
   );
   assert(

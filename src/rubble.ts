@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
+import { BLOCK_FRAGMENT_VISUAL_SIZE, BLOCK_RUBBLE_MATERIAL_UNITS } from "./blockFragments";
 import { BLOCK } from "./blocks";
 import type { CollisionBounds } from "./collision";
 import {
@@ -18,15 +18,22 @@ export const RUBBLE_BLOCK_PROMOTION_PIECES = 48;
 const RUBBLE_MAX_PATCH_CELLS = 18;
 const RUBBLE_PIECE_HEALTH = 1;
 const RUBBLE_NEARBY_SEARCH_PADDING = 1.25;
-const RUBBLE_MIN_HEIGHT = 0.08;
-const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.041;
-const RUBBLE_HEIGHT_VARIATION = 0.035;
+const RUBBLE_MIN_HEIGHT = 0.04;
+const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.032;
+const RUBBLE_HEIGHT_VARIATION = 0.03;
 const RUBBLE_MAX_HEIGHT = 0.5;
 const RUBBLE_SOLID_NEIGHBOR_CORNER_RISE = 0.08;
+const RUBBLE_SOLID_NEIGHBOR_SURFACE_RISE = 0.06;
 const RUBBLE_SUPPORTED_CORNER_RISE_SCALE = 0.4;
 const RUBBLE_MAX_SURFACE_SAMPLES_PER_PILE = 24;
-const RUBBLE_SURFACE_SAMPLE_HEIGHT_PADDING = BLOCK_FRAGMENT_VISUAL_SIZE * 0.5;
-const RUBBLE_SURFACE_PEAK_VARIATION = 0.08;
+const RUBBLE_SURFACE_SAMPLE_HEIGHT_PADDING = BLOCK_FRAGMENT_VISUAL_SIZE * 0.58;
+const RUBBLE_SURFACE_SAMPLE_HEIGHT_VARIATION = 0.08;
+const RUBBLE_SURFACE_PEAK_VARIATION = 0.12;
+const RUBBLE_SURFACE_SAMPLE_FALLOFF = 0.46;
+const RUBBLE_SURFACE_EDGE_FLOOR_SCALE = 0.58;
+const RUBBLE_SURFACE_GRID_STEPS = 4;
+const RUBBLE_MIN_FOOTPRINT_RADIUS = 0.12;
+const RUBBLE_MAX_FOOTPRINT_RADIUS = 0.58;
 // Rubble should behave like rough cover, but cores are still supposed to read
 // as bouncy projectiles. Keep the rebound near terrain-block bounce strength
 // so piles feel physical without turning the launcher into a glue gun.
@@ -65,6 +72,21 @@ type RubbleCluster = {
 };
 
 type RubbleQuadVertex = readonly [number, number, number];
+type RubbleLocalFootprint = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+};
+type RubbleSurfaceGrid = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly baseY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+  readonly heights: readonly number[];
+  readonly maxY: number;
+};
 type RubbleDamageTarget = {
   readonly cluster: RubbleCluster;
   readonly pile: RubbleCellPile;
@@ -153,12 +175,13 @@ export class RubbleField {
     // capped patch. That keeps rubble readable as debris fields instead of
     // rendering hundreds of tiny standalone boxes.
     const normalizedPieces = normalizeRubblePieceCount(pieces);
+    const cell = getRubbleCell(position);
     this.absorbPileAtCell(
       block,
-      getRubbleCell(position),
+      cell,
       normalizedPieces,
       normalizedPieces * RUBBLE_PIECE_HEALTH,
-      createRubbleSurfaceSamples(getRubbleCell(position), position, normalizedPieces)
+      createRubbleSurfaceSamples(cell, position, normalizedPieces)
     );
     this.refreshStats();
   }
@@ -169,12 +192,13 @@ export class RubbleField {
     // every individual temporary fragment.
     for (const sample of samples) {
       const normalizedPieces = normalizeRubblePieceCount(sample.pieces ?? 1);
+      const cell = getRubbleCell(sample.position);
       this.absorbPileAtCell(
         sample.block,
-        getRubbleCell(sample.position),
+        cell,
         normalizedPieces,
         normalizedPieces * RUBBLE_PIECE_HEALTH,
-        createRubbleSurfaceSamples(getRubbleCell(sample.position), sample.position, normalizedPieces)
+        createRubbleSurfaceSamples(cell, sample.position, normalizedPieces)
       );
     }
     this.refreshStats();
@@ -425,138 +449,44 @@ export class RubbleField {
     // faces are skipped, so adjacent piles read as connected rubble instead of
     // separate stacked tiles.
     for (const pile of cluster.cells.values()) {
-      const minX = pile.cell.x * RUBBLE_CELL_SIZE;
-      const maxX = minX + RUBBLE_CELL_SIZE;
       const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
-      const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
-      const maxZ = minZ + RUBBLE_CELL_SIZE;
-      const northWestY = getRubbleSurfaceCornerY(
-        cluster,
-        pile.cell.x,
-        pile.cell.y,
-        pile.cell.z,
-        this.surfaceWorld
-      );
-      const southWestY = getRubbleSurfaceCornerY(
-        cluster,
-        pile.cell.x,
-        pile.cell.y,
-        pile.cell.z + 1,
-        this.surfaceWorld
-      );
-      const southEastY = getRubbleSurfaceCornerY(
-        cluster,
-        pile.cell.x + 1,
-        pile.cell.y,
-        pile.cell.z + 1,
-        this.surfaceWorld
-      );
-      const northEastY = getRubbleSurfaceCornerY(
-        cluster,
-        pile.cell.x + 1,
-        pile.cell.y,
-        pile.cell.z,
-        this.surfaceWorld
-      );
-      const apex = getRubblePileSurfaceApex(cluster, pile, this.surfaceWorld);
-      const maxTopY = Math.max(northWestY, southWestY, southEastY, northEastY);
+      const footprint = getRubblePileFootprint(pile);
+      const surfaceGrid = createRubbleSurfaceGrid(cluster, pile, this.surfaceWorld, footprint);
 
-      bounds.expandByPoint(new THREE.Vector3(minX, baseY, minZ));
-      bounds.expandByPoint(new THREE.Vector3(maxX, Math.max(maxTopY, apex.y), maxZ));
+      bounds.expandByPoint(new THREE.Vector3(surfaceGrid.minX, baseY, surfaceGrid.minZ));
+      bounds.expandByPoint(new THREE.Vector3(surfaceGrid.maxX, surfaceGrid.maxY, surfaceGrid.maxZ));
 
-      // The top is a cheap "sheet over the debris" surface: shared corners keep
-      // neighboring cells connected, while the per-pile apex preserves where
-      // the settled fragments actually clumped so the result is not a flat lid.
-      addTriangle(
-        positions,
-        normals,
-        indices,
-        [minX, northWestY, minZ],
-        [minX, southWestY, maxZ],
-        [apex.x, apex.y, apex.z]
-      );
-      addTriangle(
-        positions,
-        normals,
-        indices,
-        [minX, southWestY, maxZ],
-        [maxX, southEastY, maxZ],
-        [apex.x, apex.y, apex.z]
-      );
-      addTriangle(
-        positions,
-        normals,
-        indices,
-        [maxX, southEastY, maxZ],
-        [maxX, northEastY, minZ],
-        [apex.x, apex.y, apex.z]
-      );
-      addTriangle(
-        positions,
-        normals,
-        indices,
-        [maxX, northEastY, minZ],
-        [minX, northWestY, minZ],
-        [apex.x, apex.y, apex.z]
-      );
+      addRubbleTopSurface(positions, normals, indices, surfaceGrid, pile);
       addQuad(
         positions,
         normals,
         indices,
-        [minX, baseY, minZ],
-        [maxX, baseY, minZ],
-        [maxX, baseY, maxZ],
-        [minX, baseY, maxZ],
+        [surfaceGrid.minX, baseY, surfaceGrid.minZ],
+        [surfaceGrid.maxX, baseY, surfaceGrid.minZ],
+        [surfaceGrid.maxX, baseY, surfaceGrid.maxZ],
+        [surfaceGrid.minX, baseY, surfaceGrid.maxZ],
         [0, -1, 0]
       );
 
       if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z - 1 }))) {
-        addQuad(
-          positions,
-          normals,
-          indices,
-          [minX, baseY, minZ],
-          [minX, northWestY, minZ],
-          [maxX, northEastY, minZ],
-          [maxX, baseY, minZ],
-          [0, 0, -1]
-        );
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
+      } else if (footprint.minZ > RUBBLE_COLLISION_EPSILON) {
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
       }
       if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z + 1 }))) {
-        addQuad(
-          positions,
-          normals,
-          indices,
-          [minX, baseY, maxZ],
-          [maxX, baseY, maxZ],
-          [maxX, southEastY, maxZ],
-          [minX, southWestY, maxZ],
-          [0, 0, 1]
-        );
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
+      } else if (footprint.maxZ < 1 - RUBBLE_COLLISION_EPSILON) {
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
       }
       if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x - 1, y: pile.cell.y, z: pile.cell.z }))) {
-        addQuad(
-          positions,
-          normals,
-          indices,
-          [minX, baseY, minZ],
-          [minX, baseY, maxZ],
-          [minX, southWestY, maxZ],
-          [minX, northWestY, minZ],
-          [-1, 0, 0]
-        );
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
+      } else if (footprint.minX > RUBBLE_COLLISION_EPSILON) {
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
       }
       if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x + 1, y: pile.cell.y, z: pile.cell.z }))) {
-        addQuad(
-          positions,
-          normals,
-          indices,
-          [maxX, baseY, minZ],
-          [maxX, northEastY, minZ],
-          [maxX, southEastY, maxZ],
-          [maxX, baseY, maxZ],
-          [1, 0, 0]
-        );
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+      } else if (footprint.maxX < 1 - RUBBLE_COLLISION_EPSILON) {
+        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
       }
     }
 
@@ -905,14 +835,25 @@ function createRubbleSurfaceSamples(
   const baseX = cell.x * RUBBLE_CELL_SIZE;
   const baseY = cell.y * RUBBLE_CELL_SIZE;
   const baseZ = cell.z * RUBBLE_CELL_SIZE;
+  const localX = clamp((position.x - baseX) / RUBBLE_CELL_SIZE, 0, 1);
+  const localZ = clamp((position.z - baseZ) / RUBBLE_CELL_SIZE, 0, 1);
+  const noise = getSurfaceNoise(cell, localX, localZ);
+
+  // Surface samples are the "sheet over the heap" anchors. The old pile logic
+  // only knew how many pieces were in a cell; this keeps where the temporary
+  // cubes actually settled so the final proxy does not collapse into a flat lid.
+  const sampleHeight = clamp(
+    position.y - baseY +
+      RUBBLE_SURFACE_SAMPLE_HEIGHT_PADDING +
+      (noise - 0.35) * RUBBLE_SURFACE_SAMPLE_HEIGHT_VARIATION,
+    RUBBLE_MIN_HEIGHT,
+    RUBBLE_MAX_HEIGHT
+  );
+
   return [{
-    localX: clamp((position.x - baseX) / RUBBLE_CELL_SIZE, 0, 1),
-    localZ: clamp((position.z - baseZ) / RUBBLE_CELL_SIZE, 0, 1),
-    height: clamp(
-      position.y - baseY + RUBBLE_SURFACE_SAMPLE_HEIGHT_PADDING,
-      RUBBLE_MIN_HEIGHT,
-      RUBBLE_MAX_HEIGHT
-    ),
+    localX,
+    localZ,
+    height: sampleHeight,
     weight: normalizeRubblePieceCount(pieces)
   }];
 }
@@ -941,10 +882,7 @@ function normalizeRubblePieceCount(pieces: number): number {
 }
 
 function boundsOverlapPileHorizontally(bounds: CollisionBounds, pile: RubbleCellPile): boolean {
-  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
-  const maxX = minX + RUBBLE_CELL_SIZE;
-  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
-  const maxZ = minZ + RUBBLE_CELL_SIZE;
+  const { minX, maxX, minZ, maxZ } = getRubblePileWorldFootprint(pile);
 
   return (
     bounds.minX < maxX &&
@@ -960,10 +898,7 @@ function getPileSupportHeight(
   bounds: CollisionBounds,
   world: RubbleFieldWorld | null
 ): number | null {
-  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
-  const maxX = minX + RUBBLE_CELL_SIZE;
-  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
-  const maxZ = minZ + RUBBLE_CELL_SIZE;
+  const { minX, maxX, minZ, maxZ } = getRubblePileWorldFootprint(pile);
   const overlapMinX = Math.max(bounds.minX, minX);
   const overlapMaxX = Math.min(bounds.maxX, maxX);
   const overlapMinZ = Math.max(bounds.minZ, minZ);
@@ -993,6 +928,53 @@ function getRubblePileSurfaceYAt(
 ): number {
   const u = clamp((x - pile.cell.x * RUBBLE_CELL_SIZE) / RUBBLE_CELL_SIZE, 0, 1);
   const v = clamp((z - pile.cell.z * RUBBLE_CELL_SIZE) / RUBBLE_CELL_SIZE, 0, 1);
+  let surfaceY = getRubblePileOwnSurfaceYAt(cluster, pile, u, v, world);
+
+  // Heightfield rubble has more vertices than the old corner/apex mesh. Share
+  // edge samples with neighboring cells so broad patches stay stitched instead
+  // of opening cracks where two faceted "sheets" meet.
+  if (u <= RUBBLE_COLLISION_EPSILON) {
+    surfaceY = Math.max(surfaceY, getNeighborRubbleSurfaceY(cluster, pile, -1, 0, 1, v, world));
+  }
+  if (u >= 1 - RUBBLE_COLLISION_EPSILON) {
+    surfaceY = Math.max(surfaceY, getNeighborRubbleSurfaceY(cluster, pile, 1, 0, 0, v, world));
+  }
+  if (v <= RUBBLE_COLLISION_EPSILON) {
+    surfaceY = Math.max(surfaceY, getNeighborRubbleSurfaceY(cluster, pile, 0, -1, u, 1, world));
+  }
+  if (v >= 1 - RUBBLE_COLLISION_EPSILON) {
+    surfaceY = Math.max(surfaceY, getNeighborRubbleSurfaceY(cluster, pile, 0, 1, u, 0, world));
+  }
+
+  return surfaceY;
+}
+
+function getNeighborRubbleSurfaceY(
+  cluster: RubbleCluster,
+  pile: RubbleCellPile,
+  offsetX: number,
+  offsetZ: number,
+  neighborLocalX: number,
+  neighborLocalZ: number,
+  world: RubbleFieldWorld | null
+): number {
+  const neighbor = cluster.cells.get(getRubbleCellCoordinateKey({
+    x: pile.cell.x + offsetX,
+    y: pile.cell.y,
+    z: pile.cell.z + offsetZ
+  }));
+
+  if (!neighbor) return Number.NEGATIVE_INFINITY;
+  return getRubblePileOwnSurfaceYAt(cluster, neighbor, neighborLocalX, neighborLocalZ, world);
+}
+
+function getRubblePileOwnSurfaceYAt(
+  cluster: RubbleCluster,
+  pile: RubbleCellPile,
+  u: number,
+  v: number,
+  world: RubbleFieldWorld | null
+): number {
   const northWestY = getRubbleSurfaceCornerY(
     cluster,
     pile.cell.x,
@@ -1024,23 +1006,28 @@ function getRubblePileSurfaceYAt(
   const northY = lerp(northWestY, northEastY, u);
   const southY = lerp(southWestY, southEastY, u);
   const drapedEdgeY = lerp(northY, southY, v);
-  const apex = getRubblePileSurfaceApex(cluster, pile, world);
+  const sampleDrivenY = pile.cell.y * RUBBLE_CELL_SIZE + getRubblePileDrapedLocalHeight(pile, u, v);
+  const apex = getRubblePileSurfaceApex(pile);
   const apexU = clamp((apex.x - pile.cell.x * RUBBLE_CELL_SIZE) / RUBBLE_CELL_SIZE, 0, 1);
   const apexV = clamp((apex.z - pile.cell.z * RUBBLE_CELL_SIZE) / RUBBLE_CELL_SIZE, 0, 1);
   const apexDistance = Math.max(Math.abs(u - apexU), Math.abs(v - apexV));
   const apexInfluence = clamp(1 - apexDistance * 3.2, 0, 1);
-
-  return Math.max(
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const surfaceY = Math.max(
     drapedEdgeY,
+    sampleDrivenY,
     lerp(drapedEdgeY, apex.y, apexInfluence)
+  );
+  const terrainRise = getRubbleLocalTerrainRise(pile.cell, u, v, world);
+
+  return baseY + clamp(
+    surfaceY - baseY + terrainRise,
+    RUBBLE_MIN_HEIGHT,
+    RUBBLE_MAX_HEIGHT
   );
 }
 
-function getRubblePileSurfaceApex(
-  _cluster: RubbleCluster,
-  pile: RubbleCellPile,
-  _world: RubbleFieldWorld | null
-): { readonly x: number; readonly y: number; readonly z: number } {
+function getRubblePileSurfaceApex(pile: RubbleCellPile): { readonly x: number; readonly y: number; readonly z: number } {
   const baseX = pile.cell.x * RUBBLE_CELL_SIZE;
   const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
   const baseZ = pile.cell.z * RUBBLE_CELL_SIZE;
@@ -1078,6 +1065,39 @@ function getRubblePileSurfaceApex(
   };
 }
 
+function getRubblePileDrapedLocalHeight(pile: RubbleCellPile, localX: number, localZ: number): number {
+  const edgeHeight = getRubblePileEdgeHeight(pile);
+  let drapedHeight = edgeHeight * RUBBLE_SURFACE_EDGE_FLOOR_SCALE;
+
+  for (const sample of pile.surfaceSamples) {
+    const distance = Math.hypot(localX - sample.localX, localZ - sample.localZ);
+    const weightedHeight = sample.height - distance * RUBBLE_SURFACE_SAMPLE_FALLOFF;
+    drapedHeight = Math.max(drapedHeight, weightedHeight);
+  }
+
+  return clamp(
+    Math.max(edgeHeight * RUBBLE_SURFACE_EDGE_FLOOR_SCALE, drapedHeight),
+    RUBBLE_MIN_HEIGHT,
+    RUBBLE_MAX_HEIGHT
+  );
+}
+
+function getRubbleLocalTerrainRise(
+  cell: RubbleCell,
+  localX: number,
+  localZ: number,
+  world: RubbleFieldWorld | null
+): number {
+  if (!world) return 0;
+
+  let rise = 0;
+  if (world.isSolid(cell.x - 1, cell.y, cell.z)) rise += (1 - localX) * RUBBLE_SOLID_NEIGHBOR_SURFACE_RISE;
+  if (world.isSolid(cell.x + 1, cell.y, cell.z)) rise += localX * RUBBLE_SOLID_NEIGHBOR_SURFACE_RISE;
+  if (world.isSolid(cell.x, cell.y, cell.z - 1)) rise += (1 - localZ) * RUBBLE_SOLID_NEIGHBOR_SURFACE_RISE;
+  if (world.isSolid(cell.x, cell.y, cell.z + 1)) rise += localZ * RUBBLE_SOLID_NEIGHBOR_SURFACE_RISE;
+  return Math.min(RUBBLE_SOLID_NEIGHBOR_SURFACE_RISE, rise);
+}
+
 function getRubbleSurfaceCornerY(
   cluster: RubbleCluster,
   cornerX: number,
@@ -1096,7 +1116,9 @@ function getRubbleSurfaceCornerY(
       const key = getRubbleCellCoordinateKey(cell);
       const pile = cluster.cells.get(key);
       if (pile) {
-        height = Math.max(height, getRubblePileEdgeHeight(pile));
+        const localX = clamp(cornerX - cell.x, 0, 1);
+        const localZ = clamp(cornerZ - cell.z, 0, 1);
+        height = Math.max(height, getRubblePileDrapedLocalHeight(pile, localX, localZ));
         continue;
       }
 
@@ -1152,6 +1174,66 @@ function getRubblePileVisualHeight(pile: RubbleCellPile): number {
   );
 }
 
+function getRubblePileWorldFootprint(pile: RubbleCellPile): {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+} {
+  const footprint = getRubblePileFootprint(pile);
+  const baseX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const baseZ = pile.cell.z * RUBBLE_CELL_SIZE;
+
+  return {
+    minX: baseX + footprint.minX * RUBBLE_CELL_SIZE,
+    maxX: baseX + footprint.maxX * RUBBLE_CELL_SIZE,
+    minZ: baseZ + footprint.minZ * RUBBLE_CELL_SIZE,
+    maxZ: baseZ + footprint.maxZ * RUBBLE_CELL_SIZE
+  };
+}
+
+function getRubblePileFootprint(pile: RubbleCellPile): RubbleLocalFootprint {
+  const radius = getRubblePileFootprintRadius(pile);
+  let minX = 0.5 - radius;
+  let maxX = 0.5 + radius;
+  let minZ = 0.5 - radius;
+  let maxZ = 0.5 + radius;
+
+  if (pile.surfaceSamples.length > 0) {
+    minX = Number.POSITIVE_INFINITY;
+    maxX = Number.NEGATIVE_INFINITY;
+    minZ = Number.POSITIVE_INFINITY;
+    maxZ = Number.NEGATIVE_INFINITY;
+
+    for (const sample of pile.surfaceSamples) {
+      minX = Math.min(minX, sample.localX - radius);
+      maxX = Math.max(maxX, sample.localX + radius);
+      minZ = Math.min(minZ, sample.localZ - radius);
+      maxZ = Math.max(maxZ, sample.localZ + radius);
+    }
+  }
+
+  return {
+    minX: clamp(minX, 0, 1),
+    maxX: clamp(maxX, 0, 1),
+    minZ: clamp(minZ, 0, 1),
+    maxZ: clamp(maxZ, 0, 1)
+  };
+}
+
+function getRubblePileFootprintRadius(pile: RubbleCellPile): number {
+  // One lonely shard should remain a little mound. As material approaches a
+  // whole block-fracture budget, the proxy grows into real cover that can span
+  // the cell. This keeps the gameplay value stable without making confetti
+  // behave like a poured concrete square.
+  const materialRatio = clamp(
+    (Math.max(1, pile.pieces) - 1) / Math.max(1, BLOCK_RUBBLE_MATERIAL_UNITS - 1),
+    0,
+    1
+  );
+  return lerp(RUBBLE_MIN_FOOTPRINT_RADIUS, RUBBLE_MAX_FOOTPRINT_RADIUS, Math.sqrt(materialRatio));
+}
+
 function getRubblePileEdgeHeight(pile: RubbleCellPile): number {
   const visualWeight = Math.min(RUBBLE_MAX_VISUAL_PIECES, Math.max(1, pile.pieces));
   const height = RUBBLE_MIN_HEIGHT
@@ -1174,6 +1256,157 @@ function getSurfaceNoise(cell: RubbleCell, localX: number, localZ: number): numb
     localZ * 41.971
   ) * 24634.6345;
   return value - Math.floor(value);
+}
+
+function createRubbleSurfaceGrid(
+  cluster: RubbleCluster,
+  pile: RubbleCellPile,
+  world: RubbleFieldWorld | null,
+  footprint: RubbleLocalFootprint
+): RubbleSurfaceGrid {
+  const cellMinX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const cellMinZ = pile.cell.z * RUBBLE_CELL_SIZE;
+  const minX = cellMinX + footprint.minX * RUBBLE_CELL_SIZE;
+  const maxX = cellMinX + footprint.maxX * RUBBLE_CELL_SIZE;
+  const minZ = cellMinZ + footprint.minZ * RUBBLE_CELL_SIZE;
+  const maxZ = cellMinZ + footprint.maxZ * RUBBLE_CELL_SIZE;
+  const width = Math.max(RUBBLE_COLLISION_EPSILON, maxX - minX);
+  const depth = Math.max(RUBBLE_COLLISION_EPSILON, maxZ - minZ);
+  const heights: number[] = [];
+  let maxY = baseY + RUBBLE_MIN_HEIGHT;
+
+  for (let zIndex = 0; zIndex <= RUBBLE_SURFACE_GRID_STEPS; zIndex += 1) {
+    const footprintZ = zIndex / RUBBLE_SURFACE_GRID_STEPS;
+    const worldZ = minZ + footprintZ * depth;
+    for (let xIndex = 0; xIndex <= RUBBLE_SURFACE_GRID_STEPS; xIndex += 1) {
+      const footprintX = xIndex / RUBBLE_SURFACE_GRID_STEPS;
+      const worldX = minX + footprintX * width;
+      const height = getRubblePileSurfaceYAt(cluster, pile, worldX, worldZ, world);
+      heights.push(height);
+      maxY = Math.max(maxY, height);
+    }
+  }
+
+  return { minX, maxX, baseY, minZ, maxZ, heights, maxY };
+}
+
+function addRubbleTopSurface(
+  positions: number[],
+  normals: number[],
+  indices: number[],
+  grid: RubbleSurfaceGrid,
+  pile: RubbleCellPile
+): void {
+  for (let zIndex = 0; zIndex < RUBBLE_SURFACE_GRID_STEPS; zIndex += 1) {
+    for (let xIndex = 0; xIndex < RUBBLE_SURFACE_GRID_STEPS; xIndex += 1) {
+      const width = grid.maxX - grid.minX;
+      const depth = grid.maxZ - grid.minZ;
+      const westX = grid.minX + (xIndex / RUBBLE_SURFACE_GRID_STEPS) * width;
+      const eastX = grid.minX + ((xIndex + 1) / RUBBLE_SURFACE_GRID_STEPS) * width;
+      const northZ = grid.minZ + (zIndex / RUBBLE_SURFACE_GRID_STEPS) * depth;
+      const southZ = grid.minZ + ((zIndex + 1) / RUBBLE_SURFACE_GRID_STEPS) * depth;
+      const northWest: RubbleQuadVertex = [westX, getGridHeight(grid, xIndex, zIndex), northZ];
+      const northEast: RubbleQuadVertex = [eastX, getGridHeight(grid, xIndex + 1, zIndex), northZ];
+      const southWest: RubbleQuadVertex = [westX, getGridHeight(grid, xIndex, zIndex + 1), southZ];
+      const southEast: RubbleQuadVertex = [eastX, getGridHeight(grid, xIndex + 1, zIndex + 1), southZ];
+      const noise = getSurfaceNoise(
+        pile.cell,
+        (xIndex + 0.5) / RUBBLE_SURFACE_GRID_STEPS,
+        (zIndex + 0.5) / RUBBLE_SURFACE_GRID_STEPS
+      );
+
+      // Alternate diagonals with deterministic noise. A regular grid with the
+      // same diagonal everywhere reads too manufactured; this keeps the cheap
+      // heightfield faceted and debris-like without adding random runtime state.
+      if (noise > 0.5) {
+        addTriangle(positions, normals, indices, northWest, southWest, southEast);
+        addTriangle(positions, normals, indices, northWest, southEast, northEast);
+      } else {
+        addTriangle(positions, normals, indices, northWest, southWest, northEast);
+        addTriangle(positions, normals, indices, northEast, southWest, southEast);
+      }
+    }
+  }
+}
+
+function addRubbleBoundarySide(
+  positions: number[],
+  normals: number[],
+  indices: number[],
+  grid: RubbleSurfaceGrid,
+  side: "north" | "south" | "west" | "east"
+): void {
+  for (let step = 0; step < RUBBLE_SURFACE_GRID_STEPS; step += 1) {
+    if (side === "north") {
+      const width = grid.maxX - grid.minX;
+      const x0 = grid.minX + (step / RUBBLE_SURFACE_GRID_STEPS) * width;
+      const x1 = grid.minX + ((step + 1) / RUBBLE_SURFACE_GRID_STEPS) * width;
+      addQuad(
+        positions,
+        normals,
+        indices,
+        [x0, grid.baseY, grid.minZ],
+        [x0, getGridHeight(grid, step, 0), grid.minZ],
+        [x1, getGridHeight(grid, step + 1, 0), grid.minZ],
+        [x1, grid.baseY, grid.minZ],
+        [0, 0, -1]
+      );
+      continue;
+    }
+
+    if (side === "south") {
+      const width = grid.maxX - grid.minX;
+      const x0 = grid.minX + (step / RUBBLE_SURFACE_GRID_STEPS) * width;
+      const x1 = grid.minX + ((step + 1) / RUBBLE_SURFACE_GRID_STEPS) * width;
+      addQuad(
+        positions,
+        normals,
+        indices,
+        [x0, grid.baseY, grid.maxZ],
+        [x1, grid.baseY, grid.maxZ],
+        [x1, getGridHeight(grid, step + 1, RUBBLE_SURFACE_GRID_STEPS), grid.maxZ],
+        [x0, getGridHeight(grid, step, RUBBLE_SURFACE_GRID_STEPS), grid.maxZ],
+        [0, 0, 1]
+      );
+      continue;
+    }
+
+    if (side === "west") {
+      const depth = grid.maxZ - grid.minZ;
+      const z0 = grid.minZ + (step / RUBBLE_SURFACE_GRID_STEPS) * depth;
+      const z1 = grid.minZ + ((step + 1) / RUBBLE_SURFACE_GRID_STEPS) * depth;
+      addQuad(
+        positions,
+        normals,
+        indices,
+        [grid.minX, grid.baseY, z0],
+        [grid.minX, grid.baseY, z1],
+        [grid.minX, getGridHeight(grid, 0, step + 1), z1],
+        [grid.minX, getGridHeight(grid, 0, step), z0],
+        [-1, 0, 0]
+      );
+      continue;
+    }
+
+    const depth = grid.maxZ - grid.minZ;
+    const z0 = grid.minZ + (step / RUBBLE_SURFACE_GRID_STEPS) * depth;
+    const z1 = grid.minZ + ((step + 1) / RUBBLE_SURFACE_GRID_STEPS) * depth;
+    addQuad(
+      positions,
+      normals,
+      indices,
+      [grid.maxX, grid.baseY, z0],
+      [grid.maxX, getGridHeight(grid, RUBBLE_SURFACE_GRID_STEPS, step), z0],
+      [grid.maxX, getGridHeight(grid, RUBBLE_SURFACE_GRID_STEPS, step + 1), z1],
+      [grid.maxX, grid.baseY, z1],
+      [1, 0, 0]
+    );
+  }
+}
+
+function getGridHeight(grid: RubbleSurfaceGrid, xIndex: number, zIndex: number): number {
+  return grid.heights[zIndex * (RUBBLE_SURFACE_GRID_STEPS + 1) + xIndex] ?? grid.baseY + RUBBLE_MIN_HEIGHT;
 }
 
 function addTriangle(
@@ -1236,12 +1469,9 @@ function lerp(start: number, end: number, amount: number): number {
 }
 
 function getPointPileDistanceSq(point: THREE.Vector3, pile: RubbleCellPile): number {
-  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
-  const maxX = minX + RUBBLE_CELL_SIZE;
+  const { minX, maxX, minZ, maxZ } = getRubblePileWorldFootprint(pile);
   const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
   const topY = baseY + getRubblePileVisualHeight(pile);
-  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
-  const maxZ = minZ + RUBBLE_CELL_SIZE;
   const closestX = clamp(point.x, minX, maxX);
   const closestY = clamp(point.y, baseY, topY);
   const closestZ = clamp(point.z, minZ, maxZ);
@@ -1256,12 +1486,9 @@ function setClosestPointOnPile(
   pile: RubbleCellPile,
   target: THREE.Vector3
 ): number {
-  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
-  const maxX = minX + RUBBLE_CELL_SIZE;
+  const { minX, maxX, minZ, maxZ } = getRubblePileWorldFootprint(pile);
   const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
   const topY = baseY + getRubblePileVisualHeight(pile);
-  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
-  const maxZ = minZ + RUBBLE_CELL_SIZE;
 
   target.set(
     clamp(point.x, minX, maxX),
@@ -1278,12 +1505,9 @@ function intersectRayWithPile(
   pile: RubbleCellPile,
   maxDistance: number
 ): number | null {
-  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
-  const maxX = minX + RUBBLE_CELL_SIZE;
+  const { minX, maxX, minZ, maxZ } = getRubblePileWorldFootprint(pile);
   const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
   const topY = baseY + getRubblePileVisualHeight(pile);
-  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
-  const maxZ = minZ + RUBBLE_CELL_SIZE;
   const tx1 = (minX - origin.x) * inverseDirection.x;
   const tx2 = (maxX - origin.x) * inverseDirection.x;
   const ty1 = (baseY - origin.y) * inverseDirection.y;

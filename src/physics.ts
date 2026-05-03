@@ -4,7 +4,7 @@ import {
   BLOCK_FRAGMENT_VISUAL_SIZE
 } from "./blockFragments";
 import { BLOCKS } from "./blocks";
-import type { CollisionWorld } from "./collision";
+import type { CollisionBounds, CollisionWorld } from "./collision";
 
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 export const PHYSICS_CORE_BLOCK_DAMAGE = 30;
@@ -17,6 +17,8 @@ const FRAGMENT_COLLISION_RESTITUTION = 0.38;
 const FRAGMENT_GROUND_HORIZONTAL_DAMPING = 0.52;
 const FRAGMENT_GROUND_VERTICAL_DAMPING = 0.36;
 const FRAGMENT_WALL_DAMPING = 0.74;
+const FRAGMENT_PARTIAL_SUPPORT_EPSILON = 0.025;
+const FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION = BLOCK_FRAGMENT_VISUAL_SIZE * 2.25;
 const CORE_COLLISION_RESTITUTION = 1.55;
 const CORE_COLLISION_DAMPING = 0.985;
 const PHYSICS_TOY_COLLISION_CELL_SIZE = 1;
@@ -90,6 +92,7 @@ export class PhysicsToy {
   private readonly centerDelta = new THREE.Vector3();
   private readonly spinAxis = new THREE.Vector3();
   private readonly spinStep = new THREE.Quaternion();
+  private readonly supportNormal = new THREE.Vector3(0, 1, 0);
   private readonly disposeGeometry: boolean;
   private readonly disposeMaterial: boolean;
   private readonly maxAgeSeconds: number | null;
@@ -254,7 +257,8 @@ export class PhysicsToy {
       }
     }
 
-    this.updateSleepState(delta, touchedSolidBlock);
+    const touchedPartialSupport = this.resolvePartialSupport(world);
+    this.updateSleepState(delta, touchedSolidBlock || touchedPartialSupport);
     return impacts;
   }
 
@@ -285,6 +289,51 @@ export class PhysicsToy {
       this.velocity.multiplyScalar(FRAGMENT_WALL_DAMPING);
       this.angularVelocity.multiplyScalar(0.88);
     }
+  }
+
+  private resolvePartialSupport(world: CollisionWorld): boolean {
+    if (!this.isInstancedFragment || !world.getSupportHeight) return false;
+
+    const bounds = this.getSupportBounds();
+    const supportY = world.getSupportHeight(bounds);
+    if (supportY === null) return false;
+
+    const bottomY = this.mesh.position.y - this.radius;
+    const correction = supportY - bottomY;
+    if (correction < -FRAGMENT_PARTIAL_SUPPORT_EPSILON) {
+      return false;
+    }
+
+    // Partial-height rubble is not a voxel, so the block-sphere loop above can
+    // never push loose debris out of it. Keep the snap bounded: this catches
+    // fragments settling into a pile without teleporting pieces up through a
+    // tall cover patch they were already underneath.
+    if (correction > FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION) {
+      return false;
+    }
+
+    if (correction > 0) {
+      this.mesh.position.y += correction + 0.001;
+    }
+
+    if (this.velocity.y < 0) {
+      this.resolveBlockBounce(this.supportNormal, this.velocity.y);
+    } else if (Math.abs(this.velocity.y) < FRAGMENT_PARTIAL_SUPPORT_EPSILON) {
+      this.velocity.y = 0;
+    }
+    return true;
+  }
+
+  private getSupportBounds(): CollisionBounds {
+    const position = this.mesh.position;
+    return {
+      minX: position.x - this.radius,
+      maxX: position.x + this.radius,
+      minY: position.y - this.radius,
+      maxY: position.y + this.radius,
+      minZ: position.z - this.radius,
+      maxZ: position.z + this.radius
+    };
   }
 
   private updateAngularMotion(delta: number): void {

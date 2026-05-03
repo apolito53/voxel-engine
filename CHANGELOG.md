@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.3 - 2026-05-03
+
+### Changed
+
+- Fresh block debris now gets a short breakup phase before sticky contacts can form, with stronger outward scatter so destroyed voxels do not briefly remain as tiny intact block silhouettes.
+- Existing debris glue links now keep shaping a settling region until rubble finalization, preventing a good-looking clump from melting flat after the active pair-check window closes.
+- Final rubble meshes now use a small faceted heightfield driven by settled debris samples instead of reducing each occupied cell to one smoothed apex, so the persistent cover reads more like a jagged sheet over the pile.
+- Sparse rubble now keeps a local footprint around its settled samples instead of inflating every occupied cell into a full bumpy tile; larger material totals still grow toward broad walkable cover.
+- Loose debris now resolves against finalized rubble support surfaces, preventing fragments that land on piles from slowly sinking or clipping into the cover mesh before they finalize.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.2 - 2026-05-03
 
 ### Changed
