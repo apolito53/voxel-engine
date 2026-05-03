@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import "./style.css";
-import { getBlockFragmentOffset, getDistributedBlockFragmentIndex } from "./blockFragments";
+import {
+  getBlockFragmentMaterialUnits,
+  getBlockFragmentOffset,
+  getDistributedBlockFragmentIndex
+} from "./blockFragments";
 import { BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
   createChunkStorage,
@@ -901,8 +905,14 @@ function spawnBlockFragments(
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
       .add(new THREE.Vector3(0, 0.8 + Math.random() * 1.1, 0));
+    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
 
-    addPhysicsToy(PhysicsToy.createBlockFragment(block, blockCenter.clone().add(offset), velocity));
+    addPhysicsToy(PhysicsToy.createBlockFragment(
+      block,
+      blockCenter.clone().add(offset),
+      velocity,
+      rubbleMaterialUnits
+    ));
   }
 }
 
@@ -1057,8 +1067,8 @@ function absorbSleepingFragmentsIntoRubble(): void {
     if (!toy?.isInstancedFragment || !toy.isSleeping) continue;
 
     // Once debris has settled, it graduates from "expensive little physics
-    // shard" into a cheap cover proxy. The visible rubble remains, but the
-    // per-shard physics body leaves the hot loop.
+    // shard" into cheap cover material. A low visual debris count can still
+    // carry several material units, so graphics settings do not alter gameplay.
     if (rubbleField.absorbFragment(toy)) {
       engineEvents.emit("rubble:formed", {
         position: {
@@ -1067,7 +1077,7 @@ function absorbSleepingFragmentsIntoRubble(): void {
           z: toy.mesh.position.z
         },
         block: toy.fragmentBlock ?? 0,
-        pieces: 1
+        pieces: toy.rubbleMaterialUnits
       });
     }
     removePhysicsToyAt(index);

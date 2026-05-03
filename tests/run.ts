@@ -3,6 +3,8 @@ import {
   BLOCK_FRAGMENT_COUNT,
   BLOCK_FRAGMENT_GRID_SIZE,
   BLOCK_FRAGMENT_SPACING,
+  BLOCK_RUBBLE_MATERIAL_UNITS,
+  getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
   normalizeBlockFragmentCount
@@ -1428,6 +1430,18 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
     QUALITY_PRESETS.high.blockFragmentCount,
     "high-quality debris should choose unique grid indexes"
   );
+
+  for (const fragmentCount of [2, 4, 7, 14, BLOCK_FRAGMENT_COUNT]) {
+    let totalMaterialUnits = 0;
+    for (let index = 0; index < fragmentCount; index += 1) {
+      totalMaterialUnits += getBlockFragmentMaterialUnits(index, fragmentCount);
+    }
+    assertEqual(
+      totalMaterialUnits,
+      BLOCK_RUBBLE_MATERIAL_UNITS,
+      "quality-scaled visible fragments should still carry one full block of rubble material"
+    );
+  }
 });
 
 test("block fragments render through instanced batches instead of scene children", () => {
@@ -1562,6 +1576,36 @@ test("adjacent rubble cells merge into one broad patch", () => {
   );
   assert(hit, "the merged patch should still cover the neighboring cell");
   assertEqual(hit.block, BLOCK.dirt, "merged patches should preserve their source material");
+});
+
+test("quality-reduced fragments still settle into full rubble material", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+  const fragmentCount = QUALITY_PRESETS.potato.blockFragmentCount;
+
+  for (let index = 0; index < fragmentCount; index += 1) {
+    const fragment = PhysicsToy.createBlockFragment(
+      BLOCK.stone,
+      new THREE.Vector3(0.5 + index * 0.05, 0.2, 0.5),
+      new THREE.Vector3(0, 0, 0),
+      getBlockFragmentMaterialUnits(index, fragmentCount)
+    );
+
+    assert(rubble.absorbFragment(fragment), "visible debris should carry its gameplay material into rubble");
+  }
+
+  const rubbleStats = rubble.getStats();
+  assertEqual(
+    rubbleStats.pieces,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    "low visible debris counts should still produce one full block of rubble material"
+  );
+  assertEqual(
+    rubbleStats.health,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    "rubble health should follow material units instead of visible shard count"
+  );
+  assertEqual(scene.children.length, 1, "weighted rubble should still render as one merged proxy");
 });
 
 test("rubble field lets moving cores collide with and chip cover proxies", () => {

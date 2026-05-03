@@ -49,6 +49,7 @@ type PhysicsToyOptions = {
   readonly geometry?: THREE.BufferGeometry;
   readonly material?: THREE.MeshStandardMaterial;
   readonly fragmentBlock?: number | null;
+  readonly rubbleMaterialUnits?: number;
   readonly damagesBlocks?: boolean;
   readonly inverseMass?: number;
   readonly castShadow?: boolean;
@@ -80,6 +81,7 @@ export class PhysicsToy {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly damagesBlocks: boolean;
   readonly fragmentBlock: number | null;
+  readonly rubbleMaterialUnits: number;
   private readonly closestPoint = new THREE.Vector3();
   private readonly centerDelta = new THREE.Vector3();
   private readonly disposeGeometry: boolean;
@@ -106,6 +108,7 @@ export class PhysicsToy {
       })
     );
     this.fragmentBlock = options.fragmentBlock ?? null;
+    this.rubbleMaterialUnits = normalizeRubbleMaterialUnits(options.rubbleMaterialUnits, this.fragmentBlock !== null);
     this.damagesBlocks = options.damagesBlocks ?? true;
     this.disposeGeometry = options.disposeGeometry ?? true;
     this.disposeMaterial = options.disposeMaterial ?? true;
@@ -116,12 +119,18 @@ export class PhysicsToy {
     this.mesh.position.copy(position);
   }
 
-  static createBlockFragment(block: number, position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
+  static createBlockFragment(
+    block: number,
+    position: THREE.Vector3,
+    velocity: THREE.Vector3,
+    rubbleMaterialUnits = 1
+  ): PhysicsToy {
     return new PhysicsToy(position, velocity, {
       radius: BLOCK_FRAGMENT_COLLISION_RADIUS,
       geometry: getSharedFragmentGeometry(),
       material: getFragmentMaterial(block),
       fragmentBlock: block,
+      rubbleMaterialUnits,
       damagesBlocks: false,
       inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
@@ -569,6 +578,14 @@ export class PhysicsToyCollider {
 
 function clampToBlock(value: number, blockCoordinate: number): number {
   return Math.max(blockCoordinate, Math.min(value, blockCoordinate + 1));
+}
+
+function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boolean): number {
+  if (!isFragment) return 0;
+
+  const numericValue = value ?? 1;
+  if (!Number.isFinite(numericValue)) return 1;
+  return Math.max(1, Math.round(numericValue));
 }
 
 export function getSharedFragmentGeometry(): THREE.BoxGeometry {

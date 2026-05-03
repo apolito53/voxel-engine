@@ -111,15 +111,21 @@ export class RubbleField {
       return false;
     }
 
-    this.absorb(fragment.fragmentBlock, fragment.mesh.position);
+    this.absorb(fragment.fragmentBlock, fragment.mesh.position, fragment.rubbleMaterialUnits);
     return true;
   }
 
-  absorb(block: number, position: THREE.Vector3): void {
+  absorb(block: number, position: THREE.Vector3, pieces = 1): void {
     // Settled shards become cell piles, and adjacent piles are stitched into a
     // capped patch. That keeps rubble readable as debris fields instead of
     // rendering hundreds of tiny standalone boxes.
-    this.absorbPileAtCell(block, getRubbleCell(position), 1, RUBBLE_PIECE_HEALTH);
+    const normalizedPieces = normalizeRubblePieceCount(pieces);
+    this.absorbPileAtCell(
+      block,
+      getRubbleCell(position),
+      normalizedPieces,
+      normalizedPieces * RUBBLE_PIECE_HEALTH
+    );
     this.refreshStats();
   }
 
@@ -681,6 +687,11 @@ function clonePile(pile: RubbleCellPile): RubbleCellPile {
     pieces: pile.pieces,
     health: pile.health
   };
+}
+
+function normalizeRubblePieceCount(pieces: number): number {
+  if (!Number.isFinite(pieces)) return 1;
+  return Math.max(1, Math.round(pieces));
 }
 
 function getRubbleCellCoordinateKey(cell: RubbleCell): string {

@@ -45,7 +45,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled visible cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -59,13 +59,15 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Quality Presets
 
-- `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 2 debris shards
-- `Low`: current low-end baseline, no shadows, 128 physics bodies, 4 debris shards
-- `Normal`: 2x render distance, shadows, 192 physics bodies, 7 debris shards
-- `High`: 4x render distance, sharper local shadows, 512 physics bodies, 14 debris shards
-- `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 27 debris shards
-- `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 2 visible debris shards
+- `Low`: current low-end baseline, no shadows, 128 physics bodies, 4 visible debris shards
+- `Normal`: 2x render distance, shadows, 192 physics bodies, 7 visible debris shards
+- `High`: 4x render distance, sharper local shadows, 512 physics bodies, 14 visible debris shards
+- `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 27 visible debris shards
+- `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
+
+Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so rubble cover, health, and dense-pile promotion do not change with graphics quality.
 
 ## Engine Pieces
 
@@ -82,7 +84,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
-- `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
+- `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments

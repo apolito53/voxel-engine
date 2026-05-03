@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.17 - 2026-05-03
+
+### Changed
+
+- Decoupled rubble gameplay material from visible debris count: every destroyed block now contributes one full block's worth of rubble material even when lower quality settings spawn fewer visible fragments.
+- Visible debris count remains a performance/visual tuning knob, while settled rubble height, health, cover value, and terrain-promotion behavior stay consistent across Potato, Low, Normal, High, Ultra, and Super Ultra.
+- Fragment physics bodies now carry `rubbleMaterialUnits`, so a small number of visible shards can settle into the same gameplay rubble mass as the full 3x3x3 fracture grid.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.2.16 - 2026-05-03
 
 ### Added
