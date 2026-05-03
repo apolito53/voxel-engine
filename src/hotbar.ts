@@ -1,29 +1,30 @@
-import type { BlockDefinition, BlockId } from "./blocks";
+import type { BlockId } from "./blocks";
+import {
+  EMPTY_HANDS_ITEM_ID,
+  PHYSICS_CORE_ITEM_ID,
+  createBlockItemId,
+  createItemStack,
+  getItemAction,
+  getItemDefinition,
+  getItemLabel,
+  type ItemAction,
+  type ItemCategory,
+  type ItemRegistry,
+  type ItemStack
+} from "./items";
 
-export type HotbarBlockItem = {
-  readonly kind: "block";
-  readonly block: BlockId;
-};
-
-export type HotbarUnarmedItem = {
-  readonly kind: "unarmed";
-};
-
-export type HotbarPhysicsCoreItem = {
-  readonly kind: "physics-core";
-};
-
-export type HotbarItem = HotbarUnarmedItem | HotbarBlockItem | HotbarPhysicsCoreItem;
+export type HotbarItem = ItemStack;
 
 export type HotbarScrollDirection = -1 | 1;
 
 export function createHotbarItems(placeableBlocks: readonly BlockId[]): readonly HotbarItem[] {
-  // The physics core lives in the same selection lane as placeable blocks, so
-  // selection is one continuous loop even when item behavior differs by click.
+  // The hotbar stores stacks, not behavior. Item definitions decide what a
+  // primary or secondary click means, which keeps this selection lane reusable
+  // when the engine grows actual tools, weapons, or game-specific commands.
   return [
-    { kind: "unarmed" },
-    ...placeableBlocks.map((block): HotbarBlockItem => ({ kind: "block", block })),
-    { kind: "physics-core" }
+    createItemStack(EMPTY_HANDS_ITEM_ID),
+    ...placeableBlocks.map((block) => createItemStack(createBlockItemId(block))),
+    createItemStack(PHYSICS_CORE_ITEM_ID)
   ];
 }
 
@@ -51,26 +52,36 @@ export function normalizeHotbarIndex(index: number, itemCount: number): number {
   return ((Math.trunc(index) % itemCount) + itemCount) % itemCount;
 }
 
-export function getHotbarItemLabel(
-  item: HotbarItem,
-  blocks: Readonly<Record<number, BlockDefinition>>
-): string {
-  if (item.kind === "block") return blocks[item.block]?.name ?? "Block";
-  if (item.kind === "physics-core") return "Physics Core";
-  return "Unarmed";
+export function getHotbarIndexFromDigitCode(code: string): number | null {
+  if (!/^Digit[1-9]$/.test(code)) return null;
+
+  return Number(code.slice(-1)) - 1;
 }
 
-export function canDestroyBlockWithHotbarItem(item: HotbarItem): boolean {
-  // For this first equipment-shaped pass, block selection owns terrain editing:
-  // left click removes the target, right click places the selected block.
-  // Future tool items can join this predicate without making Unarmed magical.
-  return item.kind === "block";
+export function getHotbarItemLabel(item: HotbarItem, registry: ItemRegistry): string {
+  return getItemLabel(registry, item);
 }
 
-export function canPlaceBlockWithHotbarItem(item: HotbarItem): item is HotbarBlockItem {
-  return item.kind === "block";
+export function getHotbarItemCategory(item: HotbarItem, registry: ItemRegistry): ItemCategory {
+  return getItemDefinition(registry, item).category;
 }
 
-export function canThrowCoreWithHotbarItem(item: HotbarItem): item is HotbarPhysicsCoreItem {
-  return item.kind === "physics-core";
+export function getHotbarPrimaryAction(item: HotbarItem, registry: ItemRegistry): ItemAction {
+  return getItemAction(registry, item, "primary");
+}
+
+export function getHotbarSecondaryAction(item: HotbarItem, registry: ItemRegistry): ItemAction {
+  return getItemAction(registry, item, "secondary");
+}
+
+export function canDestroyBlockWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
+  return getHotbarPrimaryAction(item, registry).kind === "terrain:destroy-block";
+}
+
+export function canPlaceBlockWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
+  return getHotbarSecondaryAction(item, registry).kind === "terrain:place-block";
+}
+
+export function canThrowCoreWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
+  return getHotbarPrimaryAction(item, registry).kind === "physics:throw-core";
 }

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.15 - 2026-05-03
+
+### Added
+
+- Added `src/items.ts`, a reusable item registry with item ids, categories, tags, stack metadata, and primary/secondary action descriptors.
+- Added item action contracts for empty hands, placeable terrain blocks, and the Physics Core.
+- Added an `item:selected` engine event so future systems can react to held-item changes without coupling to block palette events.
+- Added regression coverage for item registry behavior, action lookup, and number-key hotbar selection mapping.
+
+### Changed
+
+- Refactored the hotbar to store item stacks and resolve behavior through the item registry instead of hard-coded item-kind unions.
+- Refactored mouse click handling to dispatch item actions, preserving the current behavior: Unarmed does nothing, blocks break/place, and Physics Core throws on left click.
+- Updated README, TODO, and codebase index notes for the new item/action foundation.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: loaded `Default World`, selected `Physics Core` with the hotbar digit path, threw a core and confirmed the debug HUD physics count updated with no fresh console errors, then selected `Grass` and confirmed the HUD label changed through the item registry path.
+
 ## 0.2.14 - 2026-05-03
 
 ### Added

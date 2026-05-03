@@ -138,10 +138,23 @@ import {
   canPlaceBlockWithHotbarItem,
   canThrowCoreWithHotbarItem,
   createHotbarItems,
+  getHotbarIndexFromDigitCode,
   getHotbarItemLabel,
+  getHotbarPrimaryAction,
   getHotbarScrollDirection,
+  getHotbarSecondaryAction,
   stepHotbarIndex
 } from "../src/hotbar";
+import {
+  EMPTY_HANDS_ITEM_ID,
+  PHYSICS_CORE_ITEM_ID,
+  createBlockItemId,
+  createItemStack,
+  createVoxelSandboxItemRegistry,
+  getItemAction,
+  getItemDefinition,
+  getItemLabel
+} from "../src/items";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import {
   appendNovaChatMessage,
@@ -399,47 +412,95 @@ test("nova chat replies use context and chat logs stay bounded", () => {
   journal.dispose();
 });
 
+test("item registry describes reusable held-item actions", () => {
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const grassItemId = createBlockItemId(BLOCK.grass);
+  const grassSecondaryAction = getItemAction(itemRegistry, grassItemId, "secondary");
+
+  assertEqual(getItemLabel(itemRegistry, EMPTY_HANDS_ITEM_ID), "Unarmed", "empty hands should be an explicit item");
+  assertEqual(
+    getItemDefinition(itemRegistry, PHYSICS_CORE_ITEM_ID).category,
+    "tool",
+    "physics core should be described as a tool item"
+  );
+  assertEqual(
+    getItemDefinition(itemRegistry, grassItemId).maxStack,
+    99,
+    "placeable blocks should already carry stack metadata for later inventory work"
+  );
+  assertEqual(
+    getItemAction(itemRegistry, grassItemId, "primary").kind,
+    "terrain:destroy-block",
+    "selected block primary action should describe terrain destruction"
+  );
+  assertEqual(
+    grassSecondaryAction.kind,
+    "terrain:place-block",
+    "selected block secondary action should describe terrain placement"
+  );
+  if (grassSecondaryAction.kind === "terrain:place-block") {
+    assertEqual(grassSecondaryAction.block, BLOCK.grass, "block placement action should preserve the block id");
+  }
+  assertEqual(
+    getItemAction(itemRegistry, PHYSICS_CORE_ITEM_ID, "primary").kind,
+    "physics:throw-core",
+    "physics core primary action should describe throwing a core"
+  );
+});
+
 test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", () => {
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
   const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
   const firstItem = hotbarItems[0];
   const lastItem = hotbarItems[hotbarItems.length - 1];
+  const grassItem = createItemStack(createBlockItemId(BLOCK.grass));
 
-  assertEqual(firstItem?.kind, "unarmed", "hotbar should start in the explicit unarmed state");
-  assertEqual(lastItem?.kind, "physics-core", "hotbar should end with the physics core item");
+  assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "hotbar should start in the explicit unarmed state");
+  assertEqual(lastItem?.itemId, PHYSICS_CORE_ITEM_ID, "hotbar should end with the physics core item");
   assertEqual(
     hotbarItems.length,
     PLACEABLE_BLOCKS.length + 2,
     "hotbar should contain unarmed, every placeable block, and the core"
   );
   assertEqual(
-    getHotbarItemLabel(firstItem ?? { kind: "unarmed" }, BLOCKS),
+    getHotbarItemLabel(firstItem ?? createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
     "Unarmed",
     "unarmed slot should have a readable HUD label"
   );
   assertEqual(
-    getHotbarItemLabel(lastItem ?? { kind: "physics-core" }, BLOCKS),
+    getHotbarItemLabel(lastItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "Physics Core",
     "core slot should have a readable HUD label"
   );
   assert(
-    !canDestroyBlockWithHotbarItem({ kind: "unarmed" }),
+    !canDestroyBlockWithHotbarItem(createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
     "unarmed should leave left click inert until tools exist"
   );
   assert(
-    canDestroyBlockWithHotbarItem({ kind: "block", block: BLOCK.grass }),
+    canDestroyBlockWithHotbarItem(grassItem, itemRegistry),
     "selected blocks should own left-click terrain destruction"
   );
   assert(
-    !canDestroyBlockWithHotbarItem({ kind: "physics-core" }),
+    !canDestroyBlockWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "holding a core should not also break targeted blocks on left click"
   );
   assert(
-    canPlaceBlockWithHotbarItem({ kind: "block", block: BLOCK.grass }),
+    canPlaceBlockWithHotbarItem(grassItem, itemRegistry),
     "selected blocks should place on right click"
   );
   assert(
-    canThrowCoreWithHotbarItem({ kind: "physics-core" }),
+    canThrowCoreWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "selected physics core should throw on left click"
+  );
+  assertEqual(
+    getHotbarPrimaryAction(grassItem, itemRegistry).kind,
+    "terrain:destroy-block",
+    "hotbar primary action should resolve through the item registry"
+  );
+  assertEqual(
+    getHotbarSecondaryAction(grassItem, itemRegistry).kind,
+    "terrain:place-block",
+    "hotbar secondary action should resolve through the item registry"
   );
 });
 
@@ -449,6 +510,9 @@ test("hotbar scrolling wraps predictably", () => {
   assertEqual(getHotbarScrollDirection(120), 1, "scrolling down should move forward through hotbar items");
   assertEqual(getHotbarScrollDirection(-120), -1, "scrolling up should move backward through hotbar items");
   assertEqual(getHotbarScrollDirection(0), null, "zero-delta wheel events should not change selection");
+  assertEqual(getHotbarIndexFromDigitCode("Digit1"), 0, "digit one should select the first hotbar slot");
+  assertEqual(getHotbarIndexFromDigitCode("Digit7"), 6, "digit seven should select the seventh hotbar slot");
+  assertEqual(getHotbarIndexFromDigitCode("KeyB"), null, "non-digit hotkeys should not select hotbar slots");
   assertEqual(
     stepHotbarIndex(0, -1, hotbarItems.length),
     hotbarItems.length - 1,

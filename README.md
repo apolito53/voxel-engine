@@ -1,6 +1,6 @@
 # Voxel Sandbox Engine
 
-A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, block edits, impact damage, and simple physics toys.
+A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, held item actions, block edits, impact damage, and simple physics toys.
 
 World units are metric: `1 block = 1 meter`.
 
@@ -34,13 +34,13 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
-- HUD shows the selected block, movement mode, and current player speed in m/s
+- HUD shows the selected held item, movement mode, and current player speed in m/s
 - Pause menu `Settings` opens the tunable engine controls; `Exit to Home` sits at the bottom as the red world-leave action
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with an 80% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide
 - `Shift` sprint on ground, or use the stronger flight speed boost; active sprint/boost widens FOV and adds peripheral speed lines
-- `Mouse wheel` selects Unarmed, placeable blocks, or Physics Core
+- `Mouse wheel` selects held items: Unarmed, placeable blocks, or Physics Core
 - `Unarmed` does nothing on either click for now
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
@@ -83,6 +83,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern and debris sizing constants
+- `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
+- `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments so thousands of shards do not become thousands of scene meshes
 - `src/rubble.ts`: persistent destructible rubble cover patches, multi-cell merge rules, support/fall behavior, and promotion into generated `Rubble` terrain blocks
@@ -102,7 +104,6 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
-- `src/hotbar.ts`: scroll-selected Unarmed/block/Physics Core item lane and selection wrapping helpers
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 
 ## Development Checks

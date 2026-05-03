@@ -19,6 +19,7 @@ Official docs to re-check before implementation:
 
 ## Equipment And Items Iteration
 
-- Promote the current scroll-selected Unarmed/block/Physics Core lane into a real equipment and inventory model.
+- First foundation is in place: `src/items.ts` defines reusable item definitions, stack metadata, categories, tags, and primary/secondary action descriptors; `src/hotbar.ts` now selects item stacks instead of hard-coded behavior unions.
 - Add explicit tool items so terrain destruction can be owned by selected blocks/tools instead of being a universal left-click behavior.
 - Decide whether blocks, throwable cores, tools, and future weapons share one hotbar or split into equipment slots plus item inventory.
+- Add an actual inventory/equipment container once item quantities, pickups, crafting, or weapon slots exist in gameplay.

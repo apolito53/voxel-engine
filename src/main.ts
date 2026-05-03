@@ -17,16 +17,23 @@ import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import {
-  canDestroyBlockWithHotbarItem,
-  canPlaceBlockWithHotbarItem,
-  canThrowCoreWithHotbarItem,
   createHotbarItems,
+  getHotbarIndexFromDigitCode,
   getHotbarItemLabel,
+  getHotbarItemCategory,
+  getHotbarPrimaryAction,
   getHotbarScrollDirection,
+  getHotbarSecondaryAction,
   normalizeHotbarIndex,
   stepHotbarIndex,
   type HotbarItem
 } from "./hotbar";
+import {
+  EMPTY_HANDS_ITEM_ID,
+  createItemStack,
+  createVoxelSandboxItemRegistry,
+  type ItemAction
+} from "./items";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
@@ -197,7 +204,9 @@ let nextPlayerLocationAutosaveAt = 0;
 let playerLocationSaveChain: Promise<void> = Promise.resolve();
 
 const engineEvents = createEngineEventBus();
+const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
 const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
+const fallbackHotbarItem = createItemStack(EMPTY_HANDS_ITEM_ID);
 const novaContext = new NovaContextJournal(engineEvents);
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
@@ -480,12 +489,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (/^Digit[1-7]$/.test(event.code)) {
-    const requestedIndex = Number(event.code.slice(-1)) - 1;
-    if (requestedIndex < hotbarItems.length) {
-      event.preventDefault();
-      selectHotbarIndex(requestedIndex);
-    }
+  const requestedHotbarIndex = getHotbarIndexFromDigitCode(event.code);
+  if (requestedHotbarIndex !== null && requestedHotbarIndex < hotbarItems.length) {
+    event.preventDefault();
+    selectHotbarIndex(requestedHotbarIndex);
   }
 
   const activePlayer = requirePlayer();
@@ -532,23 +539,28 @@ renderer.domElement.addEventListener("wheel", (event) => {
 }, { passive: false });
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
-  const selectedItem = getSelectedHotbarItem();
-
-  if (canThrowCoreWithHotbarItem(selectedItem)) {
-    if (activePlayer.isLooking()) throwPlayerCore();
-    return;
-  }
-
-  if (canDestroyBlockWithHotbarItem(selectedItem)) {
-    destroyTargetBlock();
-  }
+  useSelectedHotbarAction(activePlayer, getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry));
 }
 
 function useSelectedHotbarSecondaryAction(activePlayer: PlayerController): void {
-  const selectedItem = getSelectedHotbarItem();
+  useSelectedHotbarAction(activePlayer, getHotbarSecondaryAction(getSelectedHotbarItem(), itemRegistry));
+}
 
-  if (canPlaceBlockWithHotbarItem(selectedItem)) {
-    placeSelectedBlock(activePlayer, selectedItem.block);
+function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAction): void {
+  // Mouse buttons dispatch item actions now, not hard-coded hotbar kinds. That
+  // is the seam future FPS weapons, dungeon tools, or RTS commands can share.
+  switch (action.kind) {
+    case "none":
+      return;
+    case "terrain:destroy-block":
+      destroyTargetBlock();
+      return;
+    case "terrain:place-block":
+      placeSelectedBlock(activePlayer, action.block);
+      return;
+    case "physics:throw-core":
+      if (activePlayer.isLooking()) throwPlayerCore();
+      return;
   }
 }
 
@@ -721,14 +733,14 @@ function updateHud(): void {
   const movementMode = activePlayer.movementMode;
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
   const novaSuffix = novaPilot.active ? " | Nova" : "";
-  const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), BLOCKS);
+  const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry);
   hudTitle.textContent = `Voxel Sandbox Engine | ${selectedLabel}${modeSuffix}${novaSuffix}`;
   playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
 }
 
 function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats: RubbleFieldStats): void {
   novaContext.updateRuntimeTelemetry({
-    selectedItemLabel: getHotbarItemLabel(getSelectedHotbarItem(), BLOCKS),
+    selectedItemLabel: getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry),
     movementMode: activePlayer.movementMode,
     speedMetersPerSecond: getPlayerSpeedMetersPerSecond(activePlayer.velocity),
     novaActive: novaPilot.active,
@@ -739,17 +751,26 @@ function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats:
 }
 
 function getSelectedHotbarItem(): HotbarItem {
-  return hotbarItems[normalizeHotbarIndex(selectedHotbarIndex, hotbarItems.length)] ?? { kind: "unarmed" };
+  return hotbarItems[normalizeHotbarIndex(selectedHotbarIndex, hotbarItems.length)] ?? fallbackHotbarItem;
 }
 
 function selectHotbarIndex(index: number): void {
   selectedHotbarIndex = normalizeHotbarIndex(index, hotbarItems.length);
   const selectedItem = getSelectedHotbarItem();
+  const selectedLabel = getHotbarItemLabel(selectedItem, itemRegistry);
 
-  if (selectedItem.kind === "block") {
+  engineEvents.emit("item:selected", {
+    itemId: selectedItem.itemId,
+    name: selectedLabel,
+    category: getHotbarItemCategory(selectedItem, itemRegistry),
+    slotIndex: selectedHotbarIndex
+  });
+
+  const secondaryAction = getHotbarSecondaryAction(selectedItem, itemRegistry);
+  if (secondaryAction.kind === "terrain:place-block") {
     engineEvents.emit("palette:selected", {
-      block: selectedItem.block,
-      name: BLOCKS[selectedItem.block].name
+      block: secondaryAction.block,
+      name: BLOCKS[secondaryAction.block].name
     });
   }
 

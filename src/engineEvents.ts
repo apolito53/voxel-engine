@@ -1,6 +1,7 @@
 import type { BlockId } from "./blocks";
 import { EventBus } from "./eventBus";
 import type { FrameTimings } from "./frameTimings";
+import type { ItemCategory, ItemId } from "./items";
 import type { QualityChangeSource } from "./qualityController";
 import type { QualityPresetId } from "./qualityPresets";
 
@@ -61,6 +62,12 @@ export type EngineEvents = {
   };
   "settings:physics-budget-changed": {
     readonly physicsObjectBudget: number;
+  };
+  "item:selected": {
+    readonly itemId: ItemId;
+    readonly name: string;
+    readonly category: ItemCategory;
+    readonly slotIndex: number;
   };
   "palette:selected": {
     readonly block: BlockId;
