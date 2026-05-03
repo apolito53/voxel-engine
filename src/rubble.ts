@@ -45,6 +45,11 @@ type RubbleCluster = {
 };
 
 type RubbleQuadVertex = readonly [number, number, number];
+type RubbleDamageTarget = {
+  readonly cluster: RubbleCluster;
+  readonly pile: RubbleCellPile;
+  readonly distanceSq: number;
+};
 
 export type RubbleFieldWorld = {
   getBlock(x: number, y: number, z: number): number;
@@ -91,6 +96,7 @@ export class RubbleField {
   private readonly dirtyClusters = new Set<RubbleCluster>();
   private readonly sphereClosestPoint = new THREE.Vector3();
   private readonly sphereDelta = new THREE.Vector3();
+  private readonly pileClosestPoint = new THREE.Vector3();
   private readonly fallbackNormal = new THREE.Vector3(0, 1, 0);
   private readonly rayInverseDirection = new THREE.Vector3();
   private stats: RubbleFieldStats = EMPTY_RUBBLE_STATS;
@@ -190,21 +196,10 @@ export class RubbleField {
 
   damageNearest(position: THREE.Vector3, amount: number, radius = 1.2): boolean {
     this.flushDirtyClusterMeshes();
-    let nearestCluster: RubbleCluster | null = null;
-    let nearestDistanceSq = radius * radius;
+    const nearestTarget = this.findNearestPileDamageTarget(position, radius);
 
-    // This is the future-facing destructibility hook: bullets/explosions can
-    // chip the nearest cover proxy without needing to know about visual shards.
-    for (const cluster of this.getNearbyClusters(position, radius + RUBBLE_NEARBY_SEARCH_PADDING)) {
-      const distanceSq = getPointBoxDistanceSq(position, cluster.bounds);
-      if (distanceSq > nearestDistanceSq) continue;
-
-      nearestDistanceSq = distanceSq;
-      nearestCluster = cluster;
-    }
-
-    if (!nearestCluster) return false;
-    this.damageCluster(nearestCluster, amount);
+    if (!nearestTarget) return false;
+    this.damageClusterFromPile(nearestTarget.cluster, nearestTarget.pile, amount, position);
     return true;
   }
 
@@ -221,22 +216,24 @@ export class RubbleField {
     );
 
     for (const cluster of this.clustersById.values()) {
-      const distance = intersectRayWithBox(
-        origin,
-        direction,
-        this.rayInverseDirection,
-        cluster.bounds,
-        maxDistance
-      );
-      if (distance === null) continue;
-      if (closestHit && distance >= closestHit.distance) continue;
+      for (const pile of cluster.cells.values()) {
+        const distance = intersectRayWithPile(
+          origin,
+          direction,
+          this.rayInverseDirection,
+          pile,
+          maxDistance
+        );
+        if (distance === null) continue;
+        if (closestHit && distance >= closestHit.distance) continue;
 
-      closestHit = {
-        clusterId: cluster.id,
-        block: cluster.block,
-        distance,
-        point: origin.clone().addScaledVector(direction, distance)
-      };
+        closestHit = {
+          clusterId: cluster.id,
+          block: cluster.block,
+          distance,
+          point: origin.clone().addScaledVector(direction, distance)
+        };
+      }
     }
 
     return closestHit;
@@ -433,13 +430,10 @@ export class RubbleField {
 
   private resolveCoreClusterCollision(core: PhysicsToy, cluster: RubbleCluster): boolean {
     const corePosition = core.mesh.position;
-    this.sphereClosestPoint.set(
-      clamp(corePosition.x, cluster.bounds.min.x, cluster.bounds.max.x),
-      clamp(corePosition.y, cluster.bounds.min.y, cluster.bounds.max.y),
-      clamp(corePosition.z, cluster.bounds.min.z, cluster.bounds.max.z)
-    );
+    const targetPile = this.findCoreCollisionPile(core, cluster);
+    if (!targetPile) return false;
+
     const distanceSq = this.sphereDelta.copy(corePosition).sub(this.sphereClosestPoint).lengthSq();
-    if (distanceSq >= core.radius * core.radius) return false;
 
     const distance = Math.sqrt(distanceSq);
     const normal = distance > RUBBLE_COLLISION_EPSILON
@@ -458,16 +452,21 @@ export class RubbleField {
       core.velocity.addScaledVector(normal, -impact * RUBBLE_CORE_RESTITUTION);
       core.velocity.multiplyScalar(RUBBLE_CORE_DAMPING);
       if (impactSpeed > BLOCK_DAMAGE_IMPACT_SPEED) {
-        this.damageCluster(cluster, Math.max(1, impactSpeed / 5));
+        this.damageClusterFromPile(cluster, targetPile, Math.max(1, impactSpeed / 5), this.sphereClosestPoint);
       }
     }
 
     return true;
   }
 
-  private damageCluster(cluster: RubbleCluster, amount: number): void {
+  private damageClusterFromPile(
+    cluster: RubbleCluster,
+    targetPile: RubbleCellPile,
+    amount: number,
+    origin: THREE.Vector3
+  ): void {
     let remainingDamage = amount;
-    const piles = Array.from(cluster.cells.values()).sort((left, right) => right.health - left.health);
+    const piles = this.sortClusterPilesForDamage(cluster, targetPile, origin);
 
     for (const pile of piles) {
       if (remainingDamage <= 0) break;
@@ -492,6 +491,62 @@ export class RubbleField {
       this.markClusterDirty(cluster);
     }
     this.refreshStats();
+  }
+
+  private findNearestPileDamageTarget(position: THREE.Vector3, radius: number): RubbleDamageTarget | null {
+    let nearestTarget: RubbleDamageTarget | null = null;
+    let nearestDistanceSq = radius * radius;
+
+    // Damage must target the cell actually hit, not the merged patch's broad
+    // bounds. Otherwise a wide patch can appear to take damage in random cells.
+    for (const cluster of this.getNearbyClusters(position, radius + RUBBLE_NEARBY_SEARCH_PADDING)) {
+      for (const pile of cluster.cells.values()) {
+        const distanceSq = getPointPileDistanceSq(position, pile);
+        if (distanceSq > nearestDistanceSq) continue;
+
+        nearestDistanceSq = distanceSq;
+        nearestTarget = { cluster, pile, distanceSq };
+      }
+    }
+
+    return nearestTarget;
+  }
+
+  private findCoreCollisionPile(core: PhysicsToy, cluster: RubbleCluster): RubbleCellPile | null {
+    const corePosition = core.mesh.position;
+    let closestPile: RubbleCellPile | null = null;
+    let closestDistanceSq = core.radius * core.radius;
+
+    // Resolve against the nearest occupied pile cell. The cluster AABB is only
+    // a coarse lookup bound and can include empty space between merged cells.
+    for (const pile of cluster.cells.values()) {
+      const distanceSq = setClosestPointOnPile(corePosition, pile, this.pileClosestPoint);
+      if (distanceSq >= closestDistanceSq) continue;
+
+      closestDistanceSq = distanceSq;
+      closestPile = pile;
+      this.sphereClosestPoint.copy(this.pileClosestPoint);
+    }
+
+    return closestPile;
+  }
+
+  private sortClusterPilesForDamage(
+    cluster: RubbleCluster,
+    targetPile: RubbleCellPile,
+    origin: THREE.Vector3
+  ): RubbleCellPile[] {
+    return Array.from(cluster.cells.values()).sort((left, right) => {
+      if (left === targetPile) return -1;
+      if (right === targetPile) return 1;
+
+      const distanceDelta = getPointPileDistanceSq(origin, left) - getPointPileDistanceSq(origin, right);
+      if (Math.abs(distanceDelta) > RUBBLE_COLLISION_EPSILON) return distanceDelta;
+
+      // If excess damage spills into equally close cells, chew through the
+      // weaker material first so results are deterministic and locally sensible.
+      return left.health - right.health;
+    });
   }
 
   private removeCluster(cluster: RubbleCluster): void {
@@ -748,33 +803,65 @@ function addQuad(
   indices.push(startIndex, startIndex + 1, startIndex + 2, startIndex, startIndex + 2, startIndex + 3);
 }
 
-function getPointBoxDistanceSq(point: THREE.Vector3, box: THREE.Box3): number {
-  const closestX = clamp(point.x, box.min.x, box.max.x);
-  const closestY = clamp(point.y, box.min.y, box.max.y);
-  const closestZ = clamp(point.z, box.min.z, box.max.z);
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getPointPileDistanceSq(point: THREE.Vector3, pile: RubbleCellPile): number {
+  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const maxX = minX + RUBBLE_CELL_SIZE;
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const topY = baseY + getRubblePileVisualHeight(pile);
+  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
+  const maxZ = minZ + RUBBLE_CELL_SIZE;
+  const closestX = clamp(point.x, minX, maxX);
+  const closestY = clamp(point.y, baseY, topY);
+  const closestZ = clamp(point.z, minZ, maxZ);
   const dx = point.x - closestX;
   const dy = point.y - closestY;
   const dz = point.z - closestZ;
   return dx * dx + dy * dy + dz * dz;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+function setClosestPointOnPile(
+  point: THREE.Vector3,
+  pile: RubbleCellPile,
+  target: THREE.Vector3
+): number {
+  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const maxX = minX + RUBBLE_CELL_SIZE;
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const topY = baseY + getRubblePileVisualHeight(pile);
+  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
+  const maxZ = minZ + RUBBLE_CELL_SIZE;
+
+  target.set(
+    clamp(point.x, minX, maxX),
+    clamp(point.y, baseY, topY),
+    clamp(point.z, minZ, maxZ)
+  );
+  return target.distanceToSquared(point);
 }
 
-function intersectRayWithBox(
+function intersectRayWithPile(
   origin: THREE.Vector3,
   direction: THREE.Vector3,
   inverseDirection: THREE.Vector3,
-  box: THREE.Box3,
+  pile: RubbleCellPile,
   maxDistance: number
 ): number | null {
-  const tx1 = (box.min.x - origin.x) * inverseDirection.x;
-  const tx2 = (box.max.x - origin.x) * inverseDirection.x;
-  const ty1 = (box.min.y - origin.y) * inverseDirection.y;
-  const ty2 = (box.max.y - origin.y) * inverseDirection.y;
-  const tz1 = (box.min.z - origin.z) * inverseDirection.z;
-  const tz2 = (box.max.z - origin.z) * inverseDirection.z;
+  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const maxX = minX + RUBBLE_CELL_SIZE;
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const topY = baseY + getRubblePileVisualHeight(pile);
+  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
+  const maxZ = minZ + RUBBLE_CELL_SIZE;
+  const tx1 = (minX - origin.x) * inverseDirection.x;
+  const tx2 = (maxX - origin.x) * inverseDirection.x;
+  const ty1 = (baseY - origin.y) * inverseDirection.y;
+  const ty2 = (topY - origin.y) * inverseDirection.y;
+  const tz1 = (minZ - origin.z) * inverseDirection.z;
+  const tz2 = (maxZ - origin.z) * inverseDirection.z;
 
   const tMin = Math.max(
     Math.min(tx1, tx2),

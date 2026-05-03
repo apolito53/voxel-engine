@@ -1608,6 +1608,35 @@ test("quality-reduced fragments still settle into full rubble material", () => {
   assertEqual(scene.children.length, 1, "weighted rubble should still render as one merged proxy");
 });
 
+test("rubble damage targets the impacted pile instead of the healthiest neighbor", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.5, 0.2, 0.5), 6);
+  assertEqual(rubble.getStats().clusters, 1, "adjacent setup should merge into one broad rubble patch");
+
+  assert(
+    rubble.damageNearest(new THREE.Vector3(0.5, 0.1, 0.5), 1, 0.5),
+    "nearby damage should find the directly targeted low-health pile"
+  );
+
+  const targetCellHit = rubble.raycast(
+    new THREE.Vector3(0.5, 0.08, -2),
+    new THREE.Vector3(0, 0, 1),
+    6
+  );
+  const neighborCellHit = rubble.raycast(
+    new THREE.Vector3(1.5, 0.08, -2),
+    new THREE.Vector3(0, 0, 1),
+    6
+  );
+
+  assertEqual(targetCellHit, null, "the impacted pile should be removed first");
+  assert(neighborCellHit, "the healthier neighboring pile should not be damaged just because it shares a cluster");
+  assertEqual(rubble.getStats().pieces, 6, "remaining rubble material should belong to the neighboring pile");
+});
+
 test("rubble field lets moving cores collide with and chip cover proxies", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.18 - 2026-05-03
+
+### Fixed
+
+- Fixed rubble damage targeting so impacts damage the pile cell closest to the hit/contact point instead of damaging the healthiest pile in the merged patch.
+- Tightened rubble core collision and rubble raycasts to use occupied pile-cell bounds instead of broad merged-patch bounds, avoiding false hits in empty corners of broad rubble clusters.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.2.17 - 2026-05-03
 
 ### Changed
