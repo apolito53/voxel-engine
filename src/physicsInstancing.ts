@@ -24,7 +24,6 @@ export class PhysicsFragmentInstancer {
   private readonly countsByBlock = new Map<number, number>();
   private readonly writeIndexesByBlock = new Map<number, number>();
   private readonly instanceMatrix = new THREE.Matrix4();
-  private readonly instanceRotation = new THREE.Quaternion();
   private readonly instanceScale = new THREE.Vector3(1, 1, 1);
   private stats: PhysicsFragmentRenderStats = EMPTY_FRAGMENT_RENDER_STATS;
 
@@ -66,7 +65,10 @@ export class PhysicsFragmentInstancer {
 
       const writeIndex = this.writeIndexesByBlock.get(toy.fragmentBlock) ?? 0;
       this.writeIndexesByBlock.set(toy.fragmentBlock, writeIndex + 1);
-      this.instanceMatrix.compose(toy.mesh.position, this.instanceRotation, this.instanceScale);
+      // Fragment toys are not added to the scene individually, so the instanced
+      // renderer must carry their toy quaternion too. Without this, debris
+      // physics could spin all day and still look like static sliding tiles.
+      this.instanceMatrix.compose(toy.mesh.position, toy.mesh.quaternion, this.instanceScale);
       batch.mesh.setMatrixAt(writeIndex, this.instanceMatrix);
     }
 

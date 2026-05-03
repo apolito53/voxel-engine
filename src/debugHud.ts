@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
 import type { PhysicsToyCollisionStats } from "./physics";
@@ -50,6 +51,7 @@ export class DebugHud {
     physicsBodyBudget: number,
     physicsCollisions: PhysicsToyCollisionStats,
     fragmentRenderStats: PhysicsFragmentRenderStats,
+    debrisSettlerStats: DebrisSettlerStats,
     rubbleStats: RubbleFieldStats,
     timings: FrameTimings
   ): void {
@@ -81,6 +83,7 @@ export class DebugHud {
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
       `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
       `frag inst ${fragmentRenderStats.instances} batches ${fragmentRenderStats.batches} cap ${fragmentRenderStats.capacity}`,
+      `settle ${debrisSettlerStats.regions} rg ${debrisSettlerStats.fragments} frag pairs ${debrisSettlerStats.pairChecks} hit ${debrisSettlerStats.resolvedPairs} done ${debrisSettlerStats.finalizedBatches}/${debrisSettlerStats.forcedFinalizations}`,
       `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces} pcs cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x px ${this.renderer.getPixelRatio()}`,

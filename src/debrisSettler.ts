@@ -1,0 +1,521 @@
+import * as THREE from "three";
+import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
+import type { PhysicsToy } from "./physics";
+import { RubbleField, type RubbleAbsorptionSample } from "./rubble";
+
+export const DEBRIS_REGION_HORIZONTAL_MERGE_RADIUS = 2.5;
+export const DEBRIS_REGION_VERTICAL_MERGE_RADIUS = 1.5;
+export const DEBRIS_REGION_COLLISION_SECONDS = 0.55;
+export const DEBRIS_REGION_FINALIZE_SECONDS = 0.6;
+export const DEBRIS_REGION_MAX_SECONDS = 1.2;
+export const DEBRIS_REGION_PAIR_BUDGET = 768;
+
+const DEBRIS_REGION_COLLISION_RESTITUTION = 0.18;
+const DEBRIS_REGION_COLLISION_DAMPING = 0.82;
+const DEBRIS_REGION_COLLISION_EPSILON = 0.000001;
+const DEBRIS_REGION_FRAGMENT_RADIUS_SCALE = 0.78;
+const DEBRIS_REGION_COHESION_ACCELERATION = 6.5;
+const DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.95;
+const DEBRIS_REGION_STACK_VERTICAL_RANGE = BLOCK_FRAGMENT_VISUAL_SIZE * 1.8;
+const DEBRIS_REGION_STACK_CENTER_SEPARATION = BLOCK_FRAGMENT_VISUAL_SIZE * 0.96;
+const RUBBLE_SAMPLE_JITTER_RADIUS = 0.24;
+
+type SettlingRegion = {
+  readonly id: number;
+  readonly center: THREE.Vector3;
+  readonly fragments: Set<PhysicsToy>;
+  readonly materialUnitsByBlock: Map<number, number>;
+  createdAt: number;
+  fractureCount: number;
+  collisionUntil: number;
+  finalizeAt: number;
+  maxFinalizeAt: number;
+};
+
+export type DebrisSettlerStats = {
+  readonly regions: number;
+  readonly fragments: number;
+  readonly pairChecks: number;
+  readonly resolvedPairs: number;
+  readonly finalizedBatches: number;
+  readonly finalizedFragments: number;
+  readonly finalizedPieces: number;
+  readonly forcedFinalizations: number;
+};
+
+export type DebrisSettledBatch = {
+  readonly position: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly block: number;
+  readonly pieces: number;
+};
+
+type MutableDebrisSettlerStats = {
+  -readonly [Key in keyof DebrisSettlerStats]: DebrisSettlerStats[Key];
+};
+
+export function createEmptyDebrisSettlerStats(): DebrisSettlerStats {
+  return {
+    regions: 0,
+    fragments: 0,
+    pairChecks: 0,
+    resolvedPairs: 0,
+    finalizedBatches: 0,
+    finalizedFragments: 0,
+    finalizedPieces: 0,
+    forcedFinalizations: 0
+  };
+}
+
+export class DebrisSettler {
+  private readonly regionsById = new Map<number, SettlingRegion>();
+  private readonly fragmentRegionIds = new Map<PhysicsToy, number>();
+  private readonly normal = new THREE.Vector3();
+  private readonly relativeVelocity = new THREE.Vector3();
+  private readonly scratchPosition = new THREE.Vector3();
+  private readonly finalizedBatches: DebrisSettledBatch[] = [];
+  private readonly stats: MutableDebrisSettlerStats = createEmptyDebrisSettlerStats();
+  private nextRegionId = 1;
+  private elapsedSeconds = 0;
+
+  registerFracture(
+    block: number,
+    center: THREE.Vector3,
+    fragments: readonly PhysicsToy[]
+  ): void {
+    const activeFragments = fragments.filter((fragment) => (
+      fragment.isInstancedFragment && !fragment.isExpired
+    ));
+    if (activeFragments.length === 0) return;
+
+    const nearbyRegions = this.findNearbyRegions(center);
+    const targetRegion = nearbyRegions.length > 0
+      ? this.mergeRegions(nearbyRegions)
+      : this.createRegion(center);
+
+    this.addFractureToRegion(targetRegion, block, center, activeFragments);
+    this.refreshLiveStats();
+  }
+
+  update(delta: number, rubbleField: RubbleField): DebrisSettlerStats {
+    this.elapsedSeconds += Math.max(0, delta);
+    this.resetFrameStats();
+    this.finalizeDueRegions(rubbleField);
+    this.enforcePairBudget(rubbleField);
+    this.resolveActiveRegionCollisions(Math.max(0, delta));
+    this.refreshLiveStats();
+    return { ...this.stats };
+  }
+
+  owns(toy: PhysicsToy): boolean {
+    return this.fragmentRegionIds.has(toy);
+  }
+
+  getFinalizedBatches(): readonly DebrisSettledBatch[] {
+    return this.finalizedBatches;
+  }
+
+  forget(toy: PhysicsToy): void {
+    const regionId = this.fragmentRegionIds.get(toy);
+    if (regionId === undefined) return;
+
+    this.fragmentRegionIds.delete(toy);
+    const region = this.regionsById.get(regionId);
+    if (!region) return;
+
+    region.fragments.delete(toy);
+    if (region.fragments.size === 0) {
+      this.regionsById.delete(region.id);
+    }
+  }
+
+  clear(): void {
+    this.regionsById.clear();
+    this.fragmentRegionIds.clear();
+    this.resetFrameStats();
+  }
+
+  private createRegion(center: THREE.Vector3): SettlingRegion {
+    const region: SettlingRegion = {
+      id: this.nextRegionId,
+      center: center.clone(),
+      fragments: new Set(),
+      materialUnitsByBlock: new Map(),
+      createdAt: this.elapsedSeconds,
+      fractureCount: 0,
+      collisionUntil: this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS,
+      finalizeAt: this.elapsedSeconds + DEBRIS_REGION_FINALIZE_SECONDS,
+      maxFinalizeAt: this.elapsedSeconds + DEBRIS_REGION_MAX_SECONDS
+    };
+    this.nextRegionId += 1;
+    this.regionsById.set(region.id, region);
+    return region;
+  }
+
+  private addFractureToRegion(
+    region: SettlingRegion,
+    block: number,
+    center: THREE.Vector3,
+    fragments: readonly PhysicsToy[]
+  ): void {
+    // A region is the temporary clumping truth. Individual fractures feed it,
+    // but the final pile should read as one connected blast area.
+    region.center
+      .multiplyScalar(region.fractureCount)
+      .add(center)
+      .divideScalar(region.fractureCount + 1);
+    region.fractureCount += 1;
+    region.collisionUntil = Math.max(
+      region.collisionUntil,
+      this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS
+    );
+    region.finalizeAt = Math.min(
+      this.elapsedSeconds + DEBRIS_REGION_FINALIZE_SECONDS,
+      region.maxFinalizeAt
+    );
+
+    for (const fragment of fragments) {
+      region.fragments.add(fragment);
+      this.fragmentRegionIds.set(fragment, region.id);
+      const fragmentBlock = fragment.fragmentBlock ?? block;
+      region.materialUnitsByBlock.set(
+        fragmentBlock,
+        (region.materialUnitsByBlock.get(fragmentBlock) ?? 0) + fragment.rubbleMaterialUnits
+      );
+    }
+  }
+
+  private findNearbyRegions(center: THREE.Vector3): SettlingRegion[] {
+    const nearbyRegions: SettlingRegion[] = [];
+    for (const region of this.regionsById.values()) {
+      const horizontalDistanceSq = (
+        (region.center.x - center.x) ** 2 +
+        (region.center.z - center.z) ** 2
+      );
+      const verticalDistance = Math.abs(region.center.y - center.y);
+      if (
+        horizontalDistanceSq <= DEBRIS_REGION_HORIZONTAL_MERGE_RADIUS ** 2 &&
+        verticalDistance <= DEBRIS_REGION_VERTICAL_MERGE_RADIUS
+      ) {
+        nearbyRegions.push(region);
+      }
+    }
+    return nearbyRegions;
+  }
+
+  private mergeRegions(regions: readonly SettlingRegion[]): SettlingRegion {
+    const [target, ...sources] = [...regions].sort((left, right) => left.createdAt - right.createdAt);
+    if (!target) {
+      throw new Error("Cannot merge an empty settling-region list.");
+    }
+
+    for (const source of sources) {
+      if (source === target || !this.regionsById.has(source.id)) continue;
+
+      const combinedFractures = target.fractureCount + source.fractureCount;
+      if (combinedFractures > 0) {
+        target.center
+          .multiplyScalar(target.fractureCount)
+          .add(source.center.clone().multiplyScalar(source.fractureCount))
+          .divideScalar(combinedFractures);
+      }
+      target.fractureCount = combinedFractures;
+      target.createdAt = Math.min(target.createdAt, source.createdAt);
+      target.collisionUntil = Math.max(target.collisionUntil, source.collisionUntil);
+      target.maxFinalizeAt = Math.min(target.maxFinalizeAt, source.maxFinalizeAt);
+      target.finalizeAt = Math.min(Math.max(target.finalizeAt, source.finalizeAt), target.maxFinalizeAt);
+
+      for (const fragment of source.fragments) {
+        target.fragments.add(fragment);
+        this.fragmentRegionIds.set(fragment, target.id);
+      }
+      for (const [block, materialUnits] of source.materialUnitsByBlock) {
+        target.materialUnitsByBlock.set(
+          block,
+          (target.materialUnitsByBlock.get(block) ?? 0) + materialUnits
+        );
+      }
+      this.regionsById.delete(source.id);
+    }
+    return target;
+  }
+
+  private finalizeDueRegions(rubbleField: RubbleField): void {
+    for (const region of this.getRegionsOldestFirst()) {
+      if (!this.regionsById.has(region.id)) continue;
+      if (this.elapsedSeconds < region.finalizeAt && this.elapsedSeconds < region.maxFinalizeAt) continue;
+
+      this.finalizeRegion(region, rubbleField, false);
+    }
+  }
+
+  private enforcePairBudget(rubbleField: RubbleField): void {
+    let estimatedPairs = this.estimateActiveCollisionPairs();
+    if (estimatedPairs <= DEBRIS_REGION_PAIR_BUDGET) return;
+
+    for (const region of this.getRegionsOldestFirst()) {
+      if (!this.regionsById.has(region.id)) continue;
+      if (!this.isCollisionActive(region)) continue;
+
+      this.finalizeRegion(region, rubbleField, true);
+      estimatedPairs = this.estimateActiveCollisionPairs();
+      if (estimatedPairs <= DEBRIS_REGION_PAIR_BUDGET) break;
+    }
+  }
+
+  private resolveActiveRegionCollisions(delta: number): void {
+    for (const region of this.regionsById.values()) {
+      if (!this.isCollisionActive(region)) continue;
+
+      const fragments = this.getLiveFragments(region);
+      this.applyRegionCohesion(region, fragments, delta);
+      for (let leftIndex = 0; leftIndex < fragments.length - 1; leftIndex += 1) {
+        const left = fragments[leftIndex];
+        if (!left) continue;
+
+        for (let rightIndex = leftIndex + 1; rightIndex < fragments.length; rightIndex += 1) {
+          if (this.stats.pairChecks >= DEBRIS_REGION_PAIR_BUDGET) return;
+
+          const right = fragments[rightIndex];
+          if (!right) continue;
+
+          this.stats.pairChecks += 1;
+          if (this.resolveFragmentPair(left, right)) {
+            this.stats.resolvedPairs += 1;
+          }
+        }
+      }
+    }
+  }
+
+  private resolveFragmentPair(left: PhysicsToy, right: PhysicsToy): boolean {
+    if (left.isExpired || right.isExpired || left.isSleeping || right.isSleeping) return false;
+
+    const leftPosition = left.mesh.position;
+    const rightPosition = right.mesh.position;
+    const combinedRadius = Math.max(
+      BLOCK_FRAGMENT_VISUAL_SIZE,
+      (left.radius + right.radius) * DEBRIS_REGION_FRAGMENT_RADIUS_SCALE
+    );
+    const distanceSq = this.normal.subVectors(rightPosition, leftPosition).lengthSq();
+    if (distanceSq >= combinedRadius * combinedRadius) return false;
+
+    const distance = Math.sqrt(distanceSq);
+    if (distance > DEBRIS_REGION_COLLISION_EPSILON) {
+      this.normal.multiplyScalar(1 / distance);
+    } else {
+      this.normal.copy(right.velocity).sub(left.velocity);
+      if (this.normal.lengthSq() <= DEBRIS_REGION_COLLISION_EPSILON) {
+        this.normal.set(1, 0, 0);
+      } else {
+        this.normal.normalize();
+      }
+    }
+
+    const inverseMassSum = left.inverseMass + right.inverseMass;
+    if (inverseMassSum <= 0) return false;
+
+    const penetration = combinedRadius - distance;
+    leftPosition.addScaledVector(this.normal, -(penetration * left.inverseMass) / inverseMassSum);
+    rightPosition.addScaledVector(this.normal, (penetration * right.inverseMass) / inverseMassSum);
+
+    this.relativeVelocity.copy(right.velocity).sub(left.velocity);
+    const closingSpeed = this.relativeVelocity.dot(this.normal);
+    if (closingSpeed < 0) {
+      const impulse = (-(1 + DEBRIS_REGION_COLLISION_RESTITUTION) * closingSpeed) / inverseMassSum;
+      left.velocity.addScaledVector(this.normal, -impulse * left.inverseMass);
+      right.velocity.addScaledVector(this.normal, impulse * right.inverseMass);
+      const tumbleSpeed = Math.min(8, Math.abs(closingSpeed) + penetration * 8);
+      left.addTumbleImpulse(this.normal, tumbleSpeed);
+      right.addTumbleImpulse(this.normal, tumbleSpeed);
+    }
+
+    this.resolveStackContact(left, right);
+
+    left.velocity.multiplyScalar(DEBRIS_REGION_COLLISION_DAMPING);
+    right.velocity.multiplyScalar(DEBRIS_REGION_COLLISION_DAMPING);
+    return true;
+  }
+
+  private resolveStackContact(left: PhysicsToy, right: PhysicsToy): void {
+    const deltaX = right.mesh.position.x - left.mesh.position.x;
+    const deltaY = right.mesh.position.y - left.mesh.position.y;
+    const deltaZ = right.mesh.position.z - left.mesh.position.z;
+    if (
+      Math.abs(deltaX) > DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP ||
+      Math.abs(deltaZ) > DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP ||
+      Math.abs(deltaY) <= DEBRIS_REGION_COLLISION_EPSILON ||
+      Math.abs(deltaY) > DEBRIS_REGION_STACK_VERTICAL_RANGE
+    ) {
+      return;
+    }
+
+    const lower = deltaY > 0 ? left : right;
+    const upper = deltaY > 0 ? right : left;
+    const targetUpperY = lower.mesh.position.y + DEBRIS_REGION_STACK_CENTER_SEPARATION;
+    if (upper.mesh.position.y >= targetUpperY) return;
+
+    // This is the small cheat that makes the visible fragments read as cubes
+    // settling on a temporary pile instead of marbles phasing through each
+    // other. The persistent gameplay truth is still the rubble surface mesh,
+    // so this support only lives inside the short settling region window.
+    const correction = targetUpperY - upper.mesh.position.y;
+    upper.mesh.position.y += correction * 0.8;
+    lower.mesh.position.y -= correction * 0.2;
+    if (upper.velocity.y < lower.velocity.y) {
+      upper.velocity.y = Math.max(upper.velocity.y * -0.15, lower.velocity.y * 0.25);
+    }
+    upper.velocity.x *= 0.7;
+    upper.velocity.z *= 0.7;
+    lower.velocity.x *= 0.85;
+    lower.velocity.z *= 0.85;
+    upper.addTumbleImpulse(this.normal, correction * 8);
+  }
+
+  private applyRegionCohesion(region: SettlingRegion, fragments: readonly PhysicsToy[], delta: number): void {
+    if (delta <= 0) return;
+
+    for (const fragment of fragments) {
+      // The visible stage is "settling theater", not a real granular solver.
+      // A gentle horizontal pull keeps shards in the crater long enough for
+      // same-region contacts to read as clumping instead of immediate scatter.
+      this.scratchPosition.copy(region.center).sub(fragment.mesh.position);
+      this.scratchPosition.y *= 0.15;
+      const distanceSq = this.scratchPosition.lengthSq();
+      if (distanceSq <= DEBRIS_REGION_COLLISION_EPSILON) continue;
+
+      const distance = Math.sqrt(distanceSq);
+      this.scratchPosition.multiplyScalar(1 / distance);
+      const acceleration = Math.min(distance, 1.4) * DEBRIS_REGION_COHESION_ACCELERATION;
+      fragment.velocity.addScaledVector(this.scratchPosition, acceleration * delta);
+    }
+  }
+
+  private finalizeRegion(region: SettlingRegion, rubbleField: RubbleField, forced: boolean): void {
+    const samples = this.createRubbleSamples(region);
+    const block = this.getDominantBlock(region);
+    const pieces = samples.reduce((total, sample) => total + (sample.pieces ?? 1), 0);
+    if (samples.length > 0) {
+      rubbleField.absorbBatch(samples);
+      this.finalizedBatches.push({
+        position: {
+          x: region.center.x,
+          y: region.center.y,
+          z: region.center.z
+        },
+        block,
+        pieces
+      });
+    }
+
+    for (const fragment of region.fragments) {
+      // Keep the fragment marked as settler-owned until the normal prune path
+      // removes it. Otherwise the orphan fallback would see an expired fragment
+      // later in the same frame and deposit its material a second time.
+      fragment.expire();
+    }
+    this.regionsById.delete(region.id);
+    this.stats.finalizedBatches += 1;
+    this.stats.finalizedFragments += region.fragments.size;
+    this.stats.finalizedPieces += pieces;
+    if (forced) this.stats.forcedFinalizations += 1;
+  }
+
+  private createRubbleSamples(region: SettlingRegion): RubbleAbsorptionSample[] {
+    const block = this.getDominantBlock(region);
+    const samples: RubbleAbsorptionSample[] = [];
+
+    for (const fragment of region.fragments) {
+      if (!fragment.isInstancedFragment || fragment.fragmentBlock === null) continue;
+
+      const materialUnits = Math.max(1, fragment.rubbleMaterialUnits);
+      for (let unitIndex = 0; unitIndex < materialUnits; unitIndex += 1) {
+        samples.push({
+          block,
+          position: this.getSamplePosition(fragment, unitIndex, materialUnits),
+          pieces: 1
+        });
+      }
+    }
+    return samples;
+  }
+
+  private getSamplePosition(fragment: PhysicsToy, unitIndex: number, materialUnits: number): THREE.Vector3 {
+    const angleSeed = (
+      fragment.mesh.position.x * 12.9898 +
+      fragment.mesh.position.y * 78.233 +
+      fragment.mesh.position.z * 37.719 +
+      unitIndex * 2.399963
+    );
+    const radius = materialUnits > 1
+      ? RUBBLE_SAMPLE_JITTER_RADIUS * Math.sqrt((unitIndex + 0.5) / materialUnits)
+      : 0;
+    const angle = angleSeed % (Math.PI * 2);
+
+    return this.scratchPosition
+      .copy(fragment.mesh.position)
+      .add(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      ))
+      .clone();
+  }
+
+  private getDominantBlock(region: SettlingRegion): number {
+    let dominantBlock = 0;
+    let dominantUnits = -Infinity;
+    for (const [block, materialUnits] of region.materialUnitsByBlock) {
+      if (materialUnits <= dominantUnits) continue;
+      dominantBlock = block;
+      dominantUnits = materialUnits;
+    }
+    return dominantBlock;
+  }
+
+  private isCollisionActive(region: SettlingRegion): boolean {
+    return this.elapsedSeconds <= region.collisionUntil && this.getLiveFragments(region).length > 1;
+  }
+
+  private estimateActiveCollisionPairs(): number {
+    let pairs = 0;
+    for (const region of this.regionsById.values()) {
+      if (!this.isCollisionActive(region)) continue;
+      const fragmentCount = this.getLiveFragments(region).length;
+      pairs += (fragmentCount * (fragmentCount - 1)) / 2;
+    }
+    return pairs;
+  }
+
+  private getLiveFragments(region: SettlingRegion): PhysicsToy[] {
+    return [...region.fragments].filter((fragment) => !fragment.isExpired && !fragment.isSleeping);
+  }
+
+  private getRegionsOldestFirst(): SettlingRegion[] {
+    return [...this.regionsById.values()].sort((left, right) => left.createdAt - right.createdAt);
+  }
+
+  private resetFrameStats(): void {
+    this.finalizedBatches.length = 0;
+    this.stats.regions = 0;
+    this.stats.fragments = 0;
+    this.stats.pairChecks = 0;
+    this.stats.resolvedPairs = 0;
+    this.stats.finalizedBatches = 0;
+    this.stats.finalizedFragments = 0;
+    this.stats.finalizedPieces = 0;
+    this.stats.forcedFinalizations = 0;
+  }
+
+  private refreshLiveStats(): void {
+    this.stats.regions = this.regionsById.size;
+    let fragments = 0;
+    for (const region of this.regionsById.values()) {
+      fragments += region.fragments.size;
+    }
+    this.stats.fragments = fragments;
+  }
+}

@@ -15,6 +15,7 @@ import {
 } from "./chunkStorage";
 import type { CollisionWorld } from "./collision";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
+import { DebrisSettler, createEmptyDebrisSettlerStats, type DebrisSettlerStats } from "./debrisSettler";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEngineEventBus } from "./engineEvents";
@@ -248,6 +249,7 @@ const damagedBlockKeysThisFrame = new Set<string>();
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
+const debrisSettler = new DebrisSettler();
 const playerCollisionWorld: CollisionWorld = {
   // The player still collides against full terrain blocks through VoxelWorld.
   // Partial-height cover such as rubble is layered in as an optional support
@@ -279,6 +281,7 @@ const novaChatPanel = new NovaChatPanel({
   }
 });
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
+let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
 
@@ -680,6 +683,8 @@ function animate(): void {
       toy.update(delta, activeWorld, physicsImpacts);
       rubbleField.resolveCoreCollision(toy);
     }
+    debrisSettlerStats = debrisSettler.update(delta, rubbleField);
+    emitRubbleBatchEvents();
     absorbSettledFragmentsIntoRubble();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
     for (const impact of physicsImpacts) {
@@ -739,6 +744,7 @@ function animate(): void {
       physicsObjectBudget,
       physicsCollisionStats,
       physicsFragmentInstancer.getStats(),
+      debrisSettlerStats,
       debugRubbleStats,
       smoothedFrameTimings
     );
@@ -908,6 +914,7 @@ function spawnBlockFragments(
   const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
 
   const fragmentCount = qualityController.preset.blockFragmentCount;
+  const fragments: PhysicsToy[] = [];
 
   for (let index = 0; index < fragmentCount; index += 1) {
     const fragmentGridIndex = getDistributedBlockFragmentIndex(index, fragmentCount);
@@ -928,13 +935,17 @@ function spawnBlockFragments(
       .add(new THREE.Vector3(0, 0.8 + Math.random() * 1.1, 0));
     const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
 
-    addPhysicsToy(PhysicsToy.createBlockFragment(
+    const fragment = PhysicsToy.createBlockFragment(
       block,
       blockCenter.clone().add(offset),
       velocity,
       rubbleMaterialUnits
-    ));
+    );
+    addPhysicsToy(fragment);
+    fragments.push(fragment);
   }
+
+  debrisSettler.registerFracture(block, blockCenter, fragments);
 }
 
 function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
@@ -1085,6 +1096,7 @@ function enforcePhysicsToyBudget(): void {
 function absorbSettledFragmentsIntoRubble(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     const toy = toys[index];
+    if (toy && debrisSettler.owns(toy)) continue;
     if (!toy || !shouldAbsorbFragmentIntoRubble(toy)) continue;
 
     // Once debris has settled or aged out, it graduates from "expensive little
@@ -1106,6 +1118,16 @@ function absorbSettledFragmentsIntoRubble(): void {
   }
 }
 
+function emitRubbleBatchEvents(): void {
+  for (const batch of debrisSettler.getFinalizedBatches()) {
+    engineEvents.emit("rubble:formed", {
+      position: batch.position,
+      block: batch.block,
+      pieces: batch.pieces
+    });
+  }
+}
+
 function pruneExpiredToys(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     if (toys[index]?.isExpired) {
@@ -1120,6 +1142,7 @@ function removePhysicsToyAt(index: number): void {
     return;
   }
 
+  debrisSettler.forget(removedToy);
   physicsToyCollider.forget(removedToy);
   if (!removedToy.isInstancedFragment) {
     scene.remove(removedToy.mesh);
@@ -1376,6 +1399,7 @@ function roundPlayerLocationNumber(value: number): number {
 
 function clearToys(): void {
   for (const toy of toys) {
+    debrisSettler.forget(toy);
     physicsToyCollider.forget(toy);
     if (!toy.isInstancedFragment) {
       scene.remove(toy.mesh);
@@ -1383,6 +1407,7 @@ function clearToys(): void {
     toy.dispose();
   }
   toys.length = 0;
+  debrisSettler.clear();
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();

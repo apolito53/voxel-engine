@@ -18,10 +18,11 @@ const RUBBLE_MAX_PATCH_CELLS = 18;
 const RUBBLE_PIECE_HEALTH = 1;
 const RUBBLE_NEARBY_SEARCH_PADDING = 1.25;
 const RUBBLE_MIN_HEIGHT = 0.08;
-const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.055;
+const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.041;
 const RUBBLE_HEIGHT_VARIATION = 0.035;
 const RUBBLE_MAX_HEIGHT = 0.5;
-const RUBBLE_SOLID_NEIGHBOR_CORNER_RISE = 0.16;
+const RUBBLE_SOLID_NEIGHBOR_CORNER_RISE = 0.08;
+const RUBBLE_SUPPORTED_CORNER_RISE_SCALE = 0.4;
 // Rubble should behave like rough cover, but cores are still supposed to read
 // as bouncy projectiles. Keep the rebound near terrain-block bounce strength
 // so piles feel physical without turning the launcher into a glue gun.
@@ -69,6 +70,12 @@ export type RubbleFieldStats = {
   readonly pieces: number;
   readonly health: number;
   readonly maxCoverHeight: number;
+};
+
+export type RubbleAbsorptionSample = {
+  readonly block: number;
+  readonly position: THREE.Vector3;
+  readonly pieces?: number;
 };
 
 export type RubbleRaycastHit = {
@@ -140,6 +147,22 @@ export class RubbleField {
       normalizedPieces,
       normalizedPieces * RUBBLE_PIECE_HEALTH
     );
+    this.refreshStats();
+  }
+
+  absorbBatch(samples: readonly RubbleAbsorptionSample[]): void {
+    // A settling region deposits its whole surface sample set at once. That
+    // keeps the final mesh cheap and connected without refreshing stats after
+    // every individual temporary fragment.
+    for (const sample of samples) {
+      const normalizedPieces = normalizeRubblePieceCount(sample.pieces ?? 1);
+      this.absorbPileAtCell(
+        sample.block,
+        getRubbleCell(sample.position),
+        normalizedPieces,
+        normalizedPieces * RUBBLE_PIECE_HEALTH
+      );
+    }
     this.refreshStats();
   }
 
@@ -938,13 +961,17 @@ function getRubbleSurfaceCornerY(
     }
   }
 
-  const neighborRise = Math.min(
+  // Adjacent terrain should gently bank a rubble patch into surrounding blocks,
+  // not lift every corner into a square tactical dinner table. Keep the effect
+  // subtle because batch-finalized regions can already contain a full block of
+  // material in one cell.
+  const pileRise = Math.min(
     RUBBLE_SOLID_NEIGHBOR_CORNER_RISE,
-    nearbySolidBlocks * RUBBLE_SOLID_NEIGHBOR_CORNER_RISE * 0.45
+    nearbySolidBlocks * RUBBLE_SOLID_NEIGHBOR_CORNER_RISE * RUBBLE_SUPPORTED_CORNER_RISE_SCALE
   );
   return (
     cellY * RUBBLE_CELL_SIZE +
-    clamp(height + neighborRise, RUBBLE_MIN_HEIGHT, RUBBLE_MAX_HEIGHT)
+    clamp(height + pileRise, RUBBLE_MIN_HEIGHT, RUBBLE_MAX_HEIGHT)
   );
 }
 

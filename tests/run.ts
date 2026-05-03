@@ -127,6 +127,12 @@ import {
   type ChunkStorage
 } from "../src/chunkStorage";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
+import {
+  DEBRIS_REGION_FINALIZE_SECONDS,
+  DEBRIS_REGION_MAX_SECONDS,
+  DEBRIS_REGION_PAIR_BUDGET,
+  DebrisSettler
+} from "../src/debrisSettler";
 import { createEngineEventBus } from "../src/engineEvents";
 import { EventBus } from "../src/eventBus";
 import {
@@ -1500,6 +1506,20 @@ test("block fragments render through instanced batches instead of scene children
     { batches: 2, instances: 3, capacity: 3 },
     "instanced renderer should report visible fragment pressure"
   );
+  grassFragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
+  instancer.update([grassFragment]);
+  const grassBatch = scene.children.find((child) => child instanceof THREE.InstancedMesh);
+  assert(grassBatch instanceof THREE.InstancedMesh, "fragment batch should still be available for matrix inspection");
+  const instanceMatrix = new THREE.Matrix4();
+  const instancePosition = new THREE.Vector3();
+  const instanceRotation = new THREE.Quaternion();
+  const instanceScale = new THREE.Vector3();
+  grassBatch.getMatrixAt(0, instanceMatrix);
+  instanceMatrix.decompose(instancePosition, instanceRotation, instanceScale);
+  assert(
+    instanceRotation.angleTo(grassFragment.mesh.quaternion) < 0.001,
+    "instanced debris should render each fragment's tumble rotation, not just its position"
+  );
 
   instancer.clear();
   assertEqual(instancer.getStats().instances, 0, "clearing should hide all fragment instances");
@@ -1518,6 +1538,27 @@ test("block fragments render through instanced batches instead of scene children
     "disposed fragment batches should lazily recreate when new debris appears"
   );
   instancer.dispose();
+});
+
+test("block fragments visually tumble while flying", () => {
+  const airWorld = {
+    isSolid(_x: number, _y: number, _z: number): boolean {
+      return false;
+    }
+  };
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 2, 0.5),
+    new THREE.Vector3(2, 1, 0)
+  );
+  const startingRotation = fragment.mesh.quaternion.clone();
+
+  fragment.update(1 / 30, airWorld);
+
+  assert(
+    fragment.mesh.quaternion.angleTo(startingRotation) > 0.001,
+    "flying cube debris should spin visibly during the short settling theater"
+  );
 });
 
 test("block fragments lose ground speed and sleep near the fracture site", () => {
@@ -1581,6 +1622,224 @@ test("expired quality-scaled fragments still graduate into rubble", () => {
     "expired quality-scaled shards should preserve full rubble health"
   );
   assertEqual(scene.children.length, 1, "expired quality-scaled debris should still render as one rubble proxy");
+});
+
+function createTestFragment(
+  block: number,
+  x: number,
+  y: number,
+  z: number,
+  rubbleMaterialUnits = 1
+): PhysicsToy {
+  return PhysicsToy.createBlockFragment(
+    block,
+    new THREE.Vector3(x, y, z),
+    new THREE.Vector3(0, 0, 0),
+    rubbleMaterialUnits
+  );
+}
+
+test("debris settler merges adjacent fractures into one region", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+
+  settler.registerFracture(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 1.5, 0.5),
+    [createTestFragment(BLOCK.dirt, 0.45, 1.5, 0.45)]
+  );
+  settler.registerFracture(
+    BLOCK.dirt,
+    new THREE.Vector3(2.2, 1.5, 0.5),
+    [createTestFragment(BLOCK.dirt, 2.15, 1.5, 0.45)]
+  );
+
+  const stats = settler.update(0, rubble);
+  assertEqual(stats.regions, 1, "nearby destroyed blocks should feed one settling region");
+  assertEqual(stats.fragments, 2, "merged settling region should own both visible fragments");
+});
+
+test("debris settler keeps distant fractures in separate regions", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+
+  settler.registerFracture(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 1.5, 0.5),
+    [createTestFragment(BLOCK.dirt, 0.45, 1.5, 0.45)]
+  );
+  settler.registerFracture(
+    BLOCK.dirt,
+    new THREE.Vector3(5.5, 1.5, 0.5),
+    [createTestFragment(BLOCK.dirt, 5.45, 1.5, 0.45)]
+  );
+
+  const stats = settler.update(0, rubble);
+  assertEqual(stats.regions, 2, "distant fractures should not collapse into one fake mega-pile");
+});
+
+test("debris settler resolves same-region fragments but not cross-region fragments", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const left = createTestFragment(BLOCK.stone, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.stone, 0.58, 1.5, 0.5);
+  left.velocity.set(1, 0, 0);
+  right.velocity.set(-1, 0, 0);
+
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 1.5, 0.5), [left, right]);
+  const sameRegionStats = settler.update(0.01, rubble);
+
+  assertEqual(sameRegionStats.pairChecks, 1, "same-region debris should get one local pair check");
+  assertEqual(sameRegionStats.resolvedPairs, 1, "overlapping same-region debris should separate");
+  assert(left.mesh.position.x < 0.5, "left same-region fragment should be pushed outward");
+  assert(right.mesh.position.x > 0.58, "right same-region fragment should be pushed outward");
+
+  const isolatedSettler = new DebrisSettler();
+  const isolatedRubble = new RubbleField(new THREE.Scene());
+  const first = createTestFragment(BLOCK.stone, 0.5, 1.5, 0.5);
+  const second = createTestFragment(BLOCK.stone, 0.58, 1.5, 0.5);
+  isolatedSettler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 1.5, 0.5), [first]);
+  isolatedSettler.registerFracture(BLOCK.stone, new THREE.Vector3(4.5, 1.5, 0.5), [second]);
+
+  const crossRegionStats = isolatedSettler.update(0.01, isolatedRubble);
+  assertEqual(crossRegionStats.pairChecks, 0, "cross-region debris should not collide even if toy positions overlap");
+  assertEqual(crossRegionStats.resolvedPairs, 0, "cross-region debris should remain cheap");
+});
+
+test("debris settler supports short-lived stacked fragment contacts", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const lower = createTestFragment(BLOCK.dirt, 0.5, 1.0, 0.5);
+  const upper = createTestFragment(BLOCK.dirt, 0.51, 1.1, 0.51);
+  upper.velocity.set(0, -2, 0);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.0, 0.5), [lower, upper]);
+  const stats = settler.update(0.01, rubble);
+
+  assertEqual(stats.resolvedPairs, 1, "stacked same-region debris should use the local pair pass");
+  assert(
+    upper.mesh.position.y - lower.mesh.position.y > 0.2,
+    "upper debris should be held above lower debris instead of passing straight through"
+  );
+  assert(
+    upper.velocity.y > -1,
+    "temporary stacked contact should bleed downward speed so the pile can settle before finalization"
+  );
+});
+
+test("debris settler finalizes potato fragments into full rubble material", () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const fragmentCount = QUALITY_PRESETS.potato.blockFragmentCount;
+  const fragments: PhysicsToy[] = [];
+
+  for (let index = 0; index < fragmentCount; index += 1) {
+    fragments.push(createTestFragment(
+      BLOCK.dirt,
+      0.45 + index * 0.08,
+      1.1,
+      0.5,
+      getBlockFragmentMaterialUnits(index, fragmentCount)
+    ));
+  }
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), fragments);
+  const beforeFinalize = settler.update(DEBRIS_REGION_FINALIZE_SECONDS - 0.01, rubble);
+  assertEqual(beforeFinalize.finalizedBatches, 0, "region should stay visible before the finalize delay");
+
+  const afterFinalize = settler.update(0.02, rubble);
+  assertEqual(afterFinalize.finalizedBatches, 1, "region should finalize shortly after the delay");
+  assertEqual(afterFinalize.finalizedPieces, BLOCK_RUBBLE_MATERIAL_UNITS, "two Potato shards should expand into full rubble material");
+  assertEqual(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, "rubble field should receive all gameplay material");
+  assert(fragments.every((fragment) => fragment.isExpired), "finalized visible fragments should be marked for pruning");
+  assert(
+    fragments.every((fragment) => settler.owns(fragment)),
+    "finalized fragments should stay settler-owned until pruning so orphan fallback cannot absorb them twice"
+  );
+  settler.forget(fragments[0]);
+  assert(!settler.owns(fragments[0]), "normal toy removal should clear the stale finalized-fragment ownership marker");
+});
+
+test("debris settler hard-caps region lifetime after repeated nearby fractures", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+
+  settler.registerFracture(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 1.1, 0.5),
+    [createTestFragment(BLOCK.stone, 0.5, 1.1, 0.5)]
+  );
+  settler.update(0.59, rubble);
+  settler.registerFracture(
+    BLOCK.stone,
+    new THREE.Vector3(1.1, 1.1, 0.5),
+    [createTestFragment(BLOCK.stone, 1.1, 1.1, 0.5)]
+  );
+  settler.update(0.3, rubble);
+  settler.registerFracture(
+    BLOCK.stone,
+    new THREE.Vector3(1.4, 1.1, 0.5),
+    [createTestFragment(BLOCK.stone, 1.4, 1.1, 0.5)]
+  );
+
+  const justBeforeCap = settler.update(DEBRIS_REGION_MAX_SECONDS - 0.89 - 0.01, rubble);
+  assertEqual(justBeforeCap.finalizedBatches, 0, "new fractures can delay finalization but not past the hard cap");
+  const afterCap = settler.update(0.02, rubble);
+  assertEqual(afterCap.finalizedBatches, 1, "region should finalize once the first-fracture cap is reached");
+});
+
+test("debris settler finalizes oldest regions when pair pressure exceeds the cap", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const oldestFragments: PhysicsToy[] = [];
+  const newestFragments: PhysicsToy[] = [];
+
+  for (let index = 0; index < 8; index += 1) {
+    oldestFragments.push(createTestFragment(BLOCK.dirt, 0.5 + index * 0.01, 1.5, 0.5));
+  }
+  for (let index = 0; index < 39; index += 1) {
+    newestFragments.push(createTestFragment(BLOCK.stone, 8 + index * 0.01, 1.5, 0.5));
+  }
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.5, 0.5), oldestFragments);
+  settler.update(0.05, rubble);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(8, 1.5, 0.5), newestFragments);
+
+  const stats = settler.update(0.01, rubble);
+  assertEqual(DEBRIS_REGION_PAIR_BUDGET, 768, "test should track the intended debris pair budget");
+  assertEqual(stats.forcedFinalizations, 1, "pair pressure should force the oldest active region to finalize");
+  assertEqual(stats.regions, 1, "newer under-budget region should stay alive after pressure relief");
+  assertEqual(rubble.getStats().pieces, oldestFragments.length, "forced finalization should preserve oldest-region rubble material");
+});
+
+test("batched rubble absorption preserves totals and walkable support", () => {
+  const scene = new THREE.Scene();
+  const world = new TestRubbleWorld();
+  const rubble = new RubbleField(scene);
+  world.setBlock(0, 0, 0, BLOCK.stone);
+
+  rubble.absorbBatch([
+    { block: BLOCK.stone, position: new THREE.Vector3(0.25, 1.1, 0.25), pieces: 6 },
+    { block: BLOCK.stone, position: new THREE.Vector3(0.75, 1.1, 0.75), pieces: 5 }
+  ]);
+  rubble.settle(world);
+
+  const stats = rubble.getStats();
+  assertEqual(stats.pieces, 11, "batched rubble should preserve piece totals");
+  assertEqual(stats.health, 11, "batched rubble should preserve health totals");
+  assertEqual(stats.clusters, 1, "batched nearby samples should merge into one cover patch");
+  assert(
+    rubble.getSupportHeight({
+      minX: 0.3,
+      maxX: 0.7,
+      minY: 1,
+      maxY: 2.8,
+      minZ: 0.3,
+      maxZ: 0.7
+    }) !== null,
+    "batched rubble should expose the same walkable support as individual absorbs"
+  );
 });
 
 test("rubble field absorbs settled fragments into cover proxies", () => {
@@ -1713,7 +1972,7 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   }
 
   const core = new PhysicsToy(
-    new THREE.Vector3(0.5, 0.18, 0.2),
+    new THREE.Vector3(0.5, 0.12, 0.2),
     new THREE.Vector3(0, 0, 6)
   );
   const healthBefore = rubble.getStats().health;

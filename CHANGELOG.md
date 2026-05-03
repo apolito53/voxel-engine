@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0 - 2026-05-03
+
+### Added
+
+- Added the first hybrid settling-region rubble pipeline: destroyed blocks now feed nearby temporary debris into shared regions that finalize into connected rubble patches instead of isolated per-block piles.
+- Added short-lived same-region debris collision and stacked-contact support with a hard pair budget so fragments can tumble, stack, and clump briefly without turning dense destruction into permanent debris-debris physics.
+- Added batched rubble absorption so settled regions deposit full gameplay material in one pass, including Potato mode expanding two visible shards into one full block's rubble material.
+- Added visible cube tumbling for block fragments, including instanced-renderer support for each fragment's rotation.
+- Added debug HUD settling metrics for active regions, settling fragments, debris pair checks, resolved debris contacts, finalized batches, and forced finalizations.
+
+### Changed
+
+- Loose block fragments now convert to persistent rubble roughly `0.6s` after the latest nearby fracture, with temporary region contacts lasting most of that window and a `1.2s` hard cap from the first fracture in a region.
+- Rubble gameplay/collision truth remains the cheap sloped rubble field; visible debris is now short-lived physical theater.
+- Softened rubble height and terrain-banking so batched debris regions form lower, more organic cover instead of oversized square slabs.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: checked Potato, Normal, and Ultra rubble formation, adjacent fracture merging, core/rubble interaction, and console errors.
+
 ## 0.2.21 - 2026-05-03
 
 ### Fixed

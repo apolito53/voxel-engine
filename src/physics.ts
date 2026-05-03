@@ -50,6 +50,7 @@ type PhysicsToyOptions = {
   readonly radius?: number;
   readonly geometry?: THREE.BufferGeometry;
   readonly material?: THREE.MeshStandardMaterial;
+  readonly angularVelocity?: THREE.Vector3;
   readonly fragmentBlock?: number | null;
   readonly rubbleMaterialUnits?: number;
   readonly damagesBlocks?: boolean;
@@ -80,12 +81,15 @@ export class PhysicsToy {
   readonly radius: number;
   readonly inverseMass: number;
   readonly velocity: THREE.Vector3;
+  readonly angularVelocity: THREE.Vector3;
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly damagesBlocks: boolean;
   readonly fragmentBlock: number | null;
   readonly rubbleMaterialUnits: number;
   private readonly closestPoint = new THREE.Vector3();
   private readonly centerDelta = new THREE.Vector3();
+  private readonly spinAxis = new THREE.Vector3();
+  private readonly spinStep = new THREE.Quaternion();
   private readonly disposeGeometry: boolean;
   private readonly disposeMaterial: boolean;
   private readonly maxAgeSeconds: number | null;
@@ -100,6 +104,7 @@ export class PhysicsToy {
     this.radius = options.radius ?? 0.35;
     this.inverseMass = Math.max(0, options.inverseMass ?? 1);
     this.velocity = velocity.clone();
+    this.angularVelocity = options.angularVelocity?.clone() ?? new THREE.Vector3();
     this.mesh = new THREE.Mesh(
       options.geometry ?? new THREE.SphereGeometry(this.radius, 18, 12),
       options.material ?? new THREE.MeshStandardMaterial({
@@ -131,6 +136,7 @@ export class PhysicsToy {
       radius: BLOCK_FRAGMENT_COLLISION_RADIUS,
       geometry: getSharedFragmentGeometry(),
       material: getFragmentMaterial(block),
+      angularVelocity: createFragmentAngularVelocity(velocity),
       fragmentBlock: block,
       rubbleMaterialUnits,
       damagesBlocks: false,
@@ -170,6 +176,23 @@ export class PhysicsToy {
     this.expired = true;
     this.sleeping = false;
     this.velocity.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
+  }
+
+  addTumbleImpulse(normal: THREE.Vector3, speed: number): void {
+    if (!this.isInstancedFragment || speed <= 0) return;
+
+    // Fragment contacts are still intentionally cheap sphere-ish contacts, but
+    // giving the visible cube a spin impulse sells the "tumbling debris" read
+    // without needing a full rigid-body box solver.
+    this.spinAxis.set(-normal.z, normal.x + normal.y * 0.35, normal.x);
+    if (this.spinAxis.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) {
+      this.spinAxis.set(0, 1, 0);
+    } else {
+      this.spinAxis.normalize();
+    }
+    this.angularVelocity.addScaledVector(this.spinAxis, speed * 7.5);
+    this.angularVelocity.clampLength(0, 34);
   }
 
   update(delta: number, world: CollisionWorld, impacts: PhysicsImpact[] = []): PhysicsImpact[] {
@@ -185,6 +208,7 @@ export class PhysicsToy {
 
     this.velocity.y -= 18 * delta;
     this.mesh.position.addScaledVector(this.velocity, delta);
+    this.updateAngularMotion(delta);
 
     const p = this.mesh.position;
     const minX = Math.floor(p.x - this.radius);
@@ -251,13 +275,27 @@ export class PhysicsToy {
     // but block contact bleeds horizontal speed quickly so nearby pieces can
     // settle into the visible rubble piles.
     this.velocity.addScaledVector(normal, -impact * FRAGMENT_COLLISION_RESTITUTION);
+    this.addTumbleImpulse(normal, -impact);
     if (normal.y > 0.45) {
       this.velocity.x *= FRAGMENT_GROUND_HORIZONTAL_DAMPING;
       this.velocity.z *= FRAGMENT_GROUND_HORIZONTAL_DAMPING;
       this.velocity.y *= FRAGMENT_GROUND_VERTICAL_DAMPING;
+      this.angularVelocity.multiplyScalar(0.78);
     } else {
       this.velocity.multiplyScalar(FRAGMENT_WALL_DAMPING);
+      this.angularVelocity.multiplyScalar(0.88);
     }
+  }
+
+  private updateAngularMotion(delta: number): void {
+    if (this.angularVelocity.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) return;
+
+    const angularSpeed = this.angularVelocity.length();
+    const stepAngle = Math.min(angularSpeed * delta, Math.PI * 0.45);
+    this.spinAxis.copy(this.angularVelocity).multiplyScalar(1 / angularSpeed);
+    this.spinStep.setFromAxisAngle(this.spinAxis, stepAngle);
+    this.mesh.quaternion.premultiply(this.spinStep).normalize();
+    this.angularVelocity.multiplyScalar(this.isInstancedFragment ? 0.992 : 0.997);
   }
 
   private updateSleepState(delta: number, touchedSolidBlock: boolean): void {
@@ -277,6 +315,7 @@ export class PhysicsToy {
     // Sleeping debris keeps the visual aftermath without paying collision costs forever.
     this.sleeping = true;
     this.velocity.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
   }
 }
 
@@ -598,6 +637,22 @@ function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boo
   const numericValue = value ?? 1;
   if (!Number.isFinite(numericValue)) return 1;
   return Math.max(1, Math.round(numericValue));
+}
+
+function createFragmentAngularVelocity(velocity: THREE.Vector3): THREE.Vector3 {
+  const speed = Math.max(1, velocity.length());
+  const spin = new THREE.Vector3(
+    Math.random() - 0.5,
+    Math.random() - 0.5,
+    Math.random() - 0.5
+  );
+  if (spin.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) {
+    spin.set(0.35, 0.7, 0.2);
+  }
+
+  // A little exaggerated spin is cheaper and more readable than pretending the
+  // cube mesh is a physically accurate box collider.
+  return spin.normalize().multiplyScalar(8 + Math.min(speed * 2.5, 16));
 }
 
 export function getSharedFragmentGeometry(): THREE.BoxGeometry {
