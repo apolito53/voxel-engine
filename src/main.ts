@@ -18,6 +18,7 @@ import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEngineEventBus } from "./engineEvents";
+import { shouldAbsorbFragmentIntoRubble } from "./fragmentRubble";
 import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
@@ -679,7 +680,7 @@ function animate(): void {
       toy.update(delta, activeWorld, physicsImpacts);
       rubbleField.resolveCoreCollision(toy);
     }
-    absorbSleepingFragmentsIntoRubble();
+    absorbSettledFragmentsIntoRubble();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
     for (const impact of physicsImpacts) {
       handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
@@ -1081,14 +1082,15 @@ function enforcePhysicsToyBudget(): void {
   }
 }
 
-function absorbSleepingFragmentsIntoRubble(): void {
+function absorbSettledFragmentsIntoRubble(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     const toy = toys[index];
-    if (!toy?.isInstancedFragment || !toy.isSleeping) continue;
+    if (!toy || !shouldAbsorbFragmentIntoRubble(toy)) continue;
 
-    // Once debris has settled, it graduates from "expensive little physics
-    // shard" into cheap cover material. A low visual debris count can still
-    // carry several material units, so graphics settings do not alter gameplay.
+    // Once debris has settled or aged out, it graduates from "expensive little
+    // physics shard" into cheap cover material. A low visual debris count can
+    // still carry several material units, so graphics settings do not alter
+    // gameplay even when a tiny Potato shard sample expires before sleeping.
     if (rubbleField.absorbFragment(toy)) {
       engineEvents.emit("rubble:formed", {
         position: {

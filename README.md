@@ -67,7 +67,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
-Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality.
+Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality. If a tiny low-quality shard sample expires before sleeping, it still deposits its carried rubble material before cleanup.
 
 ## Engine Pieces
 
@@ -85,6 +85,7 @@ Lower visible debris counts are only a rendering/performance compromise. Destroy
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
+- `src/fragmentRubble.ts`: settled/expired debris-to-rubble eligibility rules that keep low-quality debris cleanup from deleting gameplay material
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments

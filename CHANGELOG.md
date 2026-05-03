@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.21 - 2026-05-03
+
+### Fixed
+
+- Fixed Potato-mode block debris failing to become rubble when its two visible shards expired before satisfying the sleep threshold.
+- Expired instanced block fragments now deposit their carried rubble material before the generic physics cleanup pass removes them, so graphics-quality debris counts do not alter gameplay rubble output.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: selected Potato quality, destroyed terrain with Physics Core impacts, and confirmed rubble counters increased without fresh app console errors.
+
 ## 0.2.20 - 2026-05-03
 
 ### Changed

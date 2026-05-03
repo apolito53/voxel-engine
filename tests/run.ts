@@ -136,6 +136,7 @@ import {
   shouldSkipExpensiveFrame
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
+import { shouldAbsorbFragmentIntoRubble } from "../src/fragmentRubble";
 import {
   canDestroyBlockWithHotbarItem,
   canPlaceBlockWithHotbarItem,
@@ -1541,6 +1542,45 @@ test("block fragments lose ground speed and sleep near the fracture site", () =>
     "ground friction should keep fragments close enough to visibly clump into nearby piles"
   );
   assertEqual(fragment.velocity.lengthSq(), 0, "sleeping fragments should stop contributing motion");
+});
+
+test("expired quality-scaled fragments still graduate into rubble", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+  const fragmentCount = QUALITY_PRESETS.potato.blockFragmentCount;
+
+  for (let index = 0; index < fragmentCount; index += 1) {
+    const fragment = PhysicsToy.createBlockFragment(
+      BLOCK.dirt,
+      new THREE.Vector3(0.45 + index * 0.08, 0.2, 0.5),
+      new THREE.Vector3(0, 0, 0),
+      getBlockFragmentMaterialUnits(index, fragmentCount)
+    );
+
+    assert(
+      !shouldAbsorbFragmentIntoRubble(fragment),
+      "active flying debris should not become rubble until it settles or ages out"
+    );
+    fragment.expire();
+    assert(
+      shouldAbsorbFragmentIntoRubble(fragment),
+      "expired low-quality debris should still deposit its carried material before pruning"
+    );
+    assert(rubble.absorbFragment(fragment), "expired fragment material should be eligible for rubble absorption");
+  }
+
+  const rubbleStats = rubble.getStats();
+  assertEqual(
+    rubbleStats.pieces,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    "Potato's two visible shards should still deposit one full block of rubble material"
+  );
+  assertEqual(
+    rubbleStats.health,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    "expired quality-scaled shards should preserve full rubble health"
+  );
+  assertEqual(scene.children.length, 1, "expired quality-scaled debris should still render as one rubble proxy");
 });
 
 test("rubble field absorbs settled fragments into cover proxies", () => {
