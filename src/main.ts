@@ -106,6 +106,22 @@ const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
 const PLAYER_LOCATION_SAVE_PRECISION = 1000;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
+type VoxelRuntimeGlobal = typeof globalThis & {
+  __VOXEL_SANDBOX_DISPOSE__?: () => void;
+};
+type ViteHotContext = {
+  dispose(callback: () => void): void;
+};
+
+const voxelRuntimeGlobal = globalThis as VoxelRuntimeGlobal;
+voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__?.();
+
+const mainAbortController = new AbortController();
+const eventListenerOptions: AddEventListenerOptions = { signal: mainAbortController.signal };
+const wheelListenerOptions: AddEventListenerOptions = {
+  signal: mainAbortController.signal,
+  passive: false
+};
 
 const app = requireElement<HTMLElement>("#app");
 const homeScreen = requireElement<HTMLElement>("#home-screen");
@@ -202,6 +218,8 @@ let pendingWorldDeletion: SavedWorld | null = null;
 let lastSavedPlayerLocation: SavedPlayerStateSnapshot | null = null;
 let nextPlayerLocationAutosaveAt = 0;
 let playerLocationSaveChain: Promise<void> = Promise.resolve();
+let runtimeDisposed = false;
+let animationFrameId: number | null = null;
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -323,7 +341,7 @@ async function startApp(): Promise<void> {
     wireMenuControls();
     worldSeedInput.value = createReadableSeed();
     await refreshHomeWorldList();
-    animate();
+    scheduleNextFrame();
   } catch (error) {
     console.error("Could not start voxel engine", error);
     homeWorldList.textContent = "Could not open local save storage.";
@@ -344,51 +362,55 @@ function wireMenuControls(): void {
     if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel")) return;
     event.preventDefault();
     resumeFromPause();
-  });
-  resumeButton.addEventListener("click", resumeFromPause);
+  }, eventListenerOptions);
+  resumeButton.addEventListener("click", resumeFromPause, eventListenerOptions);
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
-  });
+  }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
-  });
+  }, eventListenerOptions);
   // World switching stays on the home screen; the pause menu only exits back there.
   homeButton.addEventListener("click", () => {
     void exitToHome();
-  });
-  qualitySelect.addEventListener("change", () => qualityController.setPreset(qualitySelect.value));
+  }, eventListenerOptions);
+  qualitySelect.addEventListener("change", () => qualityController.setPreset(qualitySelect.value), eventListenerOptions);
   renderDistanceSlider.addEventListener("input", () => {
     qualityController.setRenderDistance(renderDistanceSlider.value);
-  });
-  physicsBudgetDecreaseButton.addEventListener("click", () => changePhysicsObjectBudget("decrease"));
-  physicsBudgetIncreaseButton.addEventListener("click", () => changePhysicsObjectBudget("increase"));
-  physicsBudgetSlider.addEventListener("input", () => setPhysicsObjectBudget(Number(physicsBudgetSlider.value)));
-  despawnObjectsButton.addEventListener("click", clearToys);
+  }, eventListenerOptions);
+  physicsBudgetDecreaseButton.addEventListener("click", () => changePhysicsObjectBudget("decrease"), eventListenerOptions);
+  physicsBudgetIncreaseButton.addEventListener("click", () => changePhysicsObjectBudget("increase"), eventListenerOptions);
+  physicsBudgetSlider.addEventListener(
+    "input",
+    () => setPhysicsObjectBudget(Number(physicsBudgetSlider.value)),
+    eventListenerOptions
+  );
+  despawnObjectsButton.addEventListener("click", clearToys, eventListenerOptions);
   shadowQualitySlider.addEventListener("input", () => {
     qualityController.setShadowQualityLevel(shadowQualitySlider.value);
-  });
+  }, eventListenerOptions);
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
-  });
+  }, eventListenerOptions);
   superUltraToggle.addEventListener("change", () => {
     qualityController.setSuperUltraEnabled(superUltraToggle.checked);
-  });
+  }, eventListenerOptions);
   createWorldForm.addEventListener("submit", (event) => {
     void createWorldFromForm(event);
-  });
+  }, eventListenerOptions);
   randomSeedButton.addEventListener("click", () => {
     worldSeedInput.value = createReadableSeed();
     worldSeedInput.focus();
-  });
-  cancelDeleteWorldButton.addEventListener("click", closeDeleteWorldDialog);
+  }, eventListenerOptions);
+  cancelDeleteWorldButton.addEventListener("click", closeDeleteWorldDialog, eventListenerOptions);
   confirmDeleteWorldButton.addEventListener("click", () => {
     void confirmPendingWorldDeletion();
-  });
+  }, eventListenerOptions);
   deleteWorldDialog.addEventListener("pointerdown", (event) => {
     if (event.target === deleteWorldDialog) {
       closeDeleteWorldDialog();
     }
-  });
+  }, eventListenerOptions);
 }
 
 function resumeFromPause(): void {
@@ -435,7 +457,7 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(qualityController.renderPixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}, eventListenerOptions);
 
 document.addEventListener("keydown", (event) => {
   if (novaChatPanel.isOpen) {
@@ -501,19 +523,23 @@ document.addEventListener("keydown", (event) => {
     throwNovaPilotCore();
     return;
   }
-});
+}, eventListenerOptions);
 
 document.addEventListener("visibilitychange", () => {
   drainFrameClockAfterIdle();
   if (document.hidden) void queueActivePlayerLocationSave(true);
-});
-window.addEventListener("focus", drainFrameClockAfterIdle);
-window.addEventListener("pageshow", drainFrameClockAfterIdle);
+}, eventListenerOptions);
+window.addEventListener("focus", drainFrameClockAfterIdle, eventListenerOptions);
+window.addEventListener("pageshow", drainFrameClockAfterIdle, eventListenerOptions);
 window.addEventListener("pagehide", () => {
   void queueActivePlayerLocationSave(true);
-});
+}, eventListenerOptions);
+window.addEventListener("beforeunload", () => {
+  void queueActivePlayerLocationSave(true);
+  disposeRuntime();
+}, eventListenerOptions);
 
-renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
+renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault(), eventListenerOptions);
 renderer.domElement.addEventListener("mousedown", (event) => {
   if (!inWorld) return;
 
@@ -527,7 +553,7 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   if (event.button === 2) {
     useSelectedHotbarSecondaryAction(activePlayer);
   }
-});
+}, eventListenerOptions);
 renderer.domElement.addEventListener("wheel", (event) => {
   if (!inWorld) return;
 
@@ -536,7 +562,7 @@ renderer.domElement.addEventListener("wheel", (event) => {
 
   event.preventDefault();
   selectHotbarIndex(stepHotbarIndex(selectedHotbarIndex, direction, hotbarItems.length));
-}, { passive: false });
+}, wheelListenerOptions);
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
   useSelectedHotbarAction(activePlayer, getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry));
@@ -585,11 +611,13 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
 }
 
 function animate(): void {
+  if (runtimeDisposed) return;
+
   const frameStartedAt = performance.now();
   const rawDelta = clock.getDelta();
   if (shouldSkipExpensiveFrame(document.hidden, rawDelta)) {
     resetFrameMetersAfterIdle();
-    requestAnimationFrame(animate);
+    scheduleNextFrame();
     return;
   }
 
@@ -701,7 +729,12 @@ function animate(): void {
       smoothedFrameTimings
     );
   }
-  requestAnimationFrame(animate);
+  scheduleNextFrame();
+}
+
+function scheduleNextFrame(): void {
+  if (runtimeDisposed) return;
+  animationFrameId = requestAnimationFrame(animate);
 }
 
 function resetFrameMetersAfterIdle(): void {
@@ -1360,5 +1393,47 @@ function updateSunShadowAnchor(): void {
   sunTarget.updateMatrixWorld();
   sun.updateMatrixWorld();
 }
+
+function disposeRuntime(): void {
+  if (runtimeDisposed) return;
+
+  const activeWorld = world;
+  runtimeDisposed = true;
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+
+  mainAbortController.abort();
+  if (inWorld) {
+    void queueActivePlayerLocationSave(true);
+  }
+
+  // The explicit teardown matters mostly in dev: Vite reloads and repeated
+  // browser smoke navigations can otherwise leave old WebGL contexts alive in
+  // Firefox's GPU process until the browser finally decides to clean house.
+  player?.dispose();
+  clearToys();
+  activeWorld?.dispose(scene);
+  inWorld = false;
+  novaPilotReactions.dispose();
+  novaContext.dispose();
+  novaPilot.dispose();
+  targetBlockHighlighter.dispose();
+  skybox.dispose();
+  worldMaterial.dispose();
+  renderer.renderLists.dispose();
+  renderer.dispose();
+  renderer.forceContextLoss();
+  renderer.domElement.remove();
+  document.body.classList.remove("in-world", "playing", "super-ultra-enabled");
+
+  if (voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ === disposeRuntime) {
+    voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = undefined;
+  }
+}
+
+voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = disposeRuntime;
+(import.meta as ImportMeta & { readonly hot?: ViteHotContext }).hot?.dispose(disposeRuntime);
 
 void startApp();

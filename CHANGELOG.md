@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.16 - 2026-05-03
+
+### Added
+
+- Added explicit runtime disposal for Vite reloads and browser unloads: cancel the animation frame loop, abort main event listeners, dispose the player controller, drop active physics/world resources, dispose long-lived Three.js helpers, and force WebGL context loss.
+- Added `PlayerController.dispose()` so document-level pointer-lock, keyboard, and mouse listeners are removed when the engine runtime is torn down.
+- Added `VoxelWorld.dispose()` so active chunk meshes and the worker are released from synchronous teardown paths.
+- Added `TargetBlockHighlighter.dispose()` and disposed the temporary box geometry used to build its edge outline.
+
+### Changed
+
+- Main runtime event listeners now share an `AbortController`, preventing duplicate UI/input handlers during dev reloads.
+- The render loop now stores and cancels its `requestAnimationFrame` id, preventing orphan frame loops when the app is reloaded in place.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: reloaded the app through the new teardown path, loaded `Default World`, opened the debug HUD, confirmed the world rendered with stable low object counts, and saw no fresh console warnings/errors. Firefox process sampling dropped from the earlier multi-GB GPU-process spike to roughly 4.7 GB total working set after the cleanup reload, though a full browser restart may still be needed to reclaim memory from contexts leaked before this patch.
+
 ## 0.2.15 - 2026-05-03
 
 ### Added

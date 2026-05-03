@@ -69,15 +69,15 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Engine Pieces
 
-- `src/main.ts`: app bootstrap, render loop, input glue, and world lifecycle orchestration
+- `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
 - `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals
-- `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, and coalesced edited-chunk saves
+- `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, coalesced edited-chunk saves, and chunk/worker disposal
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds, player resume location, and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
-- `src/player.ts`: first-person controller and voxel collision
+- `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, and voxel collision
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering

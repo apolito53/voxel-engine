@@ -76,6 +76,7 @@ export class PlayerController {
   private slideSpeedLimit = 0;
   private slideMomentumAirborne = false;
   private crouchViewOffset = 0;
+  private readonly eventAbortController = new AbortController();
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: CollisionWorld) {
     this.camera = camera;
@@ -95,12 +96,14 @@ export class PlayerController {
     this.lockTimeout = null;
     this.onPauseChange = () => {};
 
+    const listenerOptions = { signal: this.eventAbortController.signal };
+
     domElement.tabIndex = 0;
     domElement.addEventListener("click", () => {
       if (this.active && !this.locked && !this.pendingLock) {
         this.requestLock();
       }
-    });
+    }, listenerOptions);
     document.addEventListener("pointerlockchange", () => {
       const wasLocked = this.locked;
       this.locked = document.pointerLockElement === domElement;
@@ -117,13 +120,13 @@ export class PlayerController {
       }
 
       this.updateCursor();
-    });
+    }, listenerOptions);
     document.addEventListener("pointerlockerror", () => {
       this.pendingLock = false;
       this.clearLockTimeout();
       this.updateCursor();
-    });
-    document.addEventListener("mousemove", (event) => this.handleMouse(event));
+    }, listenerOptions);
+    document.addEventListener("mousemove", (event) => this.handleMouse(event), listenerOptions);
     document.addEventListener("keydown", (event) => {
       if (event.code === "Escape") {
         this.releaseLook();
@@ -139,8 +142,8 @@ export class PlayerController {
         return;
       }
       this.keys.add(event.code);
-    });
-    document.addEventListener("keyup", (event) => this.keys.delete(event.code));
+    }, listenerOptions);
+    document.addEventListener("keyup", (event) => this.keys.delete(event.code), listenerOptions);
   }
 
   resume(): void {
@@ -250,6 +253,15 @@ export class PlayerController {
       document.exitPointerLock?.();
     }
     this.updateCursor();
+  }
+
+  dispose(): void {
+    // Vite dev reloads and browser navigations can otherwise strand document
+    // listeners that still point at an old camera/world pair. AbortController
+    // gives the owner one switch to remove every listener registered above.
+    this.pause(false);
+    this.eventAbortController.abort();
+    this.clearLockTimeout();
   }
 
   teleportToFeetPosition(position: PlayerFeetPosition, yaw = this.yaw, pitch = this.pitch): void {

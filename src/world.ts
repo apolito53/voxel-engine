@@ -287,6 +287,23 @@ export class VoxelWorld implements CollisionWorld {
     this.modifiedChunkKeys.clear();
   }
 
+  dispose(scene: THREE.Scene): void {
+    // Page disposal and Vite reloads are synchronous, so this path focuses on
+    // releasing GPU/worker resources promptly. Normal world switching still
+    // calls `flushStorageWrites` before dropping chunks.
+    if (this.storageFlushTimer !== null) {
+      clearTimeout(this.storageFlushTimer);
+      this.storageFlushTimer = null;
+      this.flushPendingChunkSaves();
+    }
+
+    this.disposeLoadedChunks(scene);
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+  }
+
   key(cx: number, cz: number): string {
     return `${cx},${cz}`;
   }

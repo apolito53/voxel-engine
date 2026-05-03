@@ -26,7 +26,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 ## Fast Lookup
 
-- App bootstrap, render loop, input glue, world lifecycle orchestration: `src/main.ts`
+- App bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown: `src/main.ts`
 - HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
@@ -49,9 +49,9 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
-- Chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty/modified chunk indexes, reads/writes, sparse block damage, coalesced chunk-save writes: `src/world.ts`
+- Chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty/modified chunk indexes, reads/writes, sparse block damage, coalesced chunk-save writes, and worker/chunk disposal: `src/world.ts`
 - Shared collision-world shape used by player and physics toys: `src/collision.ts`
-- First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, voxel collision: `src/player.ts`
+- First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, input-listener disposal, voxel collision: `src/player.ts`
 - Player movement constants and committed slide/landing-slide/air-control/flight/crouch-view tuning helpers: `src/playerMovement.ts`
 - Player velocity magnitude and metric speed readout formatting: `src/playerSpeed.ts`
 - Sprint/flight-boost feedback FOV target and smoothing helpers: `src/sprintFeedback.ts`
@@ -59,7 +59,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Event-backed Nova context journal, local reply generation, and in-game chat panel: `src/novaContext.ts`, `src/novaChat.ts`, `src/novaChatPanel.ts`
 - Event-driven Nova chatter, glow pulses, message throttling, and companion reactions: `src/novaPilotReactions.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
-- Thin black edge outline for the currently targeted block: `src/targetHighlighter.ts`
+- Thin black edge outline for the currently targeted block, including geometry/material disposal: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, sleep-aware split core/debris broadphase collision, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
 - Instanced debris rendering batches keyed by source block material: `src/physicsInstancing.ts`
 - Persistent destructible rubble cover patches, multi-cell merge rules, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
@@ -97,6 +97,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 13. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
 14. Thrown physics cores report voxel impacts; impacts above 2 m/s call `VoxelWorld.damageBlock`, and destroyed blocks are removed from the grid before spawning quality-scaled loose cube fragments sampled from the 3x3x3 fracture grid. Fragments reuse geometry/materials, avoid shadow casting, and become persistent destructible rubble cover patches after settling, rather than staying as long-lived individual physics bodies. Rubble patches merge across neighboring same-height cells up to a bounded patch size, skip internal mesh faces so they read as connected debris, and check support each active frame: unsupported cells fall one voxel cell, falling cells merge into piles below, and dense supported cells compact into the generated solid `Rubble` block only after well over one full block-fracture worth of debris accumulates. Active cores can still shove loose fragments, collide with rubble patches, and chip rubble health without enabling debris-debris pair generation; `X` removes only thrown cores so rubble experiments can stay in place, while the settings-panel `Despawn All Objects` button clears cores, loose debris, and rubble. Cores also sleep after settling so old shots do not keep paying per-frame voxel collision cost forever.
 15. `Enter` or the pause-menu `Nova Chat` button opens the local Nova chat pane. Opening chat suspends movement/look without showing the pause menu, feeds replies from the `NovaContextJournal`, and resumes pointer lock when closed. The current implementation is local context-aware text only; a real model/proxy hook is future work.
+16. Dev reloads and browser unloads run `disposeRuntime()` from `src/main.ts`: the active animation frame is canceled, main event listeners are aborted, player input listeners are disposed, active chunks/worker/physics/Nova helpers are released, and the renderer forces WebGL context loss so Firefox's GPU process does not keep old dev contexts around.
 
 ## Common Change Targets
 
@@ -132,6 +133,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Pause-menu tuning controls live behind the `Settings` button so normal pause/resume stays quick; opening settings hides `Resume` and the red `Exit to Home` action until the user backs out.
 - Slider edits intentionally fork into the single `Custom` preset instead of mutating built-in presets; named custom preset management is future UI work.
 - Browser worker behavior can differ from the build smoke test; reload the local app after worker pipeline changes and watch console logs/debug metrics.
+- Firefox can retain WebGL/GPU-process memory across dev reloads if old contexts are not explicitly lost. Keep `disposeRuntime()` wired to `beforeunload` and Vite HMR, and keep long-lived Three.js helpers on a disposal path when adding new renderer-owned resources.
 - `npm.cmd run test` bundles `tests/run.ts` into `.test-dist/` with esbuild before running in Node; `.test-dist/` is generated and ignored.
 - `node_modules` and `dist` are generated and should not be scanned unless diagnosing dependency/build output.
 - `vite.config.ts` manually separates Three.js into a `vendor-three` chunk and keeps other dependencies in `vendor`, so production build warnings point at genuinely oversized app code instead of the stable renderer dependency.

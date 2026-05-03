@@ -9,7 +9,9 @@ export class TargetBlockHighlighter {
   readonly object: THREE.LineSegments;
 
   constructor() {
-    const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
+    const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const geometry = new THREE.EdgesGeometry(boxGeometry);
+    boxGeometry.dispose();
     const material = new THREE.LineBasicMaterial({
       color: TARGET_LINE_COLOR,
       depthTest: true,
@@ -34,5 +36,15 @@ export class TargetBlockHighlighter {
 
   hide(): void {
     this.object.visible = false;
+  }
+
+  dispose(): void {
+    this.object.geometry.dispose();
+    const material = this.object.material;
+    if (Array.isArray(material)) {
+      for (const entry of material) entry.dispose();
+      return;
+    }
+    material.dispose();
   }
 }
