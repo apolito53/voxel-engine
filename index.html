@@ -12,9 +12,38 @@
       <div id="player-speed-readout" class="row">Speed 0.0 m/s</div>
       <div class="row">WASD move | Space jump/up | C crouch/slide/down | Shift sprint/boost</div>
       <div class="row">Mouse wheel select | Unarmed no-op | Block L/R break/place | Core left throw</div>
-      <div class="row">F flight | N Nova pilot | B Nova core | X despawn cores | F3 debug | F4 quality | Esc pause</div>
+      <div class="row">F flight | Enter Nova chat | N pilot | B core | X cores | F3/F4 | Esc pause</div>
     </div>
     <div id="nova-message" aria-live="polite"></div>
+    <div
+      id="nova-chat"
+      class="nova-chat is-hidden"
+      aria-hidden="true"
+      role="dialog"
+      aria-labelledby="nova-chat-title"
+    >
+      <div class="nova-chat-pane">
+        <div class="nova-chat-header">
+          <div>
+            <div id="nova-chat-title" class="nova-chat-title">Nova Chat</div>
+            <div class="nova-chat-subtitle">Local context link</div>
+          </div>
+          <button id="nova-chat-close" class="nova-chat-close" type="button">Close</button>
+        </div>
+        <div id="nova-chat-log" class="nova-chat-log" role="log" aria-live="polite"></div>
+        <form id="nova-chat-form" class="nova-chat-form">
+          <input
+            id="nova-chat-input"
+            class="nova-chat-input"
+            type="text"
+            maxlength="180"
+            autocomplete="off"
+            placeholder="Ask Nova what she sees..."
+          />
+          <button class="nova-chat-send" type="submit">Send</button>
+        </form>
+      </div>
+    </div>
     <div id="debug-panel"></div>
     <canvas id="minimap" width="128" height="128"></canvas>
     <div id="sprint-overlay" aria-hidden="true"></div>
@@ -99,6 +128,9 @@
             aria-controls="pause-settings-panel"
           >
             Settings
+          </button>
+          <button id="nova-chat-button" class="menu-button secondary menu-main-action" type="button">
+            Nova Chat
           </button>
           <div id="pause-settings-panel" class="settings-panel" aria-label="Engine settings" hidden>
             <label class="settings-field" for="quality-select">

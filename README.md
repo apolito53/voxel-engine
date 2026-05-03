@@ -47,6 +47,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `F` toggle flight mode
 - Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
+- `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
@@ -94,6 +95,9 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
 - `src/novaPilot.ts`: visible companion pilot, follow/orbit behavior, and Nova-thrown core launch helpers
+- `src/novaContext.ts`: recent engine-event and runtime-context journal for Nova chat/reactions
+- `src/novaChat.ts`: local context-aware Nova reply generation and bounded chat log helpers
+- `src/novaChatPanel.ts`: in-game Nova chat pane, message rendering, and submit/close behavior
 - `src/novaPilotReactions.ts`: event-driven Nova chatter, pulse reactions, and message throttling
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards

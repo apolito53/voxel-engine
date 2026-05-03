@@ -143,6 +143,12 @@ import {
   stepHotbarIndex
 } from "../src/hotbar";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
+import {
+  appendNovaChatMessage,
+  createNovaChatReply,
+  type NovaChatMessage
+} from "../src/novaChat";
+import { NovaContextJournal } from "../src/novaContext";
 import { NovaPilot, createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
 import { NovaPilotReactions, type NovaPilotMessageTarget } from "../src/novaPilotReactions";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
@@ -286,6 +292,111 @@ test("nova pilot reactions turn engine events into rate-limited HUD messages", (
 
   reactions.dispose();
   pilot.dispose();
+});
+
+test("nova context journal records world, runtime, and event state", () => {
+  let now = 0;
+  const events = createEngineEventBus();
+  const journal = new NovaContextJournal(events, () => now);
+
+  events.emit("world:loaded", {
+    worldId: "default",
+    name: "Default World",
+    seed: "classic"
+  });
+  now += 10;
+  events.emit("quality:changed", {
+    presetId: "normal",
+    label: "Normal",
+    source: "preset",
+    renderDistance: 6,
+    physicsObjectBudget: 192,
+    blockFragmentCount: 7
+  });
+  now += 10;
+  events.emit("palette:selected", {
+    block: BLOCK.grass,
+    name: "Grass"
+  });
+  events.emit("physics:core-thrown", { source: "player" });
+  events.emit("block:destroyed", {
+    position: { x: 1, y: 2, z: 3 },
+    block: BLOCK.grass,
+    impactSpeed: 4,
+    fragmentCount: 7
+  });
+  journal.updateRuntimeTelemetry({
+    selectedItemLabel: "Grass",
+    movementMode: "flight",
+    speedMetersPerSecond: 12.5,
+    novaActive: true,
+    physicsObjectCount: 3,
+    rubblePatchCount: 2,
+    rubblePieceCount: 11
+  });
+
+  const snapshot = journal.snapshot();
+
+  assertEqual(snapshot.world?.name, "Default World", "context should remember the loaded world");
+  assertEqual(snapshot.qualityLabel, "Normal", "context should remember quality changes");
+  assertEqual(snapshot.runtime.selectedItemLabel, "Grass", "runtime telemetry should carry the selected item");
+  assertEqual(snapshot.runtime.movementMode, "flight", "runtime telemetry should carry player movement mode");
+  assertEqual(snapshot.counters.playerCoreThrows, 1, "context should count player-thrown cores");
+  assertEqual(snapshot.counters.blocksDestroyed, 1, "context should count destroyed blocks");
+  assert(
+    snapshot.recentEvents.some((event) => event.summary.includes("Grass fractured")),
+    "recent event summaries should include block destruction"
+  );
+
+  journal.dispose();
+});
+
+test("nova chat replies use context and chat logs stay bounded", () => {
+  const events = createEngineEventBus();
+  const journal = new NovaContextJournal(events, () => 100);
+  events.emit("world:loaded", {
+    worldId: "default",
+    name: "Default World",
+    seed: "classic"
+  });
+  events.emit("quality:changed", {
+    presetId: "custom",
+    label: "Custom",
+    source: "settings",
+    renderDistance: 9,
+    physicsObjectBudget: 512,
+    blockFragmentCount: 13
+  });
+  events.emit("physics:core-thrown", { source: "player" });
+  journal.updateRuntimeTelemetry({
+    selectedItemLabel: "Physics Core",
+    movementMode: "walk",
+    speedMetersPerSecond: 0,
+    novaActive: true,
+    physicsObjectCount: 1,
+    rubblePatchCount: 0,
+    rubblePieceCount: 0
+  });
+
+  const physicsReply = createNovaChatReply("what about the physics core?", journal.snapshot());
+  assert(physicsReply.includes("1 core"), "physics replies should use core counters from context");
+
+  const performanceReply = createNovaChatReply("are we lagging?", journal.snapshot());
+  assert(performanceReply.includes("Custom"), "performance replies should mention current quality context");
+
+  const messages: readonly NovaChatMessage[] = [
+    { role: "player", text: "one", timestamp: 1 },
+    { role: "nova", text: "two", timestamp: 2 }
+  ];
+  const boundedMessages = appendNovaChatMessage(
+    messages,
+    { role: "player", text: "three", timestamp: 3 },
+    2
+  );
+  assertEqual(boundedMessages.length, 2, "chat log should stay within its configured cap");
+  assertEqual(boundedMessages[0]?.text, "two", "oldest chat message should drop first");
+
+  journal.dispose();
 });
 
 test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", () => {

@@ -24,6 +24,10 @@ export type EngineEvents = {
   "nova:toggled": {
     readonly active: boolean;
   };
+  "nova:chat-message": {
+    readonly role: "player" | "nova";
+    readonly text: string;
+  };
   "physics:core-thrown": {
     readonly source: PhysicsCoreSource;
   };

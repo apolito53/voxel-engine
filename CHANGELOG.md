@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.14 - 2026-05-03
+
+### Added
+
+- Added `NovaContextJournal`, an event-backed local context snapshot that tracks loaded world, selected item, player mode/speed, quality settings, physics counts, recent damage/rubble/performance events, and chat history.
+- Added `Nova Chat`, an in-game local chat pane opened with `Enter` or the pause-menu `Nova Chat` button.
+- Added local context-aware Nova replies for help, world/location, performance, physics-core, rubble, and general status prompts.
+- Added regression coverage for Nova context snapshots, contextual chat replies, and bounded chat logs.
+
+### Changed
+
+- Opening Nova Chat now suspends movement/look input without showing the pause menu, then resumes pointer lock when chat closes.
+- Updated README, TODO, and codebase index notes for the local chat slice and the later real model/proxy hook.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: loaded `Default World`, opened Nova Chat with `Enter`, submitted `what are you seeing?`, verified the player message and context-aware Nova status reply rendered, closed chat with `Esc`, and saw no fresh console errors.
+
 ## 0.2.13 - 2026-05-03
 
 ### Changed

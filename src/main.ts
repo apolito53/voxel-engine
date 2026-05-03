@@ -29,11 +29,14 @@ import {
 } from "./hotbar";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
+import { createNovaChatReply, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
+import { NovaChatPanel } from "./novaChatPanel";
+import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
-import { formatPlayerSpeedMetersPerSecond } from "./playerSpeed";
+import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PhysicsToy,
@@ -69,7 +72,7 @@ import {
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
-import { RubbleField } from "./rubble";
+import { RubbleField, type RubbleFieldStats } from "./rubble";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -114,6 +117,7 @@ const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
 const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
+const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
 const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
 const qualitySelect = requireElement<HTMLSelectElement>("#quality-select");
 const renderDistanceSlider = requireElement<HTMLInputElement>("#render-distance-slider");
@@ -134,6 +138,11 @@ const minimap = requireElement<HTMLCanvasElement>("#minimap");
 const hudTitle = requireElement<HTMLElement>("#hud .title");
 const playerSpeedReadout = requireElement<HTMLElement>("#player-speed-readout");
 const novaMessage = requireElement<HTMLElement>("#nova-message");
+const novaChatRoot = requireElement<HTMLElement>("#nova-chat");
+const novaChatLog = requireElement<HTMLElement>("#nova-chat-log");
+const novaChatForm = requireElement<HTMLFormElement>("#nova-chat-form");
+const novaChatInput = requireElement<HTMLInputElement>("#nova-chat-input");
+const novaChatCloseButton = requireElement<HTMLButtonElement>("#nova-chat-close");
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -189,6 +198,7 @@ let playerLocationSaveChain: Promise<void> = Promise.resolve();
 
 const engineEvents = createEngineEventBus();
 const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
+const novaContext = new NovaContextJournal(engineEvents);
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const chunkStreamDirection = new THREE.Vector3();
@@ -210,6 +220,22 @@ const novaPilotReactions = new NovaPilotReactions({
   events: engineEvents,
   pilot: novaPilot,
   output: novaMessage
+});
+const novaChatPanel = new NovaChatPanel({
+  root: novaChatRoot,
+  log: novaChatLog,
+  form: novaChatForm,
+  input: novaChatInput,
+  closeButton: novaChatCloseButton,
+  getReply: (message) => createNovaChatReply(message, novaContext.snapshot()),
+  onOpen: openNovaChatInputMode,
+  onClose: closeNovaChatInputMode,
+  onMessage: (message) => {
+    engineEvents.emit("nova:chat-message", {
+      role: message.role,
+      text: message.text
+    });
+  }
 });
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
@@ -314,6 +340,9 @@ function wireMenuControls(): void {
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
   });
+  novaChatButton.addEventListener("click", () => {
+    openNovaChat();
+  });
   // World switching stays on the home screen; the pause menu only exits back there.
   homeButton.addEventListener("click", () => {
     void exitToHome();
@@ -354,7 +383,28 @@ function wireMenuControls(): void {
 }
 
 function resumeFromPause(): void {
+  if (novaChatPanel.isOpen) {
+    novaChatPanel.close();
+  }
   setSettingsPanelOpen(false);
+  requirePlayer().resume();
+}
+
+function openNovaChat(): void {
+  if (!inWorld) return;
+  novaChatPanel.open();
+}
+
+function openNovaChatInputMode(): void {
+  // Chat is an in-world overlay rather than a pause-menu panel. Suspend only
+  // movement/look so the player can type, then restore pointer lock on close.
+  setSettingsPanelOpen(false);
+  pauseMenu.classList.add("is-hidden");
+  requirePlayer().suspendForTextInput();
+}
+
+function closeNovaChatInputMode(): void {
+  if (!inWorld) return;
   requirePlayer().resume();
 }
 
@@ -379,6 +429,15 @@ window.addEventListener("resize", () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (novaChatPanel.isOpen) {
+    if (event.code === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      novaChatPanel.close();
+    }
+    return;
+  }
+
   if (event.code === "Escape" && !deleteWorldDialog.classList.contains("is-hidden")) {
     event.preventDefault();
     closeDeleteWorldDialog();
@@ -398,6 +457,13 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (!inWorld) return;
+
+  if (event.code === NOVA_CHAT_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openNovaChat();
+    return;
+  }
 
   if (event.code === "KeyX") {
     event.preventDefault();
@@ -520,6 +586,7 @@ function animate(): void {
   let timingSectionStartedAt = frameStartedAt;
   let debugPlayerChunk: ChunkCoords | null = null;
   let debugWorldStats: WorldStats | null = null;
+  let debugRubbleStats: RubbleFieldStats | null = null;
   let debugMinimapMs = minimapRenderer.lastUpdateMs;
 
   const recordTimingSection = (section: FrameTimingSection): void => {
@@ -571,7 +638,9 @@ function animate(): void {
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
     recordTimingSection("meshMs");
+    debugRubbleStats = rubbleField.getStats();
     updateHud();
+    updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
     updateSprintFeedback(activePlayer.isSprintFeedbackActive(), delta);
     recordTimingSection("otherMs");
@@ -606,7 +675,7 @@ function animate(): void {
   );
   frameTimingsInitialized = true;
 
-  if (inWorld && debugPlayerChunk && debugWorldStats) {
+  if (inWorld && debugPlayerChunk && debugWorldStats && debugRubbleStats) {
     debugHud.update(
       rawDelta,
       debugPlayerChunk,
@@ -616,7 +685,7 @@ function animate(): void {
       physicsObjectBudget,
       physicsCollisionStats,
       physicsFragmentInstancer.getStats(),
-      rubbleField.getStats(),
+      debugRubbleStats,
       smoothedFrameTimings
     );
   }
@@ -655,6 +724,18 @@ function updateHud(): void {
   const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), BLOCKS);
   hudTitle.textContent = `Voxel Sandbox Engine | ${selectedLabel}${modeSuffix}${novaSuffix}`;
   playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
+}
+
+function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats: RubbleFieldStats): void {
+  novaContext.updateRuntimeTelemetry({
+    selectedItemLabel: getHotbarItemLabel(getSelectedHotbarItem(), BLOCKS),
+    movementMode: activePlayer.movementMode,
+    speedMetersPerSecond: getPlayerSpeedMetersPerSecond(activePlayer.velocity),
+    novaActive: novaPilot.active,
+    physicsObjectCount: toys.length,
+    rubblePatchCount: rubbleStats.clusters,
+    rubblePieceCount: rubbleStats.pieces
+  });
 }
 
 function getSelectedHotbarItem(): HotbarItem {
@@ -1075,6 +1156,9 @@ async function exitToHome(): Promise<void> {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
     const activeWorld = requireWorld();
     await queueActivePlayerLocationSave(true);
+    if (novaChatPanel.isOpen) {
+      novaChatPanel.close();
+    }
     requirePlayer().pause(true);
     camera.getWorldDirection(direction);
     novaPilot.setActive(false, camera.position, direction, activeWorld);

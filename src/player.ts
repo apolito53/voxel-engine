@@ -226,6 +226,20 @@ export class PlayerController {
     this.pause(true);
   }
 
+  suspendForTextInput(): void {
+    // Chat/input overlays need the cursor and keyboard without raising the pause
+    // menu. Flip the gameplay controller inactive before releasing pointer lock
+    // so the browser's pointerlockchange event does not treat this as Esc pause.
+    this.active = false;
+    this.pendingLock = false;
+    this.clearLockTimeout();
+    this.keys.clear();
+    if (document.pointerLockElement === this.domElement) {
+      document.exitPointerLock?.();
+    }
+    this.updateCursor();
+  }
+
   pause(exitPointerLock = true): void {
     this.active = false;
     this.pendingLock = false;
