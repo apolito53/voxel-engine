@@ -133,6 +133,13 @@ import {
   shouldSkipExpensiveFrame
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
+import {
+  canBreakBlockWithHotbarItem,
+  createHotbarItems,
+  getHotbarItemLabel,
+  getHotbarScrollDirection,
+  stepHotbarIndex
+} from "../src/hotbar";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import { NovaPilot, createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
 import { NovaPilotReactions, type NovaPilotMessageTarget } from "../src/novaPilotReactions";
@@ -277,6 +284,53 @@ test("nova pilot reactions turn engine events into rate-limited HUD messages", (
 
   reactions.dispose();
   pilot.dispose();
+});
+
+test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", () => {
+  const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
+  const firstItem = hotbarItems[0];
+  const lastItem = hotbarItems[hotbarItems.length - 1];
+
+  assertEqual(firstItem?.kind, "unarmed", "hotbar should start in the explicit unarmed state");
+  assertEqual(lastItem?.kind, "physics-core", "hotbar should end with the physics core item");
+  assertEqual(
+    hotbarItems.length,
+    PLACEABLE_BLOCKS.length + 2,
+    "hotbar should contain unarmed, every placeable block, and the core"
+  );
+  assertEqual(
+    getHotbarItemLabel(firstItem ?? { kind: "unarmed" }, BLOCKS),
+    "Unarmed",
+    "unarmed slot should have a readable HUD label"
+  );
+  assertEqual(
+    getHotbarItemLabel(lastItem ?? { kind: "physics-core" }, BLOCKS),
+    "Physics Core",
+    "core slot should have a readable HUD label"
+  );
+  assert(canBreakBlockWithHotbarItem({ kind: "unarmed" }), "unarmed should allow left-click terrain breaking");
+  assert(
+    !canBreakBlockWithHotbarItem({ kind: "physics-core" }),
+    "holding a core should not also break targeted blocks on left click"
+  );
+});
+
+test("hotbar scrolling wraps predictably", () => {
+  const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
+
+  assertEqual(getHotbarScrollDirection(120), 1, "scrolling down should move forward through hotbar items");
+  assertEqual(getHotbarScrollDirection(-120), -1, "scrolling up should move backward through hotbar items");
+  assertEqual(getHotbarScrollDirection(0), null, "zero-delta wheel events should not change selection");
+  assertEqual(
+    stepHotbarIndex(0, -1, hotbarItems.length),
+    hotbarItems.length - 1,
+    "scrolling backward from first slot should wrap to the last slot"
+  );
+  assertEqual(
+    stepHotbarIndex(hotbarItems.length - 1, 1, hotbarItems.length),
+    0,
+    "scrolling forward from last slot should wrap to the first slot"
+  );
 });
 
 test("world chunk coordinates wrap cleanly across zero", () => {

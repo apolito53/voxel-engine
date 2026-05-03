@@ -40,11 +40,11 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with an 80% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide
 - `Shift` sprint on ground, or use the stronger flight speed boost; active sprint/boost widens FOV and adds peripheral speed lines
-- `Left click` break block
-- `Right click` place block
-- `1-5` select block
+- `Mouse wheel` selects Unarmed, placeable blocks, or Physics Core
+- `Left click` breaks a targeted block only while Unarmed
+- `Right click` uses the selected item: place the selected block, or throw the selected Physics Core
 - `F` toggle flight mode
-- `T` throw a physics core; impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, and rubble cover stats for hitch hunting
@@ -97,6 +97,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
+- `src/hotbar.ts`: scroll-selected Unarmed/block/Physics Core item lane and selection wrapping helpers
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 
 ## Development Checks

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.12 - 2026-05-02
+
+### Added
+
+- Added a scroll-selected hotbar lane containing `Unarmed`, each placeable block, and `Physics Core`.
+- Added regression coverage for hotbar item order, labels, break eligibility, wheel direction, and wraparound selection.
+- Added a TODO note for the future equipment/items iteration.
+
+### Changed
+
+- Removed `T` as the player physics-core launch control.
+- Right click now uses the selected hotbar item: selected blocks place into the targeted adjacent space, while selected Physics Core throws a core.
+- Left click now breaks terrain only while `Unarmed`, leaving selected blocks/cores from accidentally demolishing the target.
+- Updated HUD, README, and codebase index control references for the new selection model.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: loaded `Default World`, confirmed the HUD starts on `Unarmed`, mouse wheel selection advances through block items, and no fresh console errors appeared.
+
 ## 0.2.11 - 2026-05-02
 
 ### Added

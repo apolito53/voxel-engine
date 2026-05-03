@@ -16,6 +16,15 @@ import { createEngineEventBus } from "./engineEvents";
 import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
+import {
+  canBreakBlockWithHotbarItem,
+  createHotbarItems,
+  getHotbarItemLabel,
+  getHotbarScrollDirection,
+  normalizeHotbarIndex,
+  stepHotbarIndex,
+  type HotbarItem
+} from "./hotbar";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
@@ -168,7 +177,7 @@ let world: VoxelWorld | null = null;
 let player: PlayerController | null = null;
 let inWorld = false;
 let worldTransitioning = false;
-let selectedBlockIndex = 0;
+let selectedHotbarIndex = 0;
 let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
 let pendingWorldDeletion: SavedWorld | null = null;
@@ -177,6 +186,7 @@ let nextPlayerLocationAutosaveAt = 0;
 let playerLocationSaveChain: Promise<void> = Promise.resolve();
 
 const engineEvents = createEngineEventBus();
+const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const chunkStreamDirection = new THREE.Vector3();
@@ -402,12 +412,12 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (/^Digit[1-5]$/.test(event.code)) {
-    selectedBlockIndex = Number(event.code.slice(-1)) - 1;
-    engineEvents.emit("palette:selected", {
-      block: PLACEABLE_BLOCKS[selectedBlockIndex],
-      name: BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name
-    });
+  if (/^Digit[1-7]$/.test(event.code)) {
+    const requestedIndex = Number(event.code.slice(-1)) - 1;
+    if (requestedIndex < hotbarItems.length) {
+      event.preventDefault();
+      selectHotbarIndex(requestedIndex);
+    }
   }
 
   const activePlayer = requirePlayer();
@@ -415,11 +425,6 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     throwNovaPilotCore();
     return;
-  }
-
-  if (event.code === "KeyT" && activePlayer.isLooking()) {
-    event.preventDefault();
-    throwPlayerCore();
   }
 });
 
@@ -438,24 +443,52 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   if (!inWorld) return;
 
   const activePlayer = requirePlayer();
-  const hit: VoxelRaycastHit | null = getTargetBlockHit();
-  if (!hit) return;
 
   if (event.button === 0) {
+    const selectedItem = getSelectedHotbarItem();
+    if (!canBreakBlockWithHotbarItem(selectedItem)) return;
+
+    const hit: VoxelRaycastHit | null = getTargetBlockHit();
+    if (!hit) return;
     requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
+    return;
   }
 
   if (event.button === 2) {
-    const block = PLACEABLE_BLOCKS[selectedBlockIndex];
+    useSelectedHotbarItem(activePlayer);
+  }
+});
+renderer.domElement.addEventListener("wheel", (event) => {
+  if (!inWorld) return;
+
+  const direction = getHotbarScrollDirection(event.deltaY);
+  if (direction === null) return;
+
+  event.preventDefault();
+  selectHotbarIndex(stepHotbarIndex(selectedHotbarIndex, direction, hotbarItems.length));
+}, { passive: false });
+
+function useSelectedHotbarItem(activePlayer: PlayerController): void {
+  const selectedItem = getSelectedHotbarItem();
+
+  if (selectedItem.kind === "physics-core") {
+    if (activePlayer.isLooking()) throwPlayerCore();
+    return;
+  }
+
+  if (selectedItem.kind === "block") {
+    const hit: VoxelRaycastHit | null = getTargetBlockHit();
+    if (!hit) return;
+
     const target = {
       x: hit.block.x + hit.normal.x,
       y: hit.block.y + hit.normal.y,
       z: hit.block.z + hit.normal.z
     };
     if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
-    requireWorld().setBlock(target.x, target.y, target.z, block);
+    requireWorld().setBlock(target.x, target.y, target.z, selectedItem.block);
   }
-});
+}
 
 function animate(): void {
   const frameStartedAt = performance.now();
@@ -603,8 +636,27 @@ function updateHud(): void {
   const movementMode = activePlayer.movementMode;
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
   const novaSuffix = novaPilot.active ? " | Nova" : "";
-  hudTitle.textContent = `Voxel Sandbox Engine | ${BLOCKS[PLACEABLE_BLOCKS[selectedBlockIndex]].name}${modeSuffix}${novaSuffix}`;
+  const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), BLOCKS);
+  hudTitle.textContent = `Voxel Sandbox Engine | ${selectedLabel}${modeSuffix}${novaSuffix}`;
   playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
+}
+
+function getSelectedHotbarItem(): HotbarItem {
+  return hotbarItems[normalizeHotbarIndex(selectedHotbarIndex, hotbarItems.length)] ?? { kind: "unarmed" };
+}
+
+function selectHotbarIndex(index: number): void {
+  selectedHotbarIndex = normalizeHotbarIndex(index, hotbarItems.length);
+  const selectedItem = getSelectedHotbarItem();
+
+  if (selectedItem.kind === "block") {
+    engineEvents.emit("palette:selected", {
+      block: selectedItem.block,
+      name: BLOCKS[selectedItem.block].name
+    });
+  }
+
+  updateHud();
 }
 
 function updateSprintFeedback(active: boolean, delta: number): void {
