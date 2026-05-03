@@ -134,7 +134,9 @@ import {
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import {
-  canBreakBlockWithHotbarItem,
+  canDestroyBlockWithHotbarItem,
+  canPlaceBlockWithHotbarItem,
+  canThrowCoreWithHotbarItem,
   createHotbarItems,
   getHotbarItemLabel,
   getHotbarScrollDirection,
@@ -308,10 +310,25 @@ test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", 
     "Physics Core",
     "core slot should have a readable HUD label"
   );
-  assert(canBreakBlockWithHotbarItem({ kind: "unarmed" }), "unarmed should allow left-click terrain breaking");
   assert(
-    !canBreakBlockWithHotbarItem({ kind: "physics-core" }),
+    !canDestroyBlockWithHotbarItem({ kind: "unarmed" }),
+    "unarmed should leave left click inert until tools exist"
+  );
+  assert(
+    canDestroyBlockWithHotbarItem({ kind: "block", block: BLOCK.grass }),
+    "selected blocks should own left-click terrain destruction"
+  );
+  assert(
+    !canDestroyBlockWithHotbarItem({ kind: "physics-core" }),
     "holding a core should not also break targeted blocks on left click"
+  );
+  assert(
+    canPlaceBlockWithHotbarItem({ kind: "block", block: BLOCK.grass }),
+    "selected blocks should place on right click"
+  );
+  assert(
+    canThrowCoreWithHotbarItem({ kind: "physics-core" }),
+    "selected physics core should throw on left click"
   );
 });
 

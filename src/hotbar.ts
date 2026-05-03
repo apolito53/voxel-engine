@@ -19,7 +19,7 @@ export type HotbarScrollDirection = -1 | 1;
 
 export function createHotbarItems(placeableBlocks: readonly BlockId[]): readonly HotbarItem[] {
   // The physics core lives in the same selection lane as placeable blocks, so
-  // right click can become "use selected" instead of a pile of special keys.
+  // selection is one continuous loop even when item behavior differs by click.
   return [
     { kind: "unarmed" },
     ...placeableBlocks.map((block): HotbarBlockItem => ({ kind: "block", block })),
@@ -60,9 +60,17 @@ export function getHotbarItemLabel(
   return "Unarmed";
 }
 
-export function canBreakBlockWithHotbarItem(item: HotbarItem): boolean {
-  // Tools can plug into this predicate later. For now, unarmed is the only
-  // intentional terrain-breaking state; holding a block/core means left click
-  // should not silently demolish whatever the crosshair touches.
-  return item.kind === "unarmed";
+export function canDestroyBlockWithHotbarItem(item: HotbarItem): boolean {
+  // For this first equipment-shaped pass, block selection owns terrain editing:
+  // left click removes the target, right click places the selected block.
+  // Future tool items can join this predicate without making Unarmed magical.
+  return item.kind === "block";
+}
+
+export function canPlaceBlockWithHotbarItem(item: HotbarItem): item is HotbarBlockItem {
+  return item.kind === "block";
+}
+
+export function canThrowCoreWithHotbarItem(item: HotbarItem): item is HotbarPhysicsCoreItem {
+  return item.kind === "physics-core";
 }

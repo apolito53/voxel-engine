@@ -41,8 +41,9 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with an 80% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide
 - `Shift` sprint on ground, or use the stronger flight speed boost; active sprint/boost widens FOV and adds peripheral speed lines
 - `Mouse wheel` selects Unarmed, placeable blocks, or Physics Core
-- `Left click` breaks a targeted block only while Unarmed
-- `Right click` uses the selected item: place the selected block, or throw the selected Physics Core
+- `Unarmed` does nothing on either click for now
+- Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
+- Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
 - Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled loose cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position

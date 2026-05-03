@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import "./style.css";
 import { getBlockFragmentOffset, getDistributedBlockFragmentIndex } from "./blockFragments";
-import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
+import { BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
   createChunkStorage,
   createWorldRegistry,
@@ -17,7 +17,9 @@ import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import {
-  canBreakBlockWithHotbarItem,
+  canDestroyBlockWithHotbarItem,
+  canPlaceBlockWithHotbarItem,
+  canThrowCoreWithHotbarItem,
   createHotbarItems,
   getHotbarItemLabel,
   getHotbarScrollDirection,
@@ -445,17 +447,12 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   const activePlayer = requirePlayer();
 
   if (event.button === 0) {
-    const selectedItem = getSelectedHotbarItem();
-    if (!canBreakBlockWithHotbarItem(selectedItem)) return;
-
-    const hit: VoxelRaycastHit | null = getTargetBlockHit();
-    if (!hit) return;
-    requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
+    useSelectedHotbarPrimaryAction(activePlayer);
     return;
   }
 
   if (event.button === 2) {
-    useSelectedHotbarItem(activePlayer);
+    useSelectedHotbarSecondaryAction(activePlayer);
   }
 });
 renderer.domElement.addEventListener("wheel", (event) => {
@@ -468,26 +465,45 @@ renderer.domElement.addEventListener("wheel", (event) => {
   selectHotbarIndex(stepHotbarIndex(selectedHotbarIndex, direction, hotbarItems.length));
 }, { passive: false });
 
-function useSelectedHotbarItem(activePlayer: PlayerController): void {
+function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
   const selectedItem = getSelectedHotbarItem();
 
-  if (selectedItem.kind === "physics-core") {
+  if (canThrowCoreWithHotbarItem(selectedItem)) {
     if (activePlayer.isLooking()) throwPlayerCore();
     return;
   }
 
-  if (selectedItem.kind === "block") {
-    const hit: VoxelRaycastHit | null = getTargetBlockHit();
-    if (!hit) return;
-
-    const target = {
-      x: hit.block.x + hit.normal.x,
-      y: hit.block.y + hit.normal.y,
-      z: hit.block.z + hit.normal.z
-    };
-    if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
-    requireWorld().setBlock(target.x, target.y, target.z, selectedItem.block);
+  if (canDestroyBlockWithHotbarItem(selectedItem)) {
+    destroyTargetBlock();
   }
+}
+
+function useSelectedHotbarSecondaryAction(activePlayer: PlayerController): void {
+  const selectedItem = getSelectedHotbarItem();
+
+  if (canPlaceBlockWithHotbarItem(selectedItem)) {
+    placeSelectedBlock(activePlayer, selectedItem.block);
+  }
+}
+
+function destroyTargetBlock(): void {
+  const hit: VoxelRaycastHit | null = getTargetBlockHit();
+  if (!hit) return;
+
+  requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
+}
+
+function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): void {
+  const hit: VoxelRaycastHit | null = getTargetBlockHit();
+  if (!hit) return;
+
+  const target = {
+    x: hit.block.x + hit.normal.x,
+    y: hit.block.y + hit.normal.y,
+    z: hit.block.z + hit.normal.z
+  };
+  if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
+  requireWorld().setBlock(target.x, target.y, target.z, block);
 }
 
 function animate(): void {

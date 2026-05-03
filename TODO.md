@@ -19,5 +19,5 @@ Official docs to re-check before implementation:
 ## Equipment And Items Iteration
 
 - Promote the current scroll-selected Unarmed/block/Physics Core lane into a real equipment and inventory model.
-- Add explicit tool items so terrain destruction can be owned by Unarmed/tool states instead of being a universal left-click behavior.
+- Add explicit tool items so terrain destruction can be owned by selected blocks/tools instead of being a universal left-click behavior.
 - Decide whether blocks, throwable cores, tools, and future weapons share one hotbar or split into equipment slots plus item inventory.

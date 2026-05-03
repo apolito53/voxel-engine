@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.13 - 2026-05-03
+
+### Changed
+
+- Changed hotbar click behavior so `Unarmed` is intentionally inert on both mouse buttons.
+- Changed selected block behavior to own terrain editing: left click breaks the targeted block and right click places the selected block.
+- Changed selected `Physics Core` behavior so left click throws a core and right click is reserved for future use.
+- Updated HUD, README, and codebase index controls for the corrected item-action mapping.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: loaded `Default World`, confirmed updated HUD control text, verified wheel selection reaches block and `Physics Core` slots, and confirmed selected `Physics Core` left click increased the active physics count from 1 to 2 with no fresh console errors during the focused check.
+
 ## 0.2.12 - 2026-05-02
 
 ### Added
