@@ -22,6 +22,7 @@ import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
+  PHYSICS_CORE_BLOCK_DAMAGE,
   PhysicsToy,
   PhysicsToyCollider,
   createEmptyPhysicsToyCollisionStats
@@ -1368,6 +1369,30 @@ test("block damage tracks health before removing voxels", () => {
   assertEqual(world.getBlockDamage(2, 3, 4), 0, "destroyed blocks should clear transient damage state");
 });
 
+test("physics core impact damage overwhelms ordinary terrain health", () => {
+  const world = new VoxelWorld({ seed: "core-damage-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.rubble);
+
+  assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "physics cores should deal the tuned impact damage");
+  assert(
+    PHYSICS_CORE_BLOCK_DAMAGE > BLOCKS[BLOCK.stone].health,
+    "core impact damage should one-shot ordinary two-health terrain blocks"
+  );
+  assert(
+    PHYSICS_CORE_BLOCK_DAMAGE > BLOCKS[BLOCK.rubble].health,
+    "core impact damage should also one-shot generated rubble terrain blocks"
+  );
+
+  const stoneHit = world.damageBlock(2, 3, 4, PHYSICS_CORE_BLOCK_DAMAGE);
+  const rubbleHit = world.damageBlock(3, 3, 4, PHYSICS_CORE_BLOCK_DAMAGE);
+
+  assert(stoneHit?.destroyed, "a core hit should destroy a normal terrain block in one impact");
+  assert(rubbleHit?.destroyed, "a core hit should destroy a generated rubble block in one impact");
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed stone should leave the voxel grid");
+  assertEqual(world.getBlock(3, 3, 4), BLOCK.air, "destroyed rubble terrain should leave the voxel grid");
+});
+
 test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
   assertEqual(BLOCK_FRAGMENT_GRID_SIZE, 3, "block fracture grid should be three pieces per axis");
   assertEqual(BLOCK_FRAGMENT_COUNT, 27, "block fracture grid should create 27 loose pieces");
@@ -1655,11 +1680,12 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   const collided = rubble.resolveCoreCollision(core);
 
   assert(collided, "moving cores should collide with rubble cover");
-  assert(core.velocity.z < -2.5, "core should bounce away from the rubble proxy with meaningful rebound speed");
   assert(
     rubble.getStats().health < healthBefore,
     "meaningful core impacts should chip destructible rubble"
   );
+  assertEqual(rubble.getStats().clusters, 0, "core impact damage should destroy a small rubble pile outright");
+  assert(core.isExpired, "a core should self-destruct when it destroys the impacted rubble pile");
 });
 
 class TestRubbleWorld implements RubbleFieldWorld {
@@ -1826,6 +1852,35 @@ test("physics impacts report speed so block damage can be thresholded", () => {
     fastImpacts[0].speed > BLOCK_DAMAGE_IMPACT_SPEED,
     "faster impacts should clear the current block damage gate"
   );
+  assertEqual(fastImpacts[0].source, fastToy, "impact payloads should carry the core that caused them");
+});
+
+test("destroying an impacted block can consume the source physics core", () => {
+  const collisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return `${x},${y},${z}` === "2,2,2";
+    }
+  };
+  const world = new VoxelWorld({ seed: "core-expire-test" });
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.7, 2.5, 2.5),
+    new THREE.Vector3(BLOCK_DAMAGE_IMPACT_SPEED + 0.5, 0, 0)
+  );
+  world.setBlock(2, 2, 2, BLOCK.stone);
+
+  const impacts = core.update(0, collisionWorld);
+  const impact = impacts[0];
+  assert(impact, "setup should produce one core impact against the test block");
+  const result = world.damageBlock(
+    impact.block.x,
+    impact.block.y,
+    impact.block.z,
+    PHYSICS_CORE_BLOCK_DAMAGE
+  );
+  if (result?.destroyed) impact.source.expire();
+
+  assert(core.isExpired, "a core should be markable for pruning after it destroys its impact block");
+  assertEqual(core.update(1 / 60, collisionWorld).length, 0, "expired cores should stop reporting impacts");
 });
 
 test("physics toy collider resolves nearby core and debris contacts through broadphase", () => {

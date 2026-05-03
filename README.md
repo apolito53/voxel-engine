@@ -45,7 +45,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled visible cube fragments, settled fragments merge into sloped, walkable, destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, and fracturing destroyed terrain into quality-scaled visible cube fragments that settle into sloped, walkable rubble cover patches; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover

@@ -51,6 +51,7 @@ import { PLAYER_HEIGHT } from "./playerMovement";
 import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
+  PHYSICS_CORE_BLOCK_DAMAGE,
   PhysicsToy,
   PhysicsToyCollider,
   createEmptyPhysicsToyCollisionStats,
@@ -858,13 +859,19 @@ function handlePhysicsImpact(
   impact: PhysicsImpact,
   damagedBlocksThisFrame: Set<string>
 ): void {
+  if (impact.source.isExpired) return;
   if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return;
 
   const damageKey = activeWorld.damageKey(impact.block.x, impact.block.y, impact.block.z);
   if (damagedBlocksThisFrame.has(damageKey)) return;
   damagedBlocksThisFrame.add(damageKey);
 
-  const result = activeWorld.damageBlock(impact.block.x, impact.block.y, impact.block.z, 1);
+  const result = activeWorld.damageBlock(
+    impact.block.x,
+    impact.block.y,
+    impact.block.z,
+    PHYSICS_CORE_BLOCK_DAMAGE
+  );
   if (!result) return;
 
   engineEvents.emit("block:damaged", {
@@ -875,6 +882,11 @@ function handlePhysicsImpact(
   });
 
   if (!result.destroyed) return;
+
+  // The core is now a breaching charge instead of a forever-drilling marble:
+  // one destroyed voxel consumes the projectile and the normal prune path
+  // removes it from scene/collider bookkeeping at the end of the physics pass.
+  impact.source.expire();
 
   engineEvents.emit("block:destroyed", {
     position: result.position,

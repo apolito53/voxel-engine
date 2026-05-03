@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.20 - 2026-05-03
+
+### Changed
+
+- Raised physics core impact damage to `30` for terrain blocks and destructible rubble piles.
+- Physics core impact payloads now keep a reference to the source core so gameplay handlers can consume the projectile after destructive impacts.
+- Physics cores now self-destruct when their impact destroys a terrain voxel or the rubble pile cell they struck.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: selected Physics Core, fired into terrain, confirmed one-shot block destruction/core consumption behavior, and checked for fresh app console errors.
+
 ## 0.2.19 - 2026-05-03
 
 ### Added

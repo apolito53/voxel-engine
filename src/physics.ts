@@ -7,6 +7,7 @@ import { BLOCKS } from "./blocks";
 import type { CollisionWorld } from "./collision";
 
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
+export const PHYSICS_CORE_BLOCK_DAMAGE = 30;
 
 const FRAGMENT_MAX_AGE_SECONDS = 9;
 const FRAGMENT_INVERSE_MASS = 2.5;
@@ -34,6 +35,7 @@ const sharedFragmentGeometry = new THREE.BoxGeometry(
 const sharedFragmentMaterials = new Map<number, THREE.MeshStandardMaterial>();
 
 export type PhysicsImpact = {
+  readonly source: PhysicsToy;
   readonly block: {
     readonly x: number;
     readonly y: number;
@@ -161,6 +163,15 @@ export class PhysicsToy {
     this.settledSeconds = 0;
   }
 
+  expire(): void {
+    // Impact-destroyed cores should leave the world through the normal pruning
+    // path instead of being removed mid-physics-loop while other systems still
+    // hold references for this frame.
+    this.expired = true;
+    this.sleeping = false;
+    this.velocity.set(0, 0, 0);
+  }
+
   update(delta: number, world: CollisionWorld, impacts: PhysicsImpact[] = []): PhysicsImpact[] {
     if (this.expired) return impacts;
 
@@ -206,6 +217,7 @@ export class PhysicsToy {
           if (impact < 0) {
             if (this.damagesBlocks) {
               impacts.push({
+                source: this,
                 block: { x, y, z },
                 normal: normal.clone(),
                 speed: -impact,

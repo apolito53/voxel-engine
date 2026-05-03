@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { BLOCK } from "./blocks";
 import type { CollisionBounds } from "./collision";
-import { BLOCK_DAMAGE_IMPACT_SPEED, getFragmentMaterial, type PhysicsToy } from "./physics";
+import {
+  BLOCK_DAMAGE_IMPACT_SPEED,
+  PHYSICS_CORE_BLOCK_DAMAGE,
+  getFragmentMaterial,
+  type PhysicsToy
+} from "./physics";
 
 const RUBBLE_CELL_SIZE = 1;
 const RUBBLE_MAX_VISUAL_PIECES = 36;
@@ -513,7 +518,13 @@ export class RubbleField {
       core.velocity.addScaledVector(normal, -impact * RUBBLE_CORE_RESTITUTION);
       core.velocity.multiplyScalar(RUBBLE_CORE_DAMPING);
       if (impactSpeed > BLOCK_DAMAGE_IMPACT_SPEED) {
-        this.damageClusterFromPile(cluster, targetPile, Math.max(1, impactSpeed / 5), this.sphereClosestPoint);
+        const destroyedImpactedPile = this.damageClusterFromPile(
+          cluster,
+          targetPile,
+          PHYSICS_CORE_BLOCK_DAMAGE,
+          this.sphereClosestPoint
+        );
+        if (destroyedImpactedPile) core.expire();
       }
     }
 
@@ -525,8 +536,9 @@ export class RubbleField {
     targetPile: RubbleCellPile,
     amount: number,
     origin: THREE.Vector3
-  ): void {
+  ): boolean {
     let remainingDamage = amount;
+    let destroyedTargetPile = false;
     const piles = this.sortClusterPilesForDamage(cluster, targetPile, origin);
 
     for (const pile of piles) {
@@ -537,6 +549,7 @@ export class RubbleField {
       remainingDamage -= damage;
       pile.pieces = Math.ceil(pile.health / RUBBLE_PIECE_HEALTH);
       if (pile.health <= RUBBLE_COLLISION_EPSILON || pile.pieces <= 0) {
+        if (pile === targetPile) destroyedTargetPile = true;
         const key = getRubbleCellCoordinateKey(pile.cell);
         cluster.cells.delete(key);
         if (this.clustersByCell.get(key) === cluster) {
@@ -552,6 +565,7 @@ export class RubbleField {
       this.markClusterDirty(cluster);
     }
     this.refreshStats();
+    return destroyedTargetPile;
   }
 
   private findNearestPileDamageTarget(position: THREE.Vector3, radius: number): RubbleDamageTarget | null {
