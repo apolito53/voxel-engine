@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.19 - 2026-05-03
+
+### Added
+
+- Added partial-height rubble support queries so the player can stand on and step onto settled rubble cover without turning every pile into a full solid voxel.
+- Added sloped rubble patch surfaces that share corner heights across neighboring pile cells and rise subtly toward adjacent solid terrain.
+- Added regression coverage for walkable rubble support height and terrain-directed rubble slope generation.
+
+### Changed
+
+- Routed player collision through a combined collision world: full terrain still comes from `VoxelWorld.isSolid`, while rubble supplies optional partial support height.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: spawned rubble by firing physics cores into terrain, walked onto settled rubble patches, and checked for fresh app console errors.
+
 ## 0.2.18 - 2026-05-03
 
 ### Fixed

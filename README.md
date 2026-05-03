@@ -45,7 +45,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled visible cube fragments, settled fragments merge into destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
+- Physics Core impacts above 2 m/s damage blocks, two damaging hits fracture a block into quality-scaled visible cube fragments, settled fragments merge into sloped, walkable, destructible rubble cover patches that can span neighboring cells, unsupported piles fall/merge, large dense piles compact into a solid `Rubble` block, and moving cores can bump or chip cores/fragments/rubble before settling to sleep
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -67,7 +67,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
-Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so rubble cover, health, and dense-pile promotion do not change with graphics quality.
+Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality.
 
 ## Engine Pieces
 
@@ -79,7 +79,7 @@ Lower visible debris counts are only a rendering/performance compromise. Destroy
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
-- `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, and voxel collision
+- `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, voxel collision, and partial-height rubble support stepping
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin block-target outline rendering
@@ -89,7 +89,7 @@ Lower visible debris counts are only a rendering/performance compromise. Destroy
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments so thousands of shards do not become thousands of scene meshes
-- `src/rubble.ts`: persistent destructible rubble cover patches, multi-cell merge rules, support/fall behavior, and promotion into generated `Rubble` terrain blocks
+- `src/rubble.ts`: persistent sloped destructible rubble cover patches, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading

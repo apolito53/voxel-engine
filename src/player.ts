@@ -35,6 +35,8 @@ import {
 
 type MovementAxis = "x" | "y" | "z";
 export type PlayerMovementMode = "walk" | "crouch" | "slide" | "flight";
+const PARTIAL_SURFACE_STEP_HEIGHT = 0.55;
+const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
 
 export type PlayerBounds = {
   readonly minX: number;
@@ -613,9 +615,14 @@ export class PlayerController {
 
   moveAxis(axis: MovementAxis, amount: number): void {
     if (amount === 0) return;
+    const previousFeetY = this.getFeetY();
     this.camera.position[axis] += amount;
 
-    if (!this.collides()) return;
+    if (!this.collides()) {
+      if (axis === "y" && amount < 0 && this.snapDownToPartialSupport(previousFeetY)) return;
+      if (axis !== "y") this.stepUpOntoPartialSupport(previousFeetY);
+      return;
+    }
 
     this.camera.position[axis] -= amount;
     if (axis === "y" && amount < 0) this.onGround = true;
@@ -678,6 +685,46 @@ export class PlayerController {
       }
     }
     return false;
+  }
+
+  private snapDownToPartialSupport(previousFeetY: number): boolean {
+    const supportY = this.world.getSupportHeight?.(this.getBounds());
+    if (supportY === undefined || supportY === null) return false;
+
+    const feetY = this.getFeetY();
+    if (supportY > previousFeetY + PARTIAL_SURFACE_SNAP_EPSILON) return false;
+    if (feetY > supportY + PARTIAL_SURFACE_SNAP_EPSILON) return false;
+
+    this.camera.position.y += supportY - feetY;
+    this.onGround = true;
+    this.velocity.y = 0;
+    return true;
+  }
+
+  private stepUpOntoPartialSupport(previousFeetY: number): boolean {
+    const supportY = this.world.getSupportHeight?.(this.getBounds());
+    if (supportY === undefined || supportY === null) return false;
+
+    const feetY = this.getFeetY();
+    const stepHeight = supportY - feetY;
+    if (stepHeight <= PARTIAL_SURFACE_SNAP_EPSILON) return false;
+    if (stepHeight > PARTIAL_SURFACE_STEP_HEIGHT) return false;
+    if (previousFeetY + PARTIAL_SURFACE_STEP_HEIGHT < supportY) return false;
+
+    // Rubble and other partial-height surfaces are not full voxels, so they
+    // need a small step-up path separate from ordinary block collision. After
+    // lifting the camera, re-run full voxel collision so a low ceiling or block
+    // overhang can still reject the move cleanly.
+    const previousCameraY = this.camera.position.y;
+    this.camera.position.y += stepHeight;
+    if (this.collides()) {
+      this.camera.position.y = previousCameraY;
+      return false;
+    }
+
+    this.onGround = true;
+    if (this.velocity.y < 0) this.velocity.y = 0;
+    return true;
   }
 }
 

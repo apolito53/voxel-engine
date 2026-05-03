@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BLOCK } from "./blocks";
+import type { CollisionBounds } from "./collision";
 import { BLOCK_DAMAGE_IMPACT_SPEED, getFragmentMaterial, type PhysicsToy } from "./physics";
 
 const RUBBLE_CELL_SIZE = 1;
@@ -15,6 +16,7 @@ const RUBBLE_MIN_HEIGHT = 0.08;
 const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.055;
 const RUBBLE_HEIGHT_VARIATION = 0.035;
 const RUBBLE_MAX_HEIGHT = 0.5;
+const RUBBLE_SOLID_NEIGHBOR_CORNER_RISE = 0.16;
 // Rubble should behave like rough cover, but cores are still supposed to read
 // as bouncy projectiles. Keep the rebound near terrain-block bounce strength
 // so piles feel physical without turning the launcher into a glue gun.
@@ -99,6 +101,7 @@ export class RubbleField {
   private readonly pileClosestPoint = new THREE.Vector3();
   private readonly fallbackNormal = new THREE.Vector3(0, 1, 0);
   private readonly rayInverseDirection = new THREE.Vector3();
+  private surfaceWorld: RubbleFieldWorld | null = null;
   private stats: RubbleFieldStats = EMPTY_RUBBLE_STATS;
   private nextClusterId = 1;
 
@@ -136,6 +139,7 @@ export class RubbleField {
   }
 
   settle(world: RubbleFieldWorld): void {
+    this.surfaceWorld = world;
     this.flushDirtyClusterMeshes();
     const clusters = Array.from(this.clustersById.values()).sort(compareClustersForFalling);
     let changed = false;
@@ -172,6 +176,35 @@ export class RubbleField {
     }
 
     if (changed) this.refreshStats();
+  }
+
+  getSupportHeight(bounds: CollisionBounds): number | null {
+    this.flushDirtyClusterMeshes();
+    const minX = Math.floor(bounds.minX);
+    const maxX = Math.floor(bounds.maxX - RUBBLE_COLLISION_EPSILON);
+    const minY = Math.floor(bounds.minY - RUBBLE_MAX_HEIGHT - RUBBLE_COLLISION_EPSILON);
+    const maxY = Math.floor(bounds.maxY);
+    const minZ = Math.floor(bounds.minZ);
+    const maxZ = Math.floor(bounds.maxZ - RUBBLE_COLLISION_EPSILON);
+    let supportY: number | null = null;
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const cluster = this.clustersByCell.get(getRubbleCellCoordinateKey({ x, y, z }));
+          const pile = cluster?.cells.get(getRubbleCellCoordinateKey({ x, y, z }));
+          if (!cluster || !pile || !boundsOverlapPileHorizontally(bounds, pile)) continue;
+
+          const pileSupportY = getPileSupportHeight(cluster, pile, bounds, this.surfaceWorld);
+          if (pileSupportY === null || pileSupportY > bounds.maxY + RUBBLE_COLLISION_EPSILON) {
+            continue;
+          }
+          supportY = supportY === null ? pileSupportY : Math.max(supportY, pileSupportY);
+        }
+      }
+    }
+
+    return supportY;
   }
 
   resolveCoreCollision(core: PhysicsToy): boolean {
@@ -243,6 +276,7 @@ export class RubbleField {
     for (const cluster of Array.from(this.clustersById.values())) {
       this.removeCluster(cluster);
     }
+    this.surfaceWorld = null;
     this.stats = EMPTY_RUBBLE_STATS;
   }
 
@@ -335,25 +369,52 @@ export class RubbleField {
     // faces are skipped, so adjacent piles read as connected rubble instead of
     // separate stacked tiles.
     for (const pile of cluster.cells.values()) {
-      const height = getRubblePileVisualHeight(pile);
       const minX = pile.cell.x * RUBBLE_CELL_SIZE;
       const maxX = minX + RUBBLE_CELL_SIZE;
       const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
-      const topY = baseY + height;
       const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
       const maxZ = minZ + RUBBLE_CELL_SIZE;
+      const northWestY = getRubbleSurfaceCornerY(
+        cluster,
+        pile.cell.x,
+        pile.cell.y,
+        pile.cell.z,
+        this.surfaceWorld
+      );
+      const southWestY = getRubbleSurfaceCornerY(
+        cluster,
+        pile.cell.x,
+        pile.cell.y,
+        pile.cell.z + 1,
+        this.surfaceWorld
+      );
+      const southEastY = getRubbleSurfaceCornerY(
+        cluster,
+        pile.cell.x + 1,
+        pile.cell.y,
+        pile.cell.z + 1,
+        this.surfaceWorld
+      );
+      const northEastY = getRubbleSurfaceCornerY(
+        cluster,
+        pile.cell.x + 1,
+        pile.cell.y,
+        pile.cell.z,
+        this.surfaceWorld
+      );
+      const maxTopY = Math.max(northWestY, southWestY, southEastY, northEastY);
 
       bounds.expandByPoint(new THREE.Vector3(minX, baseY, minZ));
-      bounds.expandByPoint(new THREE.Vector3(maxX, topY, maxZ));
+      bounds.expandByPoint(new THREE.Vector3(maxX, maxTopY, maxZ));
 
       addQuad(
         positions,
         normals,
         indices,
-        [minX, topY, minZ],
-        [minX, topY, maxZ],
-        [maxX, topY, maxZ],
-        [maxX, topY, minZ],
+        [minX, northWestY, minZ],
+        [minX, southWestY, maxZ],
+        [maxX, southEastY, maxZ],
+        [maxX, northEastY, minZ],
         [0, 1, 0]
       );
       addQuad(
@@ -373,8 +434,8 @@ export class RubbleField {
           normals,
           indices,
           [minX, baseY, minZ],
-          [minX, topY, minZ],
-          [maxX, topY, minZ],
+          [minX, northWestY, minZ],
+          [maxX, northEastY, minZ],
           [maxX, baseY, minZ],
           [0, 0, -1]
         );
@@ -386,8 +447,8 @@ export class RubbleField {
           indices,
           [minX, baseY, maxZ],
           [maxX, baseY, maxZ],
-          [maxX, topY, maxZ],
-          [minX, topY, maxZ],
+          [maxX, southEastY, maxZ],
+          [minX, southWestY, maxZ],
           [0, 0, 1]
         );
       }
@@ -398,8 +459,8 @@ export class RubbleField {
           indices,
           [minX, baseY, minZ],
           [minX, baseY, maxZ],
-          [minX, topY, maxZ],
-          [minX, topY, minZ],
+          [minX, southWestY, maxZ],
+          [minX, northWestY, minZ],
           [-1, 0, 0]
         );
       }
@@ -409,8 +470,8 @@ export class RubbleField {
           normals,
           indices,
           [maxX, baseY, minZ],
-          [maxX, topY, minZ],
-          [maxX, topY, maxZ],
+          [maxX, northEastY, minZ],
+          [maxX, southEastY, maxZ],
           [maxX, baseY, maxZ],
           [1, 0, 0]
         );
@@ -749,6 +810,130 @@ function normalizeRubblePieceCount(pieces: number): number {
   return Math.max(1, Math.round(pieces));
 }
 
+function boundsOverlapPileHorizontally(bounds: CollisionBounds, pile: RubbleCellPile): boolean {
+  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const maxX = minX + RUBBLE_CELL_SIZE;
+  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
+  const maxZ = minZ + RUBBLE_CELL_SIZE;
+
+  return (
+    bounds.minX < maxX &&
+    bounds.maxX > minX &&
+    bounds.minZ < maxZ &&
+    bounds.maxZ > minZ
+  );
+}
+
+function getPileSupportHeight(
+  cluster: RubbleCluster,
+  pile: RubbleCellPile,
+  bounds: CollisionBounds,
+  world: RubbleFieldWorld | null
+): number | null {
+  const minX = pile.cell.x * RUBBLE_CELL_SIZE;
+  const maxX = minX + RUBBLE_CELL_SIZE;
+  const minZ = pile.cell.z * RUBBLE_CELL_SIZE;
+  const maxZ = minZ + RUBBLE_CELL_SIZE;
+  const overlapMinX = Math.max(bounds.minX, minX);
+  const overlapMaxX = Math.min(bounds.maxX, maxX);
+  const overlapMinZ = Math.max(bounds.minZ, minZ);
+  const overlapMaxZ = Math.min(bounds.maxZ, maxZ);
+  if (overlapMinX >= overlapMaxX || overlapMinZ >= overlapMaxZ) return null;
+
+  // Sample the overlapped footprint, not just the pile center. A player hull can
+  // stand with only part of its capsule over a sloped pile, so support should use
+  // the highest local surface under the feet.
+  const sampleCenterX = (overlapMinX + overlapMaxX) * 0.5;
+  const sampleCenterZ = (overlapMinZ + overlapMaxZ) * 0.5;
+  return Math.max(
+    getRubblePileSurfaceYAt(cluster, pile, sampleCenterX, sampleCenterZ, world),
+    getRubblePileSurfaceYAt(cluster, pile, overlapMinX, overlapMinZ, world),
+    getRubblePileSurfaceYAt(cluster, pile, overlapMinX, overlapMaxZ, world),
+    getRubblePileSurfaceYAt(cluster, pile, overlapMaxX, overlapMinZ, world),
+    getRubblePileSurfaceYAt(cluster, pile, overlapMaxX, overlapMaxZ, world)
+  );
+}
+
+function getRubblePileSurfaceYAt(
+  cluster: RubbleCluster,
+  pile: RubbleCellPile,
+  x: number,
+  z: number,
+  world: RubbleFieldWorld | null
+): number {
+  const u = clamp((x - pile.cell.x * RUBBLE_CELL_SIZE) / RUBBLE_CELL_SIZE, 0, 1);
+  const v = clamp((z - pile.cell.z * RUBBLE_CELL_SIZE) / RUBBLE_CELL_SIZE, 0, 1);
+  const northWestY = getRubbleSurfaceCornerY(
+    cluster,
+    pile.cell.x,
+    pile.cell.y,
+    pile.cell.z,
+    world
+  );
+  const southWestY = getRubbleSurfaceCornerY(
+    cluster,
+    pile.cell.x,
+    pile.cell.y,
+    pile.cell.z + 1,
+    world
+  );
+  const southEastY = getRubbleSurfaceCornerY(
+    cluster,
+    pile.cell.x + 1,
+    pile.cell.y,
+    pile.cell.z + 1,
+    world
+  );
+  const northEastY = getRubbleSurfaceCornerY(
+    cluster,
+    pile.cell.x + 1,
+    pile.cell.y,
+    pile.cell.z,
+    world
+  );
+  const northY = lerp(northWestY, northEastY, u);
+  const southY = lerp(southWestY, southEastY, u);
+  return lerp(northY, southY, v);
+}
+
+function getRubbleSurfaceCornerY(
+  cluster: RubbleCluster,
+  cornerX: number,
+  cellY: number,
+  cornerZ: number,
+  world: RubbleFieldWorld | null
+): number {
+  let height = RUBBLE_MIN_HEIGHT;
+  let nearbySolidBlocks = 0;
+
+  // The four cells touching a grid corner should agree on that corner's height.
+  // That gives neighboring piles shared edges instead of little mismatched lids.
+  for (let dz = -1; dz <= 0; dz += 1) {
+    for (let dx = -1; dx <= 0; dx += 1) {
+      const cell = { x: cornerX + dx, y: cellY, z: cornerZ + dz };
+      const key = getRubbleCellCoordinateKey(cell);
+      const pile = cluster.cells.get(key);
+      if (pile) {
+        height = Math.max(height, getRubblePileVisualHeight(pile));
+        continue;
+      }
+
+      if (world?.isSolid(cell.x, cell.y, cell.z)) {
+        nearbySolidBlocks += 1;
+      }
+    }
+  }
+
+  const neighborRise = Math.min(
+    RUBBLE_SOLID_NEIGHBOR_CORNER_RISE,
+    nearbySolidBlocks * RUBBLE_SOLID_NEIGHBOR_CORNER_RISE * 0.45
+  );
+  return (
+    cellY * RUBBLE_CELL_SIZE +
+    clamp(height + neighborRise, RUBBLE_MIN_HEIGHT, RUBBLE_MAX_HEIGHT)
+  );
+}
+
 function getRubbleCellCoordinateKey(cell: RubbleCell): string {
   return `${cell.x},${cell.y},${cell.z}`;
 }
@@ -805,6 +990,10 @@ function addQuad(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
 }
 
 function getPointPileDistanceSq(point: THREE.Vector3, pile: RubbleCellPile): number {

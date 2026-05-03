@@ -1688,6 +1688,53 @@ class TestRubbleWorld implements RubbleFieldWorld {
   }
 }
 
+test("rubble support height produces walkable slopes toward nearby terrain", () => {
+  const scene = new THREE.Scene();
+  const world = new TestRubbleWorld();
+  const rubble = new RubbleField(scene);
+  world.setBlock(0, 0, 0, BLOCK.stone);
+  world.setBlock(1, 1, 0, BLOCK.stone);
+
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 6);
+  rubble.settle(world);
+
+  const westSupportY = rubble.getSupportHeight({
+    minX: 0.05,
+    maxX: 0.15,
+    minY: 1,
+    maxY: 2.8,
+    minZ: 0.45,
+    maxZ: 0.55
+  });
+  const eastSupportY = rubble.getSupportHeight({
+    minX: 0.85,
+    maxX: 0.95,
+    minY: 1,
+    maxY: 2.8,
+    minZ: 0.45,
+    maxZ: 0.55
+  });
+  const playerFootprintSupportY = rubble.getSupportHeight({
+    minX: 0.2,
+    maxX: 0.8,
+    minY: 1,
+    maxY: 2.8,
+    minZ: 0.2,
+    maxZ: 0.8
+  });
+
+  assert(westSupportY !== null, "rubble should expose support on the low side of a pile");
+  assert(eastSupportY !== null, "rubble should expose support on the side facing nearby terrain");
+  assert(
+    eastSupportY > westSupportY + 0.02,
+    "rubble support should slope upward toward a neighboring solid block instead of staying flat"
+  );
+  assert(
+    playerFootprintSupportY !== null && playerFootprintSupportY > 1 && playerFootprintSupportY < 1.6,
+    "a player-sized footprint should be able to stand on partial-height rubble cover"
+  );
+});
+
 test("unsupported rubble piles fall and merge with piles below", () => {
   const scene = new THREE.Scene();
   const world = new TestRubbleWorld();

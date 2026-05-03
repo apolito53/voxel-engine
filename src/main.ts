@@ -13,6 +13,7 @@ import {
   type SavedWorld,
   type WorldRegistry
 } from "./chunkStorage";
+import type { CollisionWorld } from "./collision";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
@@ -245,6 +246,13 @@ const damagedBlockKeysThisFrame = new Set<string>();
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
+const playerCollisionWorld: CollisionWorld = {
+  // The player still collides against full terrain blocks through VoxelWorld.
+  // Partial-height cover such as rubble is layered in as an optional support
+  // height so it can be walked on without promoting every pile to a solid voxel.
+  isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
+  getSupportHeight: (bounds) => rubbleField.getSupportHeight(bounds)
+};
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
 const novaPilotReactions = new NovaPilotReactions({
@@ -341,7 +349,7 @@ async function startApp(): Promise<void> {
     await world.loadSavedChunkIndex();
 
     camera.position.set(2, 24, 2);
-    player = new PlayerController(camera, renderer.domElement, world);
+    player = new PlayerController(camera, renderer.domElement, playerCollisionWorld);
     wireMenuControls();
     worldSeedInput.value = createReadableSeed();
     await refreshHomeWorldList();
