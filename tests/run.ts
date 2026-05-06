@@ -27,7 +27,9 @@ import {
   PHYSICS_CORE_BLOCK_DAMAGE,
   PhysicsToy,
   PhysicsToyCollider,
-  createEmptyPhysicsToyCollisionStats
+  createEmptyPhysicsToyCollisionStats,
+  hasMeaningfulTerrainImpactSince,
+  type PhysicsImpact
 } from "../src/physics";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
 import { RUBBLE_BLOCK_PROMOTION_PIECES, RubbleField, type RubbleFieldWorld } from "../src/rubble";
@@ -2192,6 +2194,62 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   );
   assertEqual(rubble.getStats().clusters, 0, "core impact damage should destroy a small rubble pile outright");
   assert(core.isExpired, "a core should self-destruct when it destroys the impacted rubble pile");
+});
+
+test("terrain impacts claim a core before adjacent rubble can take same-frame damage", () => {
+  const scene = new THREE.Scene();
+  const world = new VoxelWorld({ seed: "terrain-rubble-impact-priority-test" });
+  const rubble = new RubbleField(scene);
+  const impacts: PhysicsImpact[] = [];
+  const targetY = 34;
+
+  world.setBlock(0, targetY, 0, BLOCK.stone);
+  world.setBlock(1, targetY - 1, 0, BLOCK.stone);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.12, targetY + 0.16, 0.5), 6);
+  rubble.settle(world);
+
+  const rubbleHealthBefore = rubble.getStats().health;
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.2, targetY + 0.2, 0.5),
+    new THREE.Vector3(-6, 0, 0)
+  );
+  const terrainAndRubbleCollisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return world.isSolid(x, y, z);
+    },
+    getSupportHeight(bounds: CollisionBounds): number | null {
+      return rubble.getSupportHeight(bounds);
+    }
+  };
+
+  const terrainImpactStartIndex = impacts.length;
+  core.update(1 / 60, terrainAndRubbleCollisionWorld, impacts);
+
+  assert(
+    hasMeaningfulTerrainImpactSince(impacts, core, terrainImpactStartIndex),
+    "the terrain hit should be detected before rubble collision is considered"
+  );
+  if (!hasMeaningfulTerrainImpactSince(impacts, core, terrainImpactStartIndex)) {
+    rubble.resolveCoreCollision(core);
+  }
+
+  for (const impact of impacts) {
+    const result = world.damageBlock(
+      impact.block.x,
+      impact.block.y,
+      impact.block.z,
+      PHYSICS_CORE_BLOCK_DAMAGE
+    );
+    if (result?.destroyed) core.expire();
+  }
+
+  assert(core.isExpired, "the terrain destruction should consume the core");
+  assertEqual(world.getBlock(0, targetY, 0), BLOCK.air, "the directly impacted terrain block should be destroyed");
+  assertEqual(
+    rubble.getStats().health,
+    rubbleHealthBefore,
+    "adjacent rubble should survive when the core already spent its hit on terrain"
+  );
 });
 
 class TestRubbleWorld implements RubbleFieldWorld {

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.5 - 2026-05-06
+
+### Fixed
+
+- Prevented physics cores from damaging adjacent rubble in the same frame that they register a meaningful terrain impact, so destroying a terrain block beside a pile no longer consumes the nearby rubble pile as collateral damage.
+- Added a regression test for the terrain-plus-rubble overlap case: the impacted terrain block is destroyed, the core is consumed, and the neighboring rubble health remains unchanged.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.4 - 2026-05-05
 
 ### Fixed

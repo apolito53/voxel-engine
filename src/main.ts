@@ -62,6 +62,7 @@ import {
   PhysicsToy,
   PhysicsToyCollider,
   createEmptyPhysicsToyCollisionStats,
+  hasMeaningfulTerrainImpactSince,
   type PhysicsImpact,
   type PhysicsToyCollisionStats
 } from "./physics";
@@ -712,8 +713,11 @@ function animate(): void {
     for (let index = 0; index < physicsToyCountAtFrameStart; index += 1) {
       const toy = toys[index];
       if (!toy) continue;
+      const terrainImpactStartIndex = physicsImpacts.length;
       toy.update(delta, terrainAndRubbleCollisionWorld, physicsImpacts);
-      rubbleField.resolveCoreCollision(toy);
+      if (!hasMeaningfulTerrainImpactSince(physicsImpacts, toy, terrainImpactStartIndex)) {
+        rubbleField.resolveCoreCollision(toy);
+      }
     }
     debrisSettlerStats = debrisSettler.update(delta, rubbleField);
     emitRubbleBatchEvents();
