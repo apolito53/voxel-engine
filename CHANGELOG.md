@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0 - 2026-05-06
+
+### Added
+
+- Added a quality-scaled active debris bubble: Potato keeps loose debris alive near the player within 8m, Low 12m, Normal 20m, High 32m, Ultra 48m, and Super Ultra 72m.
+- Added hybrid rubble visuals. Finalized rubble still uses the cheap walkable/support heightfield, but it now bakes capped static cube chunks from settled debris poses into the same rubble mesh for a chunkier pile silhouette and future re-break data.
+- Added debug HUD readouts for active settling fragments, active debris radius, and baked rubble visual chunk counts.
+
+### Changed
+
+- Replaced time-only debris finalization in the browser loop with one-way active-bubble finalization. Nearby sleeping fragments can remain visible and shoveable instead of hard-finalizing after the old 1.2s cap.
+- Reworked physics-budget pressure relief to preserve material: farthest settling regions finalize into rubble first, far/outside orphan fragments absorb into rubble next, and old physics cores are pruned only as a last resort.
+- Removed normal timer expiry from block fragments. Distance, budget pressure, or explicit cleanup now decide when debris becomes rubble.
+- Reduced the same-region debris contact window to 0.35s while preserving glue links afterward, keeping the short clumping theater without reopening permanent debris-debris broadphase work.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/`: destroy nearby blocks, move/fly away to finalize debris, spam cores, verify `X` removes cores only, verify `Despawn All Objects` clears debris/rubble, and check console.
+
 ## 0.3.8 - 2026-05-06
 
 ### Changed

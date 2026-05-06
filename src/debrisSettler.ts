@@ -1,16 +1,17 @@
 import * as THREE from "three";
 import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
 import type { PhysicsToy } from "./physics";
-import { RubbleField, type RubbleAbsorptionSample } from "./rubble";
+import { RubbleField, type RubbleAbsorptionSample, type RubbleVisualChunkSample } from "./rubble";
 
 export const DEBRIS_REGION_HORIZONTAL_MERGE_RADIUS = 2.5;
 export const DEBRIS_REGION_VERTICAL_MERGE_RADIUS = 1.5;
-export const DEBRIS_REGION_COLLISION_SECONDS = 0.55;
+export const DEBRIS_REGION_COLLISION_SECONDS = 0.35;
 export const DEBRIS_REGION_FINALIZE_SECONDS = 0.6;
 export const DEBRIS_REGION_SETTLED_FINALIZE_SECONDS = 0.15;
 export const DEBRIS_REGION_MAX_SECONDS = 1.2;
 export const DEBRIS_REGION_PAIR_BUDGET = 768;
 export const DEBRIS_REGION_GLUE_BREAKUP_SECONDS = 0.14;
+export const DEBRIS_ACTIVE_RADIUS_BUFFER_METERS = 2;
 
 const DEBRIS_REGION_QUIET_SPEED = 0.65;
 const DEBRIS_REGION_QUIET_ANGULAR_SPEED = 1.25;
@@ -56,6 +57,7 @@ type SettlingRegion = {
 export type DebrisSettlerStats = {
   readonly regions: number;
   readonly fragments: number;
+  readonly activeFragments: number;
   readonly pairChecks: number;
   readonly resolvedPairs: number;
   readonly finalizedBatches: number;
@@ -74,6 +76,12 @@ export type DebrisSettledBatch = {
   readonly pieces: number;
 };
 
+export type DebrisSettlerUpdateOptions = {
+  readonly activeCenter?: THREE.Vector3;
+  readonly activeRadius?: number;
+  readonly activeRadiusBuffer?: number;
+};
+
 type MutableDebrisSettlerStats = {
   -readonly [Key in keyof DebrisSettlerStats]: DebrisSettlerStats[Key];
 };
@@ -82,6 +90,7 @@ export function createEmptyDebrisSettlerStats(): DebrisSettlerStats {
   return {
     regions: 0,
     fragments: 0,
+    activeFragments: 0,
     pairChecks: 0,
     resolvedPairs: 0,
     finalizedBatches: 0,
@@ -123,7 +132,11 @@ export class DebrisSettler {
     this.refreshLiveStats();
   }
 
-  update(delta: number, rubbleField: RubbleField): DebrisSettlerStats {
+  update(
+    delta: number,
+    rubbleField: RubbleField,
+    options: DebrisSettlerUpdateOptions = {}
+  ): DebrisSettlerStats {
     this.elapsedSeconds += Math.max(0, delta);
     this.resetFrameStats();
 
@@ -134,7 +147,7 @@ export class DebrisSettler {
     this.enforcePairBudget(rubbleField);
     this.resolveActiveRegionCollisions(Math.max(0, delta));
     this.enforceExistingGlueLinks();
-    this.finalizeDueRegions(rubbleField);
+    this.finalizeDueRegions(rubbleField, options);
     this.refreshLiveStats();
     return { ...this.stats };
   }
@@ -143,8 +156,40 @@ export class DebrisSettler {
     return this.fragmentRegionIds.has(toy);
   }
 
+  getStats(): DebrisSettlerStats {
+    this.refreshLiveStats();
+    return { ...this.stats };
+  }
+
   getFinalizedBatches(): readonly DebrisSettledBatch[] {
     return this.finalizedBatches;
+  }
+
+  finalizeRegionsForPressure(
+    rubbleField: RubbleField,
+    activeCenter: THREE.Vector3,
+    targetBodyReduction: number
+  ): number {
+    if (targetBodyReduction <= 0) return 0;
+
+    let finalizedFragments = 0;
+    const farthestRegions = [...this.regionsById.values()]
+      .sort((left, right) => (
+        this.getRegionDistanceSqToPoint(right, activeCenter) -
+        this.getRegionDistanceSqToPoint(left, activeCenter)
+      ));
+
+    for (const region of farthestRegions) {
+      if (!this.regionsById.has(region.id)) continue;
+
+      const fragmentCount = region.fragments.size;
+      this.finalizeRegion(region, rubbleField, true);
+      finalizedFragments += fragmentCount;
+      if (finalizedFragments >= targetBodyReduction) break;
+    }
+
+    this.refreshLiveStats();
+    return finalizedFragments;
   }
 
   forget(toy: PhysicsToy): void {
@@ -165,6 +210,7 @@ export class DebrisSettler {
   clear(): void {
     this.regionsById.clear();
     this.fragmentRegionIds.clear();
+    this.finalizedBatches.length = 0;
     this.resetFrameStats();
   }
 
@@ -286,10 +332,21 @@ export class DebrisSettler {
     return target;
   }
 
-  private finalizeDueRegions(rubbleField: RubbleField): void {
+  private finalizeDueRegions(rubbleField: RubbleField, options: DebrisSettlerUpdateOptions): void {
     for (const region of this.getRegionsOldestFirst()) {
       if (!this.regionsById.has(region.id)) continue;
       this.updateRegionFinalizationDeadline(region);
+
+      // With an active player bubble configured, distance replaces the old
+      // "hard max lifetime" as the normal conversion signal. A nearby sleeping
+      // heap can keep being shoved by cores instead of secretly becoming a
+      // baked pile while the player is studying it.
+      if (this.isActiveBubbleConfigured(options)) {
+        if (this.isRegionInsideActiveBubble(region, options)) continue;
+
+        this.finalizeRegion(region, rubbleField, false);
+        continue;
+      }
 
       const reachedHardCap = this.elapsedSeconds >= region.maxFinalizeAt;
       const reachedSettledDeadline = region.settledAt !== null && this.elapsedSeconds >= region.finalizeAt;
@@ -300,7 +357,7 @@ export class DebrisSettler {
   }
 
   private updateRegionFinalizationDeadline(region: SettlingRegion): void {
-    const liveFragments = [...region.fragments].filter((fragment) => !fragment.isExpired);
+    const liveFragments = this.getUnexpiredFragments(region);
     const regionIsQuiet = this.isRegionQuietForFinalization(region, liveFragments);
     if (!regionIsQuiet) {
       region.settledAt = null;
@@ -361,7 +418,7 @@ export class DebrisSettler {
     for (const region of this.regionsById.values()) {
       if (!this.isCollisionActive(region)) continue;
 
-      const fragments = this.getLiveFragments(region);
+      const fragments = this.getAwakeFragments(region);
       this.applyRegionCohesion(region, fragments, delta);
       this.enforceGlueLinks(region);
       for (let leftIndex = 0; leftIndex < fragments.length - 1; leftIndex += 1) {
@@ -659,11 +716,20 @@ export class DebrisSettler {
         samples.push({
           block,
           position: this.getSamplePosition(fragment, unitIndex, materialUnits),
-          pieces: 1
+          pieces: 1,
+          visualChunk: unitIndex === 0 ? this.createVisualChunkSample(fragment) : undefined
         });
       }
     }
     return samples;
+  }
+
+  private createVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkSample {
+    return {
+      position: fragment.mesh.position.clone(),
+      quaternion: fragment.mesh.quaternion.clone(),
+      size: BLOCK_FRAGMENT_VISUAL_SIZE
+    };
   }
 
   private getSamplePosition(fragment: PhysicsToy, unitIndex: number, materialUnits: number): THREE.Vector3 {
@@ -700,21 +766,57 @@ export class DebrisSettler {
   }
 
   private isCollisionActive(region: SettlingRegion): boolean {
-    return this.elapsedSeconds <= region.collisionUntil && this.getLiveFragments(region).length > 1;
+    return this.elapsedSeconds <= region.collisionUntil && this.getAwakeFragments(region).length > 1;
   }
 
   private estimateActiveCollisionPairs(): number {
     let pairs = 0;
     for (const region of this.regionsById.values()) {
       if (!this.isCollisionActive(region)) continue;
-      const fragmentCount = this.getLiveFragments(region).length;
+      const fragmentCount = this.getAwakeFragments(region).length;
       pairs += (fragmentCount * (fragmentCount - 1)) / 2;
     }
     return pairs;
   }
 
-  private getLiveFragments(region: SettlingRegion): PhysicsToy[] {
+  private getAwakeFragments(region: SettlingRegion): PhysicsToy[] {
     return [...region.fragments].filter((fragment) => !fragment.isExpired && !fragment.isSleeping);
+  }
+
+  private getUnexpiredFragments(region: SettlingRegion): PhysicsToy[] {
+    return [...region.fragments].filter((fragment) => !fragment.isExpired);
+  }
+
+  private isActiveBubbleConfigured(options: DebrisSettlerUpdateOptions): boolean {
+    return (
+      options.activeCenter !== undefined &&
+      options.activeRadius !== undefined &&
+      Number.isFinite(options.activeRadius)
+    );
+  }
+
+  private isRegionInsideActiveBubble(
+    region: SettlingRegion,
+    options: DebrisSettlerUpdateOptions
+  ): boolean {
+    if (!options.activeCenter || options.activeRadius === undefined) return false;
+
+    const radius = Math.max(0, options.activeRadius) +
+      (options.activeRadiusBuffer ?? DEBRIS_ACTIVE_RADIUS_BUFFER_METERS);
+    return this.getRegionDistanceSqToPoint(region, options.activeCenter) <= radius * radius;
+  }
+
+  private getRegionDistanceSqToPoint(region: SettlingRegion, point: THREE.Vector3): number {
+    let distanceSq = region.center.distanceToSquared(point);
+
+    // Keep a broad crater alive if any owned shard is still near the player.
+    // Region centers are fracture averages, so using only the center can bake a
+    // pile even though the player is standing beside one of its edge chunks.
+    for (const fragment of region.fragments) {
+      if (fragment.isExpired) continue;
+      distanceSq = Math.min(distanceSq, fragment.mesh.position.distanceToSquared(point));
+    }
+    return distanceSq;
   }
 
   private getRegionsOldestFirst(): SettlingRegion[] {
@@ -725,6 +827,7 @@ export class DebrisSettler {
     this.finalizedBatches.length = 0;
     this.stats.regions = 0;
     this.stats.fragments = 0;
+    this.stats.activeFragments = 0;
     this.stats.pairChecks = 0;
     this.stats.resolvedPairs = 0;
     this.stats.finalizedBatches = 0;
@@ -736,9 +839,12 @@ export class DebrisSettler {
   private refreshLiveStats(): void {
     this.stats.regions = this.regionsById.size;
     let fragments = 0;
+    let activeFragments = 0;
     for (const region of this.regionsById.values()) {
       fragments += region.fragments.size;
+      activeFragments += this.getAwakeFragments(region).length;
     }
     this.stats.fragments = fragments;
+    this.stats.activeFragments = activeFragments;
   }
 }

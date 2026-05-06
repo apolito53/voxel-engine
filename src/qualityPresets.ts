@@ -31,6 +31,7 @@ export type QualityPreset = {
   readonly chunkRebuilds: number;
   readonly physicsObjectBudget: number;
   readonly blockFragmentCount: number;
+  readonly debrisActiveRadiusMeters: number;
   readonly minimapInterval: number;
   readonly minimapRowsPerFrame: number;
   readonly sunIntensity: number;
@@ -61,6 +62,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 1,
     physicsObjectBudget: 64,
     blockFragmentCount: 2,
+    debrisActiveRadiusMeters: 8,
     minimapInterval: 0.45,
     minimapRowsPerFrame: 3,
     sunIntensity: 2.8,
@@ -86,6 +88,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 2,
     physicsObjectBudget: 128,
     blockFragmentCount: 4,
+    debrisActiveRadiusMeters: 12,
     minimapInterval: 0.35,
     minimapRowsPerFrame: 4,
     sunIntensity: 3.2,
@@ -111,6 +114,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 4,
     physicsObjectBudget: 192,
     blockFragmentCount: 7,
+    debrisActiveRadiusMeters: 20,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
     sunIntensity: 3.45,
@@ -136,6 +140,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 4,
     physicsObjectBudget: 192,
     blockFragmentCount: 7,
+    debrisActiveRadiusMeters: 20,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
     sunIntensity: 3.45,
@@ -161,6 +166,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 6,
     physicsObjectBudget: 512,
     blockFragmentCount: 14,
+    debrisActiveRadiusMeters: 32,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 10,
     sunIntensity: 3.55,
@@ -186,6 +192,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 8,
     physicsObjectBudget: 1024,
     blockFragmentCount: 27,
+    debrisActiveRadiusMeters: 48,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 12,
     sunIntensity: 3.65,
@@ -211,6 +218,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     chunkRebuilds: 10,
     physicsObjectBudget: 4096,
     blockFragmentCount: 27,
+    debrisActiveRadiusMeters: 72,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,
     sunIntensity: 3.75,

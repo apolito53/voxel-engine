@@ -1713,6 +1713,31 @@ test("expired quality-scaled fragments still graduate into rubble", () => {
   assertEqual(scene.children.length, 1, "expired quality-scaled debris should still render as one rubble proxy");
 });
 
+test("orphan fragments respect the active debris bubble before rubble absorption", () => {
+  const activeCenter = new THREE.Vector3(0.5, 1.1, 0.5);
+  const nearFragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(1, 1.1, 0.5),
+    new THREE.Vector3(0, 0, 0)
+  );
+  const farFragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(20, 1.1, 0.5),
+    new THREE.Vector3(0, 0, 0)
+  );
+
+  sleepTestFragment(nearFragment);
+
+  assert(
+    !shouldAbsorbFragmentIntoRubble(nearFragment, { activeCenter, activeRadius: 8 }),
+    "sleeping orphan debris should stay physical while still inside the player bubble"
+  );
+  assert(
+    shouldAbsorbFragmentIntoRubble(farFragment, { activeCenter, activeRadius: 8 }),
+    "orphan debris outside the player bubble should become cheap rubble even before it sleeps"
+  );
+});
+
 function createTestFragment(
   block: number,
   x: number,
@@ -1953,6 +1978,61 @@ test("debris settler finalizes potato fragments into full rubble material", () =
   assert(!settler.owns(fragments[0]), "normal toy removal should clear the stale finalized-fragment ownership marker");
 });
 
+test("debris settler keeps nearby bubble debris active past the old hard cap", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  sleepTestFragment(fragment);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [fragment]);
+  const stats = settler.update(DEBRIS_REGION_MAX_SECONDS + 0.5, rubble, {
+    activeCenter: new THREE.Vector3(0.5, 1.1, 0.5),
+    activeRadius: 1
+  });
+
+  assertEqual(stats.finalizedBatches, 0, "near-player debris should not hard-finalize while inside the active bubble");
+  assertEqual(stats.regions, 1, "the settling region should stay owned while nearby");
+  assert(!fragment.isExpired, "nearby sleeping debris should remain shoveable by later physics cores");
+});
+
+test("debris settler converts far bubble debris into rubble", () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const fragment = createTestFragment(BLOCK.stone, 0.5, 1.1, 0.5, 3);
+  sleepTestFragment(fragment);
+
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5), [fragment]);
+  const stats = settler.update(0.01, rubble, {
+    activeCenter: new THREE.Vector3(20, 1.1, 0.5),
+    activeRadius: 4
+  });
+
+  assertEqual(stats.finalizedBatches, 1, "debris outside the active bubble should bake into rubble");
+  assertEqual(rubble.getStats().pieces, 3, "far finalization should preserve fragment material");
+  assert(fragment.isExpired, "finalized far debris should be marked for normal toy pruning");
+  assertEqual(scene.children.length, 1, "far debris should become one persistent rubble mesh");
+});
+
+test("debris settler pressure relief finalizes farthest regions first", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const nearFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  const farFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [nearFragment]);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 1.1, 0.5), [farFragment]);
+
+  const removed = settler.finalizeRegionsForPressure(rubble, new THREE.Vector3(0.5, 1.1, 0.5), 1);
+  const stats = settler.getStats();
+
+  assertEqual(removed, 1, "pressure relief should report the bodies it converted");
+  assertEqual(stats.regions, 1, "one nearby region should remain active after farthest-region relief");
+  assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
+  assert(farFragment.isExpired, "the farthest debris region should be the one converted");
+  assertEqual(rubble.getStats().pieces, 1, "pressure relief should preserve the far region's material");
+});
+
 test("debris settler waits for quiet fragments before soft finalization", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -2086,6 +2166,7 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   const rubbleStats = rubble.getStats();
   assertEqual(rubbleStats.clusters, 1, "absorbed fragments should merge into one cluster");
   assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
+  assertEqual(rubbleStats.visualChunks, 2, "absorbed fragments should leave baked visual chunks for the hybrid pile");
   assertNearlyEqual(
     rubbleStats.health,
     expectedRubbleHealthForPieces(2),
@@ -2107,6 +2188,52 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assert(rubble.damageNearest(new THREE.Vector3(0.5, 0.1, 0.5), 2), "rubble should be destructible by gameplay damage");
   assertEqual(rubble.getStats().clusters, 0, "destroyed rubble should leave the scene and cover index");
   assertEqual(scene.children.length, 0, "destroyed rubble should remove its visible proxy");
+});
+
+test("hybrid rubble meshes add baked chunks while keeping cheap support", () => {
+  const smoothScene = new THREE.Scene();
+  const smoothRubble = new RubbleField(smoothScene);
+  smoothRubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
+  smoothRubble.getStats();
+  const smoothMesh = smoothScene.children[0];
+  assert(smoothMesh instanceof THREE.Mesh, "setup should create a support-only rubble mesh");
+  const smoothVertexCount = smoothMesh.geometry.getAttribute("position").count;
+
+  const hybridScene = new THREE.Scene();
+  const hybridRubble = new RubbleField(hybridScene);
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 0.2, 0.5),
+    new THREE.Vector3(0, 0, 0)
+  );
+  fragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
+
+  assert(hybridRubble.absorbFragment(fragment), "a visual fragment should be absorbable into hybrid rubble");
+  const hybridStats = hybridRubble.getStats();
+  const hybridMesh = hybridScene.children[0];
+  assert(hybridMesh instanceof THREE.Mesh, "hybrid rubble should still render as one mesh");
+  const hybridVertexCount = hybridMesh.geometry.getAttribute("position").count;
+
+  assertEqual(hybridStats.visualChunks, 1, "hybrid rubble should store a capped static chunk sample");
+  assert(
+    hybridVertexCount > smoothVertexCount,
+    "hybrid rubble should add baked cuboid geometry on top of the support mound"
+  );
+  assert(
+    hybridRubble.getSupportHeight({
+      minX: 0.4,
+      maxX: 0.6,
+      minY: 0,
+      maxY: 1.5,
+      minZ: 0.4,
+      maxZ: 0.6
+    }) !== null,
+    "hybrid visual chunks should not replace the cheap walkable support surface"
+  );
+
+  hybridRubble.clear();
+  assertEqual(hybridRubble.getStats().visualChunks, 0, "full rubble cleanup should clear baked visual chunk data");
+  assertEqual(hybridScene.children.length, 0, "full rubble cleanup should remove hybrid rubble meshes");
 });
 
 test("adjacent rubble cells merge into one broad patch", () => {
@@ -2857,6 +2984,7 @@ test("physics object budget clamps and steps predictably", () => {
 test("quality presets keep scheduler and render-distance invariants", () => {
   const presetIds = [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID];
   let previousPhysicsBudget = 0;
+  let previousDebrisActiveRadius = 0;
 
   for (const presetId of presetIds) {
     const preset = QUALITY_PRESETS[presetId];
@@ -2904,7 +3032,12 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       preset.blockFragmentCount >= 1 && preset.blockFragmentCount <= BLOCK_FRAGMENT_COUNT,
       `${preset.label} debris count should stay within the fracture grid`
     );
+    assert(
+      preset.debrisActiveRadiusMeters >= previousDebrisActiveRadius,
+      `${preset.label} active debris bubble should not shrink as quality increases`
+    );
     previousPhysicsBudget = preset.physicsObjectBudget;
+    previousDebrisActiveRadius = preset.debrisActiveRadiusMeters;
   }
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
@@ -2923,6 +3056,21 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 physics bodies by default");
   assertEqual(QUALITY_PRESETS.high.physicsObjectBudget, 512, "High should allow 512 physics bodies by default");
   assertEqual(QUALITY_PRESETS.ultra.physicsObjectBudget, 1024, "Ultra should allow 1024 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.potato.debrisActiveRadiusMeters, 8, "Potato should use the smallest active debris bubble");
+  assertEqual(QUALITY_PRESETS.low.debrisActiveRadiusMeters, 12, "Low should keep debris active a little farther out");
+  assertEqual(QUALITY_PRESETS.normal.debrisActiveRadiusMeters, 20, "Normal should keep a practical active debris radius");
+  assertEqual(QUALITY_PRESETS.high.debrisActiveRadiusMeters, 32, "High should keep nearby craters active longer");
+  assertEqual(QUALITY_PRESETS.ultra.debrisActiveRadiusMeters, 48, "Ultra should keep a broad active debris bubble");
+  assertEqual(
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].debrisActiveRadiusMeters,
+    72,
+    "Super Ultra should use the largest active debris bubble"
+  );
+  assertEqual(
+    QUALITY_PRESETS[CUSTOM_PRESET_ID].debrisActiveRadiusMeters,
+    QUALITY_PRESETS.normal.debrisActiveRadiusMeters,
+    "Custom should inherit Normal's active debris bubble baseline"
+  );
   assert(
     getShadowTexelSize(QUALITY_PRESETS.high) < getShadowTexelSize(QUALITY_PRESETS.normal),
     "High should spend more shadow texels near the player than Normal"

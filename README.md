@@ -45,11 +45,11 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled tumbling cube fragments that burst apart, briefly collide, glue together on contact after the breakup moment, stack, and clump inside nearby settling regions before becoming sloped, walkable rubble cover patches; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled tumbling cube fragments. Nearby fragments stay active or sleeping inside the player-centered debris bubble, can still be shoved by later cores, and convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, settling-region metrics, and rubble cover stats for hitch hunting
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
@@ -59,15 +59,15 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 ## Quality Presets
 
-- `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 2 visible debris shards
-- `Low`: current low-end baseline, no shadows, 128 physics bodies, 4 visible debris shards
-- `Normal`: 2x render distance, shadows, 192 physics bodies, 7 visible debris shards
-- `High`: 4x render distance, sharper local shadows, 512 physics bodies, 14 visible debris shards
-- `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 27 visible debris shards
-- `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
+- `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 2 visible debris shards, 8m active debris bubble
+- `Low`: current low-end baseline, no shadows, 128 physics bodies, 4 visible debris shards, 12m active debris bubble
+- `Normal`: 2x render distance, shadows, 192 physics bodies, 7 visible debris shards, 20m active debris bubble
+- `High`: 4x render distance, sharper local shadows, 512 physics bodies, 14 visible debris shards, 32m active debris bubble
+- `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 27 visible debris shards, 48m active debris bubble
+- `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, 72m active debris bubble, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
-Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped cover shape and dense-pile promotion do not change with graphics quality; durability is scaled separately so one full block's rubble is roughly as tough as a generated `Rubble` terrain block instead of becoming a 27-HP mini-fortress. Debris is temporary: nearby fractures share a short settling region, visible cubes burst apart, tumble, glue together on contact after a brief breakup grace, stack, clump, and rest on existing rubble surfaces until they go quiet, then the region finalizes into the cheap persistent rubble field. Final rubble keeps bounded surface samples from the settled fragments and renders a faceted low-poly heightfield draped over those samples instead of reducing the pile to one smoothed cell apex or keeping thousands of little physics bodies alive. Sparse rubble uses a local footprint around its samples, while heavier piles grow toward full-cell walkable cover.
+Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped cover shape and dense-pile promotion do not change with graphics quality; durability is scaled separately so one full block's rubble is roughly as tough as a generated `Rubble` terrain block instead of becoming a 27-HP mini-fortress. Debris is temporary but no longer just timer-based: nearby fractures share a settling region, visible cubes burst apart, briefly collide, glue together on contact after a breakup grace, stack, clump, and then remain active or sleeping while inside the quality-scaled player bubble. Once the player leaves that bubble, or the physics budget needs relief, regions finalize into the cheap persistent rubble field. Final rubble keeps bounded surface samples for walkable support and capped baked cube chunks from the settled fragment poses, giving piles a jagged silhouette while preserving enough static chunk data for a later rubble-to-debris re-break feature. Sparse rubble uses a local footprint around its samples, while heavier piles grow toward full-cell walkable cover.
 
 Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and physics work has drained, the app stops the animation loop after five minutes without input, and hidden/locked sessions use a low-frequency heartbeat instead of continuous WebGL frames.
 
@@ -88,18 +88,19 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/targetHighlighter.ts`: thin block-target outline rendering
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
-- `src/debrisSettler.ts`: short-lived settling regions, breakup grace before same-region debris glue links, pair-budget pressure relief, and batched debris-to-rubble finalization
-- `src/fragmentRubble.ts`: settled/expired debris-to-rubble eligibility rules that keep low-quality debris cleanup from deleting gameplay material
+- `src/debrisSettler.ts`: player-bubble-owned settling regions, breakup grace before same-region debris glue links, pressure finalization, and batched debris-to-rubble finalization
+- `src/fragmentRubble.ts`: orphan debris-to-rubble eligibility rules for active-bubble distance, explicit expiration, and material-preserving fallback cleanup
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, cube-fragment tumble state, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments, including per-fragment tumble rotation, so thousands of shards do not become thousands of scene meshes
-- `src/rubble.ts`: persistent faceted destructible rubble cover patches, sample-sized footprints, batched absorption, scaled durability separate from material volume, local direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
+- `src/rubble.ts`: persistent faceted destructible rubble cover patches, sample-sized footprints, batched absorption, scaled durability separate from material volume, baked static visual chunk samples, local direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application
 - `src/qualitySettings.ts`: per-preset custom settings storage, slider bounds, and menu label formatting
+- `src/qualityPresets.ts`: render, shadow, streaming, physics budget, visible debris count, and active debris bubble defaults
 - `src/skybox.ts`: generated sunlit equirectangular skybox texture and camera-following sky dome
 - `src/shadows.ts`: directional shadow-map texel snapping helpers
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing

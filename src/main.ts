@@ -16,7 +16,12 @@ import {
 import type { CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
-import { DebrisSettler, createEmptyDebrisSettlerStats, type DebrisSettlerStats } from "./debrisSettler";
+import {
+  DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
+  DebrisSettler,
+  createEmptyDebrisSettlerStats,
+  type DebrisSettlerStats
+} from "./debrisSettler";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEngineEventBus } from "./engineEvents";
@@ -728,9 +733,14 @@ function animate(): void {
       }
     }
     emitRubbleDamageEvents();
-    debrisSettlerStats = debrisSettler.update(delta, rubbleField);
-    emitRubbleBatchEvents();
+    debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
+      activeCenter: camera.position,
+      activeRadius: qualityController.preset.debrisActiveRadiusMeters
+    });
     absorbSettledFragmentsIntoRubble();
+    enforcePhysicsToyBudget();
+    debrisSettlerStats = debrisSettler.getStats();
+    emitRubbleBatchEvents();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
     rubbleField.settle(activeWorld);
     pruneExpiredToys();
@@ -868,7 +878,7 @@ function shouldSuspendAnimationLoop(now: number): boolean {
 function hasActiveEngineWork(): boolean {
   if (!inWorld || !world) return false;
   if (world.hasPendingRuntimeWork()) return true;
-  if (debrisSettlerStats.regions > 0) return true;
+  if (debrisSettlerStats.activeFragments > 0) return true;
 
   for (const toy of toys) {
     if (!toy.isExpired && !toy.isSleeping) return true;
@@ -1144,7 +1154,6 @@ function addPhysicsToy(toy: PhysicsToy): void {
   if (!toy.isInstancedFragment) {
     scene.add(toy.mesh);
   }
-  enforcePhysicsToyBudget();
 }
 
 function changePhysicsObjectBudget(direction: PhysicsBudgetDirection): void {
@@ -1234,34 +1243,106 @@ function updateSettingsControls(): void {
 }
 
 function enforcePhysicsToyBudget(): void {
-  while (toys.length > physicsObjectBudget) {
-    removePhysicsToyAt(0);
-  }
+  const overBudgetCount = toys.length - physicsObjectBudget;
+  if (overBudgetCount <= 0) return;
+
+  // Budget relief must preserve material. Finalize far debris into rubble
+  // before pruning bodies, so a stress test cannot quietly delete the future
+  // cover just because the physics array crossed its cap.
+  debrisSettler.finalizeRegionsForPressure(rubbleField, camera.position, overBudgetCount);
+  absorbExpiredOrphanFragmentsIntoRubble();
+  pruneExpiredToys();
+  absorbOrphanFragmentsForBudget(true);
+  absorbOrphanFragmentsForBudget(false);
+  pruneOldestPhysicsCoresForBudget();
 }
 
 function absorbSettledFragmentsIntoRubble(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     const toy = toys[index];
     if (toy && debrisSettler.owns(toy)) continue;
-    if (!toy || !shouldAbsorbFragmentIntoRubble(toy)) continue;
+    if (!toy || !shouldAbsorbFragmentIntoRubble(toy, getFragmentRubbleAbsorptionOptions())) continue;
 
     // Once debris has settled or aged out, it graduates from "expensive little
     // physics shard" into cheap cover material. A low visual debris count can
     // still carry several material units, so graphics settings do not alter
     // gameplay even when a tiny Potato shard sample expires before sleeping.
-    if (rubbleField.absorbFragment(toy)) {
-      engineEvents.emit("rubble:formed", {
-        position: {
-          x: toy.mesh.position.x,
-          y: toy.mesh.position.y,
-          z: toy.mesh.position.z
-        },
-        block: toy.fragmentBlock ?? 0,
-        pieces: toy.rubbleMaterialUnits
-      });
-    }
+    absorbFragmentToyIntoRubble(toy);
     removePhysicsToyAt(index);
   }
+}
+
+function getFragmentRubbleAbsorptionOptions(): {
+  readonly activeCenter: THREE.Vector3;
+  readonly activeRadius: number;
+  readonly activeRadiusBuffer: number;
+} {
+  return {
+    activeCenter: camera.position,
+    activeRadius: qualityController.preset.debrisActiveRadiusMeters,
+    activeRadiusBuffer: DEBRIS_ACTIVE_RADIUS_BUFFER_METERS
+  };
+}
+
+function absorbOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
+  if (toys.length <= physicsObjectBudget) return;
+
+  const absorptionOptions = getFragmentRubbleAbsorptionOptions();
+  const candidates = toys
+    .filter((toy) => (
+      toy.isInstancedFragment &&
+      !debrisSettler.owns(toy) &&
+      (
+        outsideBubbleOnly
+          ? shouldAbsorbFragmentIntoRubble(toy, absorptionOptions)
+          : !toy.isExpired
+      )
+    ))
+    .sort((left, right) => (
+      right.mesh.position.distanceToSquared(camera.position) -
+      left.mesh.position.distanceToSquared(camera.position)
+    ));
+
+  for (const toy of candidates) {
+    if (toys.length <= physicsObjectBudget) return;
+
+    const index = toys.indexOf(toy);
+    if (index === -1) continue;
+    absorbFragmentToyIntoRubble(toy);
+    removePhysicsToyAt(index);
+  }
+}
+
+function absorbExpiredOrphanFragmentsIntoRubble(): void {
+  for (let index = toys.length - 1; index >= 0; index -= 1) {
+    const toy = toys[index];
+    if (!toy || !toy.isInstancedFragment || debrisSettler.owns(toy) || !toy.isExpired) continue;
+
+    absorbFragmentToyIntoRubble(toy);
+    removePhysicsToyAt(index);
+  }
+}
+
+function pruneOldestPhysicsCoresForBudget(): void {
+  while (toys.length > physicsObjectBudget) {
+    const coreIndex = toys.findIndex((toy) => !toy.isInstancedFragment);
+    if (coreIndex === -1) return;
+    removePhysicsToyAt(coreIndex);
+  }
+}
+
+function absorbFragmentToyIntoRubble(toy: PhysicsToy): void {
+  if (!rubbleField.absorbFragment(toy)) return;
+
+  engineEvents.emit("rubble:formed", {
+    position: {
+      x: toy.mesh.position.x,
+      y: toy.mesh.position.y,
+      z: toy.mesh.position.z
+    },
+    block: toy.fragmentBlock ?? 0,
+    pieces: toy.rubbleMaterialUnits
+  });
 }
 
 function emitRubbleBatchEvents(): void {

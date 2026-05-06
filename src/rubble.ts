@@ -11,6 +11,7 @@ import {
 
 const RUBBLE_CELL_SIZE = 1;
 const RUBBLE_MAX_VISUAL_PIECES = 36;
+const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = 18;
 // Promotion intentionally needs more material than the visible pile cap and a
 // single 27-piece block fracture. Piles can keep accruing hidden material after
 // the proxy mesh stops growing, so craters do not seal from one normal break.
@@ -55,6 +56,7 @@ type RubbleCell = {
 type RubbleCellPile = {
   readonly cell: RubbleCell;
   readonly surfaceSamples: RubbleSurfaceSample[];
+  readonly visualChunks: RubbleStoredVisualChunkSample[];
   pieces: number;
   health: number;
 };
@@ -64,6 +66,14 @@ type RubbleSurfaceSample = {
   readonly localZ: number;
   readonly height: number;
   readonly weight: number;
+};
+
+type RubbleStoredVisualChunkSample = {
+  readonly localX: number;
+  readonly localY: number;
+  readonly localZ: number;
+  readonly quaternion: THREE.Quaternion;
+  readonly size: number;
 };
 
 type RubbleCluster = {
@@ -109,12 +119,20 @@ export type RubbleFieldStats = {
   readonly pieces: number;
   readonly health: number;
   readonly maxCoverHeight: number;
+  readonly visualChunks: number;
+};
+
+export type RubbleVisualChunkSample = {
+  readonly position: THREE.Vector3;
+  readonly quaternion: THREE.Quaternion;
+  readonly size: number;
 };
 
 export type RubbleAbsorptionSample = {
   readonly block: number;
   readonly position: THREE.Vector3;
   readonly pieces?: number;
+  readonly visualChunk?: RubbleVisualChunkSample;
 };
 
 export type RubbleRaycastHit = {
@@ -138,7 +156,8 @@ const EMPTY_RUBBLE_STATS: RubbleFieldStats = {
   clusters: 0,
   pieces: 0,
   health: 0,
-  maxCoverHeight: 0
+  maxCoverHeight: 0,
+  visualChunks: 0
 };
 
 const HORIZONTAL_NEIGHBOR_OFFSETS: readonly RubbleCell[] = [
@@ -182,7 +201,12 @@ export class RubbleField {
       return false;
     }
 
-    this.absorb(fragment.fragmentBlock, fragment.mesh.position, fragment.rubbleMaterialUnits);
+    this.absorbBatch([{
+      block: fragment.fragmentBlock,
+      position: fragment.mesh.position.clone(),
+      pieces: fragment.rubbleMaterialUnits,
+      visualChunk: createRubbleVisualChunkSample(fragment)
+    }]);
     return true;
   }
 
@@ -192,13 +216,14 @@ export class RubbleField {
     // rendering hundreds of tiny standalone boxes.
     const normalizedPieces = normalizeRubblePieceCount(pieces);
     const cell = getRubbleCell(position);
-    this.absorbPileAtCell(
-      block,
-      cell,
-      normalizedPieces,
-      normalizedPieces * RUBBLE_PIECE_HEALTH,
-      createRubbleSurfaceSamples(cell, position, normalizedPieces)
-    );
+      this.absorbPileAtCell(
+        block,
+        cell,
+        normalizedPieces,
+        normalizedPieces * RUBBLE_PIECE_HEALTH,
+        createRubbleSurfaceSamples(cell, position, normalizedPieces),
+        []
+      );
     this.refreshStats();
   }
 
@@ -214,7 +239,10 @@ export class RubbleField {
         cell,
         normalizedPieces,
         normalizedPieces * RUBBLE_PIECE_HEALTH,
-        createRubbleSurfaceSamples(cell, sample.position, normalizedPieces)
+        createRubbleSurfaceSamples(cell, sample.position, normalizedPieces),
+        sample.visualChunk
+          ? [createStoredVisualChunkSample(cell, sample.visualChunk)]
+          : []
       );
     }
     this.refreshStats();
@@ -251,7 +279,8 @@ export class RubbleField {
           getRubbleCellBelow(fallingPile.cell),
           fallingPile.pieces,
           fallingPile.health,
-          fallingPile.surfaceSamples
+          fallingPile.surfaceSamples,
+          fallingPile.visualChunks
         );
         this.promoteLargePiles(world, landedCluster);
         changed = true;
@@ -407,11 +436,12 @@ export class RubbleField {
     cell: RubbleCell,
     pieces: number,
     health: number,
-    surfaceSamples: readonly RubbleSurfaceSample[] = []
+    surfaceSamples: readonly RubbleSurfaceSample[] = [],
+    visualChunks: readonly RubbleStoredVisualChunkSample[] = []
   ): RubbleCluster {
     const existingCluster = this.clustersByCell.get(getRubbleCellCoordinateKey(cell));
     if (existingCluster) {
-      this.addPileToCluster(existingCluster, cell, pieces, health, surfaceSamples);
+      this.addPileToCluster(existingCluster, cell, pieces, health, surfaceSamples, visualChunks);
       this.mergeAdjacentClusters(existingCluster);
       return existingCluster;
     }
@@ -420,7 +450,7 @@ export class RubbleField {
       .filter((cluster) => this.canAddNewCell(cluster, cell));
     const targetCluster = chooseRubbleMergeTarget(mergeCandidates, block) ?? this.createCluster(block);
 
-    this.addPileToCluster(targetCluster, cell, pieces, health, surfaceSamples);
+    this.addPileToCluster(targetCluster, cell, pieces, health, surfaceSamples, visualChunks);
     this.mergeAdjacentClusters(targetCluster);
     return targetCluster;
   }
@@ -430,7 +460,8 @@ export class RubbleField {
     cell: RubbleCell,
     pieces: number,
     health: number,
-    surfaceSamples: readonly RubbleSurfaceSample[] = []
+    surfaceSamples: readonly RubbleSurfaceSample[] = [],
+    visualChunks: readonly RubbleStoredVisualChunkSample[] = []
   ): void {
     const key = getRubbleCellCoordinateKey(cell);
     const pile = cluster.cells.get(key);
@@ -438,8 +469,15 @@ export class RubbleField {
       pile.pieces += pieces;
       pile.health += health;
       appendRubbleSurfaceSamples(pile, surfaceSamples);
+      appendRubbleVisualChunks(pile, visualChunks);
     } else {
-      cluster.cells.set(key, { cell, pieces, health, surfaceSamples: [...surfaceSamples] });
+      cluster.cells.set(key, {
+        cell,
+        pieces,
+        health,
+        surfaceSamples: surfaceSamples.map((sample) => ({ ...sample })),
+        visualChunks: visualChunks.map(cloneStoredVisualChunkSample)
+      });
       this.clustersByCell.set(key, cluster);
     }
 
@@ -516,6 +554,8 @@ export class RubbleField {
       } else if (footprint.maxX < 1 - RUBBLE_COLLISION_EPSILON) {
         addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
       }
+
+      addRubbleVisualChunks(positions, normals, indices, bounds, pile);
     }
 
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -823,11 +863,13 @@ export class RubbleField {
     let pieces = 0;
     let health = 0;
     let maxCoverHeight = 0;
+    let visualChunks = 0;
     for (const cluster of this.clustersById.values()) {
       pieces += cluster.pieces;
       health += cluster.health;
       for (const pile of cluster.cells.values()) {
         maxCoverHeight = Math.max(maxCoverHeight, getRubblePileVisualHeight(pile));
+        visualChunks += pile.visualChunks.length;
       }
     }
 
@@ -835,7 +877,8 @@ export class RubbleField {
       clusters: this.clustersById.size,
       pieces,
       health,
-      maxCoverHeight
+      maxCoverHeight,
+      visualChunks
     };
   }
 }
@@ -877,7 +920,45 @@ function clonePile(pile: RubbleCellPile): RubbleCellPile {
     cell: pile.cell,
     pieces: pile.pieces,
     health: pile.health,
-    surfaceSamples: pile.surfaceSamples.map((sample) => ({ ...sample }))
+    surfaceSamples: pile.surfaceSamples.map((sample) => ({ ...sample })),
+    visualChunks: pile.visualChunks.map(cloneStoredVisualChunkSample)
+  };
+}
+
+function createRubbleVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkSample {
+  return {
+    position: fragment.mesh.position.clone(),
+    quaternion: fragment.mesh.quaternion.clone(),
+    size: BLOCK_FRAGMENT_VISUAL_SIZE
+  };
+}
+
+function createStoredVisualChunkSample(
+  cell: RubbleCell,
+  sample: RubbleVisualChunkSample
+): RubbleStoredVisualChunkSample {
+  const baseX = cell.x * RUBBLE_CELL_SIZE;
+  const baseY = cell.y * RUBBLE_CELL_SIZE;
+  const baseZ = cell.z * RUBBLE_CELL_SIZE;
+
+  return {
+    localX: sample.position.x - baseX,
+    localY: sample.position.y - baseY,
+    localZ: sample.position.z - baseZ,
+    quaternion: sample.quaternion.clone(),
+    size: clamp(sample.size, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.35)
+  };
+}
+
+function cloneStoredVisualChunkSample(
+  sample: RubbleStoredVisualChunkSample
+): RubbleStoredVisualChunkSample {
+  return {
+    localX: sample.localX,
+    localY: sample.localY,
+    localZ: sample.localZ,
+    quaternion: sample.quaternion.clone(),
+    size: sample.size
   };
 }
 
@@ -928,6 +1009,31 @@ function appendRubbleSurfaceSamples(
     (right.height * right.weight) - (left.height * left.weight)
   ));
   pile.surfaceSamples.length = RUBBLE_MAX_SURFACE_SAMPLES_PER_PILE;
+}
+
+function appendRubbleVisualChunks(
+  pile: RubbleCellPile,
+  chunks: readonly RubbleStoredVisualChunkSample[]
+): void {
+  if (chunks.length === 0) return;
+
+  pile.visualChunks.push(...chunks.map(cloneStoredVisualChunkSample));
+  if (pile.visualChunks.length <= RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE) return;
+
+  // The baked chunks are the future re-break seed and the current silhouette.
+  // When the cap is hit, keep the higher chunks first because those are what
+  // stop the final pile from reading as a blanket draped over empty air.
+  pile.visualChunks.sort((left, right) => (
+    right.localY - left.localY ||
+    distanceFromPileCenterSq(right) - distanceFromPileCenterSq(left)
+  ));
+  pile.visualChunks.length = RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE;
+}
+
+function distanceFromPileCenterSq(chunk: RubbleStoredVisualChunkSample): number {
+  const dx = chunk.localX - 0.5;
+  const dz = chunk.localZ - 0.5;
+  return dx * dx + dz * dz;
 }
 
 function normalizeRubblePieceCount(pieces: number): number {
@@ -1457,6 +1563,88 @@ function addRubbleBoundarySide(
       [1, 0, 0]
     );
   }
+}
+
+function addRubbleVisualChunks(
+  positions: number[],
+  normals: number[],
+  indices: number[],
+  bounds: THREE.Box3,
+  pile: RubbleCellPile
+): void {
+  if (pile.visualChunks.length === 0) return;
+
+  for (const chunk of pile.visualChunks) {
+    const center = new THREE.Vector3(
+      pile.cell.x * RUBBLE_CELL_SIZE + chunk.localX,
+      pile.cell.y * RUBBLE_CELL_SIZE + chunk.localY,
+      pile.cell.z * RUBBLE_CELL_SIZE + chunk.localZ
+    );
+    const halfSize = chunk.size * 0.5;
+    const corners = createVisualChunkCorners(center, chunk.quaternion, halfSize);
+
+    for (const corner of corners) {
+      bounds.expandByPoint(corner);
+    }
+
+    // These static cubes are deliberately baked into the same rubble mesh as
+    // the support surface. They give the pile a chunky silhouette without
+    // creating persistent rigid bodies or extra draw calls.
+    addVisualChunkQuad(positions, normals, indices, corners[1], corners[5], corners[7], corners[3]);
+    addVisualChunkQuad(positions, normals, indices, corners[0], corners[2], corners[6], corners[4]);
+    addVisualChunkQuad(positions, normals, indices, corners[2], corners[3], corners[7], corners[6]);
+    addVisualChunkQuad(positions, normals, indices, corners[0], corners[4], corners[5], corners[1]);
+    addVisualChunkQuad(positions, normals, indices, corners[4], corners[6], corners[7], corners[5]);
+    addVisualChunkQuad(positions, normals, indices, corners[0], corners[1], corners[3], corners[2]);
+  }
+}
+
+function createVisualChunkCorners(
+  center: THREE.Vector3,
+  quaternion: THREE.Quaternion,
+  halfSize: number
+): readonly THREE.Vector3[] {
+  return [
+    new THREE.Vector3(-halfSize, -halfSize, -halfSize),
+    new THREE.Vector3(halfSize, -halfSize, -halfSize),
+    new THREE.Vector3(-halfSize, halfSize, -halfSize),
+    new THREE.Vector3(halfSize, halfSize, -halfSize),
+    new THREE.Vector3(-halfSize, -halfSize, halfSize),
+    new THREE.Vector3(halfSize, -halfSize, halfSize),
+    new THREE.Vector3(-halfSize, halfSize, halfSize),
+    new THREE.Vector3(halfSize, halfSize, halfSize)
+  ].map((corner) => corner.applyQuaternion(quaternion).add(center));
+}
+
+function addVisualChunkQuad(
+  positions: number[],
+  normals: number[],
+  indices: number[],
+  first: THREE.Vector3,
+  second: THREE.Vector3,
+  third: THREE.Vector3,
+  fourth: THREE.Vector3
+): void {
+  addTriangle(
+    positions,
+    normals,
+    indices,
+    vectorToRubbleVertex(first),
+    vectorToRubbleVertex(second),
+    vectorToRubbleVertex(third)
+  );
+  addTriangle(
+    positions,
+    normals,
+    indices,
+    vectorToRubbleVertex(first),
+    vectorToRubbleVertex(third),
+    vectorToRubbleVertex(fourth)
+  );
+}
+
+function vectorToRubbleVertex(vector: THREE.Vector3): RubbleQuadVertex {
+  return [vector.x, vector.y, vector.z];
 }
 
 function getGridHeight(grid: RubbleSurfaceGrid, xIndex: number, zIndex: number): number {

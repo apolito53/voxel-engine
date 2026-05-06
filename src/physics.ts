@@ -9,7 +9,6 @@ import type { CollisionBounds, CollisionWorld } from "./collision";
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 export const PHYSICS_CORE_BLOCK_DAMAGE = 30;
 
-const FRAGMENT_MAX_AGE_SECONDS = 9;
 const FRAGMENT_INVERSE_MASS = 2.5;
 const FRAGMENT_SLEEP_SPEED = 1.25;
 const FRAGMENT_SLEEP_AFTER_SECONDS = 0.18;
@@ -145,7 +144,11 @@ export class PhysicsToy {
       damagesBlocks: false,
       inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
-      maxAgeSeconds: FRAGMENT_MAX_AGE_SECONDS + Math.random() * 3,
+      // Fragments now live inside the player-centered active-debris bubble.
+      // Distance and budget pressure decide when they become cheap rubble, so
+      // a nearby sleeping pile should not silently expire while the player is
+      // still standing there looking at it.
+      maxAgeSeconds: null,
       sleepSpeed: FRAGMENT_SLEEP_SPEED,
       sleepAfterSeconds: FRAGMENT_SLEEP_AFTER_SECONDS,
       disposeGeometry: false,
