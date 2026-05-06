@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.7 - 2026-05-06
+
+### Added
+
+- Added floating debug health bars for damaged terrain blocks and destructible rubble cover. Bars are DOM overlays projected from world positions, capped to avoid unbounded UI growth, and cleared during world/object teardown.
+- Added a typed `rubble:damaged` engine event so future combat systems and Nova context can react to rubble damage without scraping render state.
+
+### Changed
+
+- Rubble damage now applies the full hit only to the directly impacted pile. If that pile is destroyed, immediate neighboring piles receive a small non-lethal collateral chip instead of inheriting the original impact damage.
+- Physics cores stop checking additional rubble clusters once they expire from destroying a pile.
+
+### Validation
+
+- Browser smoke at `http://localhost:5173/`: loaded the saved world, selected Physics Core, threw cores into terrain, and confirmed a damage indicator element appeared with health text.
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.6 - 2026-05-06
 
 ### Fixed

@@ -356,6 +356,14 @@ test("nova context journal records world, runtime, and event state", () => {
     impactSpeed: 4,
     fragmentCount: 7
   });
+  events.emit("rubble:damaged", {
+    position: { x: 2.5, y: 1.2, z: 3.5 },
+    block: BLOCK.dirt,
+    remainingHealth: 2.5,
+    maxHealth: 6,
+    destroyed: false,
+    collateral: true
+  });
   journal.updateRuntimeTelemetry({
     selectedItemLabel: "Grass",
     movementMode: "flight",
@@ -377,6 +385,10 @@ test("nova context journal records world, runtime, and event state", () => {
   assert(
     snapshot.recentEvents.some((event) => event.summary.includes("Grass fractured")),
     "recent event summaries should include block destruction"
+  );
+  assert(
+    snapshot.recentEvents.some((event) => event.summary.includes("Collateral rubble hit")),
+    "recent event summaries should include rubble damage"
   );
 
   journal.dispose();
@@ -1415,7 +1427,13 @@ test("block damage tracks health before removing voxels", () => {
   const firstHit = world.damageBlock(2, 3, 4, 1);
   assertDeepEqual(
     firstHit,
-    { block: BLOCK.stone, position: { x: 2, y: 3, z: 4 }, remainingHealth: 1, destroyed: false },
+    {
+      block: BLOCK.stone,
+      position: { x: 2, y: 3, z: 4 },
+      remainingHealth: 1,
+      maxHealth: 2,
+      destroyed: false
+    },
     "first meaningful hit should damage but not remove a two-health block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "damaged block should remain in the voxel grid");
@@ -1425,7 +1443,13 @@ test("block damage tracks health before removing voxels", () => {
   const secondHit = world.damageBlock(2, 3, 4, 1);
   assertDeepEqual(
     secondHit,
-    { block: BLOCK.stone, position: { x: 2, y: 3, z: 4 }, remainingHealth: 0, destroyed: true },
+    {
+      block: BLOCK.stone,
+      position: { x: 2, y: 3, z: 4 },
+      remainingHealth: 0,
+      maxHealth: 2,
+      destroyed: true
+    },
     "second meaningful hit should destroy a two-health block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed block should leave the voxel grid");
@@ -2119,7 +2143,7 @@ test("quality-reduced fragments still settle into full rubble material", () => {
   assertEqual(scene.children.length, 1, "weighted rubble should still render as one merged proxy");
 });
 
-test("rubble damage targets the impacted pile instead of the healthiest neighbor", () => {
+test("rubble damage removes the impacted pile and only chips immediate neighbors", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
 
@@ -2131,6 +2155,7 @@ test("rubble damage targets the impacted pile instead of the healthiest neighbor
     rubble.damageNearest(new THREE.Vector3(0.5, 0.1, 0.5), 1, 0.5),
     "nearby damage should find the directly targeted low-health pile"
   );
+  const damageEvents = rubble.consumeDamageEvents();
 
   const targetCellHit = rubble.raycast(
     new THREE.Vector3(0.5, 0.08, -2),
@@ -2144,8 +2169,22 @@ test("rubble damage targets the impacted pile instead of the healthiest neighbor
   );
 
   assertEqual(targetCellHit, null, "the impacted pile should be removed first");
-  assert(neighborCellHit, "the healthier neighboring pile should not be damaged just because it shares a cluster");
-  assertEqual(rubble.getStats().pieces, 6, "remaining rubble material should belong to the neighboring pile");
+  assert(neighborCellHit, "the healthier neighboring pile should survive sharing a cluster");
+  assertEqual(rubble.getStats().pieces, 6, "the neighboring pile should remain as a visible cover cell");
+  assertEqual(damageEvents.length, 2, "destroying one pile should emit direct and collateral damage events");
+  assertEqual(damageEvents[0]?.destroyed, true, "the first event should describe the direct destroyed pile");
+  assertEqual(damageEvents[0]?.collateral, false, "the direct hit should not be marked as collateral");
+  assertEqual(damageEvents[1]?.collateral, true, "neighboring chip damage should be marked as collateral");
+  assertEqual(
+    damageEvents[1]?.remainingHealth,
+    5.5,
+    "collateral damage should chip neighboring rubble instead of deleting it"
+  );
+  assertEqual(
+    rubble.consumeDamageEvents().length,
+    0,
+    "damage events should be consumed once so the HUD does not replay stale bars"
+  );
 });
 
 test("single-piece rubble stays in a local footprint instead of filling the whole cell", () => {

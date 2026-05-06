@@ -40,6 +40,7 @@ const RUBBLE_MAX_FOOTPRINT_RADIUS = 0.58;
 const RUBBLE_CORE_RESTITUTION = 1.55;
 const RUBBLE_CORE_DAMPING = 0.95;
 const RUBBLE_COLLISION_EPSILON = 0.000001;
+const RUBBLE_NEIGHBOR_CHIP_DAMAGE = 0.5;
 
 type RubbleCell = {
   readonly x: number;
@@ -119,6 +120,16 @@ export type RubbleRaycastHit = {
   readonly point: THREE.Vector3;
 };
 
+export type RubbleDamageEvent = {
+  readonly cell: RubbleCell;
+  readonly position: THREE.Vector3;
+  readonly block: number;
+  readonly remainingHealth: number;
+  readonly maxHealth: number;
+  readonly destroyed: boolean;
+  readonly collateral: boolean;
+};
+
 const EMPTY_RUBBLE_STATS: RubbleFieldStats = {
   clusters: 0,
   pieces: 0,
@@ -147,6 +158,7 @@ export class RubbleField {
   private readonly pileClosestPoint = new THREE.Vector3();
   private readonly fallbackNormal = new THREE.Vector3(0, 1, 0);
   private readonly rayInverseDirection = new THREE.Vector3();
+  private readonly damageEvents: RubbleDamageEvent[] = [];
   private surfaceWorld: RubbleFieldWorld | null = null;
   private stats: RubbleFieldStats = EMPTY_RUBBLE_STATS;
   private nextClusterId = 1;
@@ -287,6 +299,7 @@ export class RubbleField {
     let collided = false;
     const corePosition = core.mesh.position;
     for (const cluster of this.getNearbyClusters(corePosition, core.radius + RUBBLE_NEARBY_SEARCH_PADDING)) {
+      if (core.isExpired) break;
       if (this.resolveCoreClusterCollision(core, cluster)) {
         collided = true;
       }
@@ -299,8 +312,18 @@ export class RubbleField {
     const nearestTarget = this.findNearestPileDamageTarget(position, radius);
 
     if (!nearestTarget) return false;
-    this.damageClusterFromPile(nearestTarget.cluster, nearestTarget.pile, amount, position);
+    this.damageClusterFromPile(nearestTarget.cluster, nearestTarget.pile, amount);
     return true;
+  }
+
+  consumeDamageEvents(): RubbleDamageEvent[] {
+    const events = this.damageEvents.map((event) => ({
+      ...event,
+      cell: { ...event.cell },
+      position: event.position.clone()
+    }));
+    this.damageEvents.length = 0;
+    return events;
   }
 
   raycast(origin: THREE.Vector3, direction: THREE.Vector3, maxDistance: number): RubbleRaycastHit | null {
@@ -343,6 +366,7 @@ export class RubbleField {
     for (const cluster of Array.from(this.clustersById.values())) {
       this.removeCluster(cluster);
     }
+    this.damageEvents.length = 0;
     this.surfaceWorld = null;
     this.stats = EMPTY_RUBBLE_STATS;
   }
@@ -525,12 +549,7 @@ export class RubbleField {
       core.velocity.addScaledVector(normal, -impact * RUBBLE_CORE_RESTITUTION);
       core.velocity.multiplyScalar(RUBBLE_CORE_DAMPING);
       if (impactSpeed > BLOCK_DAMAGE_IMPACT_SPEED) {
-        const destroyedImpactedPile = this.damageClusterFromPile(
-          cluster,
-          targetPile,
-          PHYSICS_CORE_BLOCK_DAMAGE,
-          this.sphereClosestPoint
-        );
+        const destroyedImpactedPile = this.damageClusterFromPile(cluster, targetPile, PHYSICS_CORE_BLOCK_DAMAGE);
         if (destroyedImpactedPile) core.expire();
       }
     }
@@ -541,28 +560,24 @@ export class RubbleField {
   private damageClusterFromPile(
     cluster: RubbleCluster,
     targetPile: RubbleCellPile,
-    amount: number,
-    origin: THREE.Vector3
+    amount: number
   ): boolean {
-    let remainingDamage = amount;
-    let destroyedTargetPile = false;
-    const piles = this.sortClusterPilesForDamage(cluster, targetPile, origin);
+    const hitHealthBefore = targetPile.health;
+    const hitDamage = Math.min(targetPile.health, Math.max(0, amount));
+    targetPile.health -= hitDamage;
+    targetPile.pieces = Math.ceil(targetPile.health / RUBBLE_PIECE_HEALTH);
 
-    for (const pile of piles) {
-      if (remainingDamage <= 0) break;
+    const destroyedTargetPile = targetPile.health <= RUBBLE_COLLISION_EPSILON || targetPile.pieces <= 0;
+    this.recordDamageEvent(cluster.block, targetPile, hitHealthBefore, destroyedTargetPile, false);
 
-      const damage = Math.min(pile.health, remainingDamage);
-      pile.health -= damage;
-      remainingDamage -= damage;
-      pile.pieces = Math.ceil(pile.health / RUBBLE_PIECE_HEALTH);
-      if (pile.health <= RUBBLE_COLLISION_EPSILON || pile.pieces <= 0) {
-        if (pile === targetPile) destroyedTargetPile = true;
-        const key = getRubbleCellCoordinateKey(pile.cell);
-        cluster.cells.delete(key);
-        if (this.clustersByCell.get(key) === cluster) {
-          this.clustersByCell.delete(key);
-        }
+    if (destroyedTargetPile) {
+      const destroyedCell = targetPile.cell;
+      const key = getRubbleCellCoordinateKey(destroyedCell);
+      cluster.cells.delete(key);
+      if (this.clustersByCell.get(key) === cluster) {
+        this.clustersByCell.delete(key);
       }
+      this.chipAdjacentPiles(cluster, destroyedCell);
     }
 
     if (cluster.cells.size === 0) {
@@ -573,6 +588,43 @@ export class RubbleField {
     }
     this.refreshStats();
     return destroyedTargetPile;
+  }
+
+  private chipAdjacentPiles(cluster: RubbleCluster, destroyedCell: RubbleCell): void {
+    // A destroyed pile can kick a little material out of immediate neighbors,
+    // but it should never keep spending the original core's huge damage through
+    // the whole merged patch. Connected rubble is visual/topological, not one
+    // shared hit-point bucket.
+    for (const pile of cluster.cells.values()) {
+      if (!areHorizontalNeighborCells(destroyedCell, pile.cell)) continue;
+      if (pile.health <= RUBBLE_COLLISION_EPSILON) continue;
+
+      const healthBefore = pile.health;
+      const chipDamage = Math.min(RUBBLE_NEIGHBOR_CHIP_DAMAGE, Math.max(0, pile.health - RUBBLE_COLLISION_EPSILON));
+      if (chipDamage <= 0) continue;
+
+      pile.health = Math.max(RUBBLE_COLLISION_EPSILON, pile.health - chipDamage);
+      pile.pieces = Math.max(1, Math.ceil(pile.health / RUBBLE_PIECE_HEALTH));
+      this.recordDamageEvent(cluster.block, pile, healthBefore, false, true);
+    }
+  }
+
+  private recordDamageEvent(
+    block: number,
+    pile: RubbleCellPile,
+    healthBefore: number,
+    destroyed: boolean,
+    collateral: boolean
+  ): void {
+    this.damageEvents.push({
+      cell: pile.cell,
+      position: getRubblePileDamageIndicatorPosition(pile),
+      block,
+      remainingHealth: Math.max(0, pile.health),
+      maxHealth: Math.max(healthBefore, RUBBLE_COLLISION_EPSILON),
+      destroyed,
+      collateral
+    });
   }
 
   private findNearestPileDamageTarget(position: THREE.Vector3, radius: number): RubbleDamageTarget | null {
@@ -611,24 +663,6 @@ export class RubbleField {
     }
 
     return closestPile;
-  }
-
-  private sortClusterPilesForDamage(
-    cluster: RubbleCluster,
-    targetPile: RubbleCellPile,
-    origin: THREE.Vector3
-  ): RubbleCellPile[] {
-    return Array.from(cluster.cells.values()).sort((left, right) => {
-      if (left === targetPile) return -1;
-      if (right === targetPile) return 1;
-
-      const distanceDelta = getPointPileDistanceSq(origin, left) - getPointPileDistanceSq(origin, right);
-      if (Math.abs(distanceDelta) > RUBBLE_COLLISION_EPSILON) return distanceDelta;
-
-      // If excess damage spills into equally close cells, chew through the
-      // weaker material first so results are deterministic and locally sensible.
-      return left.health - right.health;
-    });
   }
 
   private removeCluster(cluster: RubbleCluster): void {
@@ -816,6 +850,22 @@ function getRubbleCellBelow(cell: RubbleCell): RubbleCell {
     y: cell.y - 1,
     z: cell.z
   };
+}
+
+function areHorizontalNeighborCells(left: RubbleCell, right: RubbleCell): boolean {
+  const deltaX = Math.abs(left.x - right.x);
+  const deltaZ = Math.abs(left.z - right.z);
+
+  return left.y === right.y && (deltaX > 0 || deltaZ > 0) && deltaX <= 1 && deltaZ <= 1;
+}
+
+function getRubblePileDamageIndicatorPosition(pile: RubbleCellPile): THREE.Vector3 {
+  const apex = getRubblePileSurfaceApex(pile);
+
+  // Health bars want to hover over the visible draped cover surface, not the
+  // cell center. Using the same apex helper keeps the debug marker attached to
+  // the piece of rubble the core actually hit.
+  return new THREE.Vector3(apex.x, apex.y + 0.22, apex.z);
 }
 
 function clonePile(pile: RubbleCellPile): RubbleCellPile {

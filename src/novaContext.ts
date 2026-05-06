@@ -123,6 +123,7 @@ export class NovaContextJournal {
       this.events.on("block:damaged", (event) => this.onBlockDamaged(event)),
       this.events.on("block:destroyed", (event) => this.onBlockDestroyed(event)),
       this.events.on("rubble:formed", (event) => this.onRubbleFormed(event)),
+      this.events.on("rubble:damaged", (event) => this.onRubbleDamaged(event)),
       this.events.on("quality:changed", (event) => this.onQualityChanged(event)),
       this.events.on("settings:physics-budget-changed", (event) => {
         this.physicsObjectBudget = event.physicsObjectBudget;
@@ -192,6 +193,15 @@ export class NovaContextJournal {
       rubbleFormed: this.counters.rubbleFormed + event.pieces
     };
     this.remember("Rubble", `${getBlockName(event.block)} debris settled into cover.`);
+  }
+
+  private onRubbleDamaged(event: EngineEvents["rubble:damaged"]): void {
+    const damageSource = event.collateral ? "Collateral" : "Direct";
+    const remainingHealth = event.remainingHealth.toFixed(event.remainingHealth % 1 === 0 ? 0 : 1);
+    this.remember(
+      "Rubble",
+      `${damageSource} rubble hit left ${remainingHealth}/${event.maxHealth} health.`
+    );
   }
 
   private onQualityChanged(event: EngineEvents["quality:changed"]): void {

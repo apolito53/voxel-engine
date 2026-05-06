@@ -79,6 +79,7 @@ export class NovaPilotReactions {
       this.events.on("block:damaged", (event) => this.onBlockDamaged(event)),
       this.events.on("block:destroyed", (event) => this.onBlockDestroyed(event)),
       this.events.on("rubble:formed", () => this.say("That debris is becoming cover now.")),
+      this.events.on("rubble:damaged", (event) => this.onRubbleDamaged(event)),
       this.events.on("quality:changed", (event) => this.onQualityChanged(event)),
       this.events.on("settings:physics-budget-changed", (event) => {
         if (event.physicsObjectBudget >= 2048) {
@@ -121,6 +122,11 @@ export class NovaPilotReactions {
 
   private onBlockDestroyed(event: EngineEvents["block:destroyed"]): void {
     this.say(`${getBlockName(event.block)} chose fragments.`);
+  }
+
+  private onRubbleDamaged(event: EngineEvents["rubble:damaged"]): void {
+    if (event.collateral || !event.destroyed) return;
+    this.say("Rubble cover cracked open.");
   }
 
   private onQualityChanged(event: EngineEvents["quality:changed"]): void {

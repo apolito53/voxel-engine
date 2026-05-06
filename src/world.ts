@@ -60,6 +60,7 @@ export type BlockDamageResult = {
   readonly block: number;
   readonly position: VoxelBlockPosition;
   readonly remainingHealth: number;
+  readonly maxHealth: number;
   readonly destroyed: boolean;
 };
 
@@ -792,12 +793,12 @@ export class VoxelWorld implements CollisionWorld {
 
     if (remainingHealth > 0) {
       this.blockDamage.set(key, nextDamage);
-      return { block, position, remainingHealth, destroyed: false };
+      return { block, position, remainingHealth, maxHealth: definition.health, destroyed: false };
     }
 
     this.blockDamage.delete(key);
     this.setBlock(position.x, position.y, position.z, BLOCK.air);
-    return { block, position, remainingHealth: 0, destroyed: true };
+    return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
   }
 
   getBlockDamage(x: number, y: number, z: number): number {

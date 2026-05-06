@@ -40,6 +40,7 @@ export type EngineEvents = {
     readonly block: number;
     readonly impactSpeed: number;
     readonly remainingHealth: number;
+    readonly maxHealth: number;
   };
   "block:destroyed": {
     readonly position: VoxelEventPosition;
@@ -51,6 +52,14 @@ export type EngineEvents = {
     readonly position: VoxelEventPosition;
     readonly block: number;
     readonly pieces: number;
+  };
+  "rubble:damaged": {
+    readonly position: VoxelEventPosition;
+    readonly block: number;
+    readonly remainingHealth: number;
+    readonly maxHealth: number;
+    readonly destroyed: boolean;
+    readonly collateral: boolean;
   };
   "quality:changed": {
     readonly presetId: QualityPresetId;

@@ -45,7 +45,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, and fracturing destroyed terrain into quality-scaled tumbling cube fragments that burst apart, briefly collide, glue together on contact after the breakup moment, stack, and clump inside nearby settling regions before becoming sloped, walkable rubble cover patches; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled tumbling cube fragments that burst apart, briefly collide, glue together on contact after the breakup moment, stack, and clump inside nearby settling regions before becoming sloped, walkable rubble cover patches; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -74,6 +74,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
+- `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
 - `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals
 - `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, coalesced edited-chunk saves, and chunk/worker disposal
@@ -93,7 +94,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple sphere-vs-voxel rigid bodies, cube-fragment tumble state, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments, including per-fragment tumble rotation, so thousands of shards do not become thousands of scene meshes
-- `src/rubble.ts`: persistent faceted destructible rubble cover patches, sample-sized footprints, batched absorption, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
+- `src/rubble.ts`: persistent faceted destructible rubble cover patches, sample-sized footprints, batched absorption, local direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading

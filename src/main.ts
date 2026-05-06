@@ -14,6 +14,7 @@ import {
   type WorldRegistry
 } from "./chunkStorage";
 import type { CollisionWorld } from "./collision";
+import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebrisSettler, createEmptyDebrisSettlerStats, type DebrisSettlerStats } from "./debrisSettler";
 import { DebugHud } from "./debugHud";
@@ -92,7 +93,7 @@ import {
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
-import { RubbleField, type RubbleFieldStats } from "./rubble";
+import { RubbleField, type RubbleDamageEvent, type RubbleFieldStats } from "./rubble";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -106,7 +107,7 @@ import {
 } from "./sprintFeedback";
 import { createSkybox } from "./skybox";
 import { TargetBlockHighlighter } from "./targetHighlighter";
-import { VoxelWorld, type ChunkCoords, type WorldStats } from "./world";
+import { VoxelWorld, type BlockDamageResult, type ChunkCoords, type WorldStats } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
@@ -180,6 +181,7 @@ const novaChatForm = requireElement<HTMLFormElement>("#nova-chat-form");
 const novaChatInput = requireElement<HTMLInputElement>("#nova-chat-input");
 const novaChatCloseButton = requireElement<HTMLButtonElement>("#nova-chat-close");
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
+const damageIndicatorRoot = requireElement<HTMLElement>("#damage-indicators");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -218,6 +220,7 @@ const worldMaterial = new THREE.MeshStandardMaterial({
 
 const targetBlockHighlighter = new TargetBlockHighlighter();
 scene.add(targetBlockHighlighter.object);
+const damageIndicators = new DamageIndicatorOverlay(damageIndicatorRoot);
 
 let worldRegistry: WorldRegistry | null = null;
 let world: VoxelWorld | null = null;
@@ -724,6 +727,7 @@ function animate(): void {
         rubbleField.resolveCoreCollision(toy);
       }
     }
+    emitRubbleDamageEvents();
     debrisSettlerStats = debrisSettler.update(delta, rubbleField);
     emitRubbleBatchEvents();
     absorbSettledFragmentsIntoRubble();
@@ -740,6 +744,7 @@ function animate(): void {
     updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
     updateSprintFeedback(activePlayer.isSprintFeedbackActive(), delta);
+    damageIndicators.update(camera, window.innerWidth, window.innerHeight);
     recordTimingSection("otherMs");
     minimapRenderer.update(delta);
     debugWorldStats = activeWorld.getStats();
@@ -747,6 +752,7 @@ function animate(): void {
     recordTimingSection("minimapMs");
   } else {
     targetBlockHighlighter.hide();
+    damageIndicators.clear();
     updateSprintFeedback(false, delta);
     recordTimingSection("otherMs");
   }
@@ -1011,8 +1017,10 @@ function handlePhysicsImpact(
     position: result.position,
     block: result.block,
     impactSpeed: impact.speed,
-    remainingHealth: result.remainingHealth
+    remainingHealth: result.remainingHealth,
+    maxHealth: result.maxHealth
   });
+  showBlockDamageIndicator(result);
 
   if (!result.destroyed) return;
 
@@ -1264,6 +1272,63 @@ function emitRubbleBatchEvents(): void {
       pieces: batch.pieces
     });
   }
+}
+
+function emitRubbleDamageEvents(): void {
+  for (const event of rubbleField.consumeDamageEvents()) {
+    engineEvents.emit("rubble:damaged", {
+      position: {
+        x: event.position.x,
+        y: event.position.y,
+        z: event.position.z
+      },
+      block: event.block,
+      remainingHealth: event.remainingHealth,
+      maxHealth: event.maxHealth,
+      destroyed: event.destroyed,
+      collateral: event.collateral
+    });
+    showRubbleDamageIndicator(event);
+  }
+}
+
+function showBlockDamageIndicator(result: BlockDamageResult): void {
+  const blockCenter = new THREE.Vector3(
+    result.position.x + 0.5,
+    result.position.y + 1.18,
+    result.position.z + 0.5
+  );
+
+  damageIndicators.show({
+    id: `block:${result.position.x},${result.position.y},${result.position.z}`,
+    position: blockCenter,
+    remainingHealth: result.remainingHealth,
+    maxHealth: result.maxHealth,
+    destroyed: result.destroyed,
+    label: formatDamageIndicatorLabel(result.remainingHealth, result.maxHealth)
+  });
+}
+
+function showRubbleDamageIndicator(event: RubbleDamageEvent): void {
+  damageIndicators.show({
+    id: `rubble:${event.cell.x},${event.cell.y},${event.cell.z}`,
+    position: event.position,
+    remainingHealth: event.remainingHealth,
+    maxHealth: event.maxHealth,
+    destroyed: event.destroyed,
+    collateral: event.collateral,
+    label: formatDamageIndicatorLabel(event.remainingHealth, event.maxHealth)
+  });
+}
+
+function formatDamageIndicatorLabel(remainingHealth: number, maxHealth: number): string {
+  return `${formatDamageValue(remainingHealth)} / ${formatDamageValue(maxHealth)}`;
+}
+
+function formatDamageValue(value: number): string {
+  if (Number.isInteger(value)) return String(value);
+  if (value < 0.1) return "0";
+  return value.toFixed(1);
 }
 
 function pruneExpiredToys(): void {
@@ -1545,6 +1610,7 @@ function clearToys(): void {
     toy.dispose();
   }
   toys.length = 0;
+  damageIndicators.clear();
   debrisSettler.clear();
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
@@ -1616,6 +1682,7 @@ function disposeRuntime(): void {
   novaContext.dispose();
   novaPilot.dispose();
   targetBlockHighlighter.dispose();
+  damageIndicators.dispose();
   skybox.dispose();
   worldMaterial.dispose();
   renderer.renderLists.dispose();
