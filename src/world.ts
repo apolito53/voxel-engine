@@ -1339,6 +1339,25 @@ export class VoxelWorld implements CollisionWorld {
     };
   }
 
+  hasPendingRuntimeWork(): boolean {
+    // The render loop uses this as its "may I go to sleep?" signal. Keep it
+    // intentionally boring: if the worker, storage, or mesh pipeline still has
+    // anything queued, one more animation frame should drain that work before
+    // the engine hibernates.
+    return (
+      this.chunkLoadQueue.size > 0 ||
+      this.pendingChunkLoads.size > 0 ||
+      this.pendingSavedChunkLoads.size > 0 ||
+      this.workerResults.length > 0 ||
+      this.savedChunkResults.length > 0 ||
+      this.pendingMeshBuilds.size > 0 ||
+      this.dirtyChunkKeys.size > 0 ||
+      this.pendingSavedChunkWrites.size > 0 ||
+      this.storageOperations.size > 0 ||
+      this.chunkStorageChains.size > 0
+    );
+  }
+
   highestSolidY(x: number, z: number): number {
     return this.getTopBlock(x, z).y;
   }

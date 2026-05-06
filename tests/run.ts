@@ -141,9 +141,11 @@ import {
 import { createEngineEventBus } from "../src/engineEvents";
 import { EventBus } from "../src/eventBus";
 import {
+  IDLE_HIBERNATE_AFTER_SECONDS,
   IDLE_RESUME_GAP_SECONDS,
   MAX_SIMULATION_DELTA_SECONDS,
   clampSimulationDelta,
+  shouldHibernateAnimationLoop,
   shouldSkipExpensiveFrame
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
@@ -1004,6 +1006,38 @@ test("frame loop clamps simulation time and skips overnight resume frames", () =
     !shouldSkipExpensiveFrame(false, 1 / 30),
     "normal visible frames should continue through the engine loop"
   );
+  assert(
+    shouldHibernateAnimationLoop({
+      pageHidden: true,
+      inactiveSeconds: 0,
+      hasActiveWork: true
+    }),
+    "hidden pages should hibernate instead of trusting RAF throttling during lock-screen sessions"
+  );
+  assert(
+    shouldHibernateAnimationLoop({
+      pageHidden: false,
+      inactiveSeconds: IDLE_HIBERNATE_AFTER_SECONDS + 1,
+      hasActiveWork: false
+    }),
+    "idle visible worlds with no pending work should stop their animation loop"
+  );
+  assert(
+    !shouldHibernateAnimationLoop({
+      pageHidden: false,
+      inactiveSeconds: IDLE_HIBERNATE_AFTER_SECONDS + 1,
+      hasActiveWork: true
+    }),
+    "pending chunk, physics, or save work should keep the loop alive until it drains"
+  );
+  assert(
+    !shouldHibernateAnimationLoop({
+      pageHidden: false,
+      inactiveSeconds: IDLE_HIBERNATE_AFTER_SECONDS - 1,
+      hasActiveWork: false
+    }),
+    "normal short idle pauses should not hibernate the engine"
+  );
 });
 
 test("pointer lock request detection supports promise and void browser APIs", () => {
@@ -1151,6 +1185,22 @@ test("world skips unload scans while player stays in a settled chunk window", ()
     "chunk-window move should scan old and new loaded chunks before pruning"
   );
   assertEqual(world.getStats().loadedChunks, 9, "unload pruning should still keep the loaded window bounded");
+});
+
+test("world reports pending runtime work before idle hibernation", () => {
+  const world = new VoxelWorld({ seed: "pending-work-test" });
+
+  assert(!world.hasPendingRuntimeWork(), "a fresh unloaded world should not block idle hibernation");
+
+  world.chunkLoadQueue.set("1,0", { cx: 1, cz: 0 });
+  assert(world.hasPendingRuntimeWork(), "queued chunk loads should keep the frame loop awake");
+  world.chunkLoadQueue.clear();
+
+  world.pendingSavedChunkWrites.set("0,0", new Uint8Array(4));
+  assert(world.hasPendingRuntimeWork(), "pending save writes should keep the heartbeat alive until storage drains");
+  world.pendingSavedChunkWrites.clear();
+
+  assert(!world.hasPendingRuntimeWork(), "cleared queues should let the idle guard hibernate again");
 });
 
 test("world tracks dirty and modified chunks with chunk-key indexes", () => {

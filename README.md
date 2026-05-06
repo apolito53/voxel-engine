@@ -69,6 +69,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped rubble cover, health, and dense-pile promotion do not change with graphics quality. Debris is temporary: nearby fractures share a short settling region, visible cubes burst apart, tumble, glue together on contact after a brief breakup grace, stack, clump, and rest on existing rubble surfaces until they go quiet, then the region finalizes into the cheap persistent rubble field. Final rubble keeps bounded surface samples from the settled fragments and renders a faceted low-poly heightfield draped over those samples instead of reducing the pile to one smoothed cell apex or keeping thousands of little physics bodies alive. Sparse rubble uses a local footprint around its samples, while heavier piles grow toward full-cell walkable cover.
 
+Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and physics work has drained, the app stops the animation loop after five minutes without input, and hidden/locked sessions use a low-frequency heartbeat instead of continuous WebGL frames.
+
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
@@ -106,7 +108,7 @@ Lower visible debris counts are only a rendering/performance compromise. Destroy
 - `src/novaChatPanel.ts`: in-game Nova chat pane, message rendering, and submit/close behavior
 - `src/novaPilotReactions.ts`: event-driven Nova chatter, pulse reactions, and message throttling
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
-- `src/frameLoop.ts`: frame delta clamping and hidden/overnight resume guards
+- `src/frameLoop.ts`: frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 

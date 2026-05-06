@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.4 - 2026-05-05
+
+### Fixed
+
+- Added a real idle hibernation path for the browser engine: hidden pages stop scheduling RAF work, and visible worlds with no active chunks, saves, debris, or physics actors suspend after five minutes of no input.
+- Added a low-frequency idle heartbeat that drains the frame clock and saves player location while the app is hidden, then resumes the normal animation loop on focus, visibility, pointer, or keyboard activity.
+- Added a world pending-work signal so the engine only hibernates after chunk streaming, worker results, mesh rebuilds, and save writes have drained.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.3 - 2026-05-03
 
 ### Changed

@@ -20,7 +20,12 @@ import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEngineEventBus } from "./engineEvents";
 import { shouldAbsorbFragmentIntoRubble } from "./fragmentRubble";
-import { clampSimulationDelta, shouldSkipExpensiveFrame } from "./frameLoop";
+import {
+  IDLE_HEARTBEAT_MS,
+  clampSimulationDelta,
+  shouldHibernateAnimationLoop,
+  shouldSkipExpensiveFrame
+} from "./frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import {
@@ -228,6 +233,8 @@ let nextPlayerLocationAutosaveAt = 0;
 let playerLocationSaveChain: Promise<void> = Promise.resolve();
 let runtimeDisposed = false;
 let animationFrameId: number | null = null;
+let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
+let lastUserActivityAt = performance.now();
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -471,6 +478,7 @@ function setSettingsPanelOpen(open: boolean): void {
 }
 
 window.addEventListener("resize", () => {
+  noteUserActivity();
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(qualityController.renderPixelRatio);
@@ -478,6 +486,7 @@ window.addEventListener("resize", () => {
 }, eventListenerOptions);
 
 document.addEventListener("keydown", (event) => {
+  noteUserActivity();
   if (novaChatPanel.isOpen) {
     if (event.code === "Escape") {
       event.preventDefault();
@@ -542,15 +551,34 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 }, eventListenerOptions);
+document.addEventListener("pointerdown", noteUserActivity, eventListenerOptions);
+document.addEventListener("pointermove", noteUserActivity, eventListenerOptions);
+document.addEventListener("mousemove", noteUserActivity, eventListenerOptions);
 
 document.addEventListener("visibilitychange", () => {
+  noteUserActivity();
   drainFrameClockAfterIdle();
-  if (document.hidden) void queueActivePlayerLocationSave(true);
+  if (document.hidden) {
+    void queueActivePlayerLocationSave(true);
+    enterIdleHeartbeat();
+    return;
+  }
+
+  resumeAnimationLoopAfterIdle();
 }, eventListenerOptions);
-window.addEventListener("focus", drainFrameClockAfterIdle, eventListenerOptions);
-window.addEventListener("pageshow", drainFrameClockAfterIdle, eventListenerOptions);
+window.addEventListener("focus", () => {
+  noteUserActivity();
+  drainFrameClockAfterIdle();
+  resumeAnimationLoopAfterIdle();
+}, eventListenerOptions);
+window.addEventListener("pageshow", () => {
+  noteUserActivity();
+  drainFrameClockAfterIdle();
+  resumeAnimationLoopAfterIdle();
+}, eventListenerOptions);
 window.addEventListener("pagehide", () => {
   void queueActivePlayerLocationSave(true);
+  enterIdleHeartbeat();
 }, eventListenerOptions);
 window.addEventListener("beforeunload", () => {
   void queueActivePlayerLocationSave(true);
@@ -559,6 +587,7 @@ window.addEventListener("beforeunload", () => {
 
 renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault(), eventListenerOptions);
 renderer.domElement.addEventListener("mousedown", (event) => {
+  noteUserActivity();
   if (!inWorld) return;
 
   const activePlayer = requirePlayer();
@@ -573,6 +602,7 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   }
 }, eventListenerOptions);
 renderer.domElement.addEventListener("wheel", (event) => {
+  noteUserActivity();
   if (!inWorld) return;
 
   const direction = getHotbarScrollDirection(event.deltaY);
@@ -630,6 +660,7 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
 
 function animate(): void {
   if (runtimeDisposed) return;
+  animationFrameId = null;
 
   const frameStartedAt = performance.now();
   const rawDelta = clock.getDelta();
@@ -755,7 +786,82 @@ function animate(): void {
 
 function scheduleNextFrame(): void {
   if (runtimeDisposed) return;
+  if (shouldSuspendAnimationLoop(performance.now())) {
+    enterIdleHeartbeat();
+    return;
+  }
+
+  clearIdleHeartbeat();
+  if (animationFrameId !== null) return;
   animationFrameId = requestAnimationFrame(animate);
+}
+
+function enterIdleHeartbeat(): void {
+  if (runtimeDisposed || idleHeartbeatTimerId !== null) return;
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+
+  // Hibernation is intentionally a timer, not another RAF. It gives the app a
+  // tiny pulse for save/visibility bookkeeping while taking WebGL rendering and
+  // per-frame allocations completely off the table during long idle stretches.
+  idleHeartbeatTimerId = setTimeout(handleIdleHeartbeat, IDLE_HEARTBEAT_MS);
+}
+
+function handleIdleHeartbeat(): void {
+  idleHeartbeatTimerId = null;
+  if (runtimeDisposed) return;
+
+  drainFrameClockAfterIdle();
+  if (document.hidden) void queueActivePlayerLocationSave(true);
+
+  if (shouldSuspendAnimationLoop(performance.now())) {
+    enterIdleHeartbeat();
+    return;
+  }
+
+  scheduleNextFrame();
+}
+
+function clearIdleHeartbeat(): void {
+  if (idleHeartbeatTimerId === null) return;
+
+  clearTimeout(idleHeartbeatTimerId);
+  idleHeartbeatTimerId = null;
+}
+
+function resumeAnimationLoopAfterIdle(): void {
+  if (runtimeDisposed || document.hidden) return;
+
+  clearIdleHeartbeat();
+  if (animationFrameId !== null) return;
+  drainFrameClockAfterIdle();
+  scheduleNextFrame();
+}
+
+function noteUserActivity(): void {
+  lastUserActivityAt = performance.now();
+  resumeAnimationLoopAfterIdle();
+}
+
+function shouldSuspendAnimationLoop(now: number): boolean {
+  return shouldHibernateAnimationLoop({
+    pageHidden: document.hidden,
+    inactiveSeconds: Math.max(0, (now - lastUserActivityAt) / 1000),
+    hasActiveWork: hasActiveEngineWork()
+  });
+}
+
+function hasActiveEngineWork(): boolean {
+  if (!inWorld || !world) return false;
+  if (world.hasPendingRuntimeWork()) return true;
+  if (debrisSettlerStats.regions > 0) return true;
+
+  for (const toy of toys) {
+    if (!toy.isExpired && !toy.isSleeping) return true;
+  }
+  return false;
 }
 
 function resetFrameMetersAfterIdle(): void {
@@ -1473,6 +1579,7 @@ function disposeRuntime(): void {
     cancelAnimationFrame(animationFrameId);
     animationFrameId = null;
   }
+  clearIdleHeartbeat();
 
   mainAbortController.abort();
   if (inWorld) {
