@@ -28,7 +28,6 @@ import {
   PhysicsToy,
   PhysicsToyCollider,
   createEmptyPhysicsToyCollisionStats,
-  hasMeaningfulTerrainImpactSince,
   type PhysicsImpact
 } from "../src/physics";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
@@ -2196,7 +2195,7 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   assert(core.isExpired, "a core should self-destruct when it destroys the impacted rubble pile");
 });
 
-test("terrain impacts claim a core before adjacent rubble can take same-frame damage", () => {
+test("terrain impacts resolve before adjacent rubble can take same-frame damage", () => {
   const scene = new THREE.Scene();
   const world = new VoxelWorld({ seed: "terrain-rubble-impact-priority-test" });
   const rubble = new RubbleField(scene);
@@ -2224,16 +2223,13 @@ test("terrain impacts claim a core before adjacent rubble can take same-frame da
 
   const terrainImpactStartIndex = impacts.length;
   core.update(1 / 60, terrainAndRubbleCollisionWorld, impacts);
-
+  const terrainImpactsForCore = impacts.slice(terrainImpactStartIndex).filter((impact) => impact.source === core);
   assert(
-    hasMeaningfulTerrainImpactSince(impacts, core, terrainImpactStartIndex),
-    "the terrain hit should be detected before rubble collision is considered"
+    terrainImpactsForCore.length >= 1,
+    "the core should report terrain hits before rubble is considered"
   );
-  if (!hasMeaningfulTerrainImpactSince(impacts, core, terrainImpactStartIndex)) {
-    rubble.resolveCoreCollision(core);
-  }
 
-  for (const impact of impacts) {
+  for (const impact of terrainImpactsForCore) {
     const result = world.damageBlock(
       impact.block.x,
       impact.block.y,
@@ -2242,6 +2238,7 @@ test("terrain impacts claim a core before adjacent rubble can take same-frame da
     );
     if (result?.destroyed) core.expire();
   }
+  if (!core.isExpired) rubble.resolveCoreCollision(core);
 
   assert(core.isExpired, "the terrain destruction should consume the core");
   assertEqual(world.getBlock(0, targetY, 0), BLOCK.air, "the directly impacted terrain block should be destroyed");
@@ -2249,6 +2246,31 @@ test("terrain impacts claim a core before adjacent rubble can take same-frame da
     rubble.getStats().health,
     rubbleHealthBefore,
     "adjacent rubble should survive when the core already spent its hit on terrain"
+  );
+});
+
+test("supported rubble survives manual removal of adjacent terrain", () => {
+  const scene = new THREE.Scene();
+  const world = new TestRubbleWorld();
+  const rubble = new RubbleField(scene);
+  world.setBlock(0, 0, 0, BLOCK.stone);
+  world.setBlock(1, 1, 0, BLOCK.stone);
+
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 6);
+  rubble.settle(world);
+  const healthBefore = rubble.getStats().health;
+
+  world.setBlock(1, 1, 0, BLOCK.air);
+  rubble.settle(world);
+
+  assertEqual(
+    rubble.getStats().health,
+    healthBefore,
+    "removing a same-height neighboring block should not delete a pile with terrain under it"
+  );
+  assert(
+    rubble.raycast(new THREE.Vector3(0.5, 1.08, -2), new THREE.Vector3(0, 0, 1), 6),
+    "the supported pile should still have a visible/collidable cover proxy"
   );
 });
 

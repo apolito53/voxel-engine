@@ -62,7 +62,6 @@ import {
   PhysicsToy,
   PhysicsToyCollider,
   createEmptyPhysicsToyCollisionStats,
-  hasMeaningfulTerrainImpactSince,
   type PhysicsImpact,
   type PhysicsToyCollisionStats
 } from "./physics";
@@ -715,7 +714,13 @@ function animate(): void {
       if (!toy) continue;
       const terrainImpactStartIndex = physicsImpacts.length;
       toy.update(delta, terrainAndRubbleCollisionWorld, physicsImpacts);
-      if (!hasMeaningfulTerrainImpactSince(physicsImpacts, toy, terrainImpactStartIndex)) {
+
+      // Terrain impacts are projectile-spending events. Handle them before the
+      // same core gets a rubble collision pass; otherwise one shot can remove a
+      // voxel and also chew up an adjacent rubble pile while the impact is still
+      // waiting in the frame buffer.
+      processPhysicsImpacts(activeWorld, terrainImpactStartIndex, physicsImpacts.length, damagedBlockKeysThisFrame);
+      if (!toy.isExpired) {
         rubbleField.resolveCoreCollision(toy);
       }
     }
@@ -723,9 +728,6 @@ function animate(): void {
     emitRubbleBatchEvents();
     absorbSettledFragmentsIntoRubble();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
-    for (const impact of physicsImpacts) {
-      handlePhysicsImpact(activeWorld, impact, damagedBlockKeysThisFrame);
-    }
     rubbleField.settle(activeWorld);
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
@@ -900,6 +902,19 @@ function updateHud(): void {
   const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry);
   hudTitle.textContent = `Voxel Sandbox Engine | ${selectedLabel}${modeSuffix}${novaSuffix}`;
   playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
+}
+
+function processPhysicsImpacts(
+  activeWorld: VoxelWorld,
+  startIndex: number,
+  endIndex: number,
+  damagedBlocksThisFrame: Set<string>
+): void {
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const impact = physicsImpacts[index];
+    if (!impact) continue;
+    handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame);
+  }
 }
 
 function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats: RubbleFieldStats): void {

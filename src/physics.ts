@@ -48,24 +48,6 @@ export type PhysicsImpact = {
   readonly position: THREE.Vector3;
 };
 
-export function hasMeaningfulTerrainImpactSince(
-  impacts: readonly PhysicsImpact[],
-  source: PhysicsToy,
-  startIndex: number,
-  minSpeed = BLOCK_DAMAGE_IMPACT_SPEED
-): boolean {
-  // The main loop lets voxel terrain damage run after toy movement, but rubble
-  // collision happens in the same physics phase. This helper answers whether a
-  // core already earned a terrain hit this frame so it cannot also splash-damage
-  // adjacent rubble before the terrain handler consumes/expends the projectile.
-  for (let index = Math.max(0, Math.floor(startIndex)); index < impacts.length; index += 1) {
-    const impact = impacts[index];
-    if (impact.source === source && impact.speed > minSpeed) return true;
-  }
-
-  return false;
-}
-
 type PhysicsToyOptions = {
   readonly radius?: number;
   readonly geometry?: THREE.BufferGeometry;

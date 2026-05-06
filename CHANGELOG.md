@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.6 - 2026-05-06
+
+### Fixed
+
+- Resolved terrain-hit damage immediately after each physics core moves, before that core can collide with rubble, so a projectile consumed by block destruction cannot also delete an adjacent pile in the same frame.
+- Added regression coverage for both core impact ordering and manual adjacent-terrain removal: adjacent same-height block edits should not delete a supported rubble pile.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.5 - 2026-05-06
 
 ### Fixed
