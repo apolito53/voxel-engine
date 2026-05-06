@@ -16,7 +16,11 @@ const RUBBLE_MAX_VISUAL_PIECES = 36;
 // the proxy mesh stops growing, so craters do not seal from one normal break.
 export const RUBBLE_BLOCK_PROMOTION_PIECES = 48;
 const RUBBLE_MAX_PATCH_CELLS = 18;
-const RUBBLE_PIECE_HEALTH = 1;
+// `pieces` is material volume for cover shape/promotion; health is gameplay
+// durability. A full block fracture produces 27 material units, but it should
+// not also create a 27-HP object when ordinary terrain has 2-3 HP.
+export const RUBBLE_FULL_BLOCK_HEALTH = 3;
+const RUBBLE_PIECE_HEALTH = RUBBLE_FULL_BLOCK_HEALTH / BLOCK_RUBBLE_MATERIAL_UNITS;
 const RUBBLE_NEARBY_SEARCH_PADDING = 1.25;
 const RUBBLE_MIN_HEIGHT = 0.04;
 const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.032;
@@ -40,7 +44,7 @@ const RUBBLE_MAX_FOOTPRINT_RADIUS = 0.58;
 const RUBBLE_CORE_RESTITUTION = 1.55;
 const RUBBLE_CORE_DAMPING = 0.95;
 const RUBBLE_COLLISION_EPSILON = 0.000001;
-const RUBBLE_NEIGHBOR_CHIP_DAMAGE = 0.5;
+const RUBBLE_NEIGHBOR_CHIP_DAMAGE = 0.25;
 
 type RubbleCell = {
   readonly x: number;

@@ -31,7 +31,12 @@ import {
   type PhysicsImpact
 } from "../src/physics";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
-import { RUBBLE_BLOCK_PROMOTION_PIECES, RubbleField, type RubbleFieldWorld } from "../src/rubble";
+import {
+  RUBBLE_BLOCK_PROMOTION_PIECES,
+  RUBBLE_FULL_BLOCK_HEALTH,
+  RubbleField,
+  type RubbleFieldWorld
+} from "../src/rubble";
 import {
   CROUCH_OR_DESCEND_KEY,
   CROUCH_SPEED,
@@ -227,6 +232,10 @@ function assertUint8ArraysEqual(actual: Uint8Array, expected: Uint8Array, messag
       throw new Error(`${message}. First difference at ${index}: ${actual[index]} !== ${expected[index]}.`);
     }
   }
+}
+
+function expectedRubbleHealthForPieces(pieces: number): number {
+  return (pieces / BLOCK_RUBBLE_MATERIAL_UNITS) * RUBBLE_FULL_BLOCK_HEALTH;
 }
 
 function hasAnyDifference(left: Uint8Array, right: Uint8Array): boolean {
@@ -1696,10 +1705,10 @@ test("expired quality-scaled fragments still graduate into rubble", () => {
     BLOCK_RUBBLE_MATERIAL_UNITS,
     "Potato's two visible shards should still deposit one full block of rubble material"
   );
-  assertEqual(
+  assertNearlyEqual(
     rubbleStats.health,
-    BLOCK_RUBBLE_MATERIAL_UNITS,
-    "expired quality-scaled shards should preserve full rubble health"
+    RUBBLE_FULL_BLOCK_HEALTH,
+    "expired quality-scaled shards should preserve one block worth of rubble durability"
   );
   assertEqual(scene.children.length, 1, "expired quality-scaled debris should still render as one rubble proxy");
 });
@@ -2024,7 +2033,7 @@ test("debris settler finalizes oldest regions when pair pressure exceeds the cap
   assertEqual(rubble.getStats().pieces, oldestFragments.length, "forced finalization should preserve oldest-region rubble material");
 });
 
-test("batched rubble absorption preserves totals and walkable support", () => {
+test("batched rubble absorption preserves material and scales health", () => {
   const scene = new THREE.Scene();
   const world = new TestRubbleWorld();
   const rubble = new RubbleField(scene);
@@ -2038,7 +2047,11 @@ test("batched rubble absorption preserves totals and walkable support", () => {
 
   const stats = rubble.getStats();
   assertEqual(stats.pieces, 11, "batched rubble should preserve piece totals");
-  assertEqual(stats.health, 11, "batched rubble should preserve health totals");
+  assertNearlyEqual(
+    stats.health,
+    expectedRubbleHealthForPieces(11),
+    "batched rubble health should scale separately from material totals"
+  );
   assertEqual(stats.clusters, 1, "batched nearby samples should merge into one cover patch");
   assert(
     rubble.getSupportHeight({
@@ -2073,7 +2086,11 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   const rubbleStats = rubble.getStats();
   assertEqual(rubbleStats.clusters, 1, "absorbed fragments should merge into one cluster");
   assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
-  assertEqual(rubbleStats.health, 2, "absorbed fragments should add destructible cover health");
+  assertNearlyEqual(
+    rubbleStats.health,
+    expectedRubbleHealthForPieces(2),
+    "absorbed fragments should add scaled destructible cover health"
+  );
   assert(
     rubbleStats.maxCoverHeight > 0.2 && rubbleStats.maxCoverHeight < 0.4,
     "absorbed fragments should report the draped surface height over the visible debris"
@@ -2135,10 +2152,10 @@ test("quality-reduced fragments still settle into full rubble material", () => {
     BLOCK_RUBBLE_MATERIAL_UNITS,
     "low visible debris counts should still produce one full block of rubble material"
   );
-  assertEqual(
+  assertNearlyEqual(
     rubbleStats.health,
-    BLOCK_RUBBLE_MATERIAL_UNITS,
-    "rubble health should follow material units instead of visible shard count"
+    RUBBLE_FULL_BLOCK_HEALTH,
+    "rubble health should follow full-block durability instead of visible shard count"
   );
   assertEqual(scene.children.length, 1, "weighted rubble should still render as one merged proxy");
 });
@@ -2170,14 +2187,14 @@ test("rubble damage removes the impacted pile and only chips immediate neighbors
 
   assertEqual(targetCellHit, null, "the impacted pile should be removed first");
   assert(neighborCellHit, "the healthier neighboring pile should survive sharing a cluster");
-  assertEqual(rubble.getStats().pieces, 6, "the neighboring pile should remain as a visible cover cell");
+  assertEqual(rubble.getStats().pieces, 4, "the neighboring pile should only lose a small collateral chip");
   assertEqual(damageEvents.length, 2, "destroying one pile should emit direct and collateral damage events");
   assertEqual(damageEvents[0]?.destroyed, true, "the first event should describe the direct destroyed pile");
   assertEqual(damageEvents[0]?.collateral, false, "the direct hit should not be marked as collateral");
   assertEqual(damageEvents[1]?.collateral, true, "neighboring chip damage should be marked as collateral");
-  assertEqual(
+  assertNearlyEqual(
     damageEvents[1]?.remainingHealth,
-    5.5,
+    expectedRubbleHealthForPieces(6) - 0.25,
     "collateral damage should chip neighboring rubble instead of deleting it"
   );
   assertEqual(

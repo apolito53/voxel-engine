@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.8 - 2026-05-06
+
+### Changed
+
+- Decoupled rubble material volume from rubble durability. A destroyed block still contributes one full 3x3x3 fracture grid worth of cover material for shape, support, quality parity, and dense-pile promotion, but one block worth of rubble now has 3 HP instead of accidentally inheriting 27 HP.
+- Reduced the collateral chip applied to neighboring rubble after a directly hit pile breaks, keeping adjacent cover from feeling like it was secretly hit by the full impact.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.3.7 - 2026-05-06
 
 ### Added
