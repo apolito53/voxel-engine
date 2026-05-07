@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.6 - 2026-05-07
+
+### Fixed
+
+- Changed active-bubble debris sleep from whole-region to glue-connected component checks, so one supported pile can no longer freeze unrelated fragments floating above the same crater.
+- Added support-anchored sleep tracking to debris fragments so already-sleeping, legitimately supported clumps can still anchor their own component without making old unsupported sleepers count as terrain support.
+- Added a mixed-region regression test where a supported clump sleeps while an unconnected floating shard remains active.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/?debrisComponentSmoke=1778135000000`: loaded `Default World` and confirmed no fresh console errors.
+
 ## 0.4.5 - 2026-05-07
 
 ### Fixed

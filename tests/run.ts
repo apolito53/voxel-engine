@@ -2010,6 +2010,43 @@ test("debris settler sleeps quiet supported clumps even when upper shards are st
   assertEqual(rubble.getStats().pieces, 0, "nearby supported clumps should remain physical inside the active bubble");
 });
 
+test("debris settler only sleeps the supported component inside a mixed settling region", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const activeCenter = new THREE.Vector3(0.64, 1.2, 0.5);
+  const supportedLower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
+  const supportedUpper = createTestFragment(BLOCK.grass, 0.75, 1.18, 0.5);
+  const unsupportedFloater = createTestFragment(BLOCK.grass, 1.8, 1.8, 0.5);
+  const floorWorld = {
+    isSolid(_x: number, y: number, _z: number): boolean {
+      return y === 0;
+    }
+  };
+
+  supportedLower.velocity.set(0, 0, 0);
+  supportedUpper.velocity.set(0.06, 0, 0);
+  unsupportedFloater.velocity.set(0.04, 0, 0);
+  unsupportedFloater.angularVelocity.set(7, 0, 0);
+  supportedLower.update(1 / 120, floorWorld);
+
+  settler.registerFracture(BLOCK.grass, activeCenter, [supportedLower, supportedUpper, unsupportedFloater]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+
+  assert(supportedLower.isSleeping, "the terrain-supported clump should sleep");
+  assert(supportedUpper.isSleeping, "the glued upper shard should inherit support from its component");
+  assert(
+    !unsupportedFloater.isSleeping,
+    "an unconnected unsupported fragment in the same region should not freeze in midair"
+  );
+});
+
 test("debris settler does not sleep quiet unsupported clumps in midair", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());

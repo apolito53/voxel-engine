@@ -100,6 +100,7 @@ export class PhysicsToy {
   private ageSeconds = 0;
   private settledSeconds = 0;
   private supportContactLastUpdate = false;
+  private supportAnchoredSleep = false;
   private sleeping = false;
   private expired = false;
 
@@ -173,10 +174,15 @@ export class PhysicsToy {
     return this.supportContactLastUpdate;
   }
 
+  get isSupportAnchoredSleep(): boolean {
+    return this.sleeping && this.supportAnchoredSleep;
+  }
+
   wakeFromToyCollision(): void {
     if (!this.sleeping) return;
 
     this.sleeping = false;
+    this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
   }
 
@@ -186,11 +192,12 @@ export class PhysicsToy {
     // hold references for this frame.
     this.expired = true;
     this.sleeping = false;
+    this.supportAnchoredSleep = false;
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
   }
 
-  sleepInPlace(): void {
+  sleepInPlace(supportAnchored = true): void {
     if (!this.isInstancedFragment || this.expired) return;
 
     // Settling regions can prove a linked clump is quiet even when an upper
@@ -198,6 +205,7 @@ export class PhysicsToy {
     // Let those fragments use the same cheap sleeping state as ground-settled
     // debris so they stop visually spinning while remaining shoveable by cores.
     this.sleeping = true;
+    this.supportAnchoredSleep = supportAnchored;
     this.settledSeconds = this.sleepAfterSeconds;
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
@@ -386,6 +394,7 @@ export class PhysicsToy {
 
     // Sleeping debris keeps the visual aftermath without paying collision costs forever.
     this.sleeping = true;
+    this.supportAnchoredSleep = true;
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
   }

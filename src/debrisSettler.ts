@@ -397,27 +397,74 @@ export class DebrisSettler {
     liveFragments: readonly PhysicsToy[]
   ): boolean {
     if (liveFragments.length === 0) return true;
-    if (liveFragments.every((fragment) => fragment.isSleeping)) return true;
+    if (liveFragments.every((fragment) => fragment.isSupportAnchoredSleep)) return true;
 
-    const hasSupportAnchor = liveFragments.some((fragment) => (
-      fragment.isSleeping ||
-      fragment.hadSupportContactLastUpdate
-    ));
-    if (!hasSupportAnchor || region.glueLinks.size === 0) return false;
+    // A settling region can cover multiple disconnected piles after a spammy
+    // explosion. Do quiet checks per glue-connected component so a supported
+    // floor clump does not accidentally sleep unrelated shards floating above
+    // the crater.
+    return this.getGlueConnectedComponents(region, liveFragments)
+      .every((component) => this.isComponentQuietAndSupported(component));
+  }
 
-    // Glued upper shards often never satisfy PhysicsToy's old "touched solid"
-    // sleep rule because they are resting on other debris, not terrain. Once at
-    // least one linked shard is actually supported by terrain/rubble, linear
-    // calm is enough to sleep the whole clump; otherwise high angular velocity
-    // can keep visually settled cubes spinning forever.
-    return liveFragments.every((fragment) => (
+  private isFragmentLinearQuiet(fragment: PhysicsToy): boolean {
+    return fragment.velocity.lengthSq() <= DEBRIS_REGION_QUIET_SPEED ** 2;
+  }
+
+  private isFragmentSupportAnchor(fragment: PhysicsToy): boolean {
+    return fragment.isSupportAnchoredSleep || fragment.hadSupportContactLastUpdate;
+  }
+
+  private isComponentQuietAndSupported(component: readonly PhysicsToy[]): boolean {
+    if (component.length === 0) return true;
+    if (!component.some((fragment) => this.isFragmentSupportAnchor(fragment))) return false;
+
+    return component.every((fragment) => (
       fragment.isSleeping ||
       this.isFragmentLinearQuiet(fragment)
     ));
   }
 
-  private isFragmentLinearQuiet(fragment: PhysicsToy): boolean {
-    return fragment.velocity.lengthSq() <= DEBRIS_REGION_QUIET_SPEED ** 2;
+  private getGlueConnectedComponents(
+    region: SettlingRegion,
+    liveFragments: readonly PhysicsToy[]
+  ): PhysicsToy[][] {
+    const liveSet = new Set(liveFragments);
+    const adjacency = new Map<PhysicsToy, PhysicsToy[]>();
+    for (const fragment of liveFragments) {
+      adjacency.set(fragment, []);
+    }
+
+    for (const link of region.glueLinks.values()) {
+      if (!liveSet.has(link.left) || !liveSet.has(link.right)) continue;
+
+      adjacency.get(link.left)?.push(link.right);
+      adjacency.get(link.right)?.push(link.left);
+    }
+
+    const components: PhysicsToy[][] = [];
+    const visited = new Set<PhysicsToy>();
+    for (const fragment of liveFragments) {
+      if (visited.has(fragment)) continue;
+
+      const component: PhysicsToy[] = [];
+      const stack = [fragment];
+      visited.add(fragment);
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current) continue;
+
+        component.push(current);
+        for (const neighbor of adjacency.get(current) ?? []) {
+          if (visited.has(neighbor)) continue;
+
+          visited.add(neighbor);
+          stack.push(neighbor);
+        }
+      }
+      components.push(component);
+    }
+    return components;
   }
 
   private shouldFinalizeOutsideActiveBubble(region: SettlingRegion): boolean {
@@ -706,20 +753,20 @@ export class DebrisSettler {
   }
 
   private sleepQuietRegionFragments(region: SettlingRegion): void {
-    if (
-      region.settledAt === null ||
-      this.elapsedSeconds < region.settledAt + DEBRIS_REGION_QUIET_SLEEP_SECONDS
-    ) {
-      return;
-    }
+    if (this.elapsedSeconds < region.glueAfter + DEBRIS_REGION_QUIET_SLEEP_SECONDS) return;
 
     // Inside the active debris bubble, a quiet glued clump should remain as
     // shoveable debris rather than immediately finalizing into rubble. Put the
     // fragments into the same sleeping state terrain-supported shards use so
     // they stop spinning in place while the broadphase can still wake them when
-    // a physics core hits.
-    for (const fragment of region.fragments) {
-      if (!fragment.isExpired) fragment.sleepInPlace();
+    // a physics core hits. Do this per glue-connected component: one grounded
+    // pile should not freeze unrelated fragments that are still hanging in the air.
+    for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredFragments(region))) {
+      if (!this.isComponentQuietAndSupported(component)) continue;
+
+      for (const fragment of component) {
+        if (!fragment.isExpired) fragment.sleepInPlace(true);
+      }
     }
   }
 
