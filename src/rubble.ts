@@ -205,7 +205,9 @@ export class RubbleField {
       block: fragment.fragmentBlock,
       position: fragment.mesh.position.clone(),
       pieces: fragment.rubbleMaterialUnits,
-      visualChunk: createRubbleVisualChunkSample(fragment)
+      visualChunk: shouldBakeFragmentVisualChunk(fragment)
+        ? createRubbleVisualChunkSample(fragment)
+        : undefined
     }]);
     return true;
   }
@@ -931,6 +933,13 @@ function createRubbleVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkS
     quaternion: fragment.mesh.quaternion.clone(),
     size: BLOCK_FRAGMENT_VISUAL_SIZE
   };
+}
+
+function shouldBakeFragmentVisualChunk(fragment: PhysicsToy): boolean {
+  // Baked chunks are persistent static geometry. Only settled debris should
+  // leave a cuboid silhouette; airborne fragments still preserve material via
+  // the rubble surface samples, but they must not become floating cube fossils.
+  return fragment.isSleeping && !fragment.isExpired;
 }
 
 function createStoredVisualChunkSample(

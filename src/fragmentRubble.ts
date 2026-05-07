@@ -23,9 +23,10 @@ export function shouldAbsorbFragmentIntoRubble(
   // sleeping fragments graduate into rubble.
   if (!isActiveBubbleConfigured(options)) return toy.isSleeping;
 
-  // In the browser loop, even awake orphan fragments outside the active bubble
-  // should become cheap rubble instead of staying as unowned physics bodies.
-  return isFragmentOutsideActiveBubble(toy, options);
+  // Distance should not freeze visible shards in mid-flight. Outside-bubble
+  // orphan debris can become cheap rubble once it is actually sleeping; object
+  // budget pressure has its own explicit material-preserving fallback.
+  return toy.isSleeping && isFragmentOutsideActiveBubble(toy, options);
 }
 
 function isActiveBubbleConfigured(options: FragmentRubbleAbsorptionOptions): boolean {

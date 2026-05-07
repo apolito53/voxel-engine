@@ -1726,16 +1726,26 @@ test("orphan fragments respect the active debris bubble before rubble absorption
     new THREE.Vector3(20, 1.1, 0.5),
     new THREE.Vector3(0, 0, 0)
   );
+  const farSleepingFragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(20, 1.1, 0.5),
+    new THREE.Vector3(0, 0, 0)
+  );
 
   sleepTestFragment(nearFragment);
+  sleepTestFragment(farSleepingFragment);
 
   assert(
     !shouldAbsorbFragmentIntoRubble(nearFragment, { activeCenter, activeRadius: 8 }),
     "sleeping orphan debris should stay physical while still inside the player bubble"
   );
   assert(
-    shouldAbsorbFragmentIntoRubble(farFragment, { activeCenter, activeRadius: 8 }),
-    "orphan debris outside the player bubble should become cheap rubble even before it sleeps"
+    !shouldAbsorbFragmentIntoRubble(farFragment, { activeCenter, activeRadius: 8 }),
+    "awake orphan debris outside the player bubble should not freeze into rubble mid-flight"
+  );
+  assert(
+    shouldAbsorbFragmentIntoRubble(farSleepingFragment, { activeCenter, activeRadius: 8 }),
+    "sleeping orphan debris outside the player bubble should become cheap rubble"
   );
 });
 
@@ -2071,7 +2081,13 @@ test("debris settler converts far bubble debris into rubble", () => {
   sleepTestFragment(fragment);
 
   settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5), [fragment]);
-  const stats = settler.update(0.01, rubble, {
+  const beforeGrace = settler.update(DEBRIS_REGION_FINALIZE_SECONDS - 0.01, rubble, {
+    activeCenter: new THREE.Vector3(20, 1.1, 0.5),
+    activeRadius: 4
+  });
+  assertEqual(beforeGrace.finalizedBatches, 0, "far sleeping debris should keep the normal settle grace before baking");
+
+  const stats = settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS + 0.02, rubble, {
     activeCenter: new THREE.Vector3(20, 1.1, 0.5),
     activeRadius: 4
   });
@@ -2080,6 +2096,25 @@ test("debris settler converts far bubble debris into rubble", () => {
   assertEqual(rubble.getStats().pieces, 3, "far finalization should preserve fragment material");
   assert(fragment.isExpired, "finalized far debris should be marked for normal toy pruning");
   assertEqual(scene.children.length, 1, "far debris should become one persistent rubble mesh");
+});
+
+test("debris settler keeps far airborne bubble debris alive until it settles", () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const fragment = createTestFragment(BLOCK.stone, 0.5, 2.1, 0.5, 3);
+  fragment.velocity.set(2, 1, 0);
+
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 2.1, 0.5), [fragment]);
+  const stats = settler.update(DEBRIS_REGION_FINALIZE_SECONDS + 0.5, rubble, {
+    activeCenter: new THREE.Vector3(20, 2.1, 0.5),
+    activeRadius: 4
+  });
+
+  assertEqual(stats.finalizedBatches, 0, "outside-bubble debris should not bake while still airborne");
+  assert(settler.owns(fragment), "airborne debris should remain owned by its settling region");
+  assert(!fragment.isExpired, "airborne debris should not disappear mid-flight");
+  assertEqual(rubble.getStats().pieces, 0, "airborne debris should not create static rubble chunks yet");
 });
 
 test("debris settler pressure relief finalizes farthest regions first", () => {
@@ -2157,7 +2192,7 @@ test("debris settler hard-caps region lifetime after repeated nearby fractures",
   assertEqual(afterCap.finalizedBatches, 1, "region should finalize once the first-fracture cap is reached");
 });
 
-test("debris settler finalizes oldest regions when pair pressure exceeds the cap", () => {
+test("debris settler throttles old local contacts when pair pressure exceeds the cap", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const oldestFragments: PhysicsToy[] = [];
@@ -2176,9 +2211,22 @@ test("debris settler finalizes oldest regions when pair pressure exceeds the cap
 
   const stats = settler.update(DEBRIS_REGION_CONTACT_BREAKUP_SECONDS + 0.01, rubble);
   assertEqual(DEBRIS_REGION_PAIR_BUDGET, 768, "test should track the intended debris pair budget");
-  assertEqual(stats.forcedFinalizations, 1, "pair pressure should force the oldest active region to finalize");
-  assertEqual(stats.regions, 1, "newer under-budget region should stay alive after pressure relief");
-  assertEqual(rubble.getStats().pieces, oldestFragments.length, "forced finalization should preserve oldest-region rubble material");
+  assertEqual(stats.forcedFinalizations, 0, "pair pressure should not bake airborne debris into static rubble");
+  assertEqual(stats.regions, 2, "both regions should stay alive after local contact throttling");
+  assertEqual(rubble.getStats().pieces, 0, "pair-pressure throttling should not create mid-flight rubble");
+  assert(oldestFragments.every((fragment) => !fragment.isExpired), "oldest debris should keep flying instead of despawning");
+
+  const nextFrame = settler.update(0.01, rubble);
+  assert(
+    nextFrame.pairChecks <= DEBRIS_REGION_PAIR_BUDGET,
+    "pair-pressure throttling should keep the remaining debris-debris work under the hard cap"
+  );
+  assertEqual(
+    nextFrame.forcedFinalizations,
+    0,
+    "continued pair-pressure throttling should not bake live debris into static rubble"
+  );
+  assertEqual(rubble.getStats().pieces, 0, "continued contact throttling should still avoid mid-flight rubble");
 });
 
 test("batched rubble absorption preserves material and scales health", () => {
@@ -2227,6 +2275,8 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
     new THREE.Vector3(0.72, 0.24, 0.65),
     new THREE.Vector3(0, 0, 0)
   );
+  firstFragment.sleepInPlace();
+  secondFragment.sleepInPlace();
 
   assert(rubble.absorbFragment(firstFragment), "settled debris should be eligible for rubble absorption");
   assert(rubble.absorbFragment(secondFragment), "nearby debris of the same block should merge into one pile");
@@ -2275,6 +2325,7 @@ test("hybrid rubble meshes add baked chunks while keeping cheap support", () => 
     new THREE.Vector3(0, 0, 0)
   );
   fragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
+  fragment.sleepInPlace();
 
   assert(hybridRubble.absorbFragment(fragment), "a visual fragment should be absorbable into hybrid rubble");
   const hybridStats = hybridRubble.getStats();

@@ -147,7 +147,7 @@ export class DebrisSettler {
     // until the region converts. Otherwise the old per-fragment physics path
     // pulls a nice clump back down into one flat floor layer before absorption.
     this.enforceExistingGlueLinks();
-    this.enforcePairBudget(rubbleField);
+    this.enforcePairBudget();
     this.resolveActiveRegionCollisions(Math.max(0, delta));
     this.enforceExistingGlueLinks();
     this.finalizeDueRegions(rubbleField, options);
@@ -356,7 +356,10 @@ export class DebrisSettler {
           continue;
         }
 
-        this.finalizeRegion(region, rubbleField, false);
+        if (this.shouldFinalizeOutsideActiveBubble(region)) {
+          this.sleepQuietRegionFragments(region);
+          this.finalizeRegion(region, rubbleField, false);
+        }
         continue;
       }
 
@@ -412,7 +415,12 @@ export class DebrisSettler {
     ));
   }
 
-  private enforcePairBudget(rubbleField: RubbleField): void {
+  private shouldFinalizeOutsideActiveBubble(region: SettlingRegion): boolean {
+    if (region.settledAt === null) return false;
+    return this.elapsedSeconds >= region.finalizeAt;
+  }
+
+  private enforcePairBudget(): void {
     let estimatedPairs = this.estimateActiveCollisionPairs();
     if (estimatedPairs <= DEBRIS_REGION_PAIR_BUDGET) return;
 
@@ -420,7 +428,12 @@ export class DebrisSettler {
       if (!this.regionsById.has(region.id)) continue;
       if (!this.isCollisionActive(region)) continue;
 
-      this.finalizeRegion(region, rubbleField, true);
+      // Pair pressure is a CPU throttle, not a gameplay/material signal. The
+      // old path finalized whole regions here, which made dense craters appear
+      // to despawn or freeze mid-flight inside the active bubble. Instead, end
+      // local debris-debris contact work for the oldest noisy region and let
+      // those fragments keep flying/settling as ordinary physics toys.
+      region.collisionUntil = this.elapsedSeconds - DEBRIS_REGION_COLLISION_EPSILON;
       estimatedPairs = this.estimateActiveCollisionPairs();
       if (estimatedPairs <= DEBRIS_REGION_PAIR_BUDGET) break;
     }
@@ -748,7 +761,9 @@ export class DebrisSettler {
           block,
           position: this.getSamplePosition(fragment, unitIndex, materialUnits),
           pieces: 1,
-          visualChunk: unitIndex === 0 ? this.createVisualChunkSample(fragment) : undefined
+          visualChunk: unitIndex === 0 && fragment.isSleeping
+            ? this.createVisualChunkSample(fragment)
+            : undefined
         });
       }
     }

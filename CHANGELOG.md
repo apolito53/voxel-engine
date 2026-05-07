@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.4 - 2026-05-07
+
+### Fixed
+
+- Stopped debris pair-pressure relief from baking active-bubble regions into static rubble. Over-budget local contact work now shuts off the oldest contact theater instead of despawning live debris mid-flight.
+- Delayed outside-bubble settling-region finalization until fragments are actually quiet/sleeping, so distance cleanup no longer turns airborne debris into floating baked rubble.
+- Limited baked rubble visual chunks to settled fragments. Awake fragments can still preserve their material through rubble surface samples, but they no longer leave floating cube fossils when forced cleanup happens.
+- Tightened orphan fragment absorption so outside-bubble debris waits until it is sleeping before it converts into persistent rubble.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.4.3 - 2026-05-07
 
 ### Changed
