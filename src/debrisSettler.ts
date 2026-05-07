@@ -143,9 +143,9 @@ export class DebrisSettler {
     this.elapsedSeconds += Math.max(0, delta);
     this.resetFrameStats();
 
-    // Pair checks are short-lived, but glue links must keep shaping the heap
-    // until the region converts. Otherwise the old per-fragment physics path
-    // pulls a nice clump back down into one flat floor layer before absorption.
+    // Pair checks are short-lived legacy settling-theater for manual fragment
+    // toys. Rapier-driven fragments keep the same region/material ownership,
+    // but the rigid-body solver owns their contacts, stacking, and sleep state.
     this.enforceExistingGlueLinks();
     this.enforcePairBudget();
     this.resolveActiveRegionCollisions(Math.max(0, delta));
@@ -177,10 +177,16 @@ export class DebrisSettler {
 
     let finalizedFragments = 0;
     const farthestRegions = [...this.regionsById.values()]
-      .sort((left, right) => (
-        this.getRegionDistanceSqToPoint(right, activeCenter) -
-        this.getRegionDistanceSqToPoint(left, activeCenter)
-      ));
+      .sort((left, right) => {
+        const leftSleeping = this.isRegionSleeping(left);
+        const rightSleeping = this.isRegionSleeping(right);
+        if (leftSleeping !== rightSleeping) return leftSleeping ? -1 : 1;
+
+        return (
+          this.getRegionDistanceSqToPoint(right, activeCenter) -
+          this.getRegionDistanceSqToPoint(left, activeCenter)
+        );
+      });
 
     for (const region of farthestRegions) {
       if (!this.regionsById.has(region.id)) continue;
@@ -352,6 +358,10 @@ export class DebrisSettler {
       // baked pile while the player is studying it.
       if (this.isActiveBubbleConfigured(options)) {
         if (this.isRegionInsideActiveBubble(region, options)) {
+          if (this.shouldFinalizeSleepingRigidRegion(region)) {
+            this.finalizeRegion(region, rubbleField, false);
+            continue;
+          }
           this.sleepQuietRegionFragments(region);
           continue;
         }
@@ -398,6 +408,9 @@ export class DebrisSettler {
     liveFragments: readonly PhysicsToy[]
   ): boolean {
     if (liveFragments.length === 0) return true;
+    if (this.isRigidBodyRegion(region)) {
+      return liveFragments.every((fragment) => fragment.isSleeping);
+    }
     if (liveFragments.every((fragment) => fragment.isSupportAnchoredSleep)) return true;
 
     // A settling region can cover multiple disconnected piles after a spammy
@@ -529,6 +542,18 @@ export class DebrisSettler {
     return this.elapsedSeconds >= region.finalizeAt;
   }
 
+  private shouldFinalizeSleepingRigidRegion(region: SettlingRegion): boolean {
+    if (!this.isRigidBodyRegion(region)) return false;
+    if (region.settledAt === null) return false;
+
+    // Rapier bodies are the expensive truth only while debris is moving. Once a
+    // rigid-body region has genuinely slept, bake the actual settled cube poses
+    // into the rubble field even inside the player bubble. The player keeps the
+    // pile silhouette, support, material, and future re-break data without the
+    // CPU solving a dead stack forever.
+    return this.elapsedSeconds >= region.finalizeAt;
+  }
+
   private enforcePairBudget(): void {
     let estimatedPairs = this.estimateActiveCollisionPairs();
     if (estimatedPairs <= DEBRIS_REGION_PAIR_BUDGET) return;
@@ -550,6 +575,7 @@ export class DebrisSettler {
 
   private resolveActiveRegionCollisions(delta: number): void {
     for (const region of this.regionsById.values()) {
+      if (this.isRigidBodyRegion(region)) continue;
       if (!this.isCollisionActive(region)) continue;
 
       const fragments = this.getAwakeFragments(region);
@@ -577,6 +603,7 @@ export class DebrisSettler {
 
   private enforceExistingGlueLinks(): void {
     for (const region of this.regionsById.values()) {
+      if (this.isRigidBodyRegion(region)) continue;
       this.enforceGlueLinks(region);
     }
   }
@@ -865,6 +892,7 @@ export class DebrisSettler {
   }
 
   private sleepQuietRegionFragments(region: SettlingRegion): void {
+    if (this.isRigidBodyRegion(region)) return;
     if (this.elapsedSeconds < region.glueAfter + DEBRIS_REGION_QUIET_SLEEP_SECONDS) return;
 
     // Inside the active debris bubble, a quiet glued clump should remain as
@@ -976,6 +1004,7 @@ export class DebrisSettler {
   }
 
   private isCollisionActive(region: SettlingRegion): boolean {
+    if (this.isRigidBodyRegion(region)) return false;
     return (
       this.elapsedSeconds >= region.contactAfter &&
       this.elapsedSeconds <= region.collisionUntil &&
@@ -999,6 +1028,15 @@ export class DebrisSettler {
 
   private getUnexpiredFragments(region: SettlingRegion): PhysicsToy[] {
     return [...region.fragments].filter((fragment) => !fragment.isExpired);
+  }
+
+  private isRigidBodyRegion(region: SettlingRegion): boolean {
+    return this.getUnexpiredFragments(region).some((fragment) => fragment.isRigidDebrisDriven);
+  }
+
+  private isRegionSleeping(region: SettlingRegion): boolean {
+    const liveFragments = this.getUnexpiredFragments(region);
+    return liveFragments.length > 0 && liveFragments.every((fragment) => fragment.isSleeping);
   }
 
   private isActiveBubbleConfigured(options: DebrisSettlerUpdateOptions): boolean {

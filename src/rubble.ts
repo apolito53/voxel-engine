@@ -11,7 +11,11 @@ import {
 
 const RUBBLE_CELL_SIZE = 1;
 const RUBBLE_MAX_VISUAL_PIECES = 36;
-const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = 18;
+const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = RUBBLE_MAX_VISUAL_PIECES;
+// Keep the old wrinkly cover sheet available as a parked rendering mode. The
+// gameplay rubble heightfield still exists for support, raycasts, and material
+// accounting, but settled debris should currently read as baked cube piles.
+const RUBBLE_RENDER_DRAPED_SHEET_MESH = false;
 // Promotion intentionally needs more material than the visible pile cap and a
 // single 27-piece block fracture. Piles can keep accruing hidden material after
 // the proxy mesh stops growing, so craters do not seal from one normal break.
@@ -513,48 +517,49 @@ export class RubbleField {
     const indices: number[] = [];
     const bounds = new THREE.Box3();
 
-    // Build one low patch mesh out of all occupied cells. Internal vertical
-    // faces are skipped, so adjacent piles read as connected rubble instead of
-    // separate stacked tiles.
+    // Gameplay still treats rubble as cheap support/material cells. Visually,
+    // though, keep settled debris as baked cube geometry unless the parked
+    // draped-sheet mode is deliberately re-enabled later.
     for (const pile of cluster.cells.values()) {
-      const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
-      const footprint = getRubblePileFootprint(pile);
-      const surfaceGrid = createRubbleSurfaceGrid(cluster, pile, this.surfaceWorld, footprint);
+      expandRubbleGameplayBounds(bounds, pile);
 
-      bounds.expandByPoint(new THREE.Vector3(surfaceGrid.minX, baseY, surfaceGrid.minZ));
-      bounds.expandByPoint(new THREE.Vector3(surfaceGrid.maxX, surfaceGrid.maxY, surfaceGrid.maxZ));
+      if (RUBBLE_RENDER_DRAPED_SHEET_MESH) {
+        const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+        const footprint = getRubblePileFootprint(pile);
+        const surfaceGrid = createRubbleSurfaceGrid(cluster, pile, this.surfaceWorld, footprint);
 
-      addRubbleTopSurface(positions, normals, indices, surfaceGrid, pile);
-      addQuad(
-        positions,
-        normals,
-        indices,
-        [surfaceGrid.minX, baseY, surfaceGrid.minZ],
-        [surfaceGrid.maxX, baseY, surfaceGrid.minZ],
-        [surfaceGrid.maxX, baseY, surfaceGrid.maxZ],
-        [surfaceGrid.minX, baseY, surfaceGrid.maxZ],
-        [0, -1, 0]
-      );
+        addRubbleTopSurface(positions, normals, indices, surfaceGrid, pile);
+        addQuad(
+          positions,
+          normals,
+          indices,
+          [surfaceGrid.minX, baseY, surfaceGrid.minZ],
+          [surfaceGrid.maxX, baseY, surfaceGrid.minZ],
+          [surfaceGrid.maxX, baseY, surfaceGrid.maxZ],
+          [surfaceGrid.minX, baseY, surfaceGrid.maxZ],
+          [0, -1, 0]
+        );
 
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z - 1 }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
-      } else if (footprint.minZ > RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
-      }
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z + 1 }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
-      } else if (footprint.maxZ < 1 - RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
-      }
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x - 1, y: pile.cell.y, z: pile.cell.z }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
-      } else if (footprint.minX > RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
-      }
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x + 1, y: pile.cell.y, z: pile.cell.z }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
-      } else if (footprint.maxX < 1 - RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z - 1 }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
+        } else if (footprint.minZ > RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
+        }
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z + 1 }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
+        } else if (footprint.maxZ < 1 - RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
+        }
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x - 1, y: pile.cell.y, z: pile.cell.z }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
+        } else if (footprint.minX > RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
+        }
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x + 1, y: pile.cell.y, z: pile.cell.z }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+        } else if (footprint.maxX < 1 - RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+        }
       }
 
       addRubbleVisualChunks(positions, normals, indices, bounds, pile);
@@ -1425,6 +1430,15 @@ function getSurfaceNoise(cell: RubbleCell, localX: number, localZ: number): numb
     localZ * 41.971
   ) * 24634.6345;
   return value - Math.floor(value);
+}
+
+function expandRubbleGameplayBounds(bounds: THREE.Box3, pile: RubbleCellPile): void {
+  const footprint = getRubblePileWorldFootprint(pile);
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const maxY = baseY + getRubblePileVisualHeight(pile);
+
+  bounds.expandByPoint(new THREE.Vector3(footprint.minX, baseY, footprint.minZ));
+  bounds.expandByPoint(new THREE.Vector3(footprint.maxX, maxY, footprint.maxZ));
 }
 
 function createRubbleSurfaceGrid(

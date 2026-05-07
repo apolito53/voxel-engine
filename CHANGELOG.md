@@ -9,6 +9,33 @@
 - Added tests covering superflat generation, admin command parsing/fixture placement, and test-avatar aim planning.
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 
+## 0.5.0 - 2026-05-07
+
+### Added
+
+- Added Rapier through `@dimforge/rapier3d-compat` and a local `RigidDebrisSimulation` adapter, keeping WASM setup, dynamic cuboid bodies, static terrain/rubble colliders, transform sync, stats, and cleanup behind one engine-owned API.
+- Routed destroyed-block fragments through Rapier dynamic cuboids while preserving the existing `PhysicsToy` render/material proxy and `PhysicsFragmentInstancer` batches.
+- Added temporary static colliders around active debris for nearby solid terrain and partial-height rubble support, so rigid fragments can land on terrain, stack with each other, and rest on finalized piles.
+- Added rigid-debris regressions for terrain landing/sleep, rubble-support landing, far-bubble bake-out, material preservation, and sleeping-first pressure relief.
+- Added a separate CPU-facing rigid debris budget so large physics-object stress settings do not turn into thousands of active Rapier cuboids on the main thread.
+
+### Changed
+
+- `DebrisSettler` now treats Rapier-driven debris as region-owned material instead of running the old glue/contact/support-chain illusion over those fragments.
+- Physics-budget pressure now prefers sleeping debris regions before awake debris, then still preserves material before falling back to pruning old physics cores.
+- Static collider refresh now ignores already-sleeping debris and caps the active collider-cell set, reducing main-thread terrain/rubble collider churn during large debris piles.
+- Settled Rapier debris now promotes into cheap rubble even inside the player bubble, preserving the final cube poses as baked chunks instead of keeping dead rigid bodies alive forever.
+- Parked the old draped/wrinkly rubble sheet renderer behind a disabled flag, so finalized debris now renders as baked static cube chunks while keeping the cheap support, material, raycast, and damage data underneath.
+- Debug HUD now reports rigid debris body sleep counts plus terrain/rubble support collider counts.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://127.0.0.1:5175/`: loaded `Default World`, confirmed the rigid-debris debug HUD counters render, and checked for fresh console errors/warnings.
+
 ## 0.4.7 - 2026-05-07
 
 ### Fixed
