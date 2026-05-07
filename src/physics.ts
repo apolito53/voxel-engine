@@ -64,6 +64,14 @@ type PhysicsToyOptions = {
   readonly disposeMaterial?: boolean;
 };
 
+export type RigidDebrisState = {
+  readonly position: THREE.Vector3;
+  readonly quaternion: THREE.Quaternion;
+  readonly linearVelocity: THREE.Vector3;
+  readonly angularVelocity: THREE.Vector3;
+  readonly sleeping: boolean;
+};
+
 export type PhysicsToyCollisionStats = {
   readonly activeBodies: number;
   readonly sleepingBodies: number;
@@ -103,6 +111,7 @@ export class PhysicsToy {
   private supportAnchoredSleep = false;
   private sleeping = false;
   private expired = false;
+  private rigidDebrisBodyAttached = false;
 
   constructor(position: THREE.Vector3, velocity: THREE.Vector3, options: PhysicsToyOptions = {}) {
     this.radius = options.radius ?? 0.35;
@@ -170,6 +179,10 @@ export class PhysicsToy {
     return this.fragmentBlock !== null;
   }
 
+  get isRigidDebrisDriven(): boolean {
+    return this.rigidDebrisBodyAttached;
+  }
+
   get hadSupportContactLastUpdate(): boolean {
     return this.supportContactLastUpdate;
   }
@@ -211,6 +224,32 @@ export class PhysicsToy {
     this.angularVelocity.set(0, 0, 0);
   }
 
+  attachRigidDebrisBody(): void {
+    if (!this.isInstancedFragment || this.expired) return;
+
+    this.rigidDebrisBodyAttached = true;
+    this.sleeping = false;
+    this.supportAnchoredSleep = false;
+    this.settledSeconds = 0;
+  }
+
+  detachRigidDebrisBody(): void {
+    this.rigidDebrisBodyAttached = false;
+  }
+
+  syncRigidDebrisState(state: RigidDebrisState): void {
+    if (!this.rigidDebrisBodyAttached || this.expired) return;
+
+    this.mesh.position.copy(state.position);
+    this.mesh.quaternion.copy(state.quaternion);
+    this.velocity.copy(state.linearVelocity);
+    this.angularVelocity.copy(state.angularVelocity);
+    this.sleeping = state.sleeping;
+    this.supportAnchoredSleep = state.sleeping;
+    this.supportContactLastUpdate = state.sleeping;
+    this.settledSeconds = state.sleeping ? this.sleepAfterSeconds : 0;
+  }
+
   addTumbleImpulse(normal: THREE.Vector3, speed: number): void {
     if (!this.isInstancedFragment || speed <= 0) return;
 
@@ -237,7 +276,7 @@ export class PhysicsToy {
       return impacts;
     }
 
-    if (this.sleeping) return impacts;
+    if (this.sleeping || this.rigidDebrisBodyAttached) return impacts;
 
     this.velocity.y -= 18 * delta;
     this.mesh.position.addScaledVector(this.velocity, delta);

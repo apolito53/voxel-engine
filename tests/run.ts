@@ -22,7 +22,7 @@ import {
 } from "../src/blockColors";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
-import type { CollisionBounds } from "../src/collision";
+import type { CollisionBounds, CollisionWorld } from "../src/collision";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
@@ -114,6 +114,12 @@ import {
   normalizeShadowQualityLevel
 } from "../src/qualitySettings";
 import { voxelRaycast } from "../src/raycast";
+import {
+  MAX_RIGID_DEBRIS_BODY_BUDGET,
+  MIN_RIGID_DEBRIS_BODY_BUDGET,
+  getRigidDebrisBodyBudget
+} from "../src/rigidDebrisBudget";
+import { RigidDebrisSimulation } from "../src/rigidDebris";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -1750,6 +1756,76 @@ test("orphan fragments respect the active debris bubble before rubble absorption
   );
 });
 
+test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 360 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+
+  assert(fragment.isRigidDebrisDriven, "registered block debris should be driven by the rigid-body adapter");
+  assert(fragment.isSleeping, "rigid debris should use Rapier sleep instead of spinning forever");
+  assert(
+    fragment.mesh.position.y - BLOCK_FRAGMENT_VISUAL_SIZE * 0.5 >= -0.02,
+    "rigid cuboid debris should settle on top of the terrain collider"
+  );
+  assertEqual(rigidDebris.getStats().bodies, 1, "the adapter should keep the active fragment body registered");
+
+  rigidDebris.clear();
+  assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
+});
+
+test("rigid debris adapter builds temporary support colliders from rubble height queries", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const supportY = 0.5;
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  const supportWorld: CollisionWorld = {
+    isSolid(): boolean {
+      return false;
+    },
+    getSupportHeight(bounds): number | null {
+      return bounds.minX <= 0.5 && bounds.maxX >= 0.5 && bounds.minZ <= 0.5 && bounds.maxZ >= 0.5
+        ? supportY
+        : null;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 360 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, supportWorld);
+  }
+
+  assert(fragment.isSleeping, "rigid debris should settle on generated rubble support colliders");
+  assert(
+    fragment.mesh.position.y - BLOCK_FRAGMENT_VISUAL_SIZE * 0.5 >= supportY - 0.02,
+    "rigid debris should not sink through partial-height rubble support"
+  );
+  assert(
+    rigidDebris.getStats().rubbleSupportColliders > 0,
+    "the adapter should expose temporary rubble-support colliders near active debris"
+  );
+  rigidDebris.clear();
+});
+
 function createTestFragment(
   block: number,
   x: number,
@@ -2239,6 +2315,78 @@ test("debris settler converts far bubble debris into rubble", () => {
   assertEqual(scene.children.length, 1, "far debris should become one persistent rubble mesh");
 });
 
+test("debris settler bakes far sleeping rigid debris without losing material", async () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    5
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+  let finalized = false;
+
+  rigidDebris.registerFragment(fragment);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 2.5, 0.5), [fragment]);
+  for (let frame = 0; frame < 420 && !finalized; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+    const stats = settler.update(1 / 60, rubble, {
+      activeCenter: new THREE.Vector3(20, 2.5, 0.5),
+      activeRadius: 4
+    });
+    finalized = stats.finalizedBatches > 0;
+  }
+
+  assert(finalized, "sleeping rigid debris outside the bubble should bake into rubble");
+  assert(fragment.isExpired, "baked rigid debris should be marked for normal toy pruning");
+  assertEqual(rubble.getStats().pieces, 5, "rigid bake-out should preserve carried material units");
+  rigidDebris.clear();
+});
+
+test("debris settler bakes nearby sleeping rigid debris into cheap rubble", async () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    4
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+  let finalized = false;
+
+  rigidDebris.registerFragment(fragment);
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.5, 2.5, 0.5), [fragment]);
+  for (let frame = 0; frame < 420 && !finalized; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+    const stats = settler.update(1 / 60, rubble, {
+      activeCenter: new THREE.Vector3(0.5, 2.5, 0.5),
+      activeRadius: 8
+    });
+    finalized = stats.finalizedBatches > 0;
+  }
+
+  assert(finalized, "nearby rigid debris should bake after it settles instead of staying as CPU work");
+  assert(fragment.isExpired, "settled rigid debris should leave through the normal prune path");
+  assertEqual(rubble.getStats().pieces, 4, "nearby rigid bake-out should keep material units");
+  rigidDebris.clear();
+});
+
 test("debris settler keeps far airborne bubble debris alive until it settles", () => {
   const scene = new THREE.Scene();
   const settler = new DebrisSettler();
@@ -2275,6 +2423,25 @@ test("debris settler pressure relief finalizes farthest regions first", () => {
   assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
   assert(farFragment.isExpired, "the farthest debris region should be the one converted");
   assertEqual(rubble.getStats().pieces, 1, "pressure relief should preserve the far region's material");
+});
+
+test("debris settler pressure relief prefers sleeping regions before awake debris", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const nearSleepingFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  const farAwakeFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
+  sleepTestFragment(nearSleepingFragment);
+  farAwakeFragment.velocity.set(2, 0, 0);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [nearSleepingFragment]);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 1.1, 0.5), [farAwakeFragment]);
+
+  const removed = settler.finalizeRegionsForPressure(rubble, new THREE.Vector3(0.5, 1.1, 0.5), 1);
+
+  assertEqual(removed, 1, "pressure relief should convert one sleeping region when that is enough");
+  assert(nearSleepingFragment.isExpired, "sleeping debris should be the first pressure-relief candidate");
+  assert(settler.owns(farAwakeFragment), "awake debris should stay active while sleeping material can relieve pressure");
+  assertEqual(rubble.getStats().pieces, 1, "sleeping pressure relief should still preserve material");
 });
 
 test("debris settler waits for quiet fragments before soft finalization", () => {
@@ -2449,14 +2616,15 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assertEqual(scene.children.length, 0, "destroyed rubble should remove its visible proxy");
 });
 
-test("hybrid rubble meshes add baked chunks while keeping cheap support", () => {
+test("hybrid rubble meshes render baked chunks while keeping cheap support", () => {
   const smoothScene = new THREE.Scene();
   const smoothRubble = new RubbleField(smoothScene);
   smoothRubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
   smoothRubble.getStats();
   const smoothMesh = smoothScene.children[0];
-  assert(smoothMesh instanceof THREE.Mesh, "setup should create a support-only rubble mesh");
+  assert(smoothMesh instanceof THREE.Mesh, "setup should keep a support-only rubble mesh object");
   const smoothVertexCount = smoothMesh.geometry.getAttribute("position").count;
+  assertEqual(smoothVertexCount, 0, "support-only rubble should not render the parked draped sheet");
 
   const hybridScene = new THREE.Scene();
   const hybridRubble = new RubbleField(hybridScene);
@@ -2477,11 +2645,8 @@ test("hybrid rubble meshes add baked chunks while keeping cheap support", () => 
   const chunkPositions = hybridMesh.geometry.getAttribute("position");
 
   assertEqual(hybridStats.visualChunks, 1, "hybrid rubble should store a capped static chunk sample");
-  assert(
-    hybridVertexCount > smoothVertexCount,
-    "hybrid rubble should add baked cuboid geometry on top of the support mound"
-  );
-  for (let index = smoothVertexCount; index < hybridVertexCount; index += 1) {
+  assertEqual(hybridVertexCount, 36, "hybrid rubble should render the baked cuboid without the draped sheet");
+  for (let index = 0; index < hybridVertexCount; index += 1) {
     const outward = new THREE.Vector3(
       chunkPositions.getX(index) - fragment.mesh.position.x,
       chunkPositions.getY(index) - fragment.mesh.position.y,
@@ -3258,6 +3423,26 @@ test("physics object budget clamps and steps predictably", () => {
     96 - PHYSICS_OBJECT_BUDGET_STEP,
     "decrease should move by one configured step"
   );
+  assertEqual(
+    getRigidDebrisBodyBudget(QUALITY_PRESETS.potato.physicsObjectBudget),
+    48,
+    "Potato should allow only a small Rapier debris slice"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(QUALITY_PRESETS.normal.physicsObjectBudget),
+    144,
+    "Normal should keep rigid debris below the total physics toy budget"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget),
+    MAX_RIGID_DEBRIS_BODY_BUDGET,
+    "Super Ultra should hard-cap CPU-heavy rigid debris bodies"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(Number.NaN),
+    MIN_RIGID_DEBRIS_BODY_BUDGET,
+    "invalid rigid debris budgets should fall back to the minimum safety rail"
+  );
 });
 
 test("quality presets keep scheduler and render-distance invariants", () => {
@@ -3306,6 +3491,10 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     assert(
       preset.physicsObjectBudget >= previousPhysicsBudget,
       `${preset.label} physics budget should not shrink as quality increases`
+    );
+    assert(
+      getRigidDebrisBodyBudget(preset.physicsObjectBudget) <= MAX_RIGID_DEBRIS_BODY_BUDGET,
+      `${preset.label} rigid debris budget should stay within the CPU safety cap`
     );
     assert(
       preset.blockFragmentCount >= 1 && preset.blockFragmentCount <= BLOCK_FRAGMENT_COUNT,

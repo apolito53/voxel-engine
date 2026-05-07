@@ -98,6 +98,12 @@ import {
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
+import { getRigidDebrisBodyBudget } from "./rigidDebrisBudget";
+import {
+  RigidDebrisSimulation,
+  createEmptyRigidDebrisStats,
+  type RigidDebrisStats
+} from "./rigidDebris";
 import { RubbleField, type RubbleDamageEvent, type RubbleFieldStats } from "./rubble";
 import {
   createDirectionalShadowBasis,
@@ -275,6 +281,7 @@ const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
+const rigidDebris = new RigidDebrisSimulation();
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // Full terrain blocks still come from VoxelWorld. Partial-height cover such
   // as rubble is layered in through the optional support-height query so both
@@ -308,8 +315,13 @@ const novaChatPanel = new NovaChatPanel({
 });
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
+let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
+
+void rigidDebris.initialize().catch((error) => {
+  console.warn("Rigid debris physics failed to initialize; falling back to legacy fragment motion.", error);
+});
 
 const debugHud = new DebugHud({
   panel: debugPanel,
@@ -743,15 +755,18 @@ function animate(): void {
       }
     }
     emitRubbleDamageEvents();
+    rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld);
     debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
       activeCenter: camera.position,
       activeRadius: qualityController.preset.debrisActiveRadiusMeters
     });
     absorbSettledFragmentsIntoRubble();
+    enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
     debrisSettlerStats = debrisSettler.getStats();
     emitRubbleBatchEvents();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
+    rigidDebris.syncToyStatesToBodies();
     rubbleField.settle(activeWorld);
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
@@ -807,6 +822,8 @@ function animate(): void {
       toys.length,
       physicsObjectBudget,
       physicsCollisionStats,
+      rigidDebrisStats,
+      getCurrentRigidDebrisBodyBudget(),
       physicsFragmentInstancer.getStats(),
       debrisSettlerStats,
       debugRubbleStats,
@@ -1099,9 +1116,11 @@ function spawnBlockFragments(
       rubbleMaterialUnits
     );
     addPhysicsToy(fragment);
+    rigidDebris.registerFragment(fragment);
     fragments.push(fragment);
   }
 
+  rigidDebris.invalidateStaticColliders();
   debrisSettler.registerFracture(block, blockCenter, fragments);
 }
 
@@ -1269,6 +1288,23 @@ function enforcePhysicsToyBudget(): void {
   pruneOldestPhysicsCoresForBudget();
 }
 
+function enforceRigidDebrisBudget(): void {
+  const rigidDebrisBodyBudget = getCurrentRigidDebrisBodyBudget();
+  const overBudgetCount = rigidDebrisStats.bodies - rigidDebrisBodyBudget;
+  if (overBudgetCount <= 0) return;
+
+  // Rapier bodies are CPU-heavy. Convert sleeping/far debris regions back into
+  // cheap rubble before the main thread has to solve thousands of tiny cuboids.
+  debrisSettler.finalizeRegionsForPressure(rubbleField, camera.position, overBudgetCount);
+  absorbExpiredOrphanFragmentsIntoRubble();
+  pruneExpiredToys();
+  rigidDebrisStats = rigidDebris.getStats();
+}
+
+function getCurrentRigidDebrisBodyBudget(): number {
+  return getRigidDebrisBodyBudget(physicsObjectBudget);
+}
+
 function absorbSettledFragmentsIntoRubble(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     const toy = toys[index];
@@ -1346,6 +1382,7 @@ function pruneOldestPhysicsCoresForBudget(): void {
 function absorbFragmentToyIntoRubble(toy: PhysicsToy): void {
   if (!rubbleField.absorbFragment(toy)) return;
 
+  rigidDebris.invalidateStaticColliders();
   engineEvents.emit("rubble:formed", {
     position: {
       x: toy.mesh.position.x,
@@ -1358,7 +1395,10 @@ function absorbFragmentToyIntoRubble(toy: PhysicsToy): void {
 }
 
 function emitRubbleBatchEvents(): void {
-  for (const batch of debrisSettler.getFinalizedBatches()) {
+  const batches = debrisSettler.getFinalizedBatches();
+  if (batches.length > 0) rigidDebris.invalidateStaticColliders();
+
+  for (const batch of batches) {
     engineEvents.emit("rubble:formed", {
       position: batch.position,
       block: batch.block,
@@ -1368,7 +1408,10 @@ function emitRubbleBatchEvents(): void {
 }
 
 function emitRubbleDamageEvents(): void {
-  for (const event of rubbleField.consumeDamageEvents()) {
+  const events = rubbleField.consumeDamageEvents();
+  if (events.some((event) => event.destroyed)) rigidDebris.invalidateStaticColliders();
+
+  for (const event of events) {
     engineEvents.emit("rubble:damaged", {
       position: {
         x: event.position.x,
@@ -1440,6 +1483,7 @@ function removePhysicsToyAt(index: number): void {
 
   debrisSettler.forget(removedToy);
   physicsToyCollider.forget(removedToy);
+  rigidDebris.forget(removedToy);
   if (!removedToy.isInstancedFragment) {
     scene.remove(removedToy.mesh);
   }
@@ -1697,6 +1741,7 @@ function clearToys(): void {
   for (const toy of toys) {
     debrisSettler.forget(toy);
     physicsToyCollider.forget(toy);
+    rigidDebris.forget(toy);
     if (!toy.isInstancedFragment) {
       scene.remove(toy.mesh);
     }
@@ -1705,6 +1750,7 @@ function clearToys(): void {
   toys.length = 0;
   damageIndicators.clear();
   debrisSettler.clear();
+  rigidDebris.clear();
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
@@ -1769,6 +1815,7 @@ function disposeRuntime(): void {
   // Firefox's GPU process until the browser finally decides to clean house.
   player?.dispose();
   clearToys();
+  rigidDebris.dispose();
   activeWorld?.dispose(scene);
   inWorld = false;
   novaPilotReactions.dispose();
