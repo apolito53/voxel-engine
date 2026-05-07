@@ -10,11 +10,13 @@ export const DEBRIS_REGION_FINALIZE_SECONDS = 0.6;
 export const DEBRIS_REGION_SETTLED_FINALIZE_SECONDS = 0.15;
 export const DEBRIS_REGION_MAX_SECONDS = 1.2;
 export const DEBRIS_REGION_PAIR_BUDGET = 768;
-export const DEBRIS_REGION_GLUE_BREAKUP_SECONDS = 0.14;
+export const DEBRIS_REGION_CONTACT_BREAKUP_SECONDS = 0.1;
+export const DEBRIS_REGION_GLUE_BREAKUP_SECONDS = 0.28;
 export const DEBRIS_ACTIVE_RADIUS_BUFFER_METERS = 2;
 
 const DEBRIS_REGION_QUIET_SPEED = 0.65;
 const DEBRIS_REGION_QUIET_ANGULAR_SPEED = 1.25;
+const DEBRIS_REGION_QUIET_SLEEP_SECONDS = 0.08;
 const DEBRIS_REGION_COLLISION_RESTITUTION = 0.06;
 const DEBRIS_REGION_COLLISION_DAMPING = 0.74;
 const DEBRIS_REGION_BREAKUP_RESTITUTION = 0.24;
@@ -47,6 +49,7 @@ type SettlingRegion = {
   readonly materialUnitsByBlock: Map<number, number>;
   createdAt: number;
   fractureCount: number;
+  contactAfter: number;
   collisionUntil: number;
   glueAfter: number;
   finalizeAt: number;
@@ -223,6 +226,7 @@ export class DebrisSettler {
       materialUnitsByBlock: new Map(),
       createdAt: this.elapsedSeconds,
       fractureCount: 0,
+      contactAfter: this.elapsedSeconds + DEBRIS_REGION_CONTACT_BREAKUP_SECONDS,
       collisionUntil: this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS,
       glueAfter: this.elapsedSeconds + DEBRIS_REGION_GLUE_BREAKUP_SECONDS,
       finalizeAt: this.elapsedSeconds + DEBRIS_REGION_FINALIZE_SECONDS,
@@ -250,6 +254,10 @@ export class DebrisSettler {
     region.collisionUntil = Math.max(
       region.collisionUntil,
       this.elapsedSeconds + DEBRIS_REGION_COLLISION_SECONDS
+    );
+    region.contactAfter = Math.max(
+      region.contactAfter,
+      this.elapsedSeconds + DEBRIS_REGION_CONTACT_BREAKUP_SECONDS
     );
     region.glueAfter = Math.max(
       region.glueAfter,
@@ -308,6 +316,7 @@ export class DebrisSettler {
       }
       target.fractureCount = combinedFractures;
       target.createdAt = Math.min(target.createdAt, source.createdAt);
+      target.contactAfter = Math.max(target.contactAfter, source.contactAfter);
       target.collisionUntil = Math.max(target.collisionUntil, source.collisionUntil);
       target.glueAfter = Math.max(target.glueAfter, source.glueAfter);
       target.maxFinalizeAt = Math.min(target.maxFinalizeAt, source.maxFinalizeAt);
@@ -342,7 +351,10 @@ export class DebrisSettler {
       // heap can keep being shoved by cores instead of secretly becoming a
       // baked pile while the player is studying it.
       if (this.isActiveBubbleConfigured(options)) {
-        if (this.isRegionInsideActiveBubble(region, options)) continue;
+        if (this.isRegionInsideActiveBubble(region, options)) {
+          this.sleepQuietRegionFragments(region);
+          continue;
+        }
 
         this.finalizeRegion(region, rubbleField, false);
         continue;
@@ -657,6 +669,7 @@ export class DebrisSettler {
 
   private applyRegionCohesion(region: SettlingRegion, fragments: readonly PhysicsToy[], delta: number): void {
     if (delta <= 0) return;
+    if (this.elapsedSeconds < region.glueAfter) return;
 
     for (const fragment of fragments) {
       // The visible stage is "settling theater", not a real granular solver.
@@ -671,6 +684,24 @@ export class DebrisSettler {
       this.scratchPosition.multiplyScalar(1 / distance);
       const acceleration = Math.min(distance, 1.4) * DEBRIS_REGION_COHESION_ACCELERATION;
       fragment.velocity.addScaledVector(this.scratchPosition, acceleration * delta);
+    }
+  }
+
+  private sleepQuietRegionFragments(region: SettlingRegion): void {
+    if (
+      region.settledAt === null ||
+      this.elapsedSeconds < region.settledAt + DEBRIS_REGION_QUIET_SLEEP_SECONDS
+    ) {
+      return;
+    }
+
+    // Inside the active debris bubble, a quiet glued clump should remain as
+    // shoveable debris rather than immediately finalizing into rubble. Put the
+    // fragments into the same sleeping state terrain-supported shards use so
+    // they stop spinning in place while the broadphase can still wake them when
+    // a physics core hits.
+    for (const fragment of region.fragments) {
+      if (!fragment.isExpired) fragment.sleepInPlace();
     }
   }
 
@@ -766,7 +797,11 @@ export class DebrisSettler {
   }
 
   private isCollisionActive(region: SettlingRegion): boolean {
-    return this.elapsedSeconds <= region.collisionUntil && this.getAwakeFragments(region).length > 1;
+    return (
+      this.elapsedSeconds >= region.contactAfter &&
+      this.elapsedSeconds <= region.collisionUntil &&
+      this.getAwakeFragments(region).length > 1
+    );
   }
 
   private estimateActiveCollisionPairs(): number {

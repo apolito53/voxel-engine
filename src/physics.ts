@@ -185,6 +185,19 @@ export class PhysicsToy {
     this.angularVelocity.set(0, 0, 0);
   }
 
+  sleepInPlace(): void {
+    if (!this.isInstancedFragment || this.expired) return;
+
+    // Settling regions can prove a linked clump is quiet even when an upper
+    // shard is resting on another shard instead of directly touching terrain.
+    // Let those fragments use the same cheap sleeping state as ground-settled
+    // debris so they stop visually spinning while remaining shoveable by cores.
+    this.sleeping = true;
+    this.settledSeconds = this.sleepAfterSeconds;
+    this.velocity.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
+  }
+
   addTumbleImpulse(normal: THREE.Vector3, speed: number): void {
     if (!this.isInstancedFragment || speed <= 0) return;
 

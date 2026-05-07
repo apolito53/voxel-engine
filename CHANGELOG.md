@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.3 - 2026-05-07
+
+### Changed
+
+- Added an initial no-contact breakup window for destroyed-block debris so dense 3x3x3 fragments can spread before local contact damping starts preserving the original cube silhouette.
+- Delayed debris glue/cohesion and stopped applying region cohesion during breakup, so early ejection no longer fights the later clumping pass.
+- Added a quiet-clump sleep path for active-bubble debris so glued fragments that have settled stop spinning in place while remaining shoveable by physics cores.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/?debrisEjectionSmoke=1778110000000`: confirmed no fresh console errors after reload.
+
 ## 0.4.2 - 2026-05-07
 
 ### Changed

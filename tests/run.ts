@@ -136,6 +136,7 @@ import {
 } from "../src/chunkStorage";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import {
+  DEBRIS_REGION_CONTACT_BREAKUP_SECONDS,
   DEBRIS_REGION_COLLISION_SECONDS,
   DEBRIS_REGION_FINALIZE_SECONDS,
   DEBRIS_REGION_GLUE_BREAKUP_SECONDS,
@@ -1826,7 +1827,7 @@ test("debris settler resolves same-region fragments but not cross-region fragmen
   right.velocity.set(-1, 0, 0);
 
   settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 1.5, 0.5), [left, right]);
-  const sameRegionStats = settler.update(0.01, rubble);
+  const sameRegionStats = settler.update(DEBRIS_REGION_CONTACT_BREAKUP_SECONDS + 0.01, rubble);
 
   assertEqual(sameRegionStats.pairChecks, 1, "same-region debris should get one local pair check");
   assertEqual(sameRegionStats.resolvedPairs, 1, "overlapping same-region debris should separate");
@@ -1863,6 +1864,42 @@ test("debris settler lets fresh fractures break silhouette before glue can form"
   );
 });
 
+test("debris settler lets dense fracture grids spread before contact damping starts", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  left.velocity.set(-2, 0, 0);
+  right.velocity.set(2, 0, 0);
+
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  const stats = settler.update(DEBRIS_REGION_CONTACT_BREAKUP_SECONDS - 0.01, rubble);
+
+  assertEqual(stats.pairChecks, 0, "the earliest breakup frames should not damp dense grid contacts yet");
+  assert(
+    left.velocity.x <= -1.95 && right.velocity.x >= 1.95,
+    "overlapped fresh grid debris should keep its launch energy before local contact solving starts"
+  );
+});
+
+test("debris settler does not pull fresh breakup debris back into cube formation", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const left = createTestFragment(BLOCK.grass, 0.2, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.8, 1.5, 0.5);
+  left.velocity.set(-2, 0, 0);
+  right.velocity.set(2, 0, 0);
+
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.5, 1.5, 0.5), [left, right]);
+  const stats = settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS * 0.5, rubble);
+
+  assertEqual(stats.resolvedPairs, 0, "separated fresh debris should not resolve into a sticky contact yet");
+  assert(
+    left.velocity.x <= -1.95 && right.velocity.x >= 1.95,
+    "fresh breakup debris should keep its outward velocity instead of being pulled back toward the original voxel grid"
+  );
+});
+
 test("debris settler glue contacts arrest rotation and hold same-region fragments together", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -1895,6 +1932,37 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
     0,
     "glued debris contacts should stop independent cube spin once fragments stick together"
   );
+});
+
+test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const activeCenter = new THREE.Vector3(0.64, 1.5, 0.5);
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  left.velocity.set(-1.2, 0, 0);
+  right.velocity.set(1.2, 0, 0);
+
+  settler.registerFracture(BLOCK.grass, activeCenter, [left, right]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  left.sleepInPlace();
+  right.velocity.set(0.1, 0, 0);
+  right.angularVelocity.set(0.1, 0, 0);
+
+  settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+
+  assert(right.isSleeping, "quiet glued debris inside the active bubble should sleep instead of spinning forever");
+  assertEqual(rubble.getStats().pieces, 0, "nearby quiet bubble debris should sleep in place instead of finalizing");
 });
 
 test("debris settler keeps glue links shaping the heap after pair checks stop", () => {
@@ -2106,7 +2174,7 @@ test("debris settler finalizes oldest regions when pair pressure exceeds the cap
   settler.update(0.05, rubble);
   settler.registerFracture(BLOCK.stone, new THREE.Vector3(8, 1.5, 0.5), newestFragments);
 
-  const stats = settler.update(0.01, rubble);
+  const stats = settler.update(DEBRIS_REGION_CONTACT_BREAKUP_SECONDS + 0.01, rubble);
   assertEqual(DEBRIS_REGION_PAIR_BUDGET, 768, "test should track the intended debris pair budget");
   assertEqual(stats.forcedFinalizations, 1, "pair pressure should force the oldest active region to finalize");
   assertEqual(stats.regions, 1, "newer under-budget region should stay alive after pressure relief");
