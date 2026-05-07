@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.7 - 2026-05-07
+
+### Fixed
+
+- Tightened active-bubble debris sleep so each sleeping fragment needs terrain/rubble support or a believable stack-chain through another supported shard.
+- Reduced the intentional sticky contact overlap and made glue links preserve a minimum visual separation, so glued cube debris keeps clumping without freezing inside itself.
+- Added regressions for overlapped glued shards, supported stack sleep, and side-linked unsupported fragments that should keep simulating instead of floating asleep.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/?debrisGlueSmoke=1778142000000`: loaded `Default World`, let the HUD settle, and confirmed no fresh console errors or warnings.
+
 ## 0.4.6 - 2026-05-07
 
 ### Fixed

@@ -4,6 +4,7 @@ import {
   BLOCK_FRAGMENT_COLLISION_RADIUS,
   BLOCK_FRAGMENT_GRID_SIZE,
   BLOCK_FRAGMENT_SPACING,
+  BLOCK_FRAGMENT_VISUAL_SIZE,
   BLOCK_RUBBLE_MATERIAL_UNITS,
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
@@ -1944,12 +1945,51 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   );
 });
 
+test("debris settler keeps glued fragments from sleeping with visible overlap", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const activeCenter = new THREE.Vector3(0.56, 1.5, 0.5);
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.6, 1.5, 0.5);
+  left.velocity.set(0, 0, 0);
+  right.velocity.set(0, 0, 0);
+
+  settler.registerFracture(BLOCK.grass, activeCenter, [left, right]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  const distanceAfterContact = left.mesh.position.distanceTo(right.mesh.position);
+
+  settler.update(DEBRIS_REGION_COLLISION_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  const distanceAfterGlueSettles = left.mesh.position.distanceTo(right.mesh.position);
+  const minimumReadableSeparation = BLOCK_FRAGMENT_VISUAL_SIZE * 0.95;
+
+  assert(
+    distanceAfterContact >= minimumReadableSeparation,
+    "overlapped debris should separate before contact glue records the clump pose"
+  );
+  assert(
+    distanceAfterGlueSettles >= minimumReadableSeparation,
+    "glue enforcement should not pull separated debris back into an overlapping pose"
+  );
+});
+
 test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
-  const activeCenter = new THREE.Vector3(0.64, 1.5, 0.5);
-  const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  const activeCenter = new THREE.Vector3(0.64, 1.08, 0.5);
+  const left = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 1.08, 0.5);
+  const floorWorld = {
+    isSolid(_x: number, y: number, _z: number): boolean {
+      return y === 0;
+    }
+  };
+
   left.velocity.set(-1.2, 0, 0);
   right.velocity.set(1.2, 0, 0);
 
@@ -1958,7 +1998,10 @@ test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning
     activeCenter,
     activeRadius: 8
   });
-  left.sleepInPlace();
+  left.update(1 / 120, floorWorld);
+  right.update(1 / 120, floorWorld);
+  assert(left.hadSupportContactLastUpdate, "left shard should report support before the clump sleeps");
+  assert(right.hadSupportContactLastUpdate, "right shard should report support before the clump sleeps");
   right.velocity.set(0.1, 0, 0);
   right.angularVelocity.set(0.1, 0, 0);
 
@@ -1978,9 +2021,9 @@ test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning
 test("debris settler sleeps quiet supported clumps even when upper shards are still spinning", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
-  const activeCenter = new THREE.Vector3(0.64, 1.2, 0.5);
+  const activeCenter = new THREE.Vector3(0.64, 1.26, 0.5);
   const lower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
-  const upper = createTestFragment(BLOCK.grass, 0.75, 1.18, 0.5);
+  const upper = createTestFragment(BLOCK.grass, 0.68, 1.34, 0.5);
   const floorWorld = {
     isSolid(_x: number, y: number, _z: number): boolean {
       return y === 0;
@@ -2013,10 +2056,10 @@ test("debris settler sleeps quiet supported clumps even when upper shards are st
 test("debris settler only sleeps the supported component inside a mixed settling region", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
-  const activeCenter = new THREE.Vector3(0.64, 1.2, 0.5);
+  const activeCenter = new THREE.Vector3(0.64, 1.26, 0.5);
   const supportedLower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
-  const supportedUpper = createTestFragment(BLOCK.grass, 0.75, 1.18, 0.5);
-  const unsupportedFloater = createTestFragment(BLOCK.grass, 1.8, 1.8, 0.5);
+  const supportedUpper = createTestFragment(BLOCK.grass, 0.68, 1.34, 0.5);
+  const unsupportedFloater = createTestFragment(BLOCK.grass, 0.92, 1.34, 0.5);
   const floorWorld = {
     isSolid(_x: number, y: number, _z: number): boolean {
       return y === 0;
@@ -2043,7 +2086,7 @@ test("debris settler only sleeps the supported component inside a mixed settling
   assert(supportedUpper.isSleeping, "the glued upper shard should inherit support from its component");
   assert(
     !unsupportedFloater.isSleeping,
-    "an unconnected unsupported fragment in the same region should not freeze in midair"
+    "a side-linked unsupported fragment in the same region should not freeze in midair"
   );
 });
 

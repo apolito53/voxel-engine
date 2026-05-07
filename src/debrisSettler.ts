@@ -24,10 +24,11 @@ const DEBRIS_REGION_COLLISION_EPSILON = 0.000001;
 const DEBRIS_REGION_FRAGMENT_RADIUS_SCALE = 0.78;
 const DEBRIS_REGION_COHESION_ACCELERATION = 9.5;
 const DEBRIS_REGION_GLUE_CAPTURE_SLOP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.18;
-const DEBRIS_REGION_STICKY_RETAINED_OVERLAP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.18;
+const DEBRIS_REGION_STICKY_RETAINED_OVERLAP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.03;
 const DEBRIS_REGION_STICKY_HORIZONTAL_BLEND = 0.72;
 const DEBRIS_REGION_STICKY_VERTICAL_BLEND = 0.35;
 const DEBRIS_REGION_GLUE_POSITION_RESPONSE = 0.7;
+const DEBRIS_REGION_GLUE_MIN_CENTER_SEPARATION = BLOCK_FRAGMENT_VISUAL_SIZE * 0.96;
 const DEBRIS_REGION_MAX_GLUE_LINKS = 192;
 const DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP = BLOCK_FRAGMENT_VISUAL_SIZE * 0.95;
 const DEBRIS_REGION_STACK_VERTICAL_RANGE = BLOCK_FRAGMENT_VISUAL_SIZE * 1.8;
@@ -417,12 +418,68 @@ export class DebrisSettler {
 
   private isComponentQuietAndSupported(component: readonly PhysicsToy[]): boolean {
     if (component.length === 0) return true;
-    if (!component.some((fragment) => this.isFragmentSupportAnchor(fragment))) return false;
+    const supportableFragments = this.getSupportableFragments(component);
 
     return component.every((fragment) => (
-      fragment.isSleeping ||
-      this.isFragmentLinearQuiet(fragment)
+      supportableFragments.has(fragment) &&
+      this.isFragmentQuietEnoughToSleep(fragment)
     ));
+  }
+
+  private isFragmentQuietEnoughToSleep(fragment: PhysicsToy): boolean {
+    return fragment.isSleeping || this.isFragmentLinearQuiet(fragment);
+  }
+
+  private getSleepableSupportedFragments(component: readonly PhysicsToy[]): PhysicsToy[] {
+    const supportableFragments = this.getSupportableFragments(component);
+    return component.filter((fragment) => (
+      supportableFragments.has(fragment) &&
+      this.isFragmentQuietEnoughToSleep(fragment)
+    ));
+  }
+
+  private getSupportableFragments(component: readonly PhysicsToy[]): Set<PhysicsToy> {
+    const supportableFragments = new Set<PhysicsToy>();
+    for (const fragment of component) {
+      if (this.isFragmentSupportAnchor(fragment)) {
+        supportableFragments.add(fragment);
+      }
+    }
+
+    let addedSupport = true;
+    while (addedSupport) {
+      addedSupport = false;
+      for (const candidate of component) {
+        if (supportableFragments.has(candidate)) continue;
+        if (!this.isFragmentQuietEnoughToSleep(candidate)) continue;
+
+        for (const lower of supportableFragments) {
+          if (!this.isFragmentQuietEnoughToSleep(lower)) continue;
+          if (!this.isFragmentRestingOnSupportedFragment(candidate, lower)) continue;
+
+          supportableFragments.add(candidate);
+          addedSupport = true;
+          break;
+        }
+      }
+    }
+    return supportableFragments;
+  }
+
+  private isFragmentRestingOnSupportedFragment(upper: PhysicsToy, lower: PhysicsToy): boolean {
+    const deltaX = upper.mesh.position.x - lower.mesh.position.x;
+    const deltaY = upper.mesh.position.y - lower.mesh.position.y;
+    const deltaZ = upper.mesh.position.z - lower.mesh.position.z;
+
+    // Support must look like a stack, not just a side-by-side sticky contact.
+    // This stops a grounded cube from freezing neighboring debris that merely
+    // touched it while still visibly hanging in the air.
+    return (
+      Math.abs(deltaX) <= DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP &&
+      Math.abs(deltaZ) <= DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP &&
+      deltaY > BLOCK_FRAGMENT_VISUAL_SIZE * 0.2 &&
+      deltaY <= DEBRIS_REGION_STACK_VERTICAL_RANGE
+    );
   }
 
   private getGlueConnectedComponents(
@@ -625,6 +682,7 @@ export class DebrisSettler {
     if (restOffset.lengthSq() <= DEBRIS_REGION_COLLISION_EPSILON) {
       restOffset.copy(this.normal).multiplyScalar(BLOCK_FRAGMENT_VISUAL_SIZE);
     }
+    this.normalizeGlueRestOffset(restOffset);
 
     // Contact glue is the visible lie the player asked for: once two chunks
     // touch during the short settling window, they stop spinning independently
@@ -668,7 +726,61 @@ export class DebrisSettler {
         this.scratchPosition,
         -(link.right.inverseMass) / inverseMassSum
       );
+      this.relaxGlueLinkOverlap(link, inverseMassSum);
     }
+  }
+
+  private normalizeGlueRestOffset(restOffset: THREE.Vector3): void {
+    const restDistance = restOffset.length();
+    if (restDistance >= DEBRIS_REGION_GLUE_MIN_CENTER_SEPARATION) return;
+
+    // Glue should mean "move together", not "occupy the same visual volume".
+    // When the contact was captured from an overlapped pose, expand the stored
+    // rest offset so the later glue pass keeps a small visible air gap instead
+    // of preserving the interpenetration forever.
+    if (restDistance <= DEBRIS_REGION_COLLISION_EPSILON) {
+      restOffset.set(DEBRIS_REGION_GLUE_MIN_CENTER_SEPARATION, 0, 0);
+      return;
+    }
+    restOffset.multiplyScalar(DEBRIS_REGION_GLUE_MIN_CENTER_SEPARATION / restDistance);
+  }
+
+  private relaxGlueLinkOverlap(link: DebrisGlueLink, inverseMassSum: number): void {
+    this.scratchPosition.subVectors(link.right.mesh.position, link.left.mesh.position);
+    const currentDistance = this.scratchPosition.length();
+    if (currentDistance >= DEBRIS_REGION_GLUE_MIN_CENTER_SEPARATION) return;
+
+    if (currentDistance <= DEBRIS_REGION_COLLISION_EPSILON) {
+      this.normal.copy(link.restOffset);
+      if (this.normal.lengthSq() <= DEBRIS_REGION_COLLISION_EPSILON) {
+        this.normal.set(1, 0, 0);
+      } else {
+        this.normal.normalize();
+      }
+    } else {
+      this.normal.copy(this.scratchPosition).multiplyScalar(1 / currentDistance);
+    }
+
+    const correction = DEBRIS_REGION_GLUE_MIN_CENTER_SEPARATION - currentDistance;
+    link.left.mesh.position.addScaledVector(
+      this.normal,
+      -(correction * link.left.inverseMass) / inverseMassSum
+    );
+    link.right.mesh.position.addScaledVector(
+      this.normal,
+      (correction * link.right.inverseMass) / inverseMassSum
+    );
+
+    this.relativeVelocity.copy(link.right.velocity).sub(link.left.velocity);
+    const closingSpeed = this.relativeVelocity.dot(this.normal);
+    if (closingSpeed >= 0) return;
+
+    // Bleed only the compressive part of the motion. The fragments can still be
+    // shoved as a clump by a core, but the glue solver will not keep driving
+    // two cubes back through each other after it has separated them.
+    const impulse = -closingSpeed / inverseMassSum;
+    link.left.velocity.addScaledVector(this.normal, -impulse * link.left.inverseMass);
+    link.right.velocity.addScaledVector(this.normal, impulse * link.right.inverseMass);
   }
 
   private removeGlueLinksForFragment(region: SettlingRegion, toy: PhysicsToy): void {
@@ -762,9 +874,9 @@ export class DebrisSettler {
     // a physics core hits. Do this per glue-connected component: one grounded
     // pile should not freeze unrelated fragments that are still hanging in the air.
     for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredFragments(region))) {
-      if (!this.isComponentQuietAndSupported(component)) continue;
+      const sleepableFragments = this.getSleepableSupportedFragments(component);
 
-      for (const fragment of component) {
+      for (const fragment of sleepableFragments) {
         if (!fragment.isExpired) fragment.sleepInPlace(true);
       }
     }
