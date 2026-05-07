@@ -2213,12 +2213,31 @@ test("hybrid rubble meshes add baked chunks while keeping cheap support", () => 
   const hybridMesh = hybridScene.children[0];
   assert(hybridMesh instanceof THREE.Mesh, "hybrid rubble should still render as one mesh");
   const hybridVertexCount = hybridMesh.geometry.getAttribute("position").count;
+  const chunkNormals = hybridMesh.geometry.getAttribute("normal");
+  const chunkPositions = hybridMesh.geometry.getAttribute("position");
 
   assertEqual(hybridStats.visualChunks, 1, "hybrid rubble should store a capped static chunk sample");
   assert(
     hybridVertexCount > smoothVertexCount,
     "hybrid rubble should add baked cuboid geometry on top of the support mound"
   );
+  for (let index = smoothVertexCount; index < hybridVertexCount; index += 1) {
+    const outward = new THREE.Vector3(
+      chunkPositions.getX(index) - fragment.mesh.position.x,
+      chunkPositions.getY(index) - fragment.mesh.position.y,
+      chunkPositions.getZ(index) - fragment.mesh.position.z
+    );
+    const normal = new THREE.Vector3(
+      chunkNormals.getX(index),
+      chunkNormals.getY(index),
+      chunkNormals.getZ(index)
+    );
+
+    assert(
+      outward.dot(normal) > 0,
+      "baked rubble chunk faces should be wound outward so the renderer does not cull the exterior"
+    );
+  }
   assert(
     hybridRubble.getSupportHeight({
       minX: 0.4,

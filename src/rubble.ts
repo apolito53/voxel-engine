@@ -1590,12 +1590,15 @@ function addRubbleVisualChunks(
     // These static cubes are deliberately baked into the same rubble mesh as
     // the support surface. They give the pile a chunky silhouette without
     // creating persistent rigid bodies or extra draw calls.
-    addVisualChunkQuad(positions, normals, indices, corners[1], corners[5], corners[7], corners[3]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[2], corners[6], corners[4]);
-    addVisualChunkQuad(positions, normals, indices, corners[2], corners[3], corners[7], corners[6]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[4], corners[5], corners[1]);
-    addVisualChunkQuad(positions, normals, indices, corners[4], corners[6], corners[7], corners[5]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[1], corners[3], corners[2]);
+    // Keep every face wound outward. The first hybrid pass accidentally wound
+    // these inward, so WebGL culled the exterior faces and left spooky partial
+    // triangles in the crater instead of readable baked chunks.
+    addVisualChunkQuad(positions, normals, indices, corners[1], corners[3], corners[7], corners[5]);
+    addVisualChunkQuad(positions, normals, indices, corners[0], corners[4], corners[6], corners[2]);
+    addVisualChunkQuad(positions, normals, indices, corners[2], corners[6], corners[7], corners[3]);
+    addVisualChunkQuad(positions, normals, indices, corners[0], corners[1], corners[5], corners[4]);
+    addVisualChunkQuad(positions, normals, indices, corners[4], corners[5], corners[7], corners[6]);
+    addVisualChunkQuad(positions, normals, indices, corners[0], corners[2], corners[3], corners[1]);
   }
 }
 

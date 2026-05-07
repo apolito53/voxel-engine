@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.1 - 2026-05-07
+
+### Fixed
+
+- Fixed baked hybrid rubble chunk face winding so finalized rubble renders complete exterior cube faces instead of culling the outside into partial triangle shards.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.4.0 - 2026-05-06
 
 ### Added
