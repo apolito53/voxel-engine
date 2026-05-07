@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.5 - 2026-05-07
+
+### Fixed
+
+- Added a support-contact signal to loose debris physics so the settling region can tell when part of a glued clump is actually resting on terrain or rubble.
+- Let quiet supported debris clumps sleep in place even if upper shards still have leftover angular velocity, stopping the visible "spinning forever on top of the pile" behavior.
+- Kept unsupported quiet clumps from sleeping in midair, so the stronger stop condition only applies when the pile has a real support anchor.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/?debrisBakeSmoke=1778115000000`: reloaded the app, loaded `Default World`, and confirmed no fresh console errors.
+
 ## 0.4.4 - 2026-05-07
 
 ### Fixed

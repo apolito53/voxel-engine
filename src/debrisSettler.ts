@@ -15,7 +15,6 @@ export const DEBRIS_REGION_GLUE_BREAKUP_SECONDS = 0.28;
 export const DEBRIS_ACTIVE_RADIUS_BUFFER_METERS = 2;
 
 const DEBRIS_REGION_QUIET_SPEED = 0.65;
-const DEBRIS_REGION_QUIET_ANGULAR_SPEED = 1.25;
 const DEBRIS_REGION_QUIET_SLEEP_SECONDS = 0.08;
 const DEBRIS_REGION_COLLISION_RESTITUTION = 0.06;
 const DEBRIS_REGION_COLLISION_DAMPING = 0.74;
@@ -400,19 +399,25 @@ export class DebrisSettler {
     if (liveFragments.length === 0) return true;
     if (liveFragments.every((fragment) => fragment.isSleeping)) return true;
 
-    const hasGroundedAnchor = liveFragments.some((fragment) => fragment.isSleeping);
-    if (!hasGroundedAnchor || region.glueLinks.size === 0) return false;
+    const hasSupportAnchor = liveFragments.some((fragment) => (
+      fragment.isSleeping ||
+      fragment.hadSupportContactLastUpdate
+    ));
+    if (!hasSupportAnchor || region.glueLinks.size === 0) return false;
 
     // Glued upper shards often never satisfy PhysicsToy's old "touched solid"
-    // sleep rule because they are resting on other debris, not terrain. Treat
-    // the region as quiet once those linked shards have mostly stopped moving.
+    // sleep rule because they are resting on other debris, not terrain. Once at
+    // least one linked shard is actually supported by terrain/rubble, linear
+    // calm is enough to sleep the whole clump; otherwise high angular velocity
+    // can keep visually settled cubes spinning forever.
     return liveFragments.every((fragment) => (
       fragment.isSleeping ||
-      (
-        fragment.velocity.lengthSq() <= DEBRIS_REGION_QUIET_SPEED ** 2 &&
-        fragment.angularVelocity.lengthSq() <= DEBRIS_REGION_QUIET_ANGULAR_SPEED ** 2
-      )
+      this.isFragmentLinearQuiet(fragment)
     ));
+  }
+
+  private isFragmentLinearQuiet(fragment: PhysicsToy): boolean {
+    return fragment.velocity.lengthSq() <= DEBRIS_REGION_QUIET_SPEED ** 2;
   }
 
   private shouldFinalizeOutsideActiveBubble(region: SettlingRegion): boolean {

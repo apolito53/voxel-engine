@@ -1975,6 +1975,67 @@ test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning
   assertEqual(rubble.getStats().pieces, 0, "nearby quiet bubble debris should sleep in place instead of finalizing");
 });
 
+test("debris settler sleeps quiet supported clumps even when upper shards are still spinning", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const activeCenter = new THREE.Vector3(0.64, 1.2, 0.5);
+  const lower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
+  const upper = createTestFragment(BLOCK.grass, 0.75, 1.18, 0.5);
+  const floorWorld = {
+    isSolid(_x: number, y: number, _z: number): boolean {
+      return y === 0;
+    }
+  };
+
+  lower.velocity.set(0, 0, 0);
+  upper.velocity.set(0.08, 0, 0);
+  upper.angularVelocity.set(8, 0, 0);
+  lower.update(1 / 120, floorWorld);
+  assert(!lower.isSleeping, "one support tick should anchor the clump without pre-sleeping the lower shard");
+  assert(lower.hadSupportContactLastUpdate, "lower shard should report terrain support to the settling region");
+
+  settler.registerFracture(BLOCK.grass, activeCenter, [lower, upper]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+
+  assert(lower.isSleeping, "supported glued clumps should sleep in place once their linear motion is quiet");
+  assert(upper.isSleeping, "upper shards resting on the clump should stop spinning instead of waiting for terrain contact");
+  assertEqual(upper.angularVelocity.lengthSq(), 0, "settled upper shards should have no leftover visual spin");
+  assertEqual(rubble.getStats().pieces, 0, "nearby supported clumps should remain physical inside the active bubble");
+});
+
+test("debris settler does not sleep quiet unsupported clumps in midair", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const activeCenter = new THREE.Vector3(0.64, 3.5, 0.5);
+  const left = createTestFragment(BLOCK.grass, 0.5, 3.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.75, 3.5, 0.5);
+
+  left.velocity.set(0.05, 0, 0);
+  right.velocity.set(-0.05, 0, 0);
+  left.angularVelocity.set(6, 0, 0);
+  right.angularVelocity.set(0, 6, 0);
+
+  settler.registerFracture(BLOCK.grass, activeCenter, [left, right]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+
+  assert(!left.isSleeping, "unsupported low-motion clumps should keep simulating instead of freezing in midair");
+  assert(!right.isSleeping, "support contact is required before the settler can sleep a glued clump");
+});
+
 test("debris settler keeps glue links shaping the heap after pair checks stop", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());

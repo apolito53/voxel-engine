@@ -99,6 +99,7 @@ export class PhysicsToy {
   private readonly sleepAfterSeconds: number;
   private ageSeconds = 0;
   private settledSeconds = 0;
+  private supportContactLastUpdate = false;
   private sleeping = false;
   private expired = false;
 
@@ -168,6 +169,10 @@ export class PhysicsToy {
     return this.fragmentBlock !== null;
   }
 
+  get hadSupportContactLastUpdate(): boolean {
+    return this.supportContactLastUpdate;
+  }
+
   wakeFromToyCollision(): void {
     if (!this.sleeping) return;
 
@@ -217,6 +222,7 @@ export class PhysicsToy {
   update(delta: number, world: CollisionWorld, impacts: PhysicsImpact[] = []): PhysicsImpact[] {
     if (this.expired) return impacts;
 
+    this.supportContactLastUpdate = false;
     this.ageSeconds += delta;
     if (this.maxAgeSeconds !== null && this.ageSeconds >= this.maxAgeSeconds) {
       this.expired = true;
@@ -274,6 +280,7 @@ export class PhysicsToy {
     }
 
     const touchedPartialSupport = this.resolvePartialSupport(world);
+    this.supportContactLastUpdate = touchedSolidBlock || touchedPartialSupport;
     this.updateSleepState(delta, touchedSolidBlock || touchedPartialSupport);
     return impacts;
   }
