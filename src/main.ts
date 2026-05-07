@@ -118,6 +118,16 @@ import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 const BLOCK_INTERACTION_REACH = 8;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
+// Fragment launch is tuned separately from the later sticky-settling pass.
+// The first few frames should read as a voxel shattering outward before the
+// short glue window turns the debris into a believable local heap.
+const FRAGMENT_IMPACT_SPEED_SCALE = 0.75;
+const FRAGMENT_IMPACT_SPEED_CAP = 8.75;
+const FRAGMENT_SCATTER_SPEED_MIN = 2.2;
+const FRAGMENT_SCATTER_SPEED_RANGE = 2.6;
+const FRAGMENT_JITTER_SPEED = 13.5;
+const FRAGMENT_UPWARD_SPEED_MIN = 1;
+const FRAGMENT_UPWARD_SPEED_RANGE = 1.75;
 const FRAME_SPIKE_EVENT_MS = 45;
 const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
 const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
@@ -1054,7 +1064,7 @@ function spawnBlockFragments(
   position: { readonly x: number; readonly y: number; readonly z: number },
   impact: PhysicsImpact
 ): void {
-  const fragmentBaseSpeed = Math.min(5.8, impact.speed * 0.55);
+  const fragmentBaseSpeed = Math.min(FRAGMENT_IMPACT_SPEED_CAP, impact.speed * FRAGMENT_IMPACT_SPEED_SCALE);
   const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
 
   const fragmentCount = qualityController.preset.blockFragmentCount;
@@ -1072,12 +1082,14 @@ function spawnBlockFragments(
     // player should see fragments tumble out of the voxel, not a shrunken copy
     // of the original block politely waiting to become rubble.
     const spawnJitter = createFragmentSpawnJitter();
-    const scatter = createFragmentScatterDirection(offset).multiplyScalar(1.35 + Math.random() * 1.65);
+    const scatter = createFragmentScatterDirection(offset).multiplyScalar(
+      FRAGMENT_SCATTER_SPEED_MIN + Math.random() * FRAGMENT_SCATTER_SPEED_RANGE
+    );
     const velocity = impact.normal.clone()
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
-      .add(spawnJitter.clone().multiplyScalar(9.5))
-      .add(new THREE.Vector3(0, 0.75 + Math.random() * 1.25, 0));
+      .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
+      .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
     const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
 
     const fragment = PhysicsToy.createBlockFragment(

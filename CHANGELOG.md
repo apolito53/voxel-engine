@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.2 - 2026-05-07
+
+### Changed
+
+- Increased destroyed-block debris ejection speed so fragments break away more clearly before the sticky settling pass starts clumping them into rubble.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://localhost:5173/?debrisEjectionSmoke=1778110000000`: loaded `Default World`, confirmed HUD/runtime state, and checked for fresh console errors.
+
 ## 0.4.1 - 2026-05-07
 
 ### Fixed
