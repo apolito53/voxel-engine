@@ -51,7 +51,7 @@ const RUBBLE_CORE_DAMPING = 0.95;
 const RUBBLE_COLLISION_EPSILON = 0.000001;
 const RUBBLE_NEIGHBOR_CHIP_DAMAGE = 0.25;
 
-type RubbleCell = {
+export type RubbleCell = {
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -146,6 +146,7 @@ export type RubbleAbsorptionSample = {
 export type RubbleRaycastHit = {
   readonly clusterId: number;
   readonly block: number;
+  readonly cell: RubbleCell;
   readonly distance: number;
   readonly point: THREE.Vector3;
 };
@@ -396,6 +397,7 @@ export class RubbleField {
         closestHit = {
           clusterId: cluster.id,
           block: cluster.block,
+          cell: { ...pile.cell },
           distance,
           point: origin.clone().addScaledVector(direction, distance)
         };

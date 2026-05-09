@@ -15,4 +15,5 @@ if (-not (Test-Path -Path (Join-Path $Root "node_modules"))) {
 }
 
 Write-Host "Starting Voxel Sandbox Engine on http://127.0.0.1:$Port"
+Write-Host "Saved worlds are tied to that exact browser address. If the port is busy, this script fails instead of silently moving your save list."
 npm.cmd run dev -- --port $Port

@@ -2,15 +2,20 @@ import type { SavedWorld, WorldRegistry } from "./chunkStorage";
 
 export type LoadWorldHandler = (worldId: string) => void | Promise<void>;
 export type DeleteWorldHandler = (world: SavedWorld) => void | Promise<void>;
+export type RenderHomeWorldListOptions = {
+  readonly shouldCommit?: () => boolean;
+};
 
 export async function renderHomeWorldList(
   registry: WorldRegistry,
   container: HTMLElement,
   onLoadWorld: LoadWorldHandler,
-  onDeleteWorld?: DeleteWorldHandler
+  onDeleteWorld?: DeleteWorldHandler,
+  options: RenderHomeWorldListOptions = {}
 ): Promise<void> {
   const activeWorldId = await registry.getActiveWorldId();
   const worlds = await registry.listWorlds();
+  if (options.shouldCommit && !options.shouldCommit()) return;
 
   // Rebuild visible save rows from registry metadata so storage remains the single source of truth.
   container.replaceChildren(

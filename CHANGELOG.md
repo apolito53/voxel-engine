@@ -8,6 +8,8 @@
 - Added an F8 scripted test avatar that stages a target block and drives the real player Physics Core throw path for repeatable in-browser gameplay smoke checks.
 - Added tests covering superflat generation, admin command parsing/fixture placement, and test-avatar aim planning.
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
+- Added a pause-menu `Health Bars` toggle that persists locally, suppresses block/rubble damage bars, and clears active bars immediately when disabled.
+- Added a white cube-space target outline for destructible settled-rubble cells, including direct destroy-action hits against the targeted rubble proxy instead of terrain behind it.
 
 ### Fixed
 

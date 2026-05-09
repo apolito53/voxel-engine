@@ -27,12 +27,12 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 ## Fast Lookup
 
-- App bootstrap, render loop, input glue, world lifecycle orchestration, damage indicator wiring, and WebGL runtime teardown: `src/main.ts`
+- App bootstrap, render loop, input glue, world lifecycle orchestration, terrain/rubble target selection, damage indicator wiring, and WebGL runtime teardown: `src/main.ts`
 - HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
 - Admin command parsing/routing, Superflat Lab launcher hook, and spawnable terrain fixtures used by Nova Terminal for repeatable testing: `src/adminCommands.ts`
 - F8 scripted runtime avatar for in-browser gameplay smoke checks: `src/testAvatar.ts`
-- Floating health-bar projection for damaged terrain/rubble targets: `src/damageIndicators.ts`
+- Floating health-bar projection for damaged terrain/rubble targets; visibility is gated by the pause-menu `Health Bars` toggle in `src/main.ts`: `src/damageIndicators.ts`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`
 - WebGL GPU text helpers: `src/gpu.ts`
@@ -65,11 +65,11 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Event-backed Nova context journal, local reply generation, terminal command routing, and in-game terminal panel: `src/novaContext.ts`, `src/novaChat.ts`, `src/novaChatPanel.ts`
 - Event-driven Nova chatter, glow pulses, message throttling, and companion reactions: `src/novaPilotReactions.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
-- Thin black edge outline for the currently targeted block, including geometry/material disposal: `src/targetHighlighter.ts`
+- Thin edge outline for the currently targeted block or settled-rubble cube cell, including style switching and geometry/material disposal: `src/targetHighlighter.ts`
 - Throwable bouncing physics core, fragment render/material state, rigid-debris sync hooks, sleep-aware split core/debris broadphase collision, impact speed reporting, shared-resource sleeping/expiring cube fragments: `src/physics.ts`
 - Instanced debris rendering batches keyed by source block material, including per-fragment tumble rotation: `src/physicsInstancing.ts`
 - Rapier WASM initialization, dynamic cuboid debris bodies, temporary terrain/rubble support colliders, transform sync back to fragment render proxies, sleeping stats, and cleanup: `src/rigidDebris.ts`
-- Persistent destructible rubble cover patches, sparse hidden support footprints, parked faceted heightfield rendering, batched absorption, bounded surface samples, baked static cube-pile visuals, scaled durability separate from material volume, direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support-height queries, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
+- Persistent destructible rubble cover patches, sparse hidden support footprints, parked faceted heightfield rendering, batched absorption, bounded surface samples, baked static cube-pile visuals, scaled durability separate from material volume, raycast target-cell reporting, direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support-height queries, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - CPU-facing Rapier debris body cap derived from the broader physics object budget: `src/rigidDebrisBudget.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
@@ -122,9 +122,9 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Tune render/performance modes: quality preset constants in `src/qualityPresets.ts`, Custom slider bounds/storage in `src/qualitySettings.ts`, the Super Ultra opt-in toggle, settings-menu HTML/CSS in `index.html` and `src/style.css`, and application logic in `src/qualityController.ts`.
 - Tune baked voxel face shading or visible sun direction: update `src/voxelLighting.ts`, `src/lighting.ts`, `src/assets/skybox-sunlit-day.png`, and `src/skybox.ts` together so worker mesh colors, skybox alignment, and shadows agree.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
-- Change held item definitions, action mapping, break/place reach, hit behavior, item selection, or target outline: `src/items.ts`, `src/hotbar.ts`, `src/raycast.ts`, `src/targetHighlighter.ts`, and pointer/highlight hooks in `src/main.ts`.
+- Change held item definitions, action mapping, break/place reach, hit behavior, item selection, terrain/rubble target picking, or target outline: `src/items.ts`, `src/hotbar.ts`, `src/raycast.ts`, `src/targetHighlighter.ts`, `src/rubble.ts`, and pointer/highlight hooks in `src/main.ts`.
 - Change thrown object behavior, core/debris/rubble collision, debris lifetime, debris grid size, quality-scaled visible debris counts, stable rubble material units, settling-region behavior, Rapier debris bodies/colliders, instanced debris rendering, rubble cover proxies, walkable rubble support, object budget, despawn controls, damage indicators, or impact damage: `src/blockFragments.ts`, `src/rigidDebris.ts`, `src/debrisSettler.ts`, `src/fragmentRubble.ts`, `src/physics.ts`, `src/physicsInstancing.ts`, `src/rubble.ts`, `src/collision.ts`, `src/damageIndicators.ts`, per-quality defaults in `src/qualityPresets.ts`, persistence bounds in `src/physicsBudget.ts`, `VoxelWorld.damageBlock` in `src/world.ts`, plus selected Physics Core use, `KeyX`, `PhysicsToyCollider`, `RigidDebrisSimulation`, `RubbleField`, `clearPhysicsCores`, `clearToys`, and `handlePhysicsImpact` in `src/main.ts`.
-- Change HUD/minimap/debug/sprint-feedback/settings UI: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, and the orchestration hooks in `src/main.ts`.
+- Change HUD/minimap/debug/sprint-feedback/settings UI or the health-bar toggle: `index.html`, `src/style.css`, `src/debugHud.ts`, `src/frameTimings.ts`, `src/minimap.ts`, `src/sprintFeedback.ts`, `src/damageIndicators.ts`, and the orchestration hooks in `src/main.ts`.
 
 ## Sharp Edges
 

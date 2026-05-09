@@ -91,6 +91,7 @@
           </section>
           <section class="menu-panel">
             <div class="menu-title">Load World</div>
+            <div id="world-save-origin" class="world-save-origin"></div>
             <div id="home-world-list" class="world-list" aria-label="Saved worlds"></div>
           </section>
         </div>
@@ -220,6 +221,18 @@
                 max="27"
                 step="1"
                 value="7"
+              />
+            </label>
+            <label class="settings-toggle" for="health-bars-toggle">
+              <span class="settings-toggle-copy">
+                <span class="settings-toggle-title">Health Bars</span>
+                <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
+              </span>
+              <input
+                id="health-bars-toggle"
+                class="toggle-input"
+                type="checkbox"
+                checked
               />
             </label>
             <label

@@ -46,7 +46,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled Rapier-driven cuboid fragments. Nearby fragments tumble, collide, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled Rapier-driven cuboid fragments. Nearby fragments tumble, collide, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; targeted rubble cells use a white cube-space outline, unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -56,6 +56,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
+- Settings `Health Bars` toggles block/rubble damage bars and clears any visible bars when turned off
 - Settings `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
 - `Esc` pause and release mouse
@@ -90,7 +91,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, voxel collision, and partial-height rubble support stepping
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
-- `src/targetHighlighter.ts`: thin block-target outline rendering
+- `src/targetHighlighter.ts`: thin target outline rendering for terrain blocks and settled rubble cube cells
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
 - `src/debrisSettler.ts`: player-bubble-owned debris regions, material accounting, sleeping-first pressure finalization, and batched debris-to-rubble bake-out; legacy glue/contact helpers remain for non-Rapier test/fallback fragments

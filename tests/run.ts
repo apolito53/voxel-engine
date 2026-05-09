@@ -1251,10 +1251,27 @@ test("target block highlighter follows targeted block positions", () => {
   assert(!highlighter.object.visible, "target highlighter should start hidden");
   highlighter.showBlock({ x: 4, y: 12, z: -3 });
   assert(highlighter.object.visible, "target highlighter should become visible when a block is targeted");
+  assertEqual(
+    highlighter.object.material.color.getHex(),
+    0x050505,
+    "terrain block targets should use the normal dark outline"
+  );
   assertVectorNearlyEqual(
     highlighter.object.position,
     new THREE.Vector3(4.5, 12.5, -2.5),
     "target highlighter should sit on the target block center"
+  );
+
+  highlighter.showBlock({ x: 1, y: 2, z: 3 }, "rubble");
+  assertEqual(
+    highlighter.object.material.color.getHex(),
+    0xffffff,
+    "settled rubble targets should use the white object outline"
+  );
+  assertVectorNearlyEqual(
+    highlighter.object.position,
+    new THREE.Vector3(1.5, 2.5, 3.5),
+    "rubble target outlines should still occupy the full cube space"
   );
 
   highlighter.hide();
@@ -2878,6 +2895,7 @@ test("adjacent rubble cells merge into one broad patch", () => {
   );
   assert(hit, "the merged patch should still cover the neighboring cell");
   assertEqual(hit.block, BLOCK.dirt, "merged patches should preserve their source material");
+  assertDeepEqual(hit.cell, { x: 1, y: 0, z: 0 }, "rubble raycasts should report the targeted cube cell");
 });
 
 test("quality-reduced fragments still settle into full rubble material", () => {

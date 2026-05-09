@@ -12,7 +12,7 @@ import {
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex
 } from "./blockFragments";
-import { BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
+import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
   createChunkStorage,
   createWorldRegistry,
@@ -141,6 +141,7 @@ import { VoxelWorld, type BlockDamageResult, type ChunkCoords, type WorldStats }
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
+const TARGET_HIT_EPSILON = 0.0001;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
 // Fragment launch is tuned separately from the later sticky-settling pass.
@@ -186,6 +187,7 @@ const worldNameInput = requireElement<HTMLInputElement>("#world-name-input");
 const worldSeedInput = requireElement<HTMLInputElement>("#world-seed-input");
 const randomSeedButton = requireElement<HTMLButtonElement>("#random-seed-button");
 const superflatWorldButton = requireElement<HTMLButtonElement>("#superflat-world-button");
+const worldSaveOrigin = requireElement<HTMLElement>("#world-save-origin");
 const homeWorldList = requireElement<HTMLElement>("#home-world-list");
 const deleteWorldDialog = requireElement<HTMLElement>("#delete-world-dialog");
 const deleteWorldName = requireElement<HTMLElement>("#delete-world-name");
@@ -211,6 +213,7 @@ const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-sl
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
+const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
@@ -270,6 +273,7 @@ let world: VoxelWorld | null = null;
 let player: PlayerController | null = null;
 let inWorld = false;
 let worldTransitioning = false;
+let homeWorldListRefreshGeneration = 0;
 let selectedHotbarIndex = 0;
 let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
@@ -299,11 +303,34 @@ const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
 const physicsImpacts: PhysicsImpact[] = [];
 const damagedBlockKeysThisFrame = new Set<string>();
+
+type TargetHit =
+  | {
+      readonly kind: "block";
+      readonly source: "voxel";
+      readonly block: VoxelRaycastHit["block"];
+      readonly normal: VoxelRaycastHit["normal"];
+      readonly distance: number;
+    }
+  | {
+      readonly kind: "rubble";
+      readonly source: "voxel";
+      readonly block: VoxelRaycastHit["block"];
+      readonly normal: VoxelRaycastHit["normal"];
+      readonly distance: number;
+    }
+  | {
+      readonly kind: "rubble";
+      readonly source: "rubble";
+      readonly block: VoxelRaycastHit["block"];
+      readonly distance: number;
+    };
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
+const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // Full terrain blocks still come from VoxelWorld. Partial-height cover such
   // as rubble is layered in through the optional support-height query so both
@@ -363,6 +390,7 @@ let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
+let healthBarsEnabled = readHealthBarsEnabled();
 
 void rigidDebris.initialize().catch((error) => {
   console.warn("Rigid debris physics failed to initialize; falling back to legacy fragment motion.", error);
@@ -374,6 +402,8 @@ const debugHud = new DebugHud({
   gpuInfo,
   getQualityPreset: () => qualityController.preset
 });
+
+worldSaveOrigin.textContent = getWorldSaveOriginLabel();
 
 const minimapRenderer = new MinimapRenderer({
   canvas: minimap,
@@ -404,6 +434,7 @@ qualityController = new QualityController({
 qualityController.initialize();
 updateSettingsControls();
 updatePhysicsBudgetControls();
+syncHealthBarsToggle();
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {
@@ -492,6 +523,9 @@ function wireMenuControls(): void {
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
   }, eventListenerOptions);
+  healthBarsToggle.addEventListener("change", () => {
+    setHealthBarsEnabled(healthBarsToggle.checked);
+  }, eventListenerOptions);
   superUltraToggle.addEventListener("change", () => {
     qualityController.setSuperUltraEnabled(superUltraToggle.checked);
   }, eventListenerOptions);
@@ -552,6 +586,33 @@ function setSettingsPanelOpen(open: boolean): void {
   // so "Exit to Home" is not sitting next to throwaway slider experiments.
   for (const action of document.querySelectorAll<HTMLElement>(".menu-main-action")) {
     action.classList.toggle("is-hidden", open);
+  }
+}
+
+function setHealthBarsEnabled(enabled: boolean): void {
+  healthBarsEnabled = enabled;
+  syncHealthBarsToggle();
+  writeHealthBarsEnabled(enabled);
+  if (!enabled) damageIndicators.clear();
+}
+
+function syncHealthBarsToggle(): void {
+  healthBarsToggle.checked = healthBarsEnabled;
+}
+
+function readHealthBarsEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(HEALTH_BARS_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function writeHealthBarsEnabled(enabled: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(HEALTH_BARS_STORAGE_KEY, String(enabled));
+  } catch {
+    // Local storage is only a convenience; the current session setting still applies.
   }
 }
 
@@ -731,15 +792,21 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
 }
 
 function destroyTargetBlock(): void {
-  const hit: VoxelRaycastHit | null = getTargetBlockHit();
+  const hit = getTargetHit();
   if (!hit) return;
+
+  if (hit.source === "rubble") {
+    damageTargetedRubbleCell(hit.block);
+    return;
+  }
 
   requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
 }
 
 function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): void {
-  const hit: VoxelRaycastHit | null = getTargetBlockHit();
+  const hit = getTargetHit();
   if (!hit) return;
+  if (hit.source !== "voxel") return;
 
   const target = {
     x: hit.block.x + hit.normal.x,
@@ -748,6 +815,16 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
   };
   if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
   requireWorld().setBlock(target.x, target.y, target.z, block);
+}
+
+function damageTargetedRubbleCell(cell: VoxelRaycastHit["block"]): void {
+  // The rubble proxy is intentionally cheaper than real per-cube collision, but
+  // once the player is targeting its occupied cell the normal destroy action
+  // should hit that destructible cover instead of silently editing terrain
+  // behind it.
+  const cellCenter = new THREE.Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5);
+  rubbleField.damageNearest(cellCenter, PHYSICS_CORE_BLOCK_DAMAGE, 0.9);
+  emitRubbleDamageEvents();
 }
 
 function animate(): void {
@@ -1074,23 +1151,47 @@ function updateSprintFeedback(active: boolean, delta: number): void {
   sprintOverlay.classList.toggle(SPRINT_FEEDBACK_ACTIVE_CLASS, active);
 }
 
-function getTargetBlockHit(): VoxelRaycastHit | null {
+function getTargetHit(): TargetHit | null {
   if (!inWorld) return null;
   if (!requirePlayer().isLooking()) return null;
 
   camera.getWorldDirection(direction);
-  return voxelRaycast(requireWorld(), camera.position, direction, BLOCK_INTERACTION_REACH);
+
+  const activeWorld = requireWorld();
+  const blockHit = voxelRaycast(activeWorld, camera.position, direction, BLOCK_INTERACTION_REACH);
+  const rubbleHit = rubbleField.raycast(camera.position, direction, BLOCK_INTERACTION_REACH);
+
+  if (rubbleHit && (!blockHit || rubbleHit.distance < blockHit.distance - TARGET_HIT_EPSILON)) {
+    return {
+      kind: "rubble",
+      source: "rubble",
+      block: rubbleHit.cell,
+      distance: rubbleHit.distance
+    };
+  }
+
+  if (!blockHit) return null;
+
+  return {
+    kind: activeWorld.getBlock(blockHit.block.x, blockHit.block.y, blockHit.block.z) === BLOCK.rubble
+      ? "rubble"
+      : "block",
+    source: "voxel",
+    block: blockHit.block,
+    normal: blockHit.normal,
+    distance: blockHit.distance
+  };
 }
 
 function updateTargetBlockHighlighter(): void {
-  const hit = getTargetBlockHit();
+  const hit = getTargetHit();
 
   if (!hit) {
     targetBlockHighlighter.hide();
     return;
   }
 
-  targetBlockHighlighter.showBlock(hit.block);
+  targetBlockHighlighter.showBlock(hit.block, hit.kind);
 }
 
 function handlePhysicsImpact(
@@ -1495,6 +1596,8 @@ function emitRubbleDamageEvents(): void {
 }
 
 function showBlockDamageIndicator(result: BlockDamageResult): void {
+  if (!healthBarsEnabled) return;
+
   const blockCenter = new THREE.Vector3(
     result.position.x + 0.5,
     result.position.y + 1.18,
@@ -1512,6 +1615,8 @@ function showBlockDamageIndicator(result: BlockDamageResult): void {
 }
 
 function showRubbleDamageIndicator(event: RubbleDamageEvent): void {
+  if (!healthBarsEnabled) return;
+
   damageIndicators.show({
     id: `rubble:${event.cell.x},${event.cell.y},${event.cell.z}`,
     position: event.position,
@@ -1557,7 +1662,20 @@ function removePhysicsToyAt(index: number): void {
 }
 
 async function refreshHomeWorldList(): Promise<void> {
-  await renderHomeWorldList(requireWorldRegistry(), homeWorldList, loadWorld, openDeleteWorldDialog);
+  const refreshGeneration = homeWorldListRefreshGeneration + 1;
+  homeWorldListRefreshGeneration = refreshGeneration;
+  await renderHomeWorldList(
+    requireWorldRegistry(),
+    homeWorldList,
+    loadWorld,
+    openDeleteWorldDialog,
+    { shouldCommit: () => refreshGeneration === homeWorldListRefreshGeneration }
+  );
+}
+
+function getWorldSaveOriginLabel(): string {
+  const origin = globalThis.location?.origin;
+  return origin ? `Save slot: ${origin}` : "Save slot: this browser address";
 }
 
 async function createWorldFromForm(event: SubmitEvent): Promise<void> {
