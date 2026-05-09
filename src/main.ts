@@ -111,7 +111,12 @@ import {
   createEmptyRigidDebrisStats,
   type RigidDebrisStats
 } from "./rigidDebris";
-import { RubbleField, type RubbleDamageEvent, type RubbleFieldStats } from "./rubble";
+import {
+  RubbleField,
+  type RubbleDamageEvent,
+  type RubbleFieldStats,
+  type RubbleFragmentAbsorptionOptions
+} from "./rubble";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -1414,7 +1419,7 @@ function absorbOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
 
     const index = toys.indexOf(toy);
     if (index === -1) continue;
-    absorbFragmentToyIntoRubble(toy);
+    absorbFragmentToyIntoRubble(toy, { forceVisualChunk: !outsideBubbleOnly });
     removePhysicsToyAt(index);
   }
 }
@@ -1437,8 +1442,11 @@ function pruneOldestPhysicsCoresForBudget(): void {
   }
 }
 
-function absorbFragmentToyIntoRubble(toy: PhysicsToy): void {
-  if (!rubbleField.absorbFragment(toy)) return;
+function absorbFragmentToyIntoRubble(
+  toy: PhysicsToy,
+  options: RubbleFragmentAbsorptionOptions = {}
+): void {
+  if (!rubbleField.absorbFragment(toy, options)) return;
 
   rigidDebris.invalidateStaticColliders();
   engineEvents.emit("rubble:formed", {

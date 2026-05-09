@@ -2564,7 +2564,8 @@ test("debris settler keeps far airborne bubble debris alive until it settles", (
 
 test("debris settler pressure relief finalizes farthest regions first", () => {
   const settler = new DebrisSettler();
-  const rubble = new RubbleField(new THREE.Scene());
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
   const nearFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
   const farFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
 
@@ -2579,6 +2580,7 @@ test("debris settler pressure relief finalizes farthest regions first", () => {
   assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
   assert(farFragment.isExpired, "the farthest debris region should be the one converted");
   assertEqual(rubble.getStats().pieces, 1, "pressure relief should preserve the far region's material");
+  assertEqual(rubble.getStats().visualChunks, 1, "pressure relief should keep a static cube pose instead of making invisible support-only rubble");
 });
 
 test("debris settler pressure relief prefers sleeping regions before awake debris", () => {
@@ -2834,6 +2836,27 @@ test("hybrid rubble meshes render baked chunks while keeping cheap support", () 
   hybridRubble.clear();
   assertEqual(hybridRubble.getStats().visualChunks, 0, "full rubble cleanup should clear baked visual chunk data");
   assertEqual(hybridScene.children.length, 0, "full rubble cleanup should remove hybrid rubble meshes");
+});
+
+test("forced rubble absorption keeps awake cube visuals for budget relief", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 0.45, 0.5),
+    new THREE.Vector3(1.5, 0.2, 0)
+  );
+
+  assert(rubble.absorbFragment(fragment, { forceVisualChunk: true }), "budget relief should be able to bake an awake fragment");
+  const stats = rubble.getStats();
+  const mesh = scene.children[0];
+  assert(mesh instanceof THREE.Mesh, "forced budget rubble should still render through the rubble mesh");
+  assertEqual(stats.visualChunks, 1, "forced budget bake-out should preserve the visible cube pose");
+  assertEqual(
+    mesh.geometry.getAttribute("position").count,
+    36,
+    "forced budget bake-out should not disappear now that the draped sheet is disabled"
+  );
 });
 
 test("adjacent rubble cells merge into one broad patch", () => {

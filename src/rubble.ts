@@ -132,6 +132,10 @@ export type RubbleVisualChunkSample = {
   readonly size: number;
 };
 
+export type RubbleFragmentAbsorptionOptions = {
+  readonly forceVisualChunk?: boolean;
+};
+
 export type RubbleAbsorptionSample = {
   readonly block: number;
   readonly position: THREE.Vector3;
@@ -200,7 +204,7 @@ export class RubbleField {
     return this.stats;
   }
 
-  absorbFragment(fragment: PhysicsToy): boolean {
+  absorbFragment(fragment: PhysicsToy, options: RubbleFragmentAbsorptionOptions = {}): boolean {
     if (!fragment.isInstancedFragment || fragment.fragmentBlock === null) {
       return false;
     }
@@ -209,7 +213,7 @@ export class RubbleField {
       block: fragment.fragmentBlock,
       position: fragment.mesh.position.clone(),
       pieces: fragment.rubbleMaterialUnits,
-      visualChunk: shouldBakeFragmentVisualChunk(fragment)
+      visualChunk: shouldBakeFragmentVisualChunk(fragment, options)
         ? createRubbleVisualChunkSample(fragment)
         : undefined
     }]);
@@ -940,11 +944,15 @@ function createRubbleVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkS
   };
 }
 
-function shouldBakeFragmentVisualChunk(fragment: PhysicsToy): boolean {
+function shouldBakeFragmentVisualChunk(
+  fragment: PhysicsToy,
+  options: RubbleFragmentAbsorptionOptions = {}
+): boolean {
   // Baked chunks are persistent static geometry. Only settled debris should
-  // leave a cuboid silhouette; airborne fragments still preserve material via
-  // the rubble surface samples, but they must not become floating cube fossils.
-  return fragment.isSleeping && !fragment.isExpired;
+  // normally leave a cuboid silhouette. Budget pressure is the exception: with
+  // the draped sheet renderer parked, forced material bake-out needs to keep
+  // the current cube pose instead of becoming invisible support-only rubble.
+  return !fragment.isExpired && (fragment.isSleeping || options.forceVisualChunk === true);
 }
 
 function createStoredVisualChunkSample(

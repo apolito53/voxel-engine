@@ -911,7 +911,7 @@ export class DebrisSettler {
   }
 
   private finalizeRegion(region: SettlingRegion, rubbleField: RubbleField, forced: boolean): void {
-    const samples = this.createRubbleSamples(region);
+    const samples = this.createRubbleSamples(region, forced);
     const block = this.getDominantBlock(region);
     const pieces = samples.reduce((total, sample) => total + (sample.pieces ?? 1), 0);
     if (samples.length > 0) {
@@ -940,7 +940,7 @@ export class DebrisSettler {
     if (forced) this.stats.forcedFinalizations += 1;
   }
 
-  private createRubbleSamples(region: SettlingRegion): RubbleAbsorptionSample[] {
+  private createRubbleSamples(region: SettlingRegion, includeAwakeVisualChunks: boolean): RubbleAbsorptionSample[] {
     const block = this.getDominantBlock(region);
     const samples: RubbleAbsorptionSample[] = [];
 
@@ -953,7 +953,7 @@ export class DebrisSettler {
           block,
           position: this.getSamplePosition(fragment, unitIndex, materialUnits),
           pieces: 1,
-          visualChunk: unitIndex === 0 && fragment.isSleeping
+          visualChunk: unitIndex === 0 && (fragment.isSleeping || includeAwakeVisualChunks)
             ? this.createVisualChunkSample(fragment)
             : undefined
         });

@@ -9,6 +9,10 @@
 - Added tests covering superflat generation, admin command parsing/fixture placement, and test-avatar aim planning.
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 
+### Fixed
+
+- Fixed over-budget debris bake-out disappearing visually while preserving hidden material. Forced pressure relief now keeps a static cube pose when it has to convert awake debris, which matters while the draped rubble-sheet renderer is disabled.
+
 ## 0.5.0 - 2026-05-07
 
 ### Added
