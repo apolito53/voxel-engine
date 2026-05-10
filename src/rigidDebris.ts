@@ -7,8 +7,8 @@ import {
   type RigidBody
 } from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
-import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
 import type { CollisionBounds, CollisionWorld } from "./collision";
+import { createDefaultDebrisShape } from "./debrisShapes";
 import type { PhysicsToy } from "./physics";
 
 const RIGID_DEBRIS_GRAVITY = -18;
@@ -16,9 +16,10 @@ const RIGID_DEBRIS_FIXED_STEP = 1 / 60;
 const RIGID_DEBRIS_MAX_FRAME_DELTA = 1 / 12;
 const RIGID_DEBRIS_MAX_SUBSTEPS = 4;
 const RIGID_DEBRIS_STATIC_REFRESH_SECONDS = 0.12;
+const RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS = RIGID_DEBRIS_STATIC_REFRESH_SECONDS + RIGID_DEBRIS_FIXED_STEP;
+const RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES = 4;
 const RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS = 2;
 export const RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET = 4096;
-const RIGID_DEBRIS_COLLIDER_HALF_SIZE = BLOCK_FRAGMENT_VISUAL_SIZE * 0.5;
 const RIGID_DEBRIS_MASS = 0.4;
 const RIGID_DEBRIS_LINEAR_DAMPING = 0.45;
 const RIGID_DEBRIS_ANGULAR_DAMPING = 0.85;
@@ -32,6 +33,7 @@ const RAPIER_COMPAT_INIT_WARNING = "using deprecated parameters for the initiali
 type RigidDebrisBody = {
   readonly toy: PhysicsToy;
   readonly body: RigidBody;
+  readonly colliderHalfExtents: THREE.Vector3;
 };
 
 type StaticColliderRecord = {
@@ -74,6 +76,7 @@ export class RigidDebrisSimulation {
   private readonly syncQuaternion = new THREE.Quaternion();
   private readonly syncLinearVelocity = new THREE.Vector3();
   private readonly syncAngularVelocity = new THREE.Vector3();
+  private readonly colliderScanCenter = new THREE.Vector3();
   private world: RapierWorld | null = null;
   private initializePromise: Promise<void> | null = null;
   private accumulatorSeconds = 0;
@@ -223,6 +226,10 @@ export class RigidDebrisSimulation {
     return this.stats;
   }
 
+  getRegisteredColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 | null {
+    return this.bodiesByToy.get(toy)?.colliderHalfExtents.clone() ?? null;
+  }
+
   private flushPendingFragments(): void {
     if (!this.world) return;
 
@@ -230,7 +237,8 @@ export class RigidDebrisSimulation {
       if (!toy.isInstancedFragment || toy.isExpired || this.bodiesByToy.has(toy)) continue;
 
       const body = this.createBody(toy);
-      this.bodiesByToy.set(toy, { toy, body });
+      const colliderHalfExtents = getFragmentColliderHalfExtents(toy);
+      this.bodiesByToy.set(toy, { toy, body, colliderHalfExtents });
       toy.attachRigidDebrisBody();
     }
     this.pendingFragments.clear();
@@ -253,11 +261,12 @@ export class RigidDebrisSimulation {
       .setCanSleep(true)
       .setCcdEnabled(true);
     const body = this.world.createRigidBody(bodyDesc);
+    const colliderHalfExtents = getFragmentColliderHalfExtents(toy);
     const colliderDesc = ColliderDesc
       .cuboid(
-        RIGID_DEBRIS_COLLIDER_HALF_SIZE,
-        RIGID_DEBRIS_COLLIDER_HALF_SIZE,
-        RIGID_DEBRIS_COLLIDER_HALF_SIZE
+        colliderHalfExtents.x,
+        colliderHalfExtents.y,
+        colliderHalfExtents.z
       )
       .setMass(RIGID_DEBRIS_MASS)
       .setFriction(RIGID_DEBRIS_FRICTION)
@@ -317,28 +326,49 @@ export class RigidDebrisSimulation {
       if (record.toy.isExpired || record.toy.isSleeping) continue;
 
       const position = record.toy.mesh.position;
-      const centerX = Math.floor(position.x);
-      const centerY = Math.floor(position.y);
-      const centerZ = Math.floor(position.z);
+      const velocity = record.body.linvel();
 
+      // Static terrain/rubble colliders are intentionally temporary. Sampling
+      // only around the current body position lets tiny fast shards outrun the
+      // collider bubble between refreshes and tunnel through the surface they
+      // were about to hit. Add a few scan bubbles along the predicted path so
+      // the first floor/wall ahead exists before Rapier integrates into it.
+      for (let sample = 0; sample <= RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES; sample += 1) {
+        const lookaheadSeconds = (sample / RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES) *
+          RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS;
+        this.colliderScanCenter.set(
+          position.x + velocity.x * lookaheadSeconds,
+          position.y + velocity.y * lookaheadSeconds,
+          position.z + velocity.z * lookaheadSeconds
+        );
+        this.addColliderCellsAround(this.colliderScanCenter);
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+      }
+    }
+  }
+
+  private addColliderCellsAround(center: THREE.Vector3): void {
+    const centerX = Math.floor(center.x);
+    const centerY = Math.floor(center.y);
+    const centerZ = Math.floor(center.z);
+
+    for (
+      let y = centerY - RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
+      y <= centerY + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
+      y += 1
+    ) {
       for (
-        let y = centerY - RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
-        y <= centerY + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
-        y += 1
+        let z = centerZ - RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
+        z <= centerZ + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
+        z += 1
       ) {
         for (
-          let z = centerZ - RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
-          z <= centerZ + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
-          z += 1
+          let x = centerX - RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
+          x <= centerX + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
+          x += 1
         ) {
-          for (
-            let x = centerX - RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
-            x <= centerX + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
-            x += 1
-          ) {
-            this.activeColliderCells.add(getStaticColliderCellKey(x, y, z));
-            if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
-          }
+          this.activeColliderCells.add(getStaticColliderCellKey(x, y, z));
+          if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
         }
       }
     }
@@ -477,6 +507,11 @@ export class RigidDebrisSimulation {
       rubbleSupportColliders: this.rubbleSupportColliders.size
     };
   }
+}
+
+function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
+  return toy.debrisShape?.colliderHalfExtents.clone()
+    ?? createDefaultDebrisShape().colliderHalfExtents;
 }
 
 function createCellSupportBounds(cell: StaticColliderCell): CollisionBounds {

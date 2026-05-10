@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
+import { createDefaultDebrisShape } from "./debrisShapes";
 import type { PhysicsToy } from "./physics";
 import { RubbleField, type RubbleAbsorptionSample, type RubbleVisualChunkSample } from "./rubble";
 
@@ -393,7 +394,7 @@ export class DebrisSettler {
       region.settledAt = this.elapsedSeconds;
     }
 
-    // The original fracture timer is still the "show the little cubes for a
+    // The original fracture timer is still the "show the little shards for a
     // beat" floor, but late-bouncing debris now waits until it actually sleeps.
     // This keeps us from freezing a chaotic mid-bounce pose into permanent
     // rubble while the hard cap still prevents immortal region bookkeeping.
@@ -485,7 +486,7 @@ export class DebrisSettler {
     const deltaZ = upper.mesh.position.z - lower.mesh.position.z;
 
     // Support must look like a stack, not just a side-by-side sticky contact.
-    // This stops a grounded cube from freezing neighboring debris that merely
+    // This stops a grounded shard from freezing neighboring debris that merely
     // touched it while still visibly hanging in the air.
     return (
       Math.abs(deltaX) <= DEBRIS_REGION_STACK_HORIZONTAL_OVERLAP &&
@@ -547,7 +548,7 @@ export class DebrisSettler {
     if (region.settledAt === null) return false;
 
     // Rapier bodies are the expensive truth only while debris is moving. Once a
-    // rigid-body region has genuinely slept, bake the actual settled cube poses
+    // rigid-body region has genuinely slept, bake the actual settled shard poses
     // into the rubble field even inside the player bubble. The player keeps the
     // pile silhouette, support, material, and future re-break data without the
     // CPU solving a dead stack forever.
@@ -688,7 +689,7 @@ export class DebrisSettler {
     right.velocity.z += (averageZ - right.velocity.z) * DEBRIS_REGION_STICKY_HORIZONTAL_BLEND;
 
     // Vertical glue stays weaker so a top fragment can still look like it is
-    // tumbling down onto the pile instead of every cube becoming one welded
+    // tumbling down onto the pile instead of every shard becoming one welded
     // clump in mid-air.
     left.velocity.y += (averageY - left.velocity.y) * DEBRIS_REGION_STICKY_VERTICAL_BLEND;
     right.velocity.y += (averageY - right.velocity.y) * DEBRIS_REGION_STICKY_VERTICAL_BLEND;
@@ -804,7 +805,7 @@ export class DebrisSettler {
 
     // Bleed only the compressive part of the motion. The fragments can still be
     // shoved as a clump by a core, but the glue solver will not keep driving
-    // two cubes back through each other after it has separated them.
+    // two shards back through each other after it has separated them.
     const impulse = -closingSpeed / inverseMassSum;
     link.left.velocity.addScaledVector(this.normal, -impulse * link.left.inverseMass);
     link.right.velocity.addScaledVector(this.normal, impulse * link.right.inverseMass);
@@ -854,7 +855,7 @@ export class DebrisSettler {
     const targetUpperY = lower.mesh.position.y + DEBRIS_REGION_STACK_CENTER_SEPARATION;
     if (upper.mesh.position.y >= targetUpperY) return;
 
-    // This is the small cheat that makes the visible fragments read as cubes
+    // This is the small cheat that makes the visible fragments read as shards
     // settling on a temporary pile instead of marbles phasing through each
     // other. The persistent gameplay truth is still the rubble surface mesh,
     // so this support only lives inside the short settling region window.
@@ -963,10 +964,12 @@ export class DebrisSettler {
   }
 
   private createVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkSample {
+    const debrisShape = fragment.debrisShape ?? createDefaultDebrisShape();
     return {
       position: fragment.mesh.position.clone(),
       quaternion: fragment.mesh.quaternion.clone(),
-      size: BLOCK_FRAGMENT_VISUAL_SIZE
+      shapeId: debrisShape.shapeId,
+      visualScale: debrisShape.visualScale.clone()
     };
   }
 

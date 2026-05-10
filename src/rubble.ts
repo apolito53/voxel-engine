@@ -3,6 +3,11 @@ import { BLOCK_FRAGMENT_VISUAL_SIZE, BLOCK_RUBBLE_MATERIAL_UNITS } from "./block
 import { BLOCK } from "./blocks";
 import type { CollisionBounds } from "./collision";
 import {
+  createDefaultDebrisShape,
+  getDebrisShapeGeometry,
+  type DebrisShapeId
+} from "./debrisShapes";
+import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
   getFragmentMaterial,
@@ -14,7 +19,7 @@ const RUBBLE_MAX_VISUAL_PIECES = 36;
 const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = RUBBLE_MAX_VISUAL_PIECES;
 // Keep the old wrinkly cover sheet available as a parked rendering mode. The
 // gameplay rubble heightfield still exists for support, raycasts, and material
-// accounting, but settled debris should currently read as baked cube piles.
+// accounting, but settled debris should currently read as baked shard piles.
 const RUBBLE_RENDER_DRAPED_SHEET_MESH = false;
 // Promotion intentionally needs more material than the visible pile cap and a
 // single 27-piece block fracture. Piles can keep accruing hidden material after
@@ -77,7 +82,8 @@ type RubbleStoredVisualChunkSample = {
   readonly localY: number;
   readonly localZ: number;
   readonly quaternion: THREE.Quaternion;
-  readonly size: number;
+  readonly shapeId: DebrisShapeId;
+  readonly visualScale: THREE.Vector3;
 };
 
 type RubbleCluster = {
@@ -129,7 +135,8 @@ export type RubbleFieldStats = {
 export type RubbleVisualChunkSample = {
   readonly position: THREE.Vector3;
   readonly quaternion: THREE.Quaternion;
-  readonly size: number;
+  readonly shapeId: DebrisShapeId;
+  readonly visualScale: THREE.Vector3;
 };
 
 export type RubbleFragmentAbsorptionOptions = {
@@ -524,7 +531,7 @@ export class RubbleField {
     const bounds = new THREE.Box3();
 
     // Gameplay still treats rubble as cheap support/material cells. Visually,
-    // though, keep settled debris as baked cube geometry unless the parked
+    // though, keep settled debris as baked shard geometry unless the parked
     // draped-sheet mode is deliberately re-enabled later.
     for (const pile of cluster.cells.values()) {
       expandRubbleGameplayBounds(bounds, pile);
@@ -939,10 +946,12 @@ function clonePile(pile: RubbleCellPile): RubbleCellPile {
 }
 
 function createRubbleVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkSample {
+  const debrisShape = fragment.debrisShape ?? createDefaultDebrisShape();
   return {
     position: fragment.mesh.position.clone(),
     quaternion: fragment.mesh.quaternion.clone(),
-    size: BLOCK_FRAGMENT_VISUAL_SIZE
+    shapeId: debrisShape.shapeId,
+    visualScale: debrisShape.visualScale.clone()
   };
 }
 
@@ -953,7 +962,7 @@ function shouldBakeFragmentVisualChunk(
   // Baked chunks are persistent static geometry. Only settled debris should
   // normally leave a cuboid silhouette. Budget pressure is the exception: with
   // the draped sheet renderer parked, forced material bake-out needs to keep
-  // the current cube pose instead of becoming invisible support-only rubble.
+  // the current shard pose instead of becoming invisible support-only rubble.
   return !fragment.isExpired && (fragment.isSleeping || options.forceVisualChunk === true);
 }
 
@@ -970,7 +979,8 @@ function createStoredVisualChunkSample(
     localY: sample.position.y - baseY,
     localZ: sample.position.z - baseZ,
     quaternion: sample.quaternion.clone(),
-    size: clamp(sample.size, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.35)
+    shapeId: sample.shapeId,
+    visualScale: clampVisualChunkScale(sample.visualScale)
   };
 }
 
@@ -982,8 +992,17 @@ function cloneStoredVisualChunkSample(
     localY: sample.localY,
     localZ: sample.localZ,
     quaternion: sample.quaternion.clone(),
-    size: sample.size
+    shapeId: sample.shapeId,
+    visualScale: sample.visualScale.clone()
   };
+}
+
+function clampVisualChunkScale(scale: THREE.Vector3): THREE.Vector3 {
+  return new THREE.Vector3(
+    clamp(scale.x, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.5),
+    clamp(scale.y, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.5),
+    clamp(scale.z, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.5)
+  );
 }
 
 function createRubbleSurfaceSamples(
@@ -1000,7 +1019,7 @@ function createRubbleSurfaceSamples(
 
   // Surface samples are the "sheet over the heap" anchors. The old pile logic
   // only knew how many pieces were in a cell; this keeps where the temporary
-  // cubes actually settled so the final proxy does not collapse into a flat lid.
+  // shards actually settled so the final proxy does not collapse into a flat lid.
   const sampleHeight = clamp(
     position.y - baseY +
       RUBBLE_SURFACE_SAMPLE_HEIGHT_PADDING +
@@ -1613,70 +1632,44 @@ function addRubbleVisualChunks(
       pile.cell.y * RUBBLE_CELL_SIZE + chunk.localY,
       pile.cell.z * RUBBLE_CELL_SIZE + chunk.localZ
     );
-    const halfSize = chunk.size * 0.5;
-    const corners = createVisualChunkCorners(center, chunk.quaternion, halfSize);
+    const shapePositions = getDebrisShapeGeometry(chunk.shapeId).getAttribute("position");
 
-    for (const corner of corners) {
-      bounds.expandByPoint(corner);
+    // Baked chunks are static geometry inside the rubble mesh. Reusing the
+    // same shard catalog as active debris keeps the settled pile from snapping
+    // back into obvious cubes while preserving the cheap support/raycast proxy.
+    for (let vertexIndex = 0; vertexIndex < shapePositions.count; vertexIndex += 3) {
+      const first = getTransformedVisualChunkVertex(shapePositions, vertexIndex, center, chunk);
+      const second = getTransformedVisualChunkVertex(shapePositions, vertexIndex + 1, center, chunk);
+      const third = getTransformedVisualChunkVertex(shapePositions, vertexIndex + 2, center, chunk);
+
+      bounds.expandByPoint(first);
+      bounds.expandByPoint(second);
+      bounds.expandByPoint(third);
+      addTriangle(
+        positions,
+        normals,
+        indices,
+        vectorToRubbleVertex(first),
+        vectorToRubbleVertex(second),
+        vectorToRubbleVertex(third)
+      );
     }
-
-    // These static cubes are deliberately baked into the same rubble mesh as
-    // the support surface. They give the pile a chunky silhouette without
-    // creating persistent rigid bodies or extra draw calls.
-    // Keep every face wound outward. The first hybrid pass accidentally wound
-    // these inward, so WebGL culled the exterior faces and left spooky partial
-    // triangles in the crater instead of readable baked chunks.
-    addVisualChunkQuad(positions, normals, indices, corners[1], corners[3], corners[7], corners[5]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[4], corners[6], corners[2]);
-    addVisualChunkQuad(positions, normals, indices, corners[2], corners[6], corners[7], corners[3]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[1], corners[5], corners[4]);
-    addVisualChunkQuad(positions, normals, indices, corners[4], corners[5], corners[7], corners[6]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[2], corners[3], corners[1]);
   }
 }
 
-function createVisualChunkCorners(
+function getTransformedVisualChunkVertex(
+  positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  vertexIndex: number,
   center: THREE.Vector3,
-  quaternion: THREE.Quaternion,
-  halfSize: number
-): readonly THREE.Vector3[] {
-  return [
-    new THREE.Vector3(-halfSize, -halfSize, -halfSize),
-    new THREE.Vector3(halfSize, -halfSize, -halfSize),
-    new THREE.Vector3(-halfSize, halfSize, -halfSize),
-    new THREE.Vector3(halfSize, halfSize, -halfSize),
-    new THREE.Vector3(-halfSize, -halfSize, halfSize),
-    new THREE.Vector3(halfSize, -halfSize, halfSize),
-    new THREE.Vector3(-halfSize, halfSize, halfSize),
-    new THREE.Vector3(halfSize, halfSize, halfSize)
-  ].map((corner) => corner.applyQuaternion(quaternion).add(center));
-}
-
-function addVisualChunkQuad(
-  positions: number[],
-  normals: number[],
-  indices: number[],
-  first: THREE.Vector3,
-  second: THREE.Vector3,
-  third: THREE.Vector3,
-  fourth: THREE.Vector3
-): void {
-  addTriangle(
-    positions,
-    normals,
-    indices,
-    vectorToRubbleVertex(first),
-    vectorToRubbleVertex(second),
-    vectorToRubbleVertex(third)
-  );
-  addTriangle(
-    positions,
-    normals,
-    indices,
-    vectorToRubbleVertex(first),
-    vectorToRubbleVertex(third),
-    vectorToRubbleVertex(fourth)
-  );
+  chunk: RubbleStoredVisualChunkSample
+): THREE.Vector3 {
+  return new THREE.Vector3(
+    positions.getX(vertexIndex) * chunk.visualScale.x,
+    positions.getY(vertexIndex) * chunk.visualScale.y,
+    positions.getZ(vertexIndex) * chunk.visualScale.z
+  )
+    .applyQuaternion(chunk.quaternion)
+    .add(center);
 }
 
 function vectorToRubbleVertex(vector: THREE.Vector3): RubbleQuadVertex {

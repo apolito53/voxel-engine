@@ -1,7 +1,7 @@
 export const BLOCK_FRAGMENT_GRID_SIZE = 3;
 export const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 // Gameplay rubble uses a fixed material budget per destroyed block. Quality
-// settings can lower the number of visible flying cubes, but they should not
+// settings can lower the number of visible flying shards, but they should not
 // make low-end machines produce less cover or different terrain outcomes.
 export const BLOCK_RUBBLE_MATERIAL_UNITS = BLOCK_FRAGMENT_COUNT;
 export const BLOCK_FRAGMENT_SPACING = 0.28;
@@ -58,9 +58,9 @@ export function getBlockFragmentMaterialUnits(
     throw new RangeError(`Fragment material index ${fragmentIndex} is outside the ${normalizedCount}-piece budget.`);
   }
 
-  // Split the fixed rubble material across however many visible cubes the
-  // current quality tier spawns. A 2-cube Potato fracture therefore still
-  // settles into the same 27 material units as a full 27-cube Ultra fracture.
+  // Split the fixed rubble material across however many visible shards the
+  // current quality tier spawns. A 2-shard Potato fracture therefore still
+  // settles into the same 27 material units as a full 27-shard Ultra fracture.
   const normalizedMaterialUnits = Math.max(
     normalizedCount,
     Number.isFinite(materialUnits) ? Math.round(materialUnits) : BLOCK_RUBBLE_MATERIAL_UNITS

@@ -5,6 +5,12 @@ import {
 } from "./blockFragments";
 import { BLOCKS } from "./blocks";
 import type { CollisionBounds, CollisionWorld } from "./collision";
+import {
+  cloneDebrisShape,
+  createDefaultDebrisShape,
+  getDebrisShapeGeometry,
+  type DebrisShape
+} from "./debrisShapes";
 
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 export const PHYSICS_CORE_BLOCK_DAMAGE = 30;
@@ -25,14 +31,6 @@ const PHYSICS_TOY_COLLISION_RESTITUTION = 0.42;
 const PHYSICS_TOY_COLLISION_DAMPING = 0.995;
 const PHYSICS_TOY_COLLISION_EPSILON = 0.000001;
 
-// Debris cubes all share one tiny geometry and one material per source block.
-// Creating GPU buffers/materials during every explosion is exactly the sort of
-// allocation burst that feels like a hitch even when the smoothed FPS looks fine.
-const sharedFragmentGeometry = new THREE.BoxGeometry(
-  BLOCK_FRAGMENT_VISUAL_SIZE,
-  BLOCK_FRAGMENT_VISUAL_SIZE,
-  BLOCK_FRAGMENT_VISUAL_SIZE
-);
 const sharedFragmentMaterials = new Map<number, THREE.MeshStandardMaterial>();
 
 export type PhysicsImpact = {
@@ -54,6 +52,7 @@ type PhysicsToyOptions = {
   readonly angularVelocity?: THREE.Vector3;
   readonly fragmentBlock?: number | null;
   readonly rubbleMaterialUnits?: number;
+  readonly debrisShape?: DebrisShape | null;
   readonly damagesBlocks?: boolean;
   readonly inverseMass?: number;
   readonly castShadow?: boolean;
@@ -95,11 +94,16 @@ export class PhysicsToy {
   readonly damagesBlocks: boolean;
   readonly fragmentBlock: number | null;
   readonly rubbleMaterialUnits: number;
+  readonly debrisShape: DebrisShape | null;
   private readonly closestPoint = new THREE.Vector3();
   private readonly centerDelta = new THREE.Vector3();
   private readonly spinAxis = new THREE.Vector3();
   private readonly spinStep = new THREE.Quaternion();
   private readonly supportNormal = new THREE.Vector3(0, 1, 0);
+  private readonly previousPosition = new THREE.Vector3();
+  private readonly movementStep = new THREE.Vector3();
+  private readonly sweepCandidateNormal = new THREE.Vector3();
+  private readonly sweepBestNormal = new THREE.Vector3();
   private readonly disposeGeometry: boolean;
   private readonly disposeMaterial: boolean;
   private readonly maxAgeSeconds: number | null;
@@ -129,6 +133,7 @@ export class PhysicsToy {
     );
     this.fragmentBlock = options.fragmentBlock ?? null;
     this.rubbleMaterialUnits = normalizeRubbleMaterialUnits(options.rubbleMaterialUnits, this.fragmentBlock !== null);
+    this.debrisShape = options.debrisShape ? cloneDebrisShape(options.debrisShape) : null;
     this.damagesBlocks = options.damagesBlocks ?? true;
     this.disposeGeometry = options.disposeGeometry ?? true;
     this.disposeMaterial = options.disposeMaterial ?? true;
@@ -137,21 +142,31 @@ export class PhysicsToy {
     this.sleepAfterSeconds = options.sleepAfterSeconds ?? 0;
     this.mesh.castShadow = options.castShadow ?? true;
     this.mesh.position.copy(position);
+    if (this.debrisShape) {
+      this.mesh.scale.copy(this.debrisShape.visualScale);
+    }
   }
 
   static createBlockFragment(
     block: number,
     position: THREE.Vector3,
     velocity: THREE.Vector3,
-    rubbleMaterialUnits = 1
+    rubbleMaterialUnits = 1,
+    debrisShape: DebrisShape = createDefaultDebrisShape()
   ): PhysicsToy {
     return new PhysicsToy(position, velocity, {
-      radius: BLOCK_FRAGMENT_COLLISION_RADIUS,
-      geometry: getSharedFragmentGeometry(),
+      radius: Math.max(
+        BLOCK_FRAGMENT_COLLISION_RADIUS,
+        debrisShape.colliderHalfExtents.x,
+        debrisShape.colliderHalfExtents.y,
+        debrisShape.colliderHalfExtents.z
+      ),
+      geometry: getDebrisShapeGeometry(debrisShape.shapeId),
       material: getFragmentMaterial(block),
       angularVelocity: createFragmentAngularVelocity(velocity),
       fragmentBlock: block,
       rubbleMaterialUnits,
+      debrisShape,
       damagesBlocks: false,
       inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
@@ -254,7 +269,7 @@ export class PhysicsToy {
     if (!this.isInstancedFragment || speed <= 0) return;
 
     // Fragment contacts are still intentionally cheap sphere-ish contacts, but
-    // giving the visible cube a spin impulse sells the "tumbling debris" read
+    // giving the visible shard a spin impulse sells the "tumbling debris" read
     // without needing a full rigid-body box solver.
     this.spinAxis.set(-normal.z, normal.x + normal.y * 0.35, normal.x);
     if (this.spinAxis.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) {
@@ -278,18 +293,45 @@ export class PhysicsToy {
 
     if (this.sleeping || this.rigidDebrisBodyAttached) return impacts;
 
+    const p = this.mesh.position;
+    this.previousPosition.copy(p);
     this.velocity.y -= 18 * delta;
-    this.mesh.position.addScaledVector(this.velocity, delta);
+    this.movementStep.copy(this.velocity).multiplyScalar(delta);
+    const sweptBlockHit = !this.isInstancedFragment
+      ? this.findSweptBlockCollision(world, this.previousPosition, this.movementStep)
+      : null;
+    let touchedSolidBlock = false;
+
+    if (sweptBlockHit) {
+      p.copy(this.previousPosition)
+        .addScaledVector(this.movementStep, sweptBlockHit.t)
+        .addScaledVector(sweptBlockHit.normal, 0.001);
+      touchedSolidBlock = true;
+      const impact = this.velocity.dot(sweptBlockHit.normal);
+      if (impact < 0) {
+        if (this.damagesBlocks) {
+          impacts.push({
+            source: this,
+            block: { x: sweptBlockHit.x, y: sweptBlockHit.y, z: sweptBlockHit.z },
+            normal: sweptBlockHit.normal.clone(),
+            speed: -impact,
+            position: p.clone()
+          });
+        }
+        this.resolveBlockBounce(sweptBlockHit.normal, impact);
+      }
+    } else {
+      p.add(this.movementStep);
+    }
+
     this.updateAngularMotion(delta);
 
-    const p = this.mesh.position;
     const minX = Math.floor(p.x - this.radius);
     const maxX = Math.floor(p.x + this.radius);
     const minY = Math.floor(p.y - this.radius);
     const maxY = Math.floor(p.y + this.radius);
     const minZ = Math.floor(p.z - this.radius);
     const maxZ = Math.floor(p.z + this.radius);
-    let touchedSolidBlock = false;
 
     for (let y = minY; y <= maxY; y += 1) {
       for (let z = minZ; z <= maxZ; z += 1) {
@@ -330,6 +372,53 @@ export class PhysicsToy {
     this.supportContactLastUpdate = touchedSolidBlock || touchedPartialSupport;
     this.updateSleepState(delta, touchedSolidBlock || touchedPartialSupport);
     return impacts;
+  }
+
+  private findSweptBlockCollision(
+    world: CollisionWorld,
+    start: THREE.Vector3,
+    movement: THREE.Vector3
+  ): { readonly x: number; readonly y: number; readonly z: number; readonly t: number; readonly normal: THREE.Vector3 } | null {
+    if (movement.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) return null;
+
+    const endX = start.x + movement.x;
+    const endY = start.y + movement.y;
+    const endZ = start.z + movement.z;
+    const minX = Math.floor(Math.min(start.x, endX) - this.radius);
+    const maxX = Math.floor(Math.max(start.x, endX) + this.radius);
+    const minY = Math.floor(Math.min(start.y, endY) - this.radius);
+    const maxY = Math.floor(Math.max(start.y, endY) + this.radius);
+    const minZ = Math.floor(Math.min(start.z, endZ) - this.radius);
+    const maxZ = Math.floor(Math.max(start.z, endZ) + this.radius);
+    let bestT = Number.POSITIVE_INFINITY;
+    let bestBlock: { x: number; y: number; z: number } | null = null;
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          if (!world.isSolid(x, y, z)) continue;
+
+          const hitT = intersectMovingPointWithExpandedBlock(
+            start,
+            movement,
+            this.radius,
+            x,
+            y,
+            z,
+            this.sweepCandidateNormal
+          );
+          if (hitT === null || hitT >= bestT) continue;
+
+          bestT = hitT;
+          bestBlock = { x, y, z };
+          this.sweepBestNormal.copy(this.sweepCandidateNormal);
+        }
+      }
+    }
+
+    return bestBlock
+      ? { ...bestBlock, t: bestT, normal: this.sweepBestNormal.clone() }
+      : null;
   }
 
   dispose(): void {
@@ -751,6 +840,117 @@ function clampToBlock(value: number, blockCoordinate: number): number {
   return Math.max(blockCoordinate, Math.min(value, blockCoordinate + 1));
 }
 
+function intersectMovingPointWithExpandedBlock(
+  start: THREE.Vector3,
+  movement: THREE.Vector3,
+  radius: number,
+  blockX: number,
+  blockY: number,
+  blockZ: number,
+  normalOut: THREE.Vector3
+): number | null {
+  let entryTime = 0;
+  let exitTime = 1;
+  normalOut.set(0, 0, 0);
+
+  const xHit = intersectMovingPointAxis(
+    start.x,
+    movement.x,
+    blockX - radius,
+    blockX + 1 + radius,
+    -1,
+    0,
+    0
+  );
+  if (!xHit) return null;
+  if (xHit.entryTime > entryTime) {
+    entryTime = xHit.entryTime;
+    normalOut.set(xHit.normalX, xHit.normalY, xHit.normalZ);
+  }
+  exitTime = Math.min(exitTime, xHit.exitTime);
+  if (entryTime > exitTime) return null;
+
+  const yHit = intersectMovingPointAxis(
+    start.y,
+    movement.y,
+    blockY - radius,
+    blockY + 1 + radius,
+    0,
+    -1,
+    0
+  );
+  if (!yHit) return null;
+  if (yHit.entryTime > entryTime) {
+    entryTime = yHit.entryTime;
+    normalOut.set(yHit.normalX, yHit.normalY, yHit.normalZ);
+  }
+  exitTime = Math.min(exitTime, yHit.exitTime);
+  if (entryTime > exitTime) return null;
+
+  const zHit = intersectMovingPointAxis(
+    start.z,
+    movement.z,
+    blockZ - radius,
+    blockZ + 1 + radius,
+    0,
+    0,
+    -1
+  );
+  if (!zHit) return null;
+  if (zHit.entryTime > entryTime) {
+    entryTime = zHit.entryTime;
+    normalOut.set(zHit.normalX, zHit.normalY, zHit.normalZ);
+  }
+  exitTime = Math.min(exitTime, zHit.exitTime);
+  if (entryTime > exitTime) return null;
+
+  // If the toy starts inside an expanded block, let the existing overlap solver
+  // produce the push-out normal. The sweep path is for the fast in-between
+  // movement that used to skip the first voxel entirely.
+  if (entryTime <= PHYSICS_TOY_COLLISION_EPSILON) return null;
+  return entryTime <= 1 ? entryTime : null;
+}
+
+function intersectMovingPointAxis(
+  start: number,
+  movement: number,
+  min: number,
+  max: number,
+  normalX: number,
+  normalY: number,
+  normalZ: number
+): {
+  readonly entryTime: number;
+  readonly exitTime: number;
+  readonly normalX: number;
+  readonly normalY: number;
+  readonly normalZ: number;
+} | null {
+  if (Math.abs(movement) <= PHYSICS_TOY_COLLISION_EPSILON) {
+    return start >= min && start <= max
+      ? { entryTime: 0, exitTime: 1, normalX: 0, normalY: 0, normalZ: 0 }
+      : null;
+  }
+
+  const inverseMovement = 1 / movement;
+  let entryTime = (min - start) * inverseMovement;
+  let exitTime = (max - start) * inverseMovement;
+  let entryNormalX = normalX;
+  let entryNormalY = normalY;
+  let entryNormalZ = normalZ;
+
+  if (entryTime > exitTime) {
+    const previousEntryTime = entryTime;
+    entryTime = exitTime;
+    exitTime = previousEntryTime;
+    entryNormalX = -normalX;
+    entryNormalY = -normalY;
+    entryNormalZ = -normalZ;
+  }
+
+  return { entryTime, exitTime, normalX: entryNormalX, normalY: entryNormalY, normalZ: entryNormalZ };
+}
+
 function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boolean): number {
   if (!isFragment) return 0;
 
@@ -771,12 +971,8 @@ function createFragmentAngularVelocity(velocity: THREE.Vector3): THREE.Vector3 {
   }
 
   // A little exaggerated spin is cheaper and more readable than pretending the
-  // cube mesh is a physically accurate box collider.
+  // shard mesh is a physically accurate box collider.
   return spin.normalize().multiplyScalar(8 + Math.min(speed * 2.5, 16));
-}
-
-export function getSharedFragmentGeometry(): THREE.BoxGeometry {
-  return sharedFragmentGeometry;
 }
 
 export function getFragmentMaterial(block: number): THREE.MeshStandardMaterial {
