@@ -46,7 +46,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled Rapier-driven shard fragments. Nearby fragments tumble, collide through cheap cuboid envelopes, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; targeted rubble cells use a white cube-space outline, unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, stamping a faceted visual crater on the struck face, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled Rapier-driven shard fragments. Nearby fragments tumble, collide through cheap cuboid envelopes, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; targeted rubble cells use a white cube-space outline, unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -92,6 +92,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin target outline rendering for terrain blocks and settled rubble cube cells
+- `src/impactCraterField.ts`: capped static faceted crater/scar mesh stamped from physics-core terrain impact points
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
 - `src/debrisShapes.ts`: shared low-poly shard geometry catalog and material-aware shape assignment helpers

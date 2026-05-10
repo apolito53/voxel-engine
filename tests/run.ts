@@ -116,6 +116,10 @@ import {
   getPhysicsCoreVelocityMultiplier,
   normalizePhysicsCoreSettings
 } from "../src/physicsCoreSettings";
+import {
+  IMPACT_CRATER_MAX_STAMPS,
+  ImpactCraterField
+} from "../src/impactCraterField";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
@@ -1692,6 +1696,77 @@ test("physics core impact damage overwhelms ordinary terrain health", () => {
   assert(rubbleHit?.destroyed, "a core hit should destroy a generated rubble block in one impact");
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed stone should leave the voxel grid");
   assertEqual(world.getBlock(3, 3, 4), BLOCK.air, "destroyed rubble terrain should leave the voxel grid");
+});
+
+test("impact crater field stamps faceted scars on impacted block faces", () => {
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+
+  assert(craters.stamp({
+    block: BLOCK.stone,
+    blockPosition: { x: 1, y: 2, z: 3 },
+    normal: new THREE.Vector3(-1, 0, 0),
+    point: new THREE.Vector3(0.92, 2.5, 3.5),
+    speed: 16,
+    destroyed: true
+  }), "meaningful block impacts should create a crater stamp");
+
+  const stats = craters.getStats();
+  const positionAttribute = craters.mesh.geometry.getAttribute("position");
+  const colorAttribute = craters.mesh.geometry.getAttribute("color");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
+
+  assertEqual(scene.children[0], craters.mesh, "crater field should own one scene mesh");
+  assert(craters.mesh.visible, "stamped crater mesh should become visible");
+  assertEqual(stats.craters, 1, "one impact should add one crater sample");
+  assert(stats.vertices > 0 && stats.triangles > 0, "crater stamps should build visible static geometry");
+  assertEqual(
+    colorAttribute.count,
+    positionAttribute.count,
+    "crater geometry should carry per-vertex scar colors"
+  );
+  assert(
+    bounds.max.x < 1,
+    "negative-X impact scars should sit just outside the hit block face instead of drifting into the voxel"
+  );
+  assert(
+    bounds.min.y > 2 && bounds.max.y < 3,
+    "face-clamped crater geometry should stay within the hit block's vertical face span"
+  );
+  assert(
+    bounds.min.z > 3 && bounds.max.z < 4,
+    "face-clamped crater geometry should stay within the hit block's horizontal face span"
+  );
+
+  craters.dispose();
+});
+
+test("impact crater field caps old stamps and clears its static mesh", () => {
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+
+  for (let index = 0; index < IMPACT_CRATER_MAX_STAMPS + 8; index += 1) {
+    craters.stamp({
+      block: BLOCK.dirt,
+      blockPosition: { x: index, y: 4, z: 0 },
+      normal: new THREE.Vector3(0, 1, 0),
+      point: new THREE.Vector3(index + 0.5, 5, 0.5),
+      speed: 10,
+      destroyed: false
+    });
+  }
+
+  assertEqual(
+    craters.getStats().craters,
+    IMPACT_CRATER_MAX_STAMPS,
+    "crater field should cap stale static scars before they become unbounded visual baggage"
+  );
+  craters.clear();
+  assertEqual(craters.getStats().craters, 0, "clearing should drop crater stats");
+  assert(!craters.mesh.visible, "clearing should hide the shared crater mesh");
+
+  craters.dispose();
+  assertEqual(scene.children.length, 0, "disposing should remove the crater mesh from the scene");
 });
 
 test("block fracture pattern produces a centered 3x3x3 debris grid", () => {

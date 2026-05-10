@@ -60,6 +60,7 @@ import {
   createVoxelSandboxItemRegistry,
   type ItemAction
 } from "./items";
+import { ImpactCraterField } from "./impactCraterField";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
@@ -356,6 +357,7 @@ type TargetHit =
 type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
+const impactCraterField = new ImpactCraterField(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
@@ -1266,6 +1268,15 @@ function handlePhysicsImpact(
   );
   if (!result) return;
 
+  impactCraterField.stamp({
+    block: result.block,
+    blockPosition: result.position,
+    normal: impact.normal,
+    point: impact.position,
+    speed: impact.speed,
+    destroyed: result.destroyed
+  });
+
   engineEvents.emit("block:damaged", {
     position: result.position,
     block: result.block,
@@ -2072,6 +2083,7 @@ function clearToys(): void {
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
+  impactCraterField.clear();
   rubbleField.clear();
 }
 
@@ -2142,6 +2154,7 @@ function disposeRuntime(): void {
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();
+  impactCraterField.dispose();
   skybox.dispose();
   worldMaterial.dispose();
   renderer.renderLists.dispose();
