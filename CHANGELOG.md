@@ -10,7 +10,7 @@
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 - Added a pause-menu `Health Bars` toggle that persists locally, suppresses block/rubble damage bars, and clears active bars immediately when disabled.
 - Added a white cube-space target outline for destructible settled-rubble cells, including direct destroy-action hits against the targeted rubble proxy instead of terrain behind it.
-- Added in-memory partial-block terrain carving for Physics Core impacts: terrain cells can keep collision and health while rendering as faceted custom geometry with a chunk carved out.
+- Added in-memory partial-block terrain carving for Physics Core impacts: terrain cells can keep collision and health while rendering as faceted custom geometry with impact cuts that chew into neighboring exposed faces near edges.
 - Added a capped `ImpactCraterField` prototype for faceted visual crater/scar experiments; it is currently parked behind the partial-block terrain carve path.
 - Added a shared debris-shape catalog for varied low-poly active fragments, with non-uniform shard scales, cuboid physics envelopes, and baked rubble visuals that preserve the settled shard shape.
 - Split pause-menu `Settings` into `Graphics` and `Gameplay` tabs so visual/performance tuning stays separate from core feel, health bars, and cleanup.

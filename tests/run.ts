@@ -1753,6 +1753,44 @@ test("partial block field renders faceted custom terrain cells", () => {
   assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
 });
 
+test("partial block cuts chew into neighboring exposed faces near edges", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.96, z: 0.5 },
+      radius: 0.48,
+      depth: 0.5,
+      seed: 4321
+    }]
+  };
+
+  field.update([cell], () => true);
+  const positions = field.mesh.geometry.getAttribute("position");
+  const normals = field.mesh.geometry.getAttribute("normal");
+  let pulledTopFaceVertices = 0;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const y = positions.getY(index);
+    const normalY = normals.getY(index);
+    if (normalY > 0.35 && y > 2.55 && y < 2.995) {
+      pulledTopFaceVertices += 1;
+    }
+  }
+
+  assert(
+    pulledTopFaceVertices > 0,
+    "edge-adjacent cuts should pull neighboring exposed faces inward instead of only denting the impact face"
+  );
+
+  field.dispose();
+});
+
 test("chunk meshing skips carved cells and exposes adjacent terrain faces", () => {
   const chunk = new Chunk(0, 0);
   chunk.setLocal(1, 1, 1, BLOCK.stone);

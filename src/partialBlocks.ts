@@ -10,6 +10,9 @@ const PARTIAL_BLOCK_MIN_RADIUS = 0.26;
 const PARTIAL_BLOCK_MAX_RADIUS = 0.46;
 const PARTIAL_BLOCK_MIN_DEPTH = 0.24;
 const PARTIAL_BLOCK_MAX_DEPTH = 0.58;
+const PARTIAL_BLOCK_ADJACENT_FACE_STRENGTH = 0.68;
+const PARTIAL_BLOCK_ADJACENT_FACE_RADIUS_SCALE = 0.86;
+const PARTIAL_BLOCK_OPPOSITE_FACE_DOT_CUTOFF = -0.1;
 const PARTIAL_BLOCK_INNER_DARKENING = 0.55;
 
 export type PartialBlockPosition = {
@@ -186,7 +189,7 @@ export function addPartialBlockCellGeometry(
 ): void {
   for (const face of PARTIAL_BLOCK_FACES) {
     if (!isFaceVisible(cell, face.normal)) continue;
-    const cuts = cell.cuts.filter((cut) => isSameNormal(cut.normal, face.normal));
+    const cuts = cell.cuts.filter((cut) => canCutAffectFace(cut, face));
     if (cuts.length > 0) {
       addCarvedFaceGeometry(geometry, cell, face, cuts);
     } else {
@@ -255,15 +258,7 @@ function sampleCarvedFacePoint(
   let strongestCutSeed = cuts[0]?.seed ?? 0;
 
   for (const cut of cuts) {
-    const cutU = dotPosition(cut.localPoint, face.tangent);
-    const cutV = dotPosition(cut.localPoint, face.bitangent);
-    const distance = Math.hypot(u - cutU, v - cutV);
-    const normalizedDistance = distance / Math.max(0.001, cut.radius);
-    if (normalizedDistance >= 1) continue;
-
-    const falloff = (1 - normalizedDistance * normalizedDistance) ** 2;
-    const lumpyNoise = 0.82 + hashUnit(cut.seed ^ (Math.floor(u * 37) * 73856093) ^ (Math.floor(v * 41) * 19349663)) * 0.28;
-    const cutInward = Math.min(PARTIAL_BLOCK_MAX_DEPTH, cut.depth * falloff * lumpyNoise);
+    const cutInward = sampleCutInward(face, cut, u, v);
     if (cutInward > inward) {
       inward = cutInward;
       strongestCutSeed = cut.seed;
@@ -279,6 +274,41 @@ function sampleCarvedFacePoint(
     z: point.z,
     shade: Math.max(0.28, Math.min(1.08, shade))
   };
+}
+
+function sampleCutInward(face: PartialBlockFace, cut: PartialBlockCut, u: number, v: number): number {
+  const faceAlignment = dotPosition(face.normal, cut.normal);
+  if (faceAlignment < PARTIAL_BLOCK_OPPOSITE_FACE_DOT_CUTOFF) return 0;
+
+  const localPoint = localFacePoint(face, u, v, 0);
+  const distance = Math.hypot(
+    localPoint.x - cut.localPoint.x,
+    localPoint.y - cut.localPoint.y,
+    localPoint.z - cut.localPoint.z
+  );
+  const isImpactFace = faceAlignment > 0.5;
+  const radius = cut.radius * (isImpactFace ? 1 : PARTIAL_BLOCK_ADJACENT_FACE_RADIUS_SCALE);
+  const normalizedDistance = distance / Math.max(0.001, radius);
+  if (normalizedDistance >= 1) return 0;
+
+  // Treat each hit as a tiny bite volume, not a flat decal. The struck face gets
+  // the full indentation, while adjacent exposed faces get a softer pull so
+  // edge and corner impacts visibly remove part of the block silhouette.
+  const faceStrength = isImpactFace ? 1 : PARTIAL_BLOCK_ADJACENT_FACE_STRENGTH;
+  const falloff = (1 - normalizedDistance * normalizedDistance) ** 2;
+  const lumpyNoise = 0.82 + hashUnit(
+    cut.seed ^ (Math.floor(u * 37) * 73856093) ^ (Math.floor(v * 41) * 19349663)
+  ) * 0.28;
+  return Math.min(PARTIAL_BLOCK_MAX_DEPTH, cut.depth * faceStrength * falloff * lumpyNoise);
+}
+
+function canCutAffectFace(cut: PartialBlockCut, face: PartialBlockFace): boolean {
+  if (dotPosition(face.normal, cut.normal) < PARTIAL_BLOCK_OPPOSITE_FACE_DOT_CUTOFF) return false;
+
+  const facePlaneDistance = Math.abs(
+    dotPosition(cut.localPoint, face.normal) - dotPosition(face.localOrigin, face.normal)
+  );
+  return facePlaneDistance <= cut.radius * 1.15;
 }
 
 function addQuad(
@@ -309,10 +339,24 @@ function facePoint(
   v: number,
   inward: number
 ): PartialBlockPosition {
+  const localPoint = localFacePoint(face, u, v, inward);
   return {
-    x: blockPosition.x + face.localOrigin.x + face.tangent.x * u + face.bitangent.x * v - face.normal.x * inward,
-    y: blockPosition.y + face.localOrigin.y + face.tangent.y * u + face.bitangent.y * v - face.normal.y * inward,
-    z: blockPosition.z + face.localOrigin.z + face.tangent.z * u + face.bitangent.z * v - face.normal.z * inward
+    x: blockPosition.x + localPoint.x,
+    y: blockPosition.y + localPoint.y,
+    z: blockPosition.z + localPoint.z
+  };
+}
+
+function localFacePoint(
+  face: PartialBlockFace,
+  u: number,
+  v: number,
+  inward: number
+): PartialBlockPosition {
+  return {
+    x: face.localOrigin.x + face.tangent.x * u + face.bitangent.x * v - face.normal.x * inward,
+    y: face.localOrigin.y + face.tangent.y * u + face.bitangent.y * v - face.normal.y * inward,
+    z: face.localOrigin.z + face.tangent.z * u + face.bitangent.z * v - face.normal.z * inward
   };
 }
 

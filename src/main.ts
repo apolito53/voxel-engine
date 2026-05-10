@@ -410,7 +410,7 @@ const testAvatar = new TestAvatar({
   getWorld: requireWorld,
   getPlayer: requirePlayer,
   getCamera: () => camera,
-  throwPlayerCore,
+  throwPlayerCore: () => throwPlayerCore(requirePlayer()),
   noteActivity: noteUserActivity
 });
 voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
