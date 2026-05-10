@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
+import type { CollisionBounds } from "./collision";
 import { getSunlitFaceShade } from "./voxelLighting";
 
 export const PARTIAL_BLOCK_CORE_DAMAGE = 1;
@@ -14,6 +15,13 @@ const PARTIAL_BLOCK_ADJACENT_FACE_STRENGTH = 0.68;
 const PARTIAL_BLOCK_ADJACENT_FACE_RADIUS_SCALE = 0.86;
 const PARTIAL_BLOCK_OPPOSITE_FACE_DOT_CUTOFF = -0.1;
 const PARTIAL_BLOCK_INNER_DARKENING = 0.55;
+const PARTIAL_BLOCK_SURFACE_GRID_STEPS = 4;
+const PARTIAL_BLOCK_SURFACE_MIN_HEIGHT = 0.06;
+const PARTIAL_BLOCK_SURFACE_MAX_HEIGHT = 0.54;
+const PARTIAL_BLOCK_SURFACE_EDGE_HEIGHT = 0.1;
+const PARTIAL_BLOCK_SURFACE_SAMPLE_FALLOFF = 0.5;
+const PARTIAL_BLOCK_SURFACE_SAMPLE_NOISE = 0.09;
+const PARTIAL_BLOCK_SURFACE_EPSILON = 0.000001;
 
 export type PartialBlockPosition = {
   readonly x: number;
@@ -33,8 +41,16 @@ export type PartialBlockCell = {
   readonly block: number;
   readonly position: PartialBlockPosition;
   readonly cuts: readonly PartialBlockCut[];
+  readonly surfaceSamples?: readonly PartialBlockSurfaceSample[];
   readonly damage: number;
   readonly maxHealth: number;
+};
+
+export type PartialBlockSurfaceSample = {
+  readonly localX: number;
+  readonly localZ: number;
+  readonly height: number;
+  readonly weight: number;
 };
 
 export type PartialBlockFaceVisibility = (
@@ -55,6 +71,17 @@ type MutablePartialBlockGeometry = {
   readonly colors: number[];
   readonly indices: number[];
 };
+
+type PartialBlockSurfaceGrid = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly baseY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+  readonly heights: readonly number[];
+};
+
+type PartialBlockSurfaceCellMap = ReadonlyMap<string, PartialBlockCell>;
 
 export class PartialBlockMeshField {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
@@ -91,8 +118,18 @@ export class PartialBlockMeshField {
       indices: []
     };
 
+    const surfaceCells = new Map(
+      cells
+        .filter(isPartialBlockSurfaceCell)
+        .map((cell) => [createPartialBlockKey(cell.position), cell])
+    );
+
     for (const cell of cells) {
-      addPartialBlockCellGeometry(geometryData, cell, isFaceVisible);
+      if (isPartialBlockSurfaceCell(cell)) {
+        addPartialBlockSurfaceGeometry(geometryData, cell, surfaceCells);
+      } else {
+        addPartialBlockCellGeometry(geometryData, cell, isFaceVisible);
+      }
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -101,7 +138,6 @@ export class PartialBlockMeshField {
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(geometryData.colors, 3));
     geometry.setIndex(geometryData.indices);
     if (geometryData.positions.length > 0) {
-      geometry.computeVertexNormals();
       geometry.computeBoundingSphere();
     } else {
       geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 0);
@@ -147,6 +183,10 @@ export function createPartialBlockKey(position: PartialBlockPosition): string {
   return `${Math.floor(position.x)},${Math.floor(position.y)},${Math.floor(position.z)}`;
 }
 
+export function isPartialBlockSurfaceCell(cell: PartialBlockCell): boolean {
+  return Boolean(cell.surfaceSamples && cell.surfaceSamples.length > 0);
+}
+
 export function createPartialBlockCut({
   block,
   position,
@@ -182,6 +222,88 @@ export function createPartialBlockCut({
   };
 }
 
+export function createPartialBlockSurfaceSamples(
+  position: PartialBlockPosition,
+  cuts: readonly PartialBlockCut[]
+): PartialBlockSurfaceSample[] {
+  const seed = hashPartialBlockCut(0, position, { x: 0, y: 1, z: 0 }, cuts.length);
+  const centerHeight = clamp(
+    0.25 + (hashUnit(seed ^ 0x5f356495) - 0.5) * PARTIAL_BLOCK_SURFACE_SAMPLE_NOISE,
+    PARTIAL_BLOCK_SURFACE_MIN_HEIGHT,
+    PARTIAL_BLOCK_SURFACE_MAX_HEIGHT
+  );
+  const samples: PartialBlockSurfaceSample[] = [{
+    localX: 0.5,
+    localZ: 0.5,
+    height: centerHeight,
+    weight: 1
+  }];
+
+  for (const cut of cuts) {
+    samples.push({
+      localX: clamp01(cut.localPoint.x),
+      localZ: clamp01(cut.localPoint.z),
+      height: clamp(
+        0.12 + cut.depth * 0.42 + (hashUnit(cut.seed ^ 0x85ebca6b) - 0.45) * PARTIAL_BLOCK_SURFACE_SAMPLE_NOISE,
+        PARTIAL_BLOCK_SURFACE_MIN_HEIGHT,
+        PARTIAL_BLOCK_SURFACE_MAX_HEIGHT
+      ),
+      weight: 1 + cut.depth
+    });
+  }
+
+  return samples;
+}
+
+export function getPartialBlockSupportHeight(
+  cells: Iterable<PartialBlockCell>,
+  bounds: CollisionBounds
+): number | null {
+  const minX = Math.floor(bounds.minX);
+  const maxX = Math.floor(bounds.maxX - PARTIAL_BLOCK_SURFACE_EPSILON);
+  const minY = Math.floor(bounds.minY - PARTIAL_BLOCK_SURFACE_MAX_HEIGHT - PARTIAL_BLOCK_SURFACE_EPSILON);
+  const maxY = Math.floor(bounds.maxY);
+  const minZ = Math.floor(bounds.minZ);
+  const maxZ = Math.floor(bounds.maxZ - PARTIAL_BLOCK_SURFACE_EPSILON);
+  let supportY: number | null = null;
+
+  for (const cell of cells) {
+    if (!isPartialBlockSurfaceCell(cell)) continue;
+    if (
+      cell.position.x < minX ||
+      cell.position.x > maxX ||
+      cell.position.y < minY ||
+      cell.position.y > maxY ||
+      cell.position.z < minZ ||
+      cell.position.z > maxZ
+    ) {
+      continue;
+    }
+
+    const cellMinX = cell.position.x;
+    const cellMaxX = cell.position.x + 1;
+    const cellMinZ = cell.position.z;
+    const cellMaxZ = cell.position.z + 1;
+    const overlapMinX = Math.max(bounds.minX, cellMinX);
+    const overlapMaxX = Math.min(bounds.maxX, cellMaxX);
+    const overlapMinZ = Math.max(bounds.minZ, cellMinZ);
+    const overlapMaxZ = Math.min(bounds.maxZ, cellMaxZ);
+    if (overlapMinX >= overlapMaxX || overlapMinZ >= overlapMaxZ) continue;
+
+    const cellSupportY = Math.max(
+      getPartialSurfaceYAt(cell, (overlapMinX + overlapMaxX) * 0.5 - cell.position.x, (overlapMinZ + overlapMaxZ) * 0.5 - cell.position.z),
+      getPartialSurfaceYAt(cell, overlapMinX - cell.position.x, overlapMinZ - cell.position.z),
+      getPartialSurfaceYAt(cell, overlapMinX - cell.position.x, overlapMaxZ - cell.position.z),
+      getPartialSurfaceYAt(cell, overlapMaxX - cell.position.x, overlapMinZ - cell.position.z),
+      getPartialSurfaceYAt(cell, overlapMaxX - cell.position.x, overlapMaxZ - cell.position.z)
+    );
+    if (cellSupportY > bounds.maxY + PARTIAL_BLOCK_SURFACE_EPSILON) continue;
+    supportY = supportY === null ? cellSupportY : Math.max(supportY, cellSupportY);
+  }
+
+  return supportY;
+}
+
 export function addPartialBlockCellGeometry(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
@@ -195,6 +317,191 @@ export function addPartialBlockCellGeometry(
     } else {
       addFlatFaceGeometry(geometry, cell, face);
     }
+  }
+}
+
+function addPartialBlockSurfaceGeometry(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  surfaceCells: PartialBlockSurfaceCellMap
+): void {
+  const grid = createPartialSurfaceGrid(cell, surfaceCells);
+  addPartialSurfaceTop(geometry, cell, grid);
+  addPartialSurfaceBottom(geometry, cell, grid);
+  if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x, y: cell.position.y, z: cell.position.z - 1 }))) {
+    addPartialSurfaceSide(geometry, cell, grid, "north");
+  }
+  if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x, y: cell.position.y, z: cell.position.z + 1 }))) {
+    addPartialSurfaceSide(geometry, cell, grid, "south");
+  }
+  if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x - 1, y: cell.position.y, z: cell.position.z }))) {
+    addPartialSurfaceSide(geometry, cell, grid, "west");
+  }
+  if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x + 1, y: cell.position.y, z: cell.position.z }))) {
+    addPartialSurfaceSide(geometry, cell, grid, "east");
+  }
+}
+
+function createPartialSurfaceGrid(
+  cell: PartialBlockCell,
+  surfaceCells: PartialBlockSurfaceCellMap
+): PartialBlockSurfaceGrid {
+  const minX = cell.position.x;
+  const maxX = cell.position.x + 1;
+  const baseY = cell.position.y;
+  const minZ = cell.position.z;
+  const maxZ = cell.position.z + 1;
+  const heights: number[] = [];
+
+  for (let zIndex = 0; zIndex <= PARTIAL_BLOCK_SURFACE_GRID_STEPS; zIndex += 1) {
+    const localZ = zIndex / PARTIAL_BLOCK_SURFACE_GRID_STEPS;
+    for (let xIndex = 0; xIndex <= PARTIAL_BLOCK_SURFACE_GRID_STEPS; xIndex += 1) {
+      const localX = xIndex / PARTIAL_BLOCK_SURFACE_GRID_STEPS;
+      heights.push(getStitchedPartialSurfaceY(cell, surfaceCells, localX, localZ));
+    }
+  }
+
+  return { minX, maxX, baseY, minZ, maxZ, heights };
+}
+
+function getStitchedPartialSurfaceY(
+  cell: PartialBlockCell,
+  surfaceCells: PartialBlockSurfaceCellMap,
+  localX: number,
+  localZ: number
+): number {
+  let y = getPartialSurfaceYAt(cell, localX, localZ);
+  if (localX <= PARTIAL_BLOCK_SURFACE_EPSILON) {
+    y = Math.max(y, getNeighborPartialSurfaceY(cell, surfaceCells, -1, 0, 1, localZ));
+  }
+  if (localX >= 1 - PARTIAL_BLOCK_SURFACE_EPSILON) {
+    y = Math.max(y, getNeighborPartialSurfaceY(cell, surfaceCells, 1, 0, 0, localZ));
+  }
+  if (localZ <= PARTIAL_BLOCK_SURFACE_EPSILON) {
+    y = Math.max(y, getNeighborPartialSurfaceY(cell, surfaceCells, 0, -1, localX, 1));
+  }
+  if (localZ >= 1 - PARTIAL_BLOCK_SURFACE_EPSILON) {
+    y = Math.max(y, getNeighborPartialSurfaceY(cell, surfaceCells, 0, 1, localX, 0));
+  }
+  return y;
+}
+
+function getNeighborPartialSurfaceY(
+  cell: PartialBlockCell,
+  surfaceCells: PartialBlockSurfaceCellMap,
+  offsetX: number,
+  offsetZ: number,
+  localX: number,
+  localZ: number
+): number {
+  const neighbor = surfaceCells.get(createPartialBlockKey({
+    x: cell.position.x + offsetX,
+    y: cell.position.y,
+    z: cell.position.z + offsetZ
+  }));
+  return neighbor ? getPartialSurfaceYAt(neighbor, localX, localZ) : cell.position.y + PARTIAL_BLOCK_SURFACE_MIN_HEIGHT;
+}
+
+function addPartialSurfaceTop(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  grid: PartialBlockSurfaceGrid
+): void {
+  for (let zIndex = 0; zIndex < PARTIAL_BLOCK_SURFACE_GRID_STEPS; zIndex += 1) {
+    for (let xIndex = 0; xIndex < PARTIAL_BLOCK_SURFACE_GRID_STEPS; xIndex += 1) {
+      const width = grid.maxX - grid.minX;
+      const depth = grid.maxZ - grid.minZ;
+      const westX = grid.minX + (xIndex / PARTIAL_BLOCK_SURFACE_GRID_STEPS) * width;
+      const eastX = grid.minX + ((xIndex + 1) / PARTIAL_BLOCK_SURFACE_GRID_STEPS) * width;
+      const northZ = grid.minZ + (zIndex / PARTIAL_BLOCK_SURFACE_GRID_STEPS) * depth;
+      const southZ = grid.minZ + ((zIndex + 1) / PARTIAL_BLOCK_SURFACE_GRID_STEPS) * depth;
+      const northWest: RubbleLikeVertex = [westX, getPartialGridHeight(grid, xIndex, zIndex), northZ];
+      const northEast: RubbleLikeVertex = [eastX, getPartialGridHeight(grid, xIndex + 1, zIndex), northZ];
+      const southWest: RubbleLikeVertex = [westX, getPartialGridHeight(grid, xIndex, zIndex + 1), southZ];
+      const southEast: RubbleLikeVertex = [eastX, getPartialGridHeight(grid, xIndex + 1, zIndex + 1), southZ];
+      const noise = hashUnit(
+        hashPartialBlockCut(cell.block, cell.position, { x: 0, y: 1, z: 0 }, xIndex + zIndex * 17)
+      );
+      if (noise > 0.5) {
+        addTriangle(geometry, cell, northWest, southWest, southEast);
+        addTriangle(geometry, cell, northWest, southEast, northEast);
+      } else {
+        addTriangle(geometry, cell, northWest, southWest, northEast);
+        addTriangle(geometry, cell, northEast, southWest, southEast);
+      }
+    }
+  }
+}
+
+function addPartialSurfaceBottom(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  grid: PartialBlockSurfaceGrid
+): void {
+  addTriangle(
+    geometry,
+    cell,
+    [grid.minX, grid.baseY, grid.minZ],
+    [grid.maxX, grid.baseY, grid.maxZ],
+    [grid.minX, grid.baseY, grid.maxZ]
+  );
+  addTriangle(
+    geometry,
+    cell,
+    [grid.minX, grid.baseY, grid.minZ],
+    [grid.maxX, grid.baseY, grid.minZ],
+    [grid.maxX, grid.baseY, grid.maxZ]
+  );
+}
+
+function addPartialSurfaceSide(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  grid: PartialBlockSurfaceGrid,
+  side: "north" | "south" | "west" | "east"
+): void {
+  for (let step = 0; step < PARTIAL_BLOCK_SURFACE_GRID_STEPS; step += 1) {
+    if (side === "north") {
+      const x0 = lerp(grid.minX, grid.maxX, step / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+      const x1 = lerp(grid.minX, grid.maxX, (step + 1) / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+      addQuad(geometry, cell.block, cell.position, { x: 0, y: 0, z: -1 }, [
+        { x: x0, y: grid.baseY, z: grid.minZ },
+        { x: x0, y: getPartialGridHeight(grid, step, 0), z: grid.minZ },
+        { x: x1, y: getPartialGridHeight(grid, step + 1, 0), z: grid.minZ },
+        { x: x1, y: grid.baseY, z: grid.minZ }
+      ], 1);
+      continue;
+    }
+    if (side === "south") {
+      const x0 = lerp(grid.minX, grid.maxX, step / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+      const x1 = lerp(grid.minX, grid.maxX, (step + 1) / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+      addQuad(geometry, cell.block, cell.position, { x: 0, y: 0, z: 1 }, [
+        { x: x0, y: grid.baseY, z: grid.maxZ },
+        { x: x1, y: grid.baseY, z: grid.maxZ },
+        { x: x1, y: getPartialGridHeight(grid, step + 1, PARTIAL_BLOCK_SURFACE_GRID_STEPS), z: grid.maxZ },
+        { x: x0, y: getPartialGridHeight(grid, step, PARTIAL_BLOCK_SURFACE_GRID_STEPS), z: grid.maxZ }
+      ], 1);
+      continue;
+    }
+    if (side === "west") {
+      const z0 = lerp(grid.minZ, grid.maxZ, step / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+      const z1 = lerp(grid.minZ, grid.maxZ, (step + 1) / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+      addQuad(geometry, cell.block, cell.position, { x: -1, y: 0, z: 0 }, [
+        { x: grid.minX, y: grid.baseY, z: z0 },
+        { x: grid.minX, y: grid.baseY, z: z1 },
+        { x: grid.minX, y: getPartialGridHeight(grid, 0, step + 1), z: z1 },
+        { x: grid.minX, y: getPartialGridHeight(grid, 0, step), z: z0 }
+      ], 1);
+      continue;
+    }
+    const z0 = lerp(grid.minZ, grid.maxZ, step / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+    const z1 = lerp(grid.minZ, grid.maxZ, (step + 1) / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
+    addQuad(geometry, cell.block, cell.position, { x: 1, y: 0, z: 0 }, [
+      { x: grid.maxX, y: grid.baseY, z: z0 },
+      { x: grid.maxX, y: getPartialGridHeight(grid, PARTIAL_BLOCK_SURFACE_GRID_STEPS, step), z: z0 },
+      { x: grid.maxX, y: getPartialGridHeight(grid, PARTIAL_BLOCK_SURFACE_GRID_STEPS, step + 1), z: z1 },
+      { x: grid.maxX, y: grid.baseY, z: z1 }
+    ], 1);
   }
 }
 
@@ -245,6 +552,58 @@ function addCarvedFaceGeometry(
       geometry.indices.push(a, b, c, a, c, d);
     }
   }
+}
+
+type RubbleLikeVertex = readonly [number, number, number];
+
+function addTriangle(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  first: RubbleLikeVertex,
+  second: RubbleLikeVertex,
+  third: RubbleLikeVertex
+): void {
+  const normal = getTriangleNormal(first, second, third);
+  const shade = Math.max(0.24, getSunlitFaceShade(normal) * 0.95);
+  const color = getTintedBlockColor(createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z), shade);
+  const base = geometry.positions.length / 3;
+  geometry.positions.push(...first, ...second, ...third);
+  geometry.normals.push(...normal, ...normal, ...normal);
+  geometry.colors.push(...color, ...color, ...color);
+  geometry.indices.push(base, base + 1, base + 2);
+}
+
+function getTriangleNormal(
+  first: RubbleLikeVertex,
+  second: RubbleLikeVertex,
+  third: RubbleLikeVertex
+): [number, number, number] {
+  const ux = second[0] - first[0];
+  const uy = second[1] - first[1];
+  const uz = second[2] - first[2];
+  const vx = third[0] - first[0];
+  const vy = third[1] - first[1];
+  const vz = third[2] - first[2];
+  const nx = uy * vz - uz * vy;
+  const ny = uz * vx - ux * vz;
+  const nz = ux * vy - uy * vx;
+  const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+  if (length <= PARTIAL_BLOCK_SURFACE_EPSILON) return [0, 1, 0];
+  return [nx / length, ny / length, nz / length];
+}
+
+function getPartialGridHeight(grid: PartialBlockSurfaceGrid, xIndex: number, zIndex: number): number {
+  return grid.heights[xIndex + (PARTIAL_BLOCK_SURFACE_GRID_STEPS + 1) * zIndex] ?? grid.baseY;
+}
+
+function getPartialSurfaceYAt(cell: PartialBlockCell, localX: number, localZ: number): number {
+  const samples = cell.surfaceSamples ?? [];
+  let height = PARTIAL_BLOCK_SURFACE_EDGE_HEIGHT;
+  for (const sample of samples) {
+    const distance = Math.hypot(clamp01(localX) - sample.localX, clamp01(localZ) - sample.localZ);
+    height = Math.max(height, sample.height - distance * PARTIAL_BLOCK_SURFACE_SAMPLE_FALLOFF * sample.weight);
+  }
+  return cell.position.y + clamp(height, PARTIAL_BLOCK_SURFACE_MIN_HEIGHT, PARTIAL_BLOCK_SURFACE_MAX_HEIGHT);
 }
 
 function sampleCarvedFacePoint(
@@ -410,7 +769,11 @@ function mixHash(value: number): number {
 }
 
 function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
+  return clamp(value, 0, 1);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function lerp(a: number, b: number, t: number): number {

@@ -1717,7 +1717,21 @@ test("physics core carving chips ordinary terrain before fracture", () => {
 
   assert(secondHit?.destroyed, "a second carved health step should fracture a two-health block");
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
-  assertEqual(world.getPartialBlock(2, 3, 4), null, "destroyed terrain should clear its partial geometry state");
+  assert(!world.isSolid(2, 3, 4), "fractured terrain should stop behaving like a full collision cube");
+  const surfaceCell = world.getPartialBlock(2, 3, 4);
+  assert(surfaceCell?.surfaceSamples?.length, "fractured carved terrain should leave a partial support surface");
+  const supportHeight = world.getSupportHeight({
+    minX: 2.15,
+    maxX: 2.85,
+    minY: 3,
+    maxY: 3.7,
+    minZ: 4.15,
+    maxZ: 4.85
+  });
+  assert(
+    supportHeight !== null && supportHeight > 3 && supportHeight < 4,
+    "destroyed carved terrain should expose a walkable/supporting partial-height surface"
+  );
 });
 
 test("partial block field renders faceted custom terrain cells", () => {
@@ -1787,6 +1801,33 @@ test("partial block cuts chew into neighboring exposed faces near edges", () => 
     pulledTopFaceVertices > 0,
     "edge-adjacent cuts should pull neighboring exposed faces inward instead of only denting the impact face"
   );
+
+  field.dispose();
+});
+
+test("partial block field renders broken cells as wrinkled support surfaces", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.grass,
+    position: { x: 4, y: 5, z: 6 },
+    damage: 2,
+    maxHealth: 2,
+    cuts: [],
+    surfaceSamples: [
+      { localX: 0.2, localZ: 0.3, height: 0.16, weight: 1 },
+      { localX: 0.78, localZ: 0.62, height: 0.42, weight: 1.2 }
+    ]
+  };
+
+  field.update([cell], () => true);
+  const positions = field.mesh.geometry.getAttribute("position");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positions);
+
+  assert(field.mesh.visible, "broken partial terrain should render as a visible surface patch");
+  assert(positions.count > 40, "surface patches should use a low-poly heightfield instead of a single quad");
+  assert(bounds.min.y >= 5, "partial support surfaces should stay inside their source cell base");
+  assert(bounds.max.y > 5.25 && bounds.max.y < 6, "surface samples should create a partial-height walkable patch");
 
   field.dispose();
 });

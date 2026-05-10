@@ -7,12 +7,14 @@ import type {
   ChunkWorkerRequest,
   ChunkWorkerResult
 } from "./chunkProtocol";
-import type { CollisionWorld } from "./collision";
+import type { CollisionBounds, CollisionWorld } from "./collision";
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
   createPartialBlockCut,
   createPartialBlockKey,
+  createPartialBlockSurfaceSamples,
+  getPartialBlockSupportHeight,
   type PartialBlockCell,
   type PartialBlockCut,
   type PartialBlockPosition
@@ -854,8 +856,22 @@ export class VoxelWorld implements CollisionWorld {
       return { block, position, remainingHealth, maxHealth: definition.health, destroyed: false };
     }
 
+    const finalCut = createPartialBlockCut({
+      block,
+      position,
+      point: input.point,
+      normal: input.normal,
+      speed: input.speed,
+      cutIndex: this.partialBlocks.get(key)?.cuts.length ?? 0
+    });
+    const cuts = [...(this.partialBlocks.get(key)?.cuts ?? []), finalCut];
+    while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+      cuts.shift();
+    }
+
     this.blockDamage.delete(key);
     this.setBlock(position.x, position.y, position.z, BLOCK.air);
+    this.addPartialBlockSurface(block, position, definition.health, cuts);
     return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
   }
 
@@ -877,6 +893,10 @@ export class VoxelWorld implements CollisionWorld {
 
   getPartialBlockGeometryRevision(): number {
     return this.partialBlockGeometryRevision;
+  }
+
+  getSupportHeight(bounds: CollisionBounds): number | null {
+    return getPartialBlockSupportHeight(this.partialBlocks.values(), bounds);
   }
 
   isRenderableSolid(x: number, y: number, z: number): boolean {
@@ -948,6 +968,23 @@ export class VoxelWorld implements CollisionWorld {
       position,
       cuts,
       damage,
+      maxHealth
+    });
+    this.markPartialBlockDirty(position);
+  }
+
+  private addPartialBlockSurface(
+    block: number,
+    position: VoxelBlockPosition,
+    maxHealth: number,
+    cuts: readonly PartialBlockCut[]
+  ): void {
+    this.partialBlocks.set(createPartialBlockKey(position), {
+      block,
+      position,
+      cuts: [...cuts],
+      surfaceSamples: createPartialBlockSurfaceSamples(position, cuts),
+      damage: maxHealth,
       maxHealth
     });
     this.markPartialBlockDirty(position);

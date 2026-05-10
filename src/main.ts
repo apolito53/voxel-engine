@@ -364,12 +364,18 @@ const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
-  // Full terrain blocks still come from VoxelWorld. Partial-height cover such
-  // as rubble is layered in through the optional support-height query so both
-  // player feet and loose debris can treat piles as surfaces without promoting
-  // every patch to a solid voxel.
+  // Full terrain blocks still come from VoxelWorld. Partial-height terrain
+  // scars and rubble are layered in through the optional support-height query
+  // so feet, loose debris, and rigid debris can treat them as walkable/contact
+  // surfaces without promoting every patch to a solid voxel.
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
-  getSupportHeight: (bounds) => rubbleField.getSupportHeight(bounds)
+  getSupportHeight: (bounds) => {
+    const terrainSupportY = requireWorld().getSupportHeight(bounds);
+    const rubbleSupportY = rubbleField.getSupportHeight(bounds);
+    if (terrainSupportY === null) return rubbleSupportY;
+    if (rubbleSupportY === null) return terrainSupportY;
+    return Math.max(terrainSupportY, rubbleSupportY);
+  }
 };
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
