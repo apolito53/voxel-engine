@@ -2,6 +2,7 @@ import type { BlockId } from "./blocks";
 import { EventBus } from "./eventBus";
 import type { FrameTimings } from "./frameTimings";
 import type { ItemCategory, ItemId } from "./items";
+import type { NovaChatRole } from "./novaContext";
 import type { QualityChangeSource } from "./qualityController";
 import type { QualityPresetId } from "./qualityPresets";
 
@@ -26,7 +27,7 @@ export type EngineEvents = {
     readonly active: boolean;
   };
   "nova:chat-message": {
-    readonly role: "player" | "nova";
+    readonly role: NovaChatRole;
     readonly text: string;
   };
   "physics:core-thrown": {

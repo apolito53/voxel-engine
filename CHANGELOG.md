@@ -4,9 +4,10 @@
 
 ### Added
 
-- Added main-branch testing tools: a `Superflat Lab` world shortcut, reserved `superflat` terrain seed, F9 admin command console, and spawn commands for target walls, walls, pillars, and platforms.
+- Added main-branch testing tools: a `Superflat Lab` world shortcut, reserved `superflat` terrain seed, Nova Terminal admin command routing, and spawn commands for target walls, walls, pillars, and platforms.
 - Added an F8 scripted test avatar that stages a target block and drives the real player Physics Core throw path for repeatable in-browser gameplay smoke checks.
 - Added tests covering superflat generation, admin command parsing/fixture placement, and test-avatar aim planning.
+- Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 
 ## 0.4.7 - 2026-05-07
 

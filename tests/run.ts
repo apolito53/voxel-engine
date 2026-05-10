@@ -185,6 +185,7 @@ import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import {
   appendNovaChatMessage,
   createNovaChatReply,
+  createNovaTerminalRoute,
   type NovaChatMessage
 } from "../src/novaChat";
 import { NovaContextJournal } from "../src/novaContext";
@@ -466,6 +467,53 @@ test("nova chat replies use context and chat logs stay bounded", () => {
   assertEqual(boundedMessages[0]?.text, "two", "oldest chat message should drop first");
 
   journal.dispose();
+});
+
+test("nova terminal routes chat, slash commands, and bare admin commands", () => {
+  const routedCommands: string[] = [];
+  const routeOptions = {
+    getChatReply: (message: string) => `chat:${message}`,
+    runCommand: (command: string) => {
+      routedCommands.push(command);
+      return { ok: command !== "explode", message: `ran:${command}` };
+    },
+    isCommand: (message: string) => message === "help" || message.startsWith("spawn ")
+  };
+
+  const chatRoute = createNovaTerminalRoute("hello nova", routeOptions);
+  assertDeepEqual(
+    chatRoute,
+    {
+      kind: "chat",
+      echoRole: "player",
+      echoText: "hello nova",
+      responseRole: "nova",
+      responseText: "chat:hello nova"
+    },
+    "ordinary terminal input should stay conversational"
+  );
+
+  const forcedChatRoute = createNovaTerminalRoute("/chat help", routeOptions);
+  assertEqual(forcedChatRoute.kind, "chat", "forced chat should avoid command routing");
+  assertEqual(forcedChatRoute.echoText, "help", "forced chat should strip the /chat prefix");
+
+  const bareCommandRoute = createNovaTerminalRoute("spawn target", routeOptions);
+  assertEqual(bareCommandRoute.kind, "command", "known bare admin commands should run as commands");
+  assertEqual(bareCommandRoute.echoText, "$ spawn target", "command echoes should look terminal-like");
+  assertEqual(bareCommandRoute.responseText, "ran:spawn target", "successful commands should return their message");
+
+  const slashCommandRoute = createNovaTerminalRoute("/explode", routeOptions);
+  assertEqual(slashCommandRoute.kind, "command", "slash-prefixed input should always run as a command");
+  assertEqual(
+    slashCommandRoute.responseText,
+    "Command failed: ran:explode",
+    "failed commands should be clearly labeled"
+  );
+  assertDeepEqual(
+    routedCommands,
+    ["spawn target", "explode"],
+    "terminal command router should pass normalized commands to the runner"
+  );
 });
 
 test("item registry describes reusable held-item actions", () => {

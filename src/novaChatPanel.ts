@@ -1,9 +1,9 @@
 import {
   NOVA_CHAT_MAX_INPUT_LENGTH,
   appendNovaChatMessage,
+  type NovaTerminalRoute,
   type NovaChatMessage
 } from "./novaChat";
-import type { NovaChatRole } from "./novaContext";
 
 type NovaChatPanelOptions = {
   readonly root: HTMLElement;
@@ -12,7 +12,7 @@ type NovaChatPanelOptions = {
   readonly input: HTMLInputElement;
   readonly closeButton: HTMLButtonElement;
   readonly getNow?: () => number;
-  readonly getReply: (message: string) => string;
+  readonly routeInput: (message: string) => NovaTerminalRoute;
   readonly onOpen?: () => void;
   readonly onClose?: () => void;
   readonly onMessage?: (message: NovaChatMessage) => void;
@@ -25,7 +25,7 @@ export class NovaChatPanel {
   private readonly input: HTMLInputElement;
   private readonly closeButton: HTMLButtonElement;
   private readonly getNow: () => number;
-  private readonly getReply: (message: string) => string;
+  private readonly routeInput: (message: string) => NovaTerminalRoute;
   private readonly onOpen: () => void;
   private readonly onClose: () => void;
   private readonly onMessage: (message: NovaChatMessage) => void;
@@ -38,7 +38,7 @@ export class NovaChatPanel {
     input,
     closeButton,
     getNow = () => performance.now(),
-    getReply,
+    routeInput,
     onOpen = () => {},
     onClose = () => {},
     onMessage = () => {}
@@ -49,7 +49,7 @@ export class NovaChatPanel {
     this.input = input;
     this.closeButton = closeButton;
     this.getNow = getNow;
-    this.getReply = getReply;
+    this.routeInput = routeInput;
     this.onOpen = onOpen;
     this.onClose = onClose;
     this.onMessage = onMessage;
@@ -57,7 +57,7 @@ export class NovaChatPanel {
     this.input.maxLength = NOVA_CHAT_MAX_INPUT_LENGTH;
     this.form.addEventListener("submit", (event) => this.submit(event));
     this.closeButton.addEventListener("click", () => this.close());
-    this.addMessage("nova", "Nova link established. Ask me what I am seeing, or just make a terrible decision and let me narrate it.");
+    this.addMessage("system", "Nova terminal online. Chat normally, run commands like /spawn target, or type help for the command list.");
   }
 
   get isOpen(): boolean {
@@ -99,14 +99,14 @@ export class NovaChatPanel {
     this.input.value = "";
     if (playerMessage.length === 0) return;
 
-    // Generate before emitting the player chat event so replies use the game
-    // context leading into the question, not the question itself as "latest."
-    const novaReply = this.getReply(playerMessage);
-    this.addMessage("player", playerMessage);
-    this.addMessage("nova", novaReply);
+    // Resolve before emitting the echo message so Nova chat replies use the
+    // context leading into the prompt, not the prompt itself as "latest."
+    const route = this.routeInput(playerMessage);
+    this.addMessage(route.echoRole, route.echoText);
+    this.addMessage(route.responseRole, route.responseText);
   }
 
-  private addMessage(role: NovaChatRole, text: string): void {
+  private addMessage(role: NovaChatMessage["role"], text: string): void {
     const message: NovaChatMessage = {
       role,
       text,
@@ -126,7 +126,7 @@ export class NovaChatPanel {
 
         const speaker = document.createElement("span");
         speaker.className = "nova-chat-speaker";
-        speaker.textContent = message.role === "player" ? "You" : "Nova";
+        speaker.textContent = getSpeakerLabel(message.role);
 
         const text = document.createElement("span");
         text.className = "nova-chat-text";
@@ -137,5 +137,18 @@ export class NovaChatPanel {
       })
     );
     this.log.scrollTop = this.log.scrollHeight;
+  }
+}
+
+function getSpeakerLabel(role: NovaChatMessage["role"]): string {
+  switch (role) {
+    case "player":
+      return "You";
+    case "nova":
+      return "Nova";
+    case "command":
+      return "Command";
+    case "system":
+      return "System";
   }
 }

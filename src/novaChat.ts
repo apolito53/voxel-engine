@@ -1,13 +1,34 @@
 import type { NovaContextSnapshot } from "./novaContext";
 
 export const NOVA_CHAT_TOGGLE_KEY = "Enter";
-export const NOVA_CHAT_MAX_INPUT_LENGTH = 180;
+export const NOVA_CHAT_MAX_INPUT_LENGTH = 240;
 export const NOVA_CHAT_MAX_LOG_MESSAGES = 80;
 
+export type NovaChatRole = "player" | "nova" | "command" | "system";
+
 export type NovaChatMessage = {
-  readonly role: "player" | "nova";
+  readonly role: NovaChatRole;
   readonly text: string;
   readonly timestamp: number;
+};
+
+export type NovaTerminalCommandResult = {
+  readonly ok: boolean;
+  readonly message: string;
+};
+
+export type NovaTerminalRoute = {
+  readonly kind: "chat" | "command";
+  readonly echoRole: NovaChatRole;
+  readonly echoText: string;
+  readonly responseRole: NovaChatRole;
+  readonly responseText: string;
+};
+
+export type NovaTerminalRouteOptions = {
+  readonly getChatReply: (message: string) => string;
+  readonly runCommand: (command: string) => NovaTerminalCommandResult;
+  readonly isCommand: (message: string) => boolean;
 };
 
 export function createNovaChatReply(message: string, context: NovaContextSnapshot): string {
@@ -45,6 +66,35 @@ export function createNovaChatReply(message: string, context: NovaContextSnapsho
   return createAmbientReply(trimmedMessage, context);
 }
 
+export function createNovaTerminalRoute(
+  message: string,
+  { getChatReply, runCommand, isCommand }: NovaTerminalRouteOptions
+): NovaTerminalRoute {
+  const trimmedMessage = message.trim();
+  const slashCommand = readSlashCommand(trimmedMessage);
+  const commandText = slashCommand ?? (isCommand(trimmedMessage) ? trimmedMessage : null);
+
+  if (commandText !== null) {
+    const result = runCommand(commandText);
+    return {
+      kind: "command",
+      echoRole: "command",
+      echoText: `$ ${commandText}`,
+      responseRole: "system",
+      responseText: result.ok ? result.message : `Command failed: ${result.message}`
+    };
+  }
+
+  const chatText = readForcedChat(trimmedMessage) ?? trimmedMessage;
+  return {
+    kind: "chat",
+    echoRole: "player",
+    echoText: chatText,
+    responseRole: "nova",
+    responseText: getChatReply(chatText)
+  };
+}
+
 export function appendNovaChatMessage(
   messages: readonly NovaChatMessage[],
   message: NovaChatMessage,
@@ -53,6 +103,21 @@ export function appendNovaChatMessage(
   const nextMessages = [...messages, message];
   if (nextMessages.length <= maxMessages) return nextMessages;
   return nextMessages.slice(nextMessages.length - maxMessages);
+}
+
+function readSlashCommand(message: string): string | null {
+  if (!message.startsWith("/")) return null;
+  const withoutSlash = message.slice(1).trim();
+  if (withoutSlash.length === 0) return null;
+  if (readForcedChat(message) !== null) return null;
+  return withoutSlash;
+}
+
+function readForcedChat(message: string): string | null {
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage === "/chat") return "";
+  if (!lowerMessage.startsWith("/chat ")) return null;
+  return message.slice("/chat ".length).trim();
 }
 
 function createHelpReply(context: NovaContextSnapshot): string {

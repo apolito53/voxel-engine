@@ -48,12 +48,12 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `F` toggle flight mode
 - Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled tumbling cube fragments. Nearby fragments stay active or sleeping inside the player-centered debris bubble, can still be shoved by later cores, and convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
-- `Enter` opens Nova Chat, a local companion chat pane that uses recent engine events and runtime context; this is not connected to a remote model yet
+- `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
-- `F9` opens the admin command console; useful commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
+- Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
 - Settings `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
@@ -77,7 +77,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
-- `src/adminCommands.ts`: F9 admin command console, Superflat Lab shortcut, and spawnable terrain test fixtures
+- `src/adminCommands.ts`: admin command parsing/routing, Superflat Lab shortcut, and spawnable terrain test fixtures used by Nova Terminal
 - `src/testAvatar.ts`: F8 scripted runtime avatar for repeatable in-browser gameplay smoke checks
 - `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
@@ -111,8 +111,8 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/minimap.ts`: minimap terrain slicing, grid, and player marker drawing
 - `src/novaPilot.ts`: visible companion pilot, follow/orbit behavior, and Nova-thrown core launch helpers
 - `src/novaContext.ts`: recent engine-event and runtime-context journal for Nova chat/reactions
-- `src/novaChat.ts`: local context-aware Nova reply generation and bounded chat log helpers
-- `src/novaChatPanel.ts`: in-game Nova chat pane, message rendering, and submit/close behavior
+- `src/novaChat.ts`: local context-aware Nova reply generation, terminal command routing, and bounded log helpers
+- `src/novaChatPanel.ts`: in-game Nova Terminal pane, message rendering, and submit/close behavior
 - `src/novaPilotReactions.ts`: event-driven Nova chatter, pulse reactions, and message throttling
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation

@@ -2,8 +2,10 @@ import * as THREE from "three";
 import "./style.css";
 import {
   ADMIN_COMMAND_TOGGLE_KEY,
-  AdminCommandConsole,
-  type AdminCommandApi
+  isAdminCommandInput,
+  runAdminCommand,
+  type AdminCommandApi,
+  type AdminCommandHooks
 } from "./adminCommands";
 import {
   getBlockFragmentMaterialUnits,
@@ -59,7 +61,7 @@ import {
 } from "./items";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
-import { createNovaChatReply, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
+import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
 import { NovaChatPanel } from "./novaChatPanel";
 import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
@@ -305,13 +307,24 @@ const novaPilotReactions = new NovaPilotReactions({
   pilot: novaPilot,
   output: novaMessage
 });
+const adminCommandHooks: AdminCommandHooks = {
+  isWorldActive: () => inWorld,
+  getWorld: requireWorld,
+  getCamera: () => camera,
+  createSuperflatWorld,
+  noteActivity: noteUserActivity
+};
 const novaChatPanel = new NovaChatPanel({
   root: novaChatRoot,
   log: novaChatLog,
   form: novaChatForm,
   input: novaChatInput,
   closeButton: novaChatCloseButton,
-  getReply: (message) => createNovaChatReply(message, novaContext.snapshot()),
+  routeInput: (message) => createNovaTerminalRoute(message, {
+    getChatReply: (chatMessage) => createNovaChatReply(chatMessage, novaContext.snapshot()),
+    runCommand: (command) => runAdminCommand(adminCommandHooks, command),
+    isCommand: isAdminCommandInput
+  }),
   onOpen: openNovaChatInputMode,
   onClose: closeNovaChatInputMode,
   onMessage: (message) => {
@@ -321,14 +334,6 @@ const novaChatPanel = new NovaChatPanel({
     });
   }
 });
-const adminCommandConsole = new AdminCommandConsole({
-  isWorldActive: () => inWorld,
-  getWorld: requireWorld,
-  getPlayer: requirePlayer,
-  getCamera: () => camera,
-  createSuperflatWorld,
-  noteActivity: noteUserActivity
-});
 const testAvatar = new TestAvatar({
   isWorldActive: () => inWorld,
   getWorld: requireWorld,
@@ -337,7 +342,9 @@ const testAvatar = new TestAvatar({
   throwPlayerCore,
   noteActivity: noteUserActivity
 });
-voxelRuntimeGlobal.__VOXEL_ADMIN__ = adminCommandConsole.api;
+voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
+  run: (command) => runAdminCommand(adminCommandHooks, command)
+};
 voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
@@ -559,11 +566,9 @@ document.addEventListener("keydown", (event) => {
   if (event.code === ADMIN_COMMAND_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    adminCommandConsole.toggle();
+    novaChatPanel.toggle();
     return;
   }
-
-  if (event.target instanceof Element && event.target.closest(".admin-command-panel")) return;
 
   if (event.code === "F3") {
     event.preventDefault();
@@ -1521,7 +1526,7 @@ async function createSuperflatWorld(): Promise<void> {
   if (worldTransitioning) return;
 
   testAvatar.stop();
-  adminCommandConsole.close();
+  novaChatPanel.close();
   const registry = requireWorldRegistry();
   const worlds = await registry.listWorlds();
   const savedWorld = await registry.createWorld(`Superflat Lab ${worlds.length + 1}`, SUPERFLAT_WORLD_SEED);
@@ -1646,7 +1651,7 @@ async function exitToHome(): Promise<void> {
       novaChatPanel.close();
     }
     testAvatar.stop();
-    adminCommandConsole.close();
+    novaChatPanel.close();
     requirePlayer().pause(true);
     camera.getWorldDirection(direction);
     novaPilot.setActive(false, camera.position, direction, activeWorld);
@@ -1857,7 +1862,6 @@ function disposeRuntime(): void {
   novaPilotReactions.dispose();
   novaContext.dispose();
   novaPilot.dispose();
-  adminCommandConsole.dispose();
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();

@@ -480,7 +480,6 @@ body.playing canvas {
   gap: 10px;
 }
 
-.admin-command-panel,
 .test-avatar-panel {
   position: fixed;
   right: 18px;
@@ -495,15 +494,8 @@ body.playing canvas {
   padding: 14px;
 }
 
-.admin-command-panel[hidden],
 .test-avatar-panel[hidden] {
   display: none;
-}
-
-.admin-command-panel {
-  bottom: 18px;
-  display: grid;
-  gap: 10px;
 }
 
 .test-avatar-panel {
@@ -513,61 +505,8 @@ body.playing canvas {
   pointer-events: none;
 }
 
-.admin-command-panel strong,
 .test-avatar-panel strong {
   font-size: 14px;
-  font-weight: 900;
-}
-
-.admin-command-hint {
-  color: rgba(237, 244, 248, 0.62);
-  font-size: 12px;
-  line-height: 1.3;
-}
-
-.admin-command-output {
-  display: grid;
-  gap: 4px;
-  max-height: 118px;
-  overflow-y: auto;
-  color: rgba(237, 244, 248, 0.78);
-  font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.admin-command-line.is-ok {
-  color: #a7e8b3;
-}
-
-.admin-command-line.is-error {
-  color: #ffb0b0;
-}
-
-.admin-command-form {
-  display: grid;
-  grid-template-columns: 1fr 72px;
-  gap: 8px;
-}
-
-.admin-command-input {
-  min-width: 0;
-  height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
-  background: rgba(237, 244, 248, 0.09);
-  color: #edf4f8;
-  font: inherit;
-  padding: 0 10px;
-}
-
-.admin-command-submit {
-  border: 0;
-  border-radius: 6px;
-  background: #f1c453;
-  color: #17202a;
-  cursor: pointer;
-  font: inherit;
   font-weight: 900;
 }
 
@@ -608,8 +547,6 @@ body.playing canvas {
 .range-input:focus-visible,
 .stepper-button:focus-visible,
 .toggle-input:focus-visible,
-.admin-command-input:focus-visible,
-.admin-command-submit:focus-visible,
 .nova-chat-input:focus-visible,
 .nova-chat-send:focus-visible,
 .nova-chat-close:focus-visible {
@@ -760,6 +697,17 @@ body:not(.in-world) #crosshair {
 
 .nova-chat-message.is-player {
   background: rgba(241, 196, 83, 0.13);
+}
+
+.nova-chat-message.is-command {
+  border: 1px solid rgba(126, 210, 145, 0.22);
+  background: rgba(126, 210, 145, 0.11);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.nova-chat-message.is-system {
+  border: 1px solid rgba(143, 216, 255, 0.2);
+  background: rgba(143, 216, 255, 0.1);
 }
 
 .nova-chat-speaker {

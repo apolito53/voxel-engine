@@ -5,7 +5,7 @@ import type { PlayerMovementMode } from "./player";
 
 const MAX_RECENT_EVENTS = 14;
 
-export type NovaChatRole = "player" | "nova";
+export type NovaChatRole = "player" | "nova" | "command" | "system";
 
 export type NovaContextEvent = {
   readonly label: string;
@@ -135,7 +135,7 @@ export class NovaContextJournal {
       }),
       this.events.on("performance:frame-spike", (event) => this.onFrameSpike(event)),
       this.events.on("nova:chat-message", (event) => {
-        this.remember(event.role === "player" ? "Player" : "Nova", event.text);
+        this.remember(formatChatRole(event.role), event.text);
       })
     );
   }
@@ -231,6 +231,19 @@ export class NovaContextJournal {
     if (this.recentEvents.length > MAX_RECENT_EVENTS) {
       this.recentEvents.length = MAX_RECENT_EVENTS;
     }
+  }
+}
+
+function formatChatRole(role: NovaChatRole): string {
+  switch (role) {
+    case "player":
+      return "Player";
+    case "nova":
+      return "Nova";
+    case "command":
+      return "Command";
+    case "system":
+      return "System";
   }
 }
 
