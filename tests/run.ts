@@ -24,6 +24,11 @@ import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import type { CollisionBounds, CollisionWorld } from "../src/collision";
 import {
+  createDebrisShape,
+  createDebrisShapeForBlock,
+  getDebrisShapeGeometry
+} from "../src/debrisShapes";
+import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
   PhysicsToy,
@@ -31,6 +36,10 @@ import {
   createEmptyPhysicsToyCollisionStats,
   type PhysicsImpact
 } from "../src/physics";
+import {
+  PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED,
+  createPlayerPhysicsCoreLaunchVelocity
+} from "../src/physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
 import {
   RUBBLE_BLOCK_PROMOTION_PIECES,
@@ -93,6 +102,20 @@ import {
   PHYSICS_OBJECT_BUDGET_STEP,
   stepPhysicsObjectBudget
 } from "../src/physicsBudget";
+import {
+  DEFAULT_PHYSICS_CORE_SETTINGS,
+  PHYSICS_CORE_BASE_RADIUS,
+  PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
+  PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+  PHYSICS_CORE_SIZE_MAX_PERCENT,
+  PHYSICS_CORE_SIZE_MIN_PERCENT,
+  PHYSICS_CORE_VELOCITY_MAX_PERCENT,
+  PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+  formatPhysicsCorePercent,
+  getPhysicsCoreRadius,
+  getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreSettings
+} from "../src/physicsCoreSettings";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
@@ -1308,6 +1331,7 @@ test("nova pilot keeps a readable companion offset and throws forward", () => {
   );
   assert(launch.position.z < 3, "Nova-thrown cores should spawn in front of the pilot");
   assert(launch.velocity.z < -10, "Nova-thrown cores should travel along the pilot aim direction");
+  assertEqual(launch.velocity.y, 0, "Nova-thrown cores should not add an upward arc away from the aim direction");
   assert(launch.velocity.x > 0, "Nova-thrown cores should inherit a little pilot movement");
 });
 
@@ -1735,45 +1759,68 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
 
   for (const fragmentCount of [2, 4, 7, 14, BLOCK_FRAGMENT_COUNT]) {
     let totalMaterialUnits = 0;
+    const shapeIds = new Set<string>();
     for (let index = 0; index < fragmentCount; index += 1) {
       totalMaterialUnits += getBlockFragmentMaterialUnits(index, fragmentCount);
+      shapeIds.add(createDebrisShapeForBlock(BLOCK.stone, {
+        fragmentIndex: index,
+        distributedFragmentIndex: getDistributedBlockFragmentIndex(index, fragmentCount),
+        origin: { x: 4, y: 8, z: 12 }
+      }).shapeId);
     }
     assertEqual(
       totalMaterialUnits,
       BLOCK_RUBBLE_MATERIAL_UNITS,
       "quality-scaled visible fragments should still carry one full block of rubble material"
     );
+    assert(shapeIds.size >= 1, "shape assignment should not affect fragment material accounting");
+    if (fragmentCount === BLOCK_FRAGMENT_COUNT) {
+      assert(shapeIds.size > 1, "full-quality fractures should visibly mix shard shapes");
+    }
   }
 });
 
 test("block fragments render through instanced batches instead of scene children", () => {
   const scene = new THREE.Scene();
   const instancer = new PhysicsFragmentInstancer(scene);
+  const chunkyShape = createDebrisShape("chunky-chip");
+  const slabShape = createDebrisShape("flat-slab");
   const grassFragment = PhysicsToy.createBlockFragment(
     BLOCK.grass,
     new THREE.Vector3(0, 2, 0),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    chunkyShape
   );
   const secondGrassFragment = PhysicsToy.createBlockFragment(
     BLOCK.grass,
     new THREE.Vector3(1, 2, 0),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    slabShape
   );
   const stoneFragment = PhysicsToy.createBlockFragment(
     BLOCK.stone,
     new THREE.Vector3(2, 2, 0),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    chunkyShape
   );
 
   assert(grassFragment.isInstancedFragment, "block debris should opt into instanced rendering");
   assertEqual(grassFragment.fragmentBlock, BLOCK.grass, "fragment should remember its source block");
+  assertEqual(grassFragment.debrisShape?.shapeId, "chunky-chip", "fragment should remember its shard shape");
   instancer.update([grassFragment, secondGrassFragment, stoneFragment]);
 
   const instancedMeshes = scene.children.filter((child) => child instanceof THREE.InstancedMesh);
-  assertEqual(instancedMeshes.length, 2, "fragments should batch into one instanced mesh per block type");
+  assertEqual(
+    instancedMeshes.length,
+    3,
+    "fragments should batch into one instanced mesh per block and shard shape"
+  );
   assertDeepEqual(
     instancer.getStats(),
-    { batches: 2, instances: 3, capacity: 3 },
+    { batches: 3, instances: 3, capacity: 3 },
     "instanced renderer should report visible fragment pressure"
   );
   grassFragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
@@ -1789,6 +1836,11 @@ test("block fragments render through instanced batches instead of scene children
   assert(
     instanceRotation.angleTo(grassFragment.mesh.quaternion) < 0.001,
     "instanced debris should render each fragment's tumble rotation, not just its position"
+  );
+  assertVectorNearlyEqual(
+    instanceScale,
+    chunkyShape.visualScale,
+    "instanced debris should render each fragment's non-uniform shard scale"
   );
 
   instancer.clear();
@@ -1827,7 +1879,7 @@ test("block fragments visually tumble while flying", () => {
 
   assert(
     fragment.mesh.quaternion.angleTo(startingRotation) > 0.001,
-    "flying cube debris should spin visibly during the short settling theater"
+    "flying shard debris should spin visibly during the short settling theater"
   );
 });
 
@@ -1959,6 +2011,62 @@ test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep
 
   rigidDebris.clear();
   assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
+});
+
+test("rigid debris adapter keeps fast falling shards from outrunning terrain colliders", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 4.5, 0.5),
+    new THREE.Vector3(0, -42, 0),
+    1,
+    createDebrisShape("flat-slab")
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 180 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+
+  assert(
+    fragment.mesh.position.y > -0.2,
+    "fast falling rigid debris should not tunnel through the terrain collider bubble"
+  );
+  assert(
+    rigidDebris.getStats().terrainColliders > 0,
+    "fast falling rigid debris should build temporary terrain colliders along its predicted path"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter registers per-fragment cuboid half extents", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shardShape = createDebrisShape("long-splinter");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1,
+    shardShape
+  );
+
+  rigidDebris.registerFragment(fragment);
+  const registeredHalfExtents = rigidDebris.getRegisteredColliderHalfExtents(fragment);
+  assert(registeredHalfExtents, "registered rigid debris should expose its cuboid envelope");
+  assertVectorNearlyEqual(
+    registeredHalfExtents,
+    shardShape.colliderHalfExtents,
+    "rigid debris should use the fragment's own cuboid envelope instead of one global cuboid size"
+  );
+
+  rigidDebris.clear();
 });
 
 test("rigid debris adapter builds temporary support colliders from rubble height queries", async () => {
@@ -2142,7 +2250,7 @@ test("debris settler lets dense fracture grids spread before contact damping sta
   );
 });
 
-test("debris settler does not pull fresh breakup debris back into cube formation", () => {
+test("debris settler does not pull fresh breakup debris back into intact-block formation", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const left = createTestFragment(BLOCK.grass, 0.2, 1.5, 0.5);
@@ -2190,7 +2298,7 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   assertEqual(
     left.angularVelocity.lengthSq() + right.angularVelocity.lengthSq(),
     0,
-    "glued debris contacts should stop independent cube spin once fragments stick together"
+    "glued debris contacts should stop independent shard spin once fragments stick together"
   );
 });
 
@@ -2597,7 +2705,7 @@ test("debris settler pressure relief finalizes farthest regions first", () => {
   assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
   assert(farFragment.isExpired, "the farthest debris region should be the one converted");
   assertEqual(rubble.getStats().pieces, 1, "pressure relief should preserve the far region's material");
-  assertEqual(rubble.getStats().visualChunks, 1, "pressure relief should keep a static cube pose instead of making invisible support-only rubble");
+  assertEqual(rubble.getStats().visualChunks, 1, "pressure relief should keep a static shard pose instead of making invisible support-only rubble");
 });
 
 test("debris settler pressure relief prefers sleeping regions before awake debris", () => {
@@ -2803,10 +2911,13 @@ test("hybrid rubble meshes render baked chunks while keeping cheap support", () 
 
   const hybridScene = new THREE.Scene();
   const hybridRubble = new RubbleField(hybridScene);
+  const shardShape = createDebrisShape("wedge");
   const fragment = PhysicsToy.createBlockFragment(
     BLOCK.dirt,
     new THREE.Vector3(0.5, 0.2, 0.5),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    shardShape
   );
   fragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
   fragment.sleepInPlace();
@@ -2820,7 +2931,11 @@ test("hybrid rubble meshes render baked chunks while keeping cheap support", () 
   const chunkPositions = hybridMesh.geometry.getAttribute("position");
 
   assertEqual(hybridStats.visualChunks, 1, "hybrid rubble should store a capped static chunk sample");
-  assertEqual(hybridVertexCount, 36, "hybrid rubble should render the baked cuboid without the draped sheet");
+  assertEqual(
+    hybridVertexCount,
+    getDebrisShapeGeometry(shardShape.shapeId).getAttribute("position").count,
+    "hybrid rubble should preserve the baked shard shape instead of reverting to a cube"
+  );
   for (let index = 0; index < hybridVertexCount; index += 1) {
     const outward = new THREE.Vector3(
       chunkPositions.getX(index) - fragment.mesh.position.x,
@@ -2855,24 +2970,31 @@ test("hybrid rubble meshes render baked chunks while keeping cheap support", () 
   assertEqual(hybridScene.children.length, 0, "full rubble cleanup should remove hybrid rubble meshes");
 });
 
-test("forced rubble absorption keeps awake cube visuals for budget relief", () => {
+test("forced rubble absorption keeps awake shard visuals for budget relief", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
+  const shardShape = createDebrisShape("narrow-shard");
   const fragment = PhysicsToy.createBlockFragment(
     BLOCK.stone,
     new THREE.Vector3(0.5, 0.45, 0.5),
-    new THREE.Vector3(1.5, 0.2, 0)
+    new THREE.Vector3(1.5, 0.2, 0),
+    1,
+    shardShape
   );
 
   assert(rubble.absorbFragment(fragment, { forceVisualChunk: true }), "budget relief should be able to bake an awake fragment");
   const stats = rubble.getStats();
   const mesh = scene.children[0];
   assert(mesh instanceof THREE.Mesh, "forced budget rubble should still render through the rubble mesh");
-  assertEqual(stats.visualChunks, 1, "forced budget bake-out should preserve the visible cube pose");
-  assertEqual(
-    mesh.geometry.getAttribute("position").count,
-    36,
-    "forced budget bake-out should not disappear now that the draped sheet is disabled"
+  assertEqual(stats.visualChunks, 1, "forced budget bake-out should preserve the visible shard pose");
+  const positionAttribute = mesh.geometry.getAttribute("position");
+  assert(positionAttribute.count > 0, "forced budget bake-out should not disappear now that the draped sheet is disabled");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
+  const boundsSize = new THREE.Vector3();
+  bounds.getSize(boundsSize);
+  assert(
+    boundsSize.length() > BLOCK_FRAGMENT_VISUAL_SIZE * 0.5,
+    "forced budget bake-out should create a sane visible shard bound"
   );
 });
 
@@ -3326,6 +3448,32 @@ test("physics impacts report speed so block damage can be thresholded", () => {
   assertEqual(fastImpacts[0].source, fastToy, "impact payloads should carry the core that caused them");
 });
 
+test("fast small physics cores hit the first block along their swept path", () => {
+  const collisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return y === 0 && z === 0 && (x === 1 || x === 2);
+    }
+  };
+  const fastSmallCore = new PhysicsToy(
+    new THREE.Vector3(0.2, 0.5, 0.5),
+    new THREE.Vector3(123, 0, 0),
+    { radius: 0.105 }
+  );
+
+  const impacts = fastSmallCore.update(1 / 60, collisionWorld);
+
+  assertEqual(impacts.length, 1, "swept core contact should report one front-block impact");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 1, y: 0, z: 0 },
+    "tiny fast cores should not tunnel through the front block and hit the one behind it"
+  );
+  assert(
+    fastSmallCore.mesh.position.x < 1,
+    "swept core contact should leave the core in front of the impacted block"
+  );
+});
+
 test("destroying an impacted block can consume the source physics core", () => {
   const collisionWorld = {
     isSolid(x: number, y: number, z: number): boolean {
@@ -3585,7 +3733,7 @@ test("quality settings clamp custom menu overrides", () => {
   );
   assertEqual(formatRenderDistance(6), "6 chunks", "render distance label should stay human-readable");
   assertEqual(formatShadowQuality(0), "Off", "shadow quality label should call out disabled shadows");
-  assertEqual(formatBlockFragmentCount(0), "1 cube", "debris count label should show the clamped shard count");
+  assertEqual(formatBlockFragmentCount(0), "1 shard", "debris count label should show the clamped shard count");
 });
 
 test("physics object budget clamps and steps predictably", () => {
@@ -3639,6 +3787,81 @@ test("physics object budget clamps and steps predictably", () => {
     getRigidDebrisBodyBudget(Number.NaN),
     MIN_RIGID_DEBRIS_BODY_BUDGET,
     "invalid rigid debris budgets should fall back to the minimum safety rail"
+  );
+});
+
+test("physics core settings clamp slider values", () => {
+  assertDeepEqual(
+    DEFAULT_PHYSICS_CORE_SETTINGS,
+    {
+      sizePercent: PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
+      velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT
+    },
+    "default core tuning should expose the smaller faster first-pass feel"
+  );
+
+  const tinyFastCore = normalizePhysicsCoreSettings({
+    sizePercent: -40,
+    velocityPercent: 999
+  });
+  assertEqual(
+    tinyFastCore.sizePercent,
+    PHYSICS_CORE_SIZE_MIN_PERCENT,
+    "core size slider should clamp to the smallest safe percentage"
+  );
+  assertEqual(
+    tinyFastCore.velocityPercent,
+    PHYSICS_CORE_VELOCITY_MAX_PERCENT,
+    "core velocity slider should clamp to the fastest safe percentage"
+  );
+
+  const largeSlowCore = normalizePhysicsCoreSettings({
+    sizePercent: 999,
+    velocityPercent: -40
+  });
+  assertEqual(
+    largeSlowCore.sizePercent,
+    PHYSICS_CORE_SIZE_MAX_PERCENT,
+    "core size slider should clamp to the largest safe percentage"
+  );
+  assertEqual(
+    largeSlowCore.velocityPercent,
+    PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+    "core velocity slider should clamp to the slowest safe percentage"
+  );
+  assertNearlyEqual(
+    getPhysicsCoreRadius(DEFAULT_PHYSICS_CORE_SETTINGS),
+    PHYSICS_CORE_BASE_RADIUS * (PHYSICS_CORE_DEFAULT_SIZE_PERCENT / 100),
+    0.000001,
+    "core size percent should scale the thrown core radius"
+  );
+  assertNearlyEqual(
+    getPhysicsCoreVelocityMultiplier(DEFAULT_PHYSICS_CORE_SETTINGS),
+    PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT / 100,
+    0.000001,
+    "core velocity percent should become a launch multiplier"
+  );
+  assertEqual(formatPhysicsCorePercent(140), "140%", "core slider labels should be terse percentages");
+});
+
+test("player physics core launch inherits player velocity", () => {
+  const inheritedVelocity = new THREE.Vector3(3, -2, 5);
+  const launchVelocity = createPlayerPhysicsCoreLaunchVelocity(
+    new THREE.Vector3(0, 0, -2),
+    inheritedVelocity,
+    DEFAULT_PHYSICS_CORE_SETTINGS
+  );
+
+  assertVectorNearlyEqual(
+    launchVelocity,
+    new THREE.Vector3(
+      inheritedVelocity.x,
+      inheritedVelocity.y,
+      inheritedVelocity.z -
+        PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED *
+        getPhysicsCoreVelocityMultiplier(DEFAULT_PHYSICS_CORE_SETTINGS)
+    ),
+    "player-thrown cores should add muzzle velocity on top of player base velocity"
   );
 });
 

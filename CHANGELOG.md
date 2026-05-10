@@ -10,10 +10,17 @@
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 - Added a pause-menu `Health Bars` toggle that persists locally, suppresses block/rubble damage bars, and clears active bars immediately when disabled.
 - Added a white cube-space target outline for destructible settled-rubble cells, including direct destroy-action hits against the targeted rubble proxy instead of terrain behind it.
+- Added a shared debris-shape catalog for varied low-poly active fragments, with non-uniform shard scales, cuboid physics envelopes, and baked rubble visuals that preserve the settled shard shape.
+- Split pause-menu `Settings` into `Graphics` and `Gameplay` tabs so visual/performance tuning stays separate from core feel, health bars, and cleanup.
+- Added pause-menu physics-core size and velocity sliders, with smaller/faster first-pass defaults and local persistence for future throw tuning.
 
 ### Fixed
 
-- Fixed over-budget debris bake-out disappearing visually while preserving hidden material. Forced pressure relief now keeps a static cube pose when it has to convert awake debris, which matters while the draped rubble-sheet renderer is disabled.
+- Fixed Physics Core launches inheriting an upward arc instead of firing straight along the current aim direction.
+- Fixed small fast Physics Cores tunneling through the front terrain block and damaging a block behind it.
+- Fixed fast rigid debris sometimes outrunning its temporary terrain-collider bubble before landing.
+- Fixed the pause settings panel clipping off-screen in shorter browser windows by constraining the panel to the viewport and scrolling inside it.
+- Fixed over-budget debris bake-out disappearing visually while preserving hidden material. Forced pressure relief now keeps a static shard pose when it has to convert awake debris, which matters while the draped rubble-sheet renderer is disabled.
 
 ## 0.5.0 - 2026-05-07
 
