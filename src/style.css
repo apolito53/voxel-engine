@@ -480,6 +480,126 @@ body.playing canvas {
   gap: 10px;
 }
 
+.admin-command-panel,
+.test-avatar-panel {
+  position: fixed;
+  right: 18px;
+  z-index: 22;
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 36px));
+  border: 1px solid rgba(237, 244, 248, 0.18);
+  border-radius: 8px;
+  background: rgba(13, 18, 27, 0.9);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.36);
+  color: #edf4f8;
+  padding: 14px;
+}
+
+.admin-command-panel[hidden],
+.test-avatar-panel[hidden] {
+  display: none;
+}
+
+.admin-command-panel {
+  bottom: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.test-avatar-panel {
+  bottom: 168px;
+  display: grid;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.admin-command-panel strong,
+.test-avatar-panel strong {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.admin-command-hint {
+  color: rgba(237, 244, 248, 0.62);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.admin-command-output {
+  display: grid;
+  gap: 4px;
+  max-height: 118px;
+  overflow-y: auto;
+  color: rgba(237, 244, 248, 0.78);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.admin-command-line.is-ok {
+  color: #a7e8b3;
+}
+
+.admin-command-line.is-error {
+  color: #ffb0b0;
+}
+
+.admin-command-form {
+  display: grid;
+  grid-template-columns: 1fr 72px;
+  gap: 8px;
+}
+
+.admin-command-input {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.09);
+  color: #edf4f8;
+  font: inherit;
+  padding: 0 10px;
+}
+
+.admin-command-submit {
+  border: 0;
+  border-radius: 6px;
+  background: #f1c453;
+  color: #17202a;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+}
+
+.test-avatar-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  color: rgba(237, 244, 248, 0.7);
+  font-size: 12px;
+}
+
+.test-avatar-row b {
+  overflow: hidden;
+  color: #edf4f8;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-avatar-observations {
+  min-height: 48px;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: rgba(237, 244, 248, 0.76);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
 .menu-button:focus-visible,
 .world-slot:focus-visible,
 .world-delete-button:focus-visible,
@@ -488,6 +608,8 @@ body.playing canvas {
 .range-input:focus-visible,
 .stepper-button:focus-visible,
 .toggle-input:focus-visible,
+.admin-command-input:focus-visible,
+.admin-command-submit:focus-visible,
 .nova-chat-input:focus-visible,
 .nova-chat-send:focus-visible,
 .nova-chat-close:focus-visible {

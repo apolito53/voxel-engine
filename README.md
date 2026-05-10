@@ -30,6 +30,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 
 - `WASD` move
 - Home screen creates, loads, or deletes a world through an in-app confirmation pane
+- `Superflat Lab` on the home screen creates a flat grass/dirt/stone test world using the reserved `superflat` seed
 - Loading a world restores the last saved player location and look direction
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
@@ -51,6 +52,8 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `X` despawn active physics cores while keeping loose debris and rubble cover
 - `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
+- `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
+- `F9` opens the admin command console; useful commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
 - Settings `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
@@ -74,12 +77,14 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 ## Engine Pieces
 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
+- `src/adminCommands.ts`: F9 admin command console, Superflat Lab shortcut, and spawnable terrain test fixtures
+- `src/testAvatar.ts`: F8 scripted runtime avatar for repeatable in-browser gameplay smoke checks
 - `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
 - `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals
 - `src/world.ts`: chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty chunk indexes, block reads/writes, sparse block damage, coalesced edited-chunk saves, and chunk/worker disposal
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds, player resume location, and edited chunk persistence
-- `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker
+- `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker, including the reserved superflat test-lab seed
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
 - `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
 - `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, voxel collision, and partial-height rubble support stepping

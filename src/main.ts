@@ -1,6 +1,11 @@
 import * as THREE from "three";
 import "./style.css";
 import {
+  ADMIN_COMMAND_TOGGLE_KEY,
+  AdminCommandConsole,
+  type AdminCommandApi
+} from "./adminCommands";
+import {
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex
@@ -112,6 +117,13 @@ import {
 } from "./sprintFeedback";
 import { createSkybox } from "./skybox";
 import { TargetBlockHighlighter } from "./targetHighlighter";
+import { SUPERFLAT_WORLD_SEED } from "./terrain";
+import {
+  TEST_AVATAR_QUERY_PARAM,
+  TEST_AVATAR_TOGGLE_KEY,
+  TestAvatar,
+  type TestAvatarApi
+} from "./testAvatar";
 import { VoxelWorld, type BlockDamageResult, type ChunkCoords, type WorldStats } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
@@ -137,6 +149,8 @@ const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 type VoxelRuntimeGlobal = typeof globalThis & {
   __VOXEL_SANDBOX_DISPOSE__?: () => void;
+  __VOXEL_ADMIN__?: AdminCommandApi;
+  __VOXEL_TEST_AVATAR__?: TestAvatarApi;
 };
 type ViteHotContext = {
   dispose(callback: () => void): void;
@@ -158,6 +172,7 @@ const createWorldForm = requireElement<HTMLFormElement>("#create-world-form");
 const worldNameInput = requireElement<HTMLInputElement>("#world-name-input");
 const worldSeedInput = requireElement<HTMLInputElement>("#world-seed-input");
 const randomSeedButton = requireElement<HTMLButtonElement>("#random-seed-button");
+const superflatWorldButton = requireElement<HTMLButtonElement>("#superflat-world-button");
 const homeWorldList = requireElement<HTMLElement>("#home-world-list");
 const deleteWorldDialog = requireElement<HTMLElement>("#delete-world-dialog");
 const deleteWorldName = requireElement<HTMLElement>("#delete-world-name");
@@ -306,6 +321,24 @@ const novaChatPanel = new NovaChatPanel({
     });
   }
 });
+const adminCommandConsole = new AdminCommandConsole({
+  isWorldActive: () => inWorld,
+  getWorld: requireWorld,
+  getPlayer: requirePlayer,
+  getCamera: () => camera,
+  createSuperflatWorld,
+  noteActivity: noteUserActivity
+});
+const testAvatar = new TestAvatar({
+  isWorldActive: () => inWorld,
+  getWorld: requireWorld,
+  getPlayer: requirePlayer,
+  getCamera: () => camera,
+  throwPlayerCore,
+  noteActivity: noteUserActivity
+});
+voxelRuntimeGlobal.__VOXEL_ADMIN__ = adminCommandConsole.api;
+voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
@@ -445,6 +478,9 @@ function wireMenuControls(): void {
     worldSeedInput.value = createReadableSeed();
     worldSeedInput.focus();
   }, eventListenerOptions);
+  superflatWorldButton.addEventListener("click", () => {
+    void createSuperflatWorld();
+  }, eventListenerOptions);
   cancelDeleteWorldButton.addEventListener("click", closeDeleteWorldDialog, eventListenerOptions);
   confirmDeleteWorldButton.addEventListener("click", () => {
     void confirmPendingWorldDeletion();
@@ -520,6 +556,15 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.code === ADMIN_COMMAND_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    adminCommandConsole.toggle();
+    return;
+  }
+
+  if (event.target instanceof Element && event.target.closest(".admin-command-panel")) return;
+
   if (event.code === "F3") {
     event.preventDefault();
     debugHud.toggle();
@@ -533,6 +578,13 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (!inWorld) return;
+
+  if (event.code === TEST_AVATAR_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    testAvatar.toggle();
+    return;
+  }
 
   if (event.code === NOVA_CHAT_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
@@ -707,6 +759,7 @@ function animate(): void {
     const activePlayer = requirePlayer();
 
     activePlayer.update(delta);
+    testAvatar.update(delta);
     maybeAutosavePlayerLocation(frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
     novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
@@ -1464,6 +1517,23 @@ async function createWorldFromForm(event: SubmitEvent): Promise<void> {
   await loadWorld(savedWorld.id);
 }
 
+async function createSuperflatWorld(): Promise<void> {
+  if (worldTransitioning) return;
+
+  testAvatar.stop();
+  adminCommandConsole.close();
+  const registry = requireWorldRegistry();
+  const worlds = await registry.listWorlds();
+  const savedWorld = await registry.createWorld(`Superflat Lab ${worlds.length + 1}`, SUPERFLAT_WORLD_SEED);
+  worldNameInput.value = "";
+  worldSeedInput.value = "";
+  if (inWorld) {
+    await queueActivePlayerLocationSave(true);
+    clearToys();
+  }
+  await loadWorld(savedWorld.id);
+}
+
 async function loadWorld(worldId: string): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
@@ -1509,8 +1579,19 @@ async function loadWorld(worldId: string): Promise<void> {
     debugHud.reset();
     minimapRenderer.reset();
     activePlayer.resume();
+    maybeStartTestAvatarFromUrl();
   } finally {
     worldTransitioning = false;
+  }
+}
+
+function maybeStartTestAvatarFromUrl(): void {
+  try {
+    const params = new URLSearchParams(globalThis.location?.search ?? "");
+    if (!params.has(TEST_AVATAR_QUERY_PARAM)) return;
+    testAvatar.start();
+  } catch {
+    // URL parsing should never block a playable world.
   }
 }
 
@@ -1564,6 +1645,8 @@ async function exitToHome(): Promise<void> {
     if (novaChatPanel.isOpen) {
       novaChatPanel.close();
     }
+    testAvatar.stop();
+    adminCommandConsole.close();
     requirePlayer().pause(true);
     camera.getWorldDirection(direction);
     novaPilot.setActive(false, camera.position, direction, activeWorld);
@@ -1774,6 +1857,8 @@ function disposeRuntime(): void {
   novaPilotReactions.dispose();
   novaContext.dispose();
   novaPilot.dispose();
+  adminCommandConsole.dispose();
+  testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();
   skybox.dispose();
@@ -1787,6 +1872,8 @@ function disposeRuntime(): void {
   if (voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ === disposeRuntime) {
     voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = undefined;
   }
+  voxelRuntimeGlobal.__VOXEL_ADMIN__ = undefined;
+  voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = undefined;
 }
 
 voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = disposeRuntime;

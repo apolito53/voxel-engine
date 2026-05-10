@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added main-branch testing tools: a `Superflat Lab` world shortcut, reserved `superflat` terrain seed, F9 admin command console, and spawn commands for target walls, walls, pillars, and platforms.
+- Added an F8 scripted test avatar that stages a target block and drives the real player Physics Core throw path for repeatable in-browser gameplay smoke checks.
+- Added tests covering superflat generation, admin command parsing/fixture placement, and test-avatar aim planning.
+
 ## 0.4.7 - 2026-05-07
 
 ### Fixed

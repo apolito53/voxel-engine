@@ -53,6 +53,7 @@ import {
   GROUND_SPRINT_CRUISE_SPEED,
   JUMP_SPEED,
   PREVIOUS_SPRINT_SPEED,
+  PLAYER_HEIGHT,
   SLIDE_END_SPEED,
   SLIDE_DECELERATION_RATE_MULTIPLIER,
   SLIDE_ENTRY_SPEED_MULTIPLIER,
@@ -190,7 +191,21 @@ import { NovaContextJournal } from "../src/novaContext";
 import { NovaPilot, createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
 import { NovaPilotReactions, type NovaPilotMessageTarget } from "../src/novaPilotReactions";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
-import { createTerrainContext, generateChunkBlocks, getTerrainHeight } from "../src/terrain";
+import {
+  SUPERFLAT_TERRAIN_HEIGHT,
+  SUPERFLAT_WORLD_SEED,
+  createTerrainContext,
+  generateChunkBlocks,
+  getTerrainHeight,
+  isSuperflatSeed
+} from "../src/terrain";
+import {
+  parseAdminCommand,
+  spawnPillarFixture,
+  spawnPlatformFixture,
+  spawnWallFixture
+} from "../src/adminCommands";
+import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar";
 import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
 import { VoxelWorld } from "../src/world";
@@ -608,6 +623,99 @@ test("terrain generation is deterministic by seed", () => {
   const betaChunk = generateChunkBlocks(1, -2, betaTerrain);
   assertUint8ArraysEqual(alphaChunkA, alphaChunkB, "same seed should generate identical chunk blocks");
   assert(hasAnyDifference(alphaChunkA, betaChunk), "different seed should generate a different chunk payload");
+});
+
+test("superflat terrain seed creates a flat test lab surface", () => {
+  const terrain = createTerrainContext("  SUPERFLAT  ");
+  const chunk = generateChunkBlocks(0, 0, terrain);
+  const at = (x: number, y: number, z: number): number => chunk[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
+
+  assert(isSuperflatSeed(SUPERFLAT_WORLD_SEED), "superflat seed helper should recognize the lab seed");
+  assertEqual(terrain.seed, SUPERFLAT_WORLD_SEED, "superflat terrain context should normalize its seed");
+  assertEqual(terrain.mode, "superflat", "superflat terrain should declare its terrain mode");
+  assertEqual(
+    getTerrainHeight(-200, 375, terrain),
+    SUPERFLAT_TERRAIN_HEIGHT,
+    "superflat terrain height should be constant across the map"
+  );
+  assertEqual(at(0, SUPERFLAT_TERRAIN_HEIGHT + 1, 0), BLOCK.air, "space above superflat terrain should be air");
+  assertEqual(at(0, SUPERFLAT_TERRAIN_HEIGHT, 0), BLOCK.grass, "top superflat layer should be grass");
+  assertEqual(at(0, SUPERFLAT_TERRAIN_HEIGHT - 1, 0), BLOCK.dirt, "near-surface superflat layer should be dirt");
+  assertEqual(at(0, SUPERFLAT_TERRAIN_HEIGHT - 3, 0), BLOCK.stone, "deep superflat layer should be stone");
+});
+
+test("admin command parsing keeps command names and arguments predictable", () => {
+  assertDeepEqual(
+    parseAdminCommand("  spawn wall Stone 8 5  "),
+    { name: "spawn", args: ["wall", "stone", "8", "5"] },
+    "admin command parser should trim and lowercase commands"
+  );
+  assertDeepEqual(
+    parseAdminCommand(""),
+    null,
+    "empty admin commands should not produce a parsed command"
+  );
+});
+
+test("admin spawn fixtures place reusable terrain targets in front of the camera", () => {
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(0.5, 8, 0.5);
+  camera.lookAt(0.5, 5, -5);
+  camera.updateMatrixWorld();
+
+  const wallWorld = new VoxelWorld({ seed: SUPERFLAT_WORLD_SEED });
+  const wallHooks = {
+    getWorld: () => wallWorld,
+    getCamera: () => camera
+  };
+  assertEqual(spawnWallFixture(wallHooks, BLOCK.stone, 3, 2), 6, "spawned wall should report placed block count");
+  assertEqual(wallWorld.getBlock(0, SUPERFLAT_TERRAIN_HEIGHT + 1, -5), BLOCK.stone, "wall should use the target block");
+  assertEqual(wallWorld.getBlock(-1, SUPERFLAT_TERRAIN_HEIGHT + 2, -5), BLOCK.stone, "wall should span sideways");
+
+  const pillarWorld = new VoxelWorld({ seed: SUPERFLAT_WORLD_SEED });
+  const pillarHooks = {
+    getWorld: () => pillarWorld,
+    getCamera: () => camera
+  };
+  assertEqual(spawnPillarFixture(pillarHooks, BLOCK.ember, 4), 4, "spawned pillar should report placed block count");
+  assertEqual(pillarWorld.getBlock(0, SUPERFLAT_TERRAIN_HEIGHT + 3, -5), BLOCK.ember, "pillar should stack vertically");
+
+  const platformWorld = new VoxelWorld({ seed: SUPERFLAT_WORLD_SEED });
+  const platformHooks = {
+    getWorld: () => platformWorld,
+    getCamera: () => camera
+  };
+  assertEqual(spawnPlatformFixture(platformHooks, BLOCK.sand, 3), 9, "spawned platform should report placed block count");
+  assertEqual(platformWorld.getBlock(0, SUPERFLAT_TERRAIN_HEIGHT + 1, -5), BLOCK.sand, "platform should sit above the surface");
+});
+
+test("test avatar planning aims a staged target from a safe vantage", () => {
+  const world = new VoxelWorld({ seed: SUPERFLAT_WORLD_SEED });
+  world.ensureChunksAround(0, 0, 1);
+  const plan = createCoreBreakTestPlan(world, new THREE.Vector3(0.5, 8, 0.5));
+  assert(plan, "test avatar should find a superflat target plan");
+  assertEqual(
+    world.getBlock(plan.target.x, plan.target.y, plan.target.z),
+    BLOCK.air,
+    "test avatar should choose an empty target cell above the ground"
+  );
+
+  const eye = new THREE.Vector3(
+    plan.feetPosition.x,
+    plan.feetPosition.y + PLAYER_HEIGHT,
+    plan.feetPosition.z
+  );
+  const direction = plan.aimPoint.clone().sub(eye).normalize();
+  const reconstructed = new THREE.Vector3(
+    -Math.sin(plan.yaw) * Math.cos(plan.pitch),
+    Math.sin(plan.pitch),
+    -Math.cos(plan.yaw) * Math.cos(plan.pitch)
+  );
+  assert(direction.dot(reconstructed) > 0.999, "test avatar yaw/pitch should face its aim point");
+
+  const directAim = createYawPitchToward(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
+  assertNearlyEqual(directAim.yaw, 0, 0.000001, "zero-yaw aim should face negative z");
+  assertNearlyEqual(directAim.pitch, 0, 0.000001, "flat aim should have zero pitch");
 });
 
 test("block color variants are deterministic and stay tied to block identity", () => {

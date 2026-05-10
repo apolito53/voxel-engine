@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-05-07
+Last reviewed: 2026-05-10
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -9,7 +9,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Strict TypeScript Vite browser app using native ES modules plus a module Web Worker for chunk CPU work.
 - Three.js handles rendering, camera, materials, lights, and meshes.
 - World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.ts`.
-- The app code owns chunks, terrain generation, voxel meshing, player movement, collision, ray picking, held-item action routing, HUD, minimap, impact damage, debris lifetime, rubble cover proxies, and simple physics toys.
+- The app code owns chunks, terrain generation, voxel meshing, player movement, collision, ray picking, held-item action routing, HUD, minimap, admin/test-lab tooling, impact damage, debris lifetime, rubble cover proxies, and simple physics toys.
 
 ## Commands
 
@@ -29,6 +29,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - App bootstrap, render loop, input glue, world lifecycle orchestration, damage indicator wiring, and WebGL runtime teardown: `src/main.ts`
 - HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
+- F9 admin command console, Superflat Lab launcher hook, and spawnable terrain fixtures for repeatable testing: `src/adminCommands.ts`
+- F8 scripted runtime avatar for in-browser gameplay smoke checks: `src/testAvatar.ts`
 - Floating health-bar projection for damaged terrain/rubble targets: `src/damageIndicators.ts`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`
@@ -48,7 +50,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Orphan debris-to-rubble eligibility rules for active-bubble distance, explicit expiration, and material-preserving fallback cleanup: `src/fragmentRubble.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
 - IndexedDB storage adapter for saved worlds, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths: `src/terrain.ts`
+- Seeded terrain generation shared by fallback and worker paths, including the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload: `src/chunk.ts`
 - Shared chunk worker request/result message contracts: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building: `src/chunkWorker.ts`
@@ -87,14 +89,14 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 1. `index.html` loads `src/main.ts`.
 2. `main.ts` creates the Three.js renderer, scene, lights, camera-following generated skybox, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
-3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, or confirmed deletion updates the saved-world slots, active seed, and optional player resume location.
+3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, Superflat Lab creation, or confirmed deletion updates the saved-world slots, active seed, and optional player resume location.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
 6. During play, `main.ts` passes the camera view direction and camera frustum into `VoxelWorld.streamChunksAround`; cached chunk-radius offsets populate the queue only when the player crosses a chunk boundary or the load radius changes, unchanged unload windows skip loaded-chunk sweeps, then chunk generation queues are picked as a bounded slice that keeps nearby chunks first and prioritizes chunks inside the camera view.
 7. Completed worker/storage chunk results are also applied in camera-prioritized bounded slices, so high-distance fresh worlds do not upload large bursts of chunks or let offscreen results steal the visible-frame budget.
 8. Dirty chunks are tracked by key, then use the same bounded frustum-biased priority before meshing in the worker as typed-array buffers and uploading through `Chunk.applyMeshData`; worker and fallback meshes both use `src/blockColors.ts` so deterministic tint buckets do not change between mesh paths.
 9. If workers are unavailable or fail, `VoxelWorld` falls back to synchronous chunk generation and `Chunk.rebuildMesh`.
-10. Each visible animation frame updates player motion, Nova Pilot companion motion/reactions, Nova Chat runtime context, chunk streaming, physics toys with reusable impact buffers, rubble-core collision, damage health-bar projection, settling-region debris clumping/finalization, orphan settled-fragment fallback absorption, rubble patch merge/support/fall/terrain-promotion rules, a sleep-aware split core/debris broadphase object-object collision pass, speed-gated impact damage, quality-scaled and slider-tuned physics body budgets, instanced debris render batches, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active. Hidden tabs and long resume gaps skip expensive work and reset profiler/minimap meters; once chunk, worker, save, debris, and awake-physics work has drained, visible worlds with no input for five minutes stop RAF entirely and use a low-frequency idle heartbeat until focus, visibility, pointer, or keyboard activity resumes the loop. The debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, miscellaneous work, settling-region pressure, fragment instancing pressure, and rubble cover pressure.
+10. Each visible animation frame updates player motion, optional F8 test-avatar scripting, Nova Pilot companion motion/reactions, Nova Chat runtime context, chunk streaming, physics toys with reusable impact buffers, rubble-core collision, damage health-bar projection, settling-region debris clumping/finalization, orphan settled-fragment fallback absorption, rubble patch merge/support/fall/terrain-promotion rules, a sleep-aware split core/debris broadphase object-object collision pass, speed-gated impact damage, quality-scaled and slider-tuned physics body budgets, instanced debris render batches, dirty mesh scheduling, HUD/debug text, minimap, and final render only while a world is active. Hidden tabs and long resume gaps skip expensive work and reset profiler/minimap meters; once chunk, worker, save, debris, and awake-physics work has drained, visible worlds with no input for five minutes stop RAF entirely and use a low-frequency idle heartbeat until focus, visibility, pointer, or keyboard activity resumes the loop. The debug HUD receives smoothed CPU timing buckets for player, chunk, physics, mesh, minimap, render, miscellaneous work, settling-region pressure, fragment instancing pressure, and rubble cover pressure.
 11. `Exit to Home` saves the player feet position plus look angles, flushes async chunk writes, and unloads the active world view; switching worlds happens from the home screen, not the pause menu.
 12. The scroll wheel selects the current held item stack from the hotbar. `src/items.ts` owns reusable item definitions and primary/secondary action descriptors, while `src/hotbar.ts` only owns selection and action lookup. The current item set is Unarmed, placeable blocks, and Physics Core: Unarmed is intentionally inert, selected blocks use left click to break and right click to place, and selected Physics Core uses left click to throw while right click stays reserved.
 13. Block edits go through `voxelRaycast` plus `VoxelWorld.setBlock`; edited chunk snapshots are coalesced per chunk before IndexedDB receives raw binary chunk payloads, and neighboring chunks are marked dirty when edge blocks change.
@@ -107,6 +109,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Add, recolor, or retune block health: update `src/blocks.ts`; inspect deterministic tinting in `src/blockColors.ts`, mesh color use in `src/chunk.ts`, rubble promotion in `src/rubble.ts`, and debris color use in `src/physics.ts`.
 - Tune chunk dimensions: update `src/voxelConstants.ts`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
+- Add or adjust repeatable runtime test tools: `src/adminCommands.ts`, `src/testAvatar.ts`, home/HUD markup in `index.html`, overlay styling in `src/style.css`, and the lifecycle hooks in `src/main.ts`.
 - Tune saved worlds, player resume location, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
