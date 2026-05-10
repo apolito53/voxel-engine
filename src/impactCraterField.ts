@@ -5,11 +5,11 @@ export const IMPACT_CRATER_MAX_STAMPS = 96;
 
 const IMPACT_CRATER_SEGMENTS = 14;
 const IMPACT_CRATER_SURFACE_LIFT = 0.004;
-const IMPACT_CRATER_CENTER_LIFT = 0.006;
-const IMPACT_CRATER_INNER_LIFT = 0.012;
-const IMPACT_CRATER_RIM_LIFT = 0.026;
-const IMPACT_CRATER_MIN_RADIUS = 0.18;
-const IMPACT_CRATER_MAX_RADIUS = 0.46;
+const IMPACT_CRATER_CENTER_LIFT = 0.005;
+const IMPACT_CRATER_INNER_LIFT = 0.009;
+const IMPACT_CRATER_RIM_LIFT = 0.018;
+const IMPACT_CRATER_MIN_RADIUS = 0.12;
+const IMPACT_CRATER_MAX_RADIUS = 0.32;
 const IMPACT_CRATER_FACE_MARGIN = 0.08;
 const IMPACT_CRATER_SPEED_RANGE = 18;
 
@@ -36,6 +36,7 @@ export type ImpactCraterFieldStats = {
 
 type StoredImpactCrater = {
   readonly block: number;
+  readonly blockPosition: ImpactCraterBlockPosition;
   readonly center: THREE.Vector3;
   readonly normal: THREE.Vector3;
   readonly tangent: THREE.Vector3;
@@ -48,6 +49,22 @@ const EMPTY_IMPACT_CRATER_STATS: ImpactCraterFieldStats = {
   craters: 0,
   vertices: 0,
   triangles: 0
+};
+
+export type ImpactCraterWorld = {
+  getBlock(x: number, y: number, z: number): number;
+};
+
+export type ImpactCraterDamageResult = {
+  readonly block: number;
+  readonly position: ImpactCraterBlockPosition;
+  readonly destroyed: boolean;
+};
+
+export type ImpactCraterImpact = {
+  readonly normal: THREE.Vector3;
+  readonly position: THREE.Vector3;
+  readonly speed: number;
 };
 
 export class ImpactCraterField {
@@ -96,6 +113,17 @@ export class ImpactCraterField {
     return true;
   }
 
+  removeBlock(blockPosition: ImpactCraterBlockPosition): void {
+    const previousCount = this.craters.length;
+    for (let index = this.craters.length - 1; index >= 0; index -= 1) {
+      if (!isSameBlockPosition(this.craters[index].blockPosition, blockPosition)) continue;
+      this.craters.splice(index, 1);
+    }
+    if (this.craters.length === previousCount) return;
+
+    this.rebuildMesh();
+  }
+
   clear(): void {
     this.craters.length = 0;
     this.replaceGeometry(new THREE.BufferGeometry());
@@ -141,12 +169,50 @@ export class ImpactCraterField {
   }
 }
 
+export function createImpactCraterStampForTerrainImpact(
+  world: ImpactCraterWorld,
+  result: ImpactCraterDamageResult,
+  impact: ImpactCraterImpact
+): ImpactCraterStamp | null {
+  const normal = snapNormalToDominantAxis(impact.normal);
+  if (!normal) return null;
+
+  if (!result.destroyed) {
+    return {
+      block: result.block,
+      blockPosition: result.position,
+      normal,
+      point: impact.position,
+      speed: impact.speed,
+      destroyed: false
+    };
+  }
+
+  const hostPosition = {
+    x: result.position.x - normal.x,
+    y: result.position.y - normal.y,
+    z: result.position.z - normal.z
+  };
+  const hostBlock = world.getBlock(hostPosition.x, hostPosition.y, hostPosition.z);
+  const hostDefinition = BLOCKS[hostBlock] ?? BLOCKS[BLOCK.air];
+  if (!hostDefinition.solid) return null;
+
+  return {
+    block: hostBlock,
+    blockPosition: hostPosition,
+    normal,
+    point: impact.position,
+    speed: impact.speed,
+    destroyed: true
+  };
+}
+
 function createStoredImpactCrater(stamp: ImpactCraterStamp, normal: THREE.Vector3): StoredImpactCrater {
   const seed = hashImpactCraterStamp(stamp);
   const speedScale = clamp(stamp.speed / IMPACT_CRATER_SPEED_RANGE, 0, 1);
   const destroyedScale = stamp.destroyed ? 0.05 : 0;
   const radius = clamp(
-    IMPACT_CRATER_MIN_RADIUS + speedScale * 0.21 + destroyedScale,
+    IMPACT_CRATER_MIN_RADIUS + speedScale * 0.15 + destroyedScale,
     IMPACT_CRATER_MIN_RADIUS,
     IMPACT_CRATER_MAX_RADIUS
   );
@@ -156,6 +222,7 @@ function createStoredImpactCrater(stamp: ImpactCraterStamp, normal: THREE.Vector
 
   return {
     block: stamp.block,
+    blockPosition: stamp.blockPosition,
     center,
     normal,
     tangent: basis.tangent,
@@ -163,6 +230,10 @@ function createStoredImpactCrater(stamp: ImpactCraterStamp, normal: THREE.Vector
     radius,
     seed
   };
+}
+
+function isSameBlockPosition(left: ImpactCraterBlockPosition, right: ImpactCraterBlockPosition): boolean {
+  return left.x === right.x && left.y === right.y && left.z === right.z;
 }
 
 function addCraterGeometry(

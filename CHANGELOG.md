@@ -21,6 +21,7 @@
 - Fixed small fast Physics Cores tunneling through the front terrain block and damaging a block behind it.
 - Fixed fast rigid debris sometimes outrunning its temporary terrain-collider bubble before landing.
 - Fixed the pause settings panel clipping off-screen in shorter browser windows by constraining the panel to the viewport and scrolling inside it.
+- Fixed destroyed-block crater stamps floating in empty space by moving them onto surviving exposed faces and removing scars hosted by blocks that later break.
 - Fixed over-budget debris bake-out disappearing visually while preserving hidden material. Forced pressure relief now keeps a static shard pose when it has to convert awake debris, which matters while the draped rubble-sheet renderer is disabled.
 
 ## 0.5.0 - 2026-05-07

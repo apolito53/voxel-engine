@@ -118,7 +118,8 @@ import {
 } from "../src/physicsCoreSettings";
 import {
   IMPACT_CRATER_MAX_STAMPS,
-  ImpactCraterField
+  ImpactCraterField,
+  createImpactCraterStampForTerrainImpact
 } from "../src/impactCraterField";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
@@ -1767,6 +1768,98 @@ test("impact crater field caps old stamps and clears its static mesh", () => {
 
   craters.dispose();
   assertEqual(scene.children.length, 0, "disposing should remove the crater mesh from the scene");
+});
+
+test("impact crater stamps destroyed hits onto surviving exposed faces", () => {
+  const hostWorld = {
+    getBlock(x: number, y: number, z: number): number {
+      return x === 2 && y === 2 && z === 3 ? BLOCK.stone : BLOCK.air;
+    }
+  };
+
+  const craterStamp = createImpactCraterStampForTerrainImpact(
+    hostWorld,
+    {
+      block: BLOCK.grass,
+      position: { x: 1, y: 2, z: 3 },
+      destroyed: true
+    },
+    {
+      normal: new THREE.Vector3(-1, 0, 0),
+      position: new THREE.Vector3(0.94, 2.55, 3.45),
+      speed: 14
+    }
+  );
+
+  assert(craterStamp, "destroyed block impacts should look for a surviving exposed host face");
+  assertDeepEqual(
+    craterStamp.blockPosition,
+    { x: 2, y: 2, z: 3 },
+    "the crater host should be the solid cell behind the destroyed voxel, not the air cell that just disappeared"
+  );
+  assertEqual(craterStamp.block, BLOCK.stone, "destroyed-block craters should inherit the surviving host material");
+  assertVectorNearlyEqual(
+    craterStamp.normal,
+    new THREE.Vector3(-1, 0, 0),
+    "the surviving host face should point back into the destroyed voxel"
+  );
+
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+  craters.stamp(craterStamp);
+  const bounds = new THREE.Box3().setFromBufferAttribute(craters.mesh.geometry.getAttribute("position"));
+  assert(
+    bounds.max.x < 2,
+    "destroyed-block crater geometry should sit against the surviving host face instead of floating at the removed voxel face"
+  );
+  craters.dispose();
+});
+
+test("impact crater field removes scars hosted by destroyed blocks", () => {
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+  const host = { x: 3, y: 1, z: 2 };
+
+  craters.stamp({
+    block: BLOCK.stone,
+    blockPosition: host,
+    normal: new THREE.Vector3(0, 0, -1),
+    point: new THREE.Vector3(3.5, 1.5, 2),
+    speed: 8
+  });
+  assertEqual(craters.getStats().craters, 1, "setup should create one hosted crater");
+
+  craters.removeBlock(host);
+  assertEqual(craters.getStats().craters, 0, "destroying a crater host should remove its scar geometry");
+  assert(!craters.mesh.visible, "removing the final hosted crater should hide the mesh");
+  craters.dispose();
+});
+
+test("destroyed impact craters skip empty back faces instead of leaving floating decals", () => {
+  const emptyWorld = {
+    getBlock(): number {
+      return BLOCK.air;
+    }
+  };
+  const craterStamp = createImpactCraterStampForTerrainImpact(
+    emptyWorld,
+    {
+      block: BLOCK.grass,
+      position: { x: 1, y: 2, z: 3 },
+      destroyed: true
+    },
+    {
+      normal: new THREE.Vector3(-1, 0, 0),
+      position: new THREE.Vector3(0.94, 2.55, 3.45),
+      speed: 14
+    }
+  );
+
+  assertEqual(
+    craterStamp,
+    null,
+    "destroyed-block impacts without a surviving host face should not leave unsupported crater geometry"
+  );
 });
 
 test("block fracture pattern produces a centered 3x3x3 debris grid", () => {

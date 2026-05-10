@@ -60,7 +60,10 @@ import {
   createVoxelSandboxItemRegistry,
   type ItemAction
 } from "./items";
-import { ImpactCraterField } from "./impactCraterField";
+import {
+  ImpactCraterField,
+  createImpactCraterStampForTerrainImpact
+} from "./impactCraterField";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
@@ -1268,14 +1271,11 @@ function handlePhysicsImpact(
   );
   if (!result) return;
 
-  impactCraterField.stamp({
-    block: result.block,
-    blockPosition: result.position,
-    normal: impact.normal,
-    point: impact.position,
-    speed: impact.speed,
-    destroyed: result.destroyed
-  });
+  if (result.destroyed) {
+    impactCraterField.removeBlock(result.position);
+  }
+  const craterStamp = createImpactCraterStampForTerrainImpact(activeWorld, result, impact);
+  if (craterStamp) impactCraterField.stamp(craterStamp);
 
   engineEvents.emit("block:damaged", {
     position: result.position,
