@@ -23,6 +23,7 @@ import {
 import type { CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
+import { createDebrisShapeForBlock } from "./debrisShapes";
 import {
   DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
   DebrisSettler,
@@ -78,6 +79,7 @@ import {
   type PhysicsImpact,
   type PhysicsToyCollisionStats
 } from "./physics";
+import { createPlayerPhysicsCoreLaunchVelocity } from "./physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "./physicsInstancing";
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -89,6 +91,23 @@ import {
   writePhysicsObjectBudgetPreference,
   type PhysicsBudgetDirection
 } from "./physicsBudget";
+import {
+  PHYSICS_CORE_SIZE_MAX_PERCENT,
+  PHYSICS_CORE_SIZE_MIN_PERCENT,
+  PHYSICS_CORE_SIZE_STEP_PERCENT,
+  PHYSICS_CORE_VELOCITY_MAX_PERCENT,
+  PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+  PHYSICS_CORE_VELOCITY_STEP_PERCENT,
+  formatPhysicsCorePercent,
+  getPhysicsCoreRadius,
+  getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreSettings,
+  normalizePhysicsCoreSizePercent,
+  normalizePhysicsCoreVelocityPercent,
+  readPhysicsCoreSettingsPreference,
+  writePhysicsCoreSettingsPreference,
+  type PhysicsCoreSettings
+} from "./physicsCoreSettings";
 import { QualityController, type QualityChangeSource } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import {
@@ -201,6 +220,10 @@ const homeButton = requireElement<HTMLButtonElement>("#home-button");
 const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
 const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
 const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
+const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
+const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
+const settingsGraphicsPanel = requireElement<HTMLElement>("#settings-graphics-panel");
+const settingsGameplayPanel = requireElement<HTMLElement>("#settings-gameplay-panel");
 const qualitySelect = requireElement<HTMLSelectElement>("#quality-select");
 const renderDistanceSlider = requireElement<HTMLInputElement>("#render-distance-slider");
 const renderDistanceValue = requireElement<HTMLElement>("#render-distance-value");
@@ -213,6 +236,10 @@ const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-sl
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
+const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
+const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
+const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
+const coreVelocityValue = requireElement<HTMLElement>("#core-velocity-value");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
@@ -285,6 +312,7 @@ let runtimeDisposed = false;
 let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
+let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -325,6 +353,7 @@ type TargetHit =
       readonly block: VoxelRaycastHit["block"];
       readonly distance: number;
     };
+type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const rubbleField = new RubbleField(scene);
@@ -434,6 +463,7 @@ qualityController = new QualityController({
 qualityController.initialize();
 updateSettingsControls();
 updatePhysicsBudgetControls();
+updatePhysicsCoreControls();
 syncHealthBarsToggle();
 
 function requireWorldRegistry(): WorldRegistry {
@@ -498,6 +528,12 @@ function wireMenuControls(): void {
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
   }, eventListenerOptions);
+  settingsGraphicsTab.addEventListener("click", () => {
+    setSettingsCategory("graphics");
+  }, eventListenerOptions);
+  settingsGameplayTab.addEventListener("click", () => {
+    setSettingsCategory("gameplay");
+  }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
   }, eventListenerOptions);
@@ -522,6 +558,12 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
+  }, eventListenerOptions);
+  coreSizeSlider.addEventListener("input", () => {
+    setPhysicsCoreSizePercent(coreSizeSlider.value);
+  }, eventListenerOptions);
+  coreVelocitySlider.addEventListener("input", () => {
+    setPhysicsCoreVelocityPercent(coreVelocitySlider.value);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -587,6 +629,16 @@ function setSettingsPanelOpen(open: boolean): void {
   for (const action of document.querySelectorAll<HTMLElement>(".menu-main-action")) {
     action.classList.toggle("is-hidden", open);
   }
+}
+
+function setSettingsCategory(category: SettingsCategory): void {
+  const showGraphics = category === "graphics";
+  settingsGraphicsPanel.hidden = !showGraphics;
+  settingsGameplayPanel.hidden = showGraphics;
+  settingsGraphicsTab.classList.toggle("is-active", showGraphics);
+  settingsGameplayTab.classList.toggle("is-active", !showGraphics);
+  settingsGraphicsTab.setAttribute("aria-selected", String(showGraphics));
+  settingsGameplayTab.setAttribute("aria-selected", String(!showGraphics));
 }
 
 function setHealthBarsEnabled(enabled: boolean): void {
@@ -786,7 +838,7 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
       placeSelectedBlock(activePlayer, action.block);
       return;
     case "physics:throw-core":
-      if (activePlayer.isLooking()) throwPlayerCore();
+      if (activePlayer.isLooking()) throwPlayerCore(activePlayer);
       return;
   }
 }
@@ -1272,12 +1324,18 @@ function spawnBlockFragments(
       .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
       .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
     const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
+    const debrisShape = createDebrisShapeForBlock(block, {
+      fragmentIndex: index,
+      distributedFragmentIndex: fragmentGridIndex,
+      origin: position
+    });
 
     const fragment = PhysicsToy.createBlockFragment(
       block,
       blockCenter.clone().add(offset).add(spawnJitter),
       velocity,
-      rubbleMaterialUnits
+      rubbleMaterialUnits,
+      debrisShape
     );
     addPhysicsToy(fragment);
     rigidDebris.registerFragment(fragment);
@@ -1318,11 +1376,16 @@ function createFragmentSpawnJitter(): THREE.Vector3 {
   );
 }
 
-function throwPlayerCore(): void {
+function throwPlayerCore(activePlayer: PlayerController): void {
   camera.getWorldDirection(direction);
+  const launchVelocity = createPlayerPhysicsCoreLaunchVelocity(
+    direction,
+    activePlayer.velocity,
+    physicsCoreSettings
+  );
   addPhysicsToy(createPhysicsCore(
     camera.position.clone().addScaledVector(direction, 1.4),
-    direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0))
+    launchVelocity
   ));
   engineEvents.emit("physics:core-thrown", { source: "player" });
 }
@@ -1330,7 +1393,10 @@ function throwPlayerCore(): void {
 function throwNovaPilotCore(): void {
   const launch = novaPilot.createCoreLaunch();
   if (!launch) return;
-  addPhysicsToy(createPhysicsCore(launch.position, launch.velocity));
+  addPhysicsToy(createPhysicsCore(
+    launch.position,
+    launch.velocity.clone().multiplyScalar(getPhysicsCoreVelocityMultiplier(physicsCoreSettings))
+  ));
   engineEvents.emit("physics:core-thrown", { source: "nova" });
 }
 
@@ -1339,6 +1405,7 @@ function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): Ph
     // Thrown cores are the expensive, gameplay-relevant actors. Keep their
     // damage/collision behavior while moving, then let them sleep after
     // settling so old shots stop taxing the frame forever.
+    radius: getPhysicsCoreRadius(physicsCoreSettings),
     sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
     sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
   });
@@ -1399,6 +1466,43 @@ function updatePhysicsBudgetControls(): void {
   physicsBudgetSlider.max = String(MAX_PHYSICS_OBJECT_BUDGET);
   physicsBudgetSlider.step = String(PHYSICS_OBJECT_BUDGET_STEP);
   physicsBudgetSlider.value = String(physicsObjectBudget);
+}
+
+function setPhysicsCoreSizePercent(sizePercent: unknown): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    sizePercent: normalizePhysicsCoreSizePercent(sizePercent, physicsCoreSettings.sizePercent)
+  });
+}
+
+function setPhysicsCoreVelocityPercent(velocityPercent: unknown): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    velocityPercent: normalizePhysicsCoreVelocityPercent(
+      velocityPercent,
+      physicsCoreSettings.velocityPercent
+    )
+  });
+}
+
+function updatePhysicsCoreSettings(settings: PhysicsCoreSettings): void {
+  physicsCoreSettings = normalizePhysicsCoreSettings(settings, physicsCoreSettings);
+  writePhysicsCoreSettingsPreference(physicsCoreSettings);
+  updatePhysicsCoreControls();
+}
+
+function updatePhysicsCoreControls(): void {
+  coreSizeSlider.min = String(PHYSICS_CORE_SIZE_MIN_PERCENT);
+  coreSizeSlider.max = String(PHYSICS_CORE_SIZE_MAX_PERCENT);
+  coreSizeSlider.step = String(PHYSICS_CORE_SIZE_STEP_PERCENT);
+  coreSizeSlider.value = String(physicsCoreSettings.sizePercent);
+  coreSizeValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.sizePercent);
+
+  coreVelocitySlider.min = String(PHYSICS_CORE_VELOCITY_MIN_PERCENT);
+  coreVelocitySlider.max = String(PHYSICS_CORE_VELOCITY_MAX_PERCENT);
+  coreVelocitySlider.step = String(PHYSICS_CORE_VELOCITY_STEP_PERCENT);
+  coreVelocitySlider.value = String(physicsCoreSettings.velocityPercent);
+  coreVelocityValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.velocityPercent);
 }
 
 function emitQualityChanged(source: QualityChangeSource): void {

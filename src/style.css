@@ -27,6 +27,7 @@ body.playing canvas {
   position: fixed;
   inset: 0;
   z-index: 20;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   background: rgba(9, 13, 18, 0.62);
@@ -76,6 +77,7 @@ body.playing canvas {
 }
 
 .menu-panel {
+  box-sizing: border-box;
   width: min(320px, calc(100vw - 32px));
   padding: 22px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -90,6 +92,10 @@ body.playing canvas {
 
 #pause-menu .menu-panel {
   width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .menu-title {
@@ -220,6 +226,43 @@ body.playing canvas {
 }
 
 .settings-panel[hidden] {
+  display: none;
+}
+
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(5, 8, 12, 0.32);
+  padding: 4px;
+}
+
+.settings-tab {
+  height: 34px;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(237, 244, 248, 0.72);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.settings-tab.is-active {
+  background: #edf4f8;
+  color: #17202a;
+}
+
+.settings-tab-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-tab-panel[hidden] {
   display: none;
 }
 
@@ -584,6 +627,7 @@ body.playing canvas {
 .text-input:focus-visible,
 .menu-select:focus-visible,
 .range-input:focus-visible,
+.settings-tab:focus-visible,
 .stepper-button:focus-visible,
 .toggle-input:focus-visible,
 .nova-chat-input:focus-visible,

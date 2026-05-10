@@ -127,7 +127,7 @@ export function formatShadowQuality(shadowMapSize: number): string {
 
 export function formatBlockFragmentCount(fragmentCount: number): string {
   const normalizedFragmentCount = normalizeBlockFragmentCount(fragmentCount);
-  return `${normalizedFragmentCount} ${normalizedFragmentCount === 1 ? "cube" : "cubes"}`;
+  return `${normalizedFragmentCount} ${normalizedFragmentCount === 1 ? "shard" : "shards"}`;
 }
 
 function clampRenderDistance(value: number): number {

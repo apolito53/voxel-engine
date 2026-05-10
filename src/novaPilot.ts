@@ -12,7 +12,6 @@ const NOVA_PILOT_STEERING_RESPONSE = 5.4;
 const NOVA_PILOT_BOB_SPEED = 1.7;
 const NOVA_PILOT_BOB_HEIGHT = 0.32;
 const NOVA_PILOT_THROW_SPEED = 15;
-const NOVA_PILOT_THROW_UP_SPEED = 2.8;
 const NOVA_PILOT_PULSE_DECAY = 3.6;
 const NOVA_PILOT_BASE_GLOW_OPACITY = 0.5;
 
@@ -64,7 +63,6 @@ export function createNovaPilotCoreLaunch(
     velocity: direction
       .clone()
       .multiplyScalar(NOVA_PILOT_THROW_SPEED)
-      .addScaledVector(up, NOVA_PILOT_THROW_UP_SPEED)
       .addScaledVector(pilotVelocity, 0.18)
   };
 }

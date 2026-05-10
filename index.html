@@ -138,130 +138,197 @@
             Nova Terminal
           </button>
           <div id="pause-settings-panel" class="settings-panel" aria-label="Engine settings" hidden>
-            <label class="settings-field" for="quality-select">
-              <span class="settings-label-row">
-                <span class="settings-label">Quality Preset</span>
-              </span>
-              <select id="quality-select" class="menu-select" aria-label="Quality preset"></select>
-            </label>
-            <label class="settings-field" for="render-distance-slider">
-              <span class="settings-label-row">
-                <span class="settings-label">Render Distance</span>
-                <span id="render-distance-value" class="settings-value">6 chunks</span>
-              </span>
-              <input
-                id="render-distance-slider"
-                class="range-input"
-                type="range"
-                min="1"
-                max="36"
-                step="1"
-                value="6"
-              />
-            </label>
-            <div class="budget-control" aria-labelledby="physics-budget-label">
-              <div class="budget-copy">
-                <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
-                <span id="physics-budget-value" class="budget-value">192 bodies</span>
-              </div>
-              <div class="stepper-controls" aria-label="Physics object budget controls">
-                <button
-                  id="physics-budget-decrease"
-                  class="stepper-button"
-                  type="button"
-                  aria-label="Decrease physics object budget"
-                >
-                  -
-                </button>
-                <button
-                  id="physics-budget-increase"
-                  class="stepper-button"
-                  type="button"
-                  aria-label="Increase physics object budget"
-                >
-                  +
-                </button>
-              </div>
-              <input
-                id="physics-budget-slider"
-                class="range-input budget-slider"
-                type="range"
-                min="32"
-                max="4096"
-                step="16"
-                value="192"
-                aria-label="Physics object budget"
-              />
+            <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+              <button
+                id="settings-tab-graphics"
+                class="settings-tab is-active"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="settings-graphics-panel"
+              >
+                Graphics
+              </button>
+              <button
+                id="settings-tab-gameplay"
+                class="settings-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="settings-gameplay-panel"
+              >
+                Gameplay
+              </button>
             </div>
-            <label class="settings-field" for="shadow-quality-slider">
-              <span class="settings-label-row">
-                <span class="settings-label">Shadow Quality</span>
-                <span id="shadow-quality-value" class="settings-value">2048px</span>
-              </span>
-              <input
-                id="shadow-quality-slider"
-                class="range-input"
-                type="range"
-                min="0"
-                max="4"
-                step="1"
-                value="2"
-              />
-            </label>
-            <label class="settings-field" for="debris-count-slider">
-              <span class="settings-label-row">
-                <span class="settings-label">Break Debris</span>
-                <span id="debris-count-value" class="settings-value">7 cubes</span>
-              </span>
-              <input
-                id="debris-count-slider"
-                class="range-input"
-                type="range"
-                min="1"
-                max="27"
-                step="1"
-                value="7"
-              />
-            </label>
-            <label class="settings-toggle" for="health-bars-toggle">
-              <span class="settings-toggle-copy">
-                <span class="settings-toggle-title">Health Bars</span>
-                <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
-              </span>
-              <input
-                id="health-bars-toggle"
-                class="toggle-input"
-                type="checkbox"
-                checked
-              />
-            </label>
-            <label
-              id="super-ultra-toggle-row"
-              class="danger-toggle"
-              for="super-ultra-toggle"
-              aria-hidden="true"
+            <div
+              id="settings-graphics-panel"
+              class="settings-tab-panel"
+              role="tabpanel"
+              aria-labelledby="settings-tab-graphics"
+            >
+              <label class="settings-field" for="quality-select">
+                <span class="settings-label-row">
+                  <span class="settings-label">Quality Preset</span>
+                </span>
+                <select id="quality-select" class="menu-select" aria-label="Quality preset"></select>
+              </label>
+              <label class="settings-field" for="render-distance-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Render Distance</span>
+                  <span id="render-distance-value" class="settings-value">6 chunks</span>
+                </span>
+                <input
+                  id="render-distance-slider"
+                  class="range-input"
+                  type="range"
+                  min="1"
+                  max="36"
+                  step="1"
+                  value="6"
+                />
+              </label>
+              <div class="budget-control" aria-labelledby="physics-budget-label">
+                <div class="budget-copy">
+                  <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
+                  <span id="physics-budget-value" class="budget-value">192 bodies</span>
+                </div>
+                <div class="stepper-controls" aria-label="Physics object budget controls">
+                  <button
+                    id="physics-budget-decrease"
+                    class="stepper-button"
+                    type="button"
+                    aria-label="Decrease physics object budget"
+                  >
+                    -
+                  </button>
+                  <button
+                    id="physics-budget-increase"
+                    class="stepper-button"
+                    type="button"
+                    aria-label="Increase physics object budget"
+                  >
+                    +
+                  </button>
+                </div>
+                <input
+                  id="physics-budget-slider"
+                  class="range-input budget-slider"
+                  type="range"
+                  min="32"
+                  max="4096"
+                  step="16"
+                  value="192"
+                  aria-label="Physics object budget"
+                />
+              </div>
+              <label class="settings-field" for="shadow-quality-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Shadow Quality</span>
+                  <span id="shadow-quality-value" class="settings-value">2048px</span>
+                </span>
+                <input
+                  id="shadow-quality-slider"
+                  class="range-input"
+                  type="range"
+                  min="0"
+                  max="4"
+                  step="1"
+                  value="2"
+                />
+              </label>
+              <label class="settings-field" for="debris-count-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Break Debris</span>
+                  <span id="debris-count-value" class="settings-value">7 shards</span>
+                </span>
+                <input
+                  id="debris-count-slider"
+                  class="range-input"
+                  type="range"
+                  min="1"
+                  max="27"
+                  step="1"
+                  value="7"
+                />
+              </label>
+              <label
+                id="super-ultra-toggle-row"
+                class="danger-toggle"
+                for="super-ultra-toggle"
+                aria-hidden="true"
+                hidden
+              >
+                <span class="danger-copy">
+                  <span class="danger-title">Allow Super Ultra Mode</span>
+                  <span id="super-ultra-warning" class="danger-warning">
+                    Unlocks the 12x distance preset. Might turn your computer into a toaster.
+                  </span>
+                </span>
+                <input
+                  id="super-ultra-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                  aria-describedby="super-ultra-warning"
+                />
+              </label>
+            </div>
+            <div
+              id="settings-gameplay-panel"
+              class="settings-tab-panel"
+              role="tabpanel"
+              aria-labelledby="settings-tab-gameplay"
               hidden
             >
-              <span class="danger-copy">
-                <span class="danger-title">Allow Super Ultra Mode</span>
-                <span id="super-ultra-warning" class="danger-warning">
-                  Unlocks the 12x distance preset. Might turn your computer into a toaster.
+              <label class="settings-field" for="core-size-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Core Size</span>
+                  <span id="core-size-value" class="settings-value">30%</span>
                 </span>
-              </span>
-              <input
-                id="super-ultra-toggle"
-                class="toggle-input"
-                type="checkbox"
-                aria-describedby="super-ultra-warning"
-              />
-            </label>
-            <button
-              id="despawn-objects-button"
-              class="menu-button secondary settings-utility-button"
-              type="button"
-            >
-              Despawn All Objects
-            </button>
+                <input
+                  id="core-size-slider"
+                  class="range-input"
+                  type="range"
+                  min="20"
+                  max="120"
+                  step="5"
+                  value="30"
+                />
+              </label>
+              <label class="settings-field" for="core-velocity-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Core Velocity</span>
+                  <span id="core-velocity-value" class="settings-value">140%</span>
+                </span>
+                <input
+                  id="core-velocity-slider"
+                  class="range-input"
+                  type="range"
+                  min="60"
+                  max="220"
+                  step="5"
+                  value="140"
+                />
+              </label>
+              <label class="settings-toggle" for="health-bars-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Health Bars</span>
+                  <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
+                </span>
+                <input
+                  id="health-bars-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                  checked
+                />
+              </label>
+              <button
+                id="despawn-objects-button"
+                class="menu-button secondary settings-utility-button"
+                type="button"
+              >
+                Despawn All Objects
+              </button>
+            </div>
           </div>
           <button id="home-button" class="menu-button danger menu-exit-button menu-main-action" type="button">
             Exit to Home
