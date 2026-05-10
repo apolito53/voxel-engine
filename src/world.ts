@@ -14,6 +14,7 @@ import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
   createPartialBlockCut,
   createPartialBlockKey,
+  createPartialBlockRemovedVisualCellIndexes,
   createPartialBlockSurfaceSamples,
   getPartialBlockSupportHeight,
   type PartialBlockCell,
@@ -988,11 +989,16 @@ export class VoxelWorld implements CollisionWorld {
     while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
       cuts.shift();
     }
+    const removedVisualCellIndexes = createPartialBlockRemovedVisualCellIndexes(
+      { cuts, damage, maxHealth },
+      existing?.removedVisualCellIndexes
+    );
 
     this.partialBlocks.set(key, {
       block,
       position,
       cuts,
+      removedVisualCellIndexes,
       damage,
       maxHealth
     });

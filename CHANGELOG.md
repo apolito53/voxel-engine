@@ -27,6 +27,7 @@
 
 ### Fixed
 
+- Fixed damaged partial-terrain bites visually refilling when later hits arrive from a different side; removed bite cells now persist and only expand as damage increases.
 - Fixed Physics Core launches inheriting an upward arc instead of firing straight along the current aim direction.
 - Fixed small fast Physics Cores tunneling through the front terrain block and damaging a block behind it.
 - Fixed fast rigid debris sometimes outrunning its temporary terrain-collider bubble before landing.

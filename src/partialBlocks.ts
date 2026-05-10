@@ -50,6 +50,7 @@ export type PartialBlockCell = {
   readonly block: number;
   readonly position: PartialBlockPosition;
   readonly cuts: readonly PartialBlockCut[];
+  readonly removedVisualCellIndexes?: readonly number[];
   readonly surfaceSamples?: readonly PartialBlockSurfaceSample[];
   readonly damage: number;
   readonly maxHealth: number;
@@ -359,15 +360,25 @@ export function getPartialBlockRemainingVisualCellCount(
   );
 }
 
-function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<number> {
+export function createPartialBlockRemovedVisualCellIndexes(
+  cell: Pick<PartialBlockCell, "cuts" | "damage" | "maxHealth">,
+  previousIndexes: readonly number[] = []
+): readonly number[] {
   // Keep one visual cell alive while the world still treats this as an existing
   // voxel. The final health step removes the voxel and routes remaining material
   // through the normal debris/rubble pipeline instead.
-  const removedCount = Math.min(
+  const targetRemovedCount = Math.min(
     PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT - 1,
     getPartialBlockRemovedVisualCellCount(cell)
   );
-  if (removedCount <= 0) return new Set();
+  if (targetRemovedCount <= 0) return [];
+
+  const removed = new Set<number>();
+  for (const index of previousIndexes) {
+    if (!Number.isInteger(index) || index < 0 || index >= PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT) continue;
+    removed.add(index);
+    if (removed.size >= targetRemovedCount) return [...removed];
+  }
 
   const rankedCells = PARTIAL_BLOCK_LATTICE_CELLS
     .map((latticeCell) => ({
@@ -376,11 +387,22 @@ function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<nu
     }))
     .sort((left, right) => left.score - right.score || left.index - right.index);
 
-  return new Set(rankedCells.slice(0, removedCount).map((entry) => entry.index));
+  for (const rankedCell of rankedCells) {
+    removed.add(rankedCell.index);
+    if (removed.size >= targetRemovedCount) break;
+  }
+
+  return [...removed];
+}
+
+function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<number> {
+  return new Set(
+    cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
+  );
 }
 
 function scorePartialBlockLatticeCellForRemoval(
-  cell: PartialBlockCell,
+  cell: Pick<PartialBlockCell, "cuts">,
   latticeCell: PartialBlockLatticeCell
 ): number {
   if (cell.cuts.length === 0) {

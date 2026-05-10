@@ -1825,6 +1825,40 @@ test("partial block damage lattice approximates remaining material fraction", ()
   );
 });
 
+test("partial block bite lattice keeps older damage from visually refilling", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-no-refill-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const firstBites = [...(world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])];
+  assert(firstBites.length > 0, "the first damage step should remove visible bite cells");
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(3, 3.5, 4.5),
+    normal: new THREE.Vector3(1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const secondBites = new Set(world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? []);
+
+  assert(secondBites.size >= firstBites.length, "later damage should add bite cells instead of shrinking the bite set");
+  assert(
+    firstBites.every((index) => secondBites.has(index)),
+    "a later hit from a different side should not make earlier removed bite cells reappear"
+  );
+});
+
 test("partial block bites open wrinkled interior faces at the impact point", () => {
   const scene = new THREE.Scene();
   const field = new PartialBlockMeshField(scene);
