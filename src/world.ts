@@ -886,22 +886,11 @@ export class VoxelWorld implements CollisionWorld {
       };
     }
 
-    const finalCut = createPartialBlockCut({
-      block,
-      position,
-      point: input.point,
-      normal: input.normal,
-      speed: input.speed,
-      cutIndex: this.partialBlocks.get(key)?.cuts.length ?? 0
-    });
-    const cuts = [...(this.partialBlocks.get(key)?.cuts ?? []), finalCut];
-    while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
-      cuts.shift();
-    }
-
     this.blockDamage.delete(key);
+    // The damaged block has already shown its bite-lattice history while it was
+    // alive. On the final health step, clear that custom mesh and leave normal
+    // air instead of stamping a wrinkled support puddle into the terrain.
     this.setBlock(position.x, position.y, position.z, BLOCK.air);
-    this.addPartialBlockSurfacePatch(block, position, definition.health, cuts, finalCut.normal, input.point);
     return {
       block,
       position,

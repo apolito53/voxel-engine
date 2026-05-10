@@ -10,7 +10,7 @@
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 - Added a pause-menu `Health Bars` toggle that persists locally, suppresses block/rubble damage bars, and clears active bars immediately when disabled.
 - Added a white cube-space target outline for destructible settled-rubble cells, including direct destroy-action hits against the targeted rubble proxy instead of terrain behind it.
-- Added in-memory partial-block terrain carving for Physics Core impacts: chipped terrain keeps collision and health, sheds a small material-budgeted burst of debris, then destroyed carved cells leave connected wrinkled partial-height support surfaces that player/debris systems can stand on.
+- Added in-memory partial-block terrain carving for Physics Core impacts: chipped terrain keeps collision and health, sheds a small material-budgeted burst of debris, and shows bite-style custom terrain until the final fracture clears it.
 - Added a capped `ImpactCraterField` prototype for faceted visual crater/scar experiments; it is currently parked behind the partial-block terrain carve path.
 - Added a shared debris-shape catalog for varied low-poly active fragments, with non-uniform shard scales, cuboid physics envelopes, and baked rubble visuals that preserve the settled shard shape.
 - Split pause-menu `Settings` into `Graphics` and `Gameplay` tabs so visual/performance tuning stays separate from core feel, health bars, and cleanup.
@@ -18,7 +18,9 @@
 
 ### Changed
 
-- Changed Physics Core terrain hits from one-shot block deletion plus visual scars into one-health carve steps; ordinary terrain now chips first, ejects debris as material is removed, then fractures into leftover debris and real low-poly terrain surfaces once its health is exhausted.
+- Changed damaged partial-terrain visuals from surface dents into hidden 3x3x3 apple-bite volumes: removed visual cells now follow damage/maxHealth, exposed bite interiors render as wrinkled faceted surfaces, and the lattice stays presentation-only while gameplay material remains normalized.
+- Changed Physics Core terrain hits from one-shot block deletion plus visual scars into one-health carve steps; ordinary terrain now chips first, ejects debris as material is removed, then fractures into leftover debris once its health is exhausted.
+- Changed final partial-terrain fracture to leave air instead of stamping the old wrinkled surface puddle.
 - Changed final terrain-fracture debris counts to scale with the material still left inside the block, so nearly-broken blocks no longer explode as if they were untouched full voxels.
 - Changed rubble material accounting from the old 27-piece debris grid to normalized block volume: a full block is `1.0`, HP ratio directly controls remaining material, and visible shard count is only presentation/performance.
 - Increased ordinary terrain block health from 2 to 10 HP so Physics Core carving has enough hits to show repeated deformation and chip debris before final fracture.

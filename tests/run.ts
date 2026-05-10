@@ -126,8 +126,11 @@ import {
   createImpactCraterStampForTerrainImpact
 } from "../src/impactCraterField";
 import {
+  PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
   PARTIAL_BLOCK_CORE_DAMAGE,
   PartialBlockMeshField,
+  getPartialBlockRemainingVisualCellCount,
+  getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
 } from "../src/partialBlocks";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
@@ -1751,7 +1754,7 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
   assert(!world.isSolid(2, 3, 4), "fractured terrain should stop behaving like a full collision cube");
   const surfaceCell = world.getPartialBlock(2, 3, 4);
-  assert(surfaceCell?.surfaceSamples?.length, "fractured carved terrain should leave a partial support surface");
+  assertEqual(surfaceCell, null, "final fracture should clear the bite mesh instead of leaving a surface puddle");
   const supportHeight = world.getSupportHeight({
     minX: 2.15,
     maxX: 2.85,
@@ -1760,10 +1763,7 @@ test("physics core carving chips ordinary terrain before fracture", () => {
     minZ: 4.15,
     maxZ: 4.85
   });
-  assert(
-    supportHeight !== null && supportHeight > 3 && supportHeight < 4,
-    "destroyed carved terrain should expose a walkable/supporting partial-height surface"
-  );
+  assertEqual(supportHeight, null, "destroyed carved terrain should leave air instead of break-time support");
 });
 
 test("partial block field renders faceted custom terrain cells", () => {
@@ -1797,6 +1797,72 @@ test("partial block field renders faceted custom terrain cells", () => {
 
   field.dispose();
   assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
+});
+
+test("partial block damage lattice approximates remaining material fraction", () => {
+  const sevenTenthsRemaining = { damage: 3, maxHealth: 10 };
+  const threeTenthsRemaining = { damage: 7, maxHealth: 10 };
+
+  assertEqual(
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+    BLOCK_FRAGMENT_COUNT,
+    "partial-block visual damage should reuse the 3x3x3 fracture lattice as presentation resolution"
+  );
+  assertEqual(
+    getPartialBlockRemovedVisualCellCount(sevenTenthsRemaining),
+    8,
+    "30 percent damage should remove roughly 30 percent of the hidden visual cells"
+  );
+  assertEqual(
+    getPartialBlockRemainingVisualCellCount(sevenTenthsRemaining),
+    19,
+    "7/10 HP should keep about 70 percent of the hidden visual cells"
+  );
+  assert(
+    Math.abs(getPartialBlockRemainingVisualCellCount(threeTenthsRemaining) / BLOCK_FRAGMENT_COUNT - 0.3) <
+      1 / BLOCK_FRAGMENT_COUNT,
+    "remaining visual cells should track remaining HP within one lattice-cell of precision"
+  );
+});
+
+test("partial block bites open wrinkled interior faces at the impact point", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 3,
+    maxHealth: 10,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.46,
+      depth: 0.55,
+      seed: 9876
+    }]
+  };
+
+  field.update([cell], () => true);
+  const positions = field.mesh.geometry.getAttribute("position");
+  const normals = field.mesh.geometry.getAttribute("normal");
+  let interiorBiteVertices = 0;
+  let wrinkledBiteVertices = 0;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const normalX = normals.getX(index);
+    if (normalX < -0.35 && x > 1.05 && x < 1.7) {
+      interiorBiteVertices += 1;
+      if (Math.abs(x - (1 + 1 / 3)) > 0.002 && Math.abs(x - (1 + 2 / 3)) > 0.002) {
+        wrinkledBiteVertices += 1;
+      }
+    }
+  }
+
+  assert(interiorBiteVertices > 0, "damage should reveal internal bite faces instead of only denting the outer cube");
+  assert(wrinkledBiteVertices > 0, "exposed bite faces should get faceted wrinkle vertices instead of staying planar");
+
+  field.dispose();
 });
 
 test("partial block cuts chew into neighboring exposed faces near edges", () => {
@@ -1864,7 +1930,7 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   field.dispose();
 });
 
-test("fractured terrain creates connected wrinkled support patches", () => {
+test("fractured terrain does not stamp a break-time surface puddle", () => {
   const world = new VoxelWorld({ seed: "partial-surface-patch-test" });
   const target = { x: 8, y: 3, z: 8 };
   for (let dz = -1; dz <= 1; dz += 1) {
@@ -1894,7 +1960,7 @@ test("fractured terrain creates connected wrinkled support patches", () => {
     Math.abs(cell.position.x - target.x) <= 1 &&
     Math.abs(cell.position.z - target.z) <= 1
   );
-  assert(surfaceCells.length >= 4, "a final terrain fracture should create a multi-cell wrinkled patch");
+  assertEqual(surfaceCells.length, 0, "a final terrain fracture should not create a multi-cell wrinkled patch");
 
   const neighborSupportHeight = world.getSupportHeight({
     minX: target.x - 0.85,
@@ -1904,10 +1970,7 @@ test("fractured terrain creates connected wrinkled support patches", () => {
     minZ: target.z + 0.15,
     maxZ: target.z + 0.85
   });
-  assert(
-    neighborSupportHeight !== null && neighborSupportHeight > target.y && neighborSupportHeight < target.y + 1,
-    "neighboring patch cells should be walkable terrain support, not decoration"
-  );
+  assertEqual(neighborSupportHeight, null, "final break should leave neighboring terrain support untouched");
 });
 
 test("chunk meshing skips carved cells and exposes adjacent terrain faces", () => {

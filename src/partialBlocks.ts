@@ -1,12 +1,21 @@
 import * as THREE from "three";
+import { BLOCK_FRAGMENT_COUNT, BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import type { CollisionBounds } from "./collision";
 import { getSunlitFaceShade } from "./voxelLighting";
 
 export const PARTIAL_BLOCK_CORE_DAMAGE = 1;
 export const PARTIAL_BLOCK_MAX_CUTS_PER_CELL = 4;
+// Damaged blocks borrow the fracture grid only as a visual presentation lattice.
+// Gameplay material stays normalized as block volume; the lattice just decides
+// how much of the still-solid cube is visibly bitten away at a given HP ratio.
+export const PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE = BLOCK_FRAGMENT_GRID_SIZE;
+export const PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT = BLOCK_FRAGMENT_COUNT;
 
 const PARTIAL_BLOCK_FACE_SEGMENTS = 5;
+const PARTIAL_BLOCK_LATTICE_CELL_SIZE = 1 / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
+const PARTIAL_BLOCK_BITE_DEPTH_SCORE_SCALE = 0.65;
+const PARTIAL_BLOCK_BITE_WRINKLE_DEPTH = 0.045;
 const PARTIAL_BLOCK_MIN_RADIUS = 0.26;
 const PARTIAL_BLOCK_MAX_RADIUS = 0.46;
 const PARTIAL_BLOCK_MIN_DEPTH = 0.24;
@@ -82,6 +91,13 @@ type PartialBlockSurfaceGrid = {
 };
 
 type PartialBlockSurfaceCellMap = ReadonlyMap<string, PartialBlockCell>;
+type PartialBlockLatticeCell = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly index: number;
+  readonly center: PartialBlockPosition;
+};
 
 export class PartialBlockMeshField {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
@@ -309,15 +325,152 @@ export function addPartialBlockCellGeometry(
   cell: PartialBlockCell,
   isFaceVisible: PartialBlockFaceVisibility
 ): void {
+  const removedCells = createPartialBlockRemovedLatticeCellSet(cell);
+  if (removedCells.size > 0) {
+    addPartialBlockLatticeGeometry(geometry, cell, isFaceVisible, removedCells);
+    return;
+  }
+
   for (const face of PARTIAL_BLOCK_FACES) {
-    if (!isFaceVisible(cell, face.normal)) continue;
-    const cuts = cell.cuts.filter((cut) => canCutAffectFace(cut, face));
-    if (cuts.length > 0) {
-      addCarvedFaceGeometry(geometry, cell, face, cuts);
-    } else {
-      addFlatFaceGeometry(geometry, cell, face);
+    if (isFaceVisible(cell, face.normal)) addFlatFaceGeometry(geometry, cell, face);
+  }
+}
+
+export function getPartialBlockRemovedVisualCellCount(
+  cell: Pick<PartialBlockCell, "damage" | "maxHealth">
+): number {
+  if (cell.maxHealth <= 0 || cell.damage <= 0) return 0;
+  const removedFraction = clamp01(cell.damage / cell.maxHealth);
+  return Math.max(
+    0,
+    Math.min(
+      PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+      Math.round(removedFraction * PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT)
+    )
+  );
+}
+
+export function getPartialBlockRemainingVisualCellCount(
+  cell: Pick<PartialBlockCell, "damage" | "maxHealth">
+): number {
+  return Math.max(
+    0,
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT - getPartialBlockRemovedVisualCellCount(cell)
+  );
+}
+
+function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<number> {
+  // Keep one visual cell alive while the world still treats this as an existing
+  // voxel. The final health step removes the voxel and routes remaining material
+  // through the normal debris/rubble pipeline instead.
+  const removedCount = Math.min(
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT - 1,
+    getPartialBlockRemovedVisualCellCount(cell)
+  );
+  if (removedCount <= 0) return new Set();
+
+  const rankedCells = PARTIAL_BLOCK_LATTICE_CELLS
+    .map((latticeCell) => ({
+      index: latticeCell.index,
+      score: scorePartialBlockLatticeCellForRemoval(cell, latticeCell)
+    }))
+    .sort((left, right) => left.score - right.score || left.index - right.index);
+
+  return new Set(rankedCells.slice(0, removedCount).map((entry) => entry.index));
+}
+
+function scorePartialBlockLatticeCellForRemoval(
+  cell: PartialBlockCell,
+  latticeCell: PartialBlockLatticeCell
+): number {
+  if (cell.cuts.length === 0) {
+    return distanceSq(latticeCell.center, { x: 0.5, y: 0.5, z: 0.5 });
+  }
+
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const cut of cell.cuts) {
+    // Rank cells from the struck face inward so repeated hits look like bites
+    // taken from the impact point instead of a generic shrink-wrap effect.
+    const inward = {
+      x: -cut.normal.x,
+      y: -cut.normal.y,
+      z: -cut.normal.z
+    };
+    const delta = {
+      x: latticeCell.center.x - cut.localPoint.x,
+      y: latticeCell.center.y - cut.localPoint.y,
+      z: latticeCell.center.z - cut.localPoint.z
+    };
+    const depth = delta.x * inward.x + delta.y * inward.y + delta.z * inward.z;
+    const lateral = {
+      x: delta.x - inward.x * depth,
+      y: delta.y - inward.y * depth,
+      z: delta.z - inward.z * depth
+    };
+    const lateralDistance = Math.sqrt(distanceSq(lateral, { x: 0, y: 0, z: 0 }));
+    const radiusScore = lateralDistance / Math.max(PARTIAL_BLOCK_LATTICE_CELL_SIZE, cut.radius);
+    const depthScore = Math.max(0, depth) /
+      Math.max(PARTIAL_BLOCK_LATTICE_CELL_SIZE, cut.depth + PARTIAL_BLOCK_LATTICE_CELL_SIZE);
+    const behindFacePenalty = depth < -PARTIAL_BLOCK_SURFACE_EPSILON ? 8 : 0;
+    const noise = hashUnit(cut.seed ^ Math.imul(latticeCell.index + 1, 0x9e3779b1)) * 0.12;
+    const score = radiusScore + depthScore * PARTIAL_BLOCK_BITE_DEPTH_SCORE_SCALE + behindFacePenalty + noise;
+    bestScore = Math.min(bestScore, score);
+  }
+  return bestScore;
+}
+
+function addPartialBlockLatticeGeometry(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  isFaceVisible: PartialBlockFaceVisibility,
+  removedCells: ReadonlySet<number>
+): void {
+  for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
+    if (removedCells.has(latticeCell.index)) continue;
+
+    for (const face of PARTIAL_BLOCK_LATTICE_FACES) {
+      const neighborIndex = getPartialBlockLatticeCellIndex(
+        latticeCell.x + face.offset.x,
+        latticeCell.y + face.offset.y,
+        latticeCell.z + face.offset.z
+      );
+      const isBoundaryFace = neighborIndex === null;
+      const exposesBite = neighborIndex !== null && removedCells.has(neighborIndex);
+      // Shared faces between remaining hidden cells are skipped, so the damaged
+      // block reads as one chipped volume instead of twenty-seven tiny cubes.
+      if (!isBoundaryFace && !exposesBite) continue;
+      if (isBoundaryFace && !isFaceVisible(cell, face.normal)) continue;
+
+      const corners = getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal);
+      if (exposesBite) {
+        addWrinkledBiteFace(geometry, cell, latticeCell, face.normal, corners);
+      } else {
+        addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
+      }
     }
   }
+}
+
+function addWrinkledBiteFace(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  latticeCell: PartialBlockLatticeCell,
+  normal: PartialBlockPosition,
+  corners: readonly PartialBlockPosition[]
+): void {
+  const center = getFaceCenter(corners);
+  const noise = hashUnit(hashPartialBlockCut(cell.block, cell.position, normal, latticeCell.index + 97));
+  const signedWrinkle = (noise - 0.35) * PARTIAL_BLOCK_BITE_WRINKLE_DEPTH;
+  const wrinkledCenter = {
+    x: center.x + normal.x * signedWrinkle,
+    y: center.y + normal.y * signedWrinkle,
+    z: center.z + normal.z * signedWrinkle
+  };
+
+  addTriangleFacingNormal(geometry, cell, corners[0]!, corners[1]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[1]!, corners[2]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[2]!, corners[3]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[3]!, corners[0]!, wrinkledCenter, normal);
 }
 
 function addPartialBlockSurfaceGeometry(
@@ -551,6 +704,30 @@ function addTriangle(
   geometry.indices.push(base, base + 1, base + 2);
 }
 
+function addTriangleFacingNormal(
+  geometry: MutablePartialBlockGeometry,
+  cell: PartialBlockCell,
+  first: PartialBlockPosition,
+  second: PartialBlockPosition,
+  third: PartialBlockPosition,
+  desiredNormal: PartialBlockPosition
+): void {
+  const triangleNormal = getTriangleNormal(
+    vectorToRubbleVertex(first),
+    vectorToRubbleVertex(second),
+    vectorToRubbleVertex(third)
+  );
+  if (dotNormal(triangleNormal, desiredNormal) >= 0) {
+    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(second), vectorToRubbleVertex(third));
+  } else {
+    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(third), vectorToRubbleVertex(second));
+  }
+}
+
+function vectorToRubbleVertex(position: PartialBlockPosition): RubbleLikeVertex {
+  return [position.x, position.y, position.z];
+}
+
 function getTriangleNormal(
   first: RubbleLikeVertex,
   second: RubbleLikeVertex,
@@ -568,6 +745,97 @@ function getTriangleNormal(
   const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
   if (length <= PARTIAL_BLOCK_SURFACE_EPSILON) return [0, 1, 0];
   return [nx / length, ny / length, nz / length];
+}
+
+function dotNormal(left: readonly [number, number, number], right: PartialBlockPosition): number {
+  return left[0] * right.x + left[1] * right.y + left[2] * right.z;
+}
+
+function getFaceCenter(corners: readonly PartialBlockPosition[]): PartialBlockPosition {
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (const corner of corners) {
+    x += corner.x;
+    y += corner.y;
+    z += corner.z;
+  }
+  const scale = 1 / Math.max(1, corners.length);
+  return { x: x * scale, y: y * scale, z: z * scale };
+}
+
+function getPartialBlockLatticeCellIndex(x: number, y: number, z: number): number | null {
+  if (
+    x < 0 ||
+    y < 0 ||
+    z < 0 ||
+    x >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ||
+    y >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ||
+    z >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE
+  ) {
+    return null;
+  }
+  return x + y * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE + z * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ** 2;
+}
+
+function getPartialBlockLatticeFaceCorners(
+  position: PartialBlockPosition,
+  cell: PartialBlockLatticeCell,
+  normal: PartialBlockPosition
+): readonly PartialBlockPosition[] {
+  const minX = position.x + cell.x * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+  const maxX = minX + PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+  const minY = position.y + cell.y * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+  const maxY = minY + PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+  const minZ = position.z + cell.z * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+  const maxZ = minZ + PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+
+  if (normal.x > 0) {
+    return [
+      { x: maxX, y: minY, z: minZ },
+      { x: maxX, y: maxY, z: minZ },
+      { x: maxX, y: maxY, z: maxZ },
+      { x: maxX, y: minY, z: maxZ }
+    ];
+  }
+  if (normal.x < 0) {
+    return [
+      { x: minX, y: minY, z: maxZ },
+      { x: minX, y: maxY, z: maxZ },
+      { x: minX, y: maxY, z: minZ },
+      { x: minX, y: minY, z: minZ }
+    ];
+  }
+  if (normal.y > 0) {
+    return [
+      { x: minX, y: maxY, z: maxZ },
+      { x: maxX, y: maxY, z: maxZ },
+      { x: maxX, y: maxY, z: minZ },
+      { x: minX, y: maxY, z: minZ }
+    ];
+  }
+  if (normal.y < 0) {
+    return [
+      { x: minX, y: minY, z: minZ },
+      { x: maxX, y: minY, z: minZ },
+      { x: maxX, y: minY, z: maxZ },
+      { x: minX, y: minY, z: maxZ }
+    ];
+  }
+  if (normal.z > 0) {
+    return [
+      { x: maxX, y: minY, z: maxZ },
+      { x: maxX, y: maxY, z: maxZ },
+      { x: minX, y: maxY, z: maxZ },
+      { x: minX, y: minY, z: maxZ }
+    ];
+  }
+  return [
+    { x: minX, y: minY, z: minZ },
+    { x: minX, y: maxY, z: minZ },
+    { x: maxX, y: maxY, z: minZ },
+    { x: maxX, y: minY, z: minZ }
+  ];
 }
 
 function getPartialGridHeight(grid: PartialBlockSurfaceGrid, xIndex: number, zIndex: number): number {
@@ -710,6 +978,13 @@ function dotPosition(left: PartialBlockPosition, right: PartialBlockPosition): n
   return left.x * right.x + left.y * right.y + left.z * right.z;
 }
 
+function distanceSq(left: PartialBlockPosition, right: PartialBlockPosition): number {
+  const dx = left.x - right.x;
+  const dy = left.y - right.y;
+  const dz = left.z - right.z;
+  return dx * dx + dy * dy + dz * dz;
+}
+
 function isSameNormal(left: PartialBlockPosition, right: PartialBlockPosition): boolean {
   return left.x === right.x && left.y === right.y && left.z === right.z;
 }
@@ -796,3 +1071,37 @@ const PARTIAL_BLOCK_FACES: readonly PartialBlockFace[] = [
     bitangent: { x: 0, y: 1, z: 0 }
   }
 ];
+
+const PARTIAL_BLOCK_LATTICE_FACES: readonly {
+  readonly normal: PartialBlockPosition;
+  readonly offset: PartialBlockPosition;
+}[] = PARTIAL_BLOCK_FACES.map((face) => ({
+  normal: face.normal,
+  offset: face.normal
+}));
+
+const PARTIAL_BLOCK_LATTICE_CELLS: readonly PartialBlockLatticeCell[] = createPartialBlockLatticeCells();
+
+function createPartialBlockLatticeCells(): PartialBlockLatticeCell[] {
+  const cells: PartialBlockLatticeCell[] = [];
+  for (let z = 0; z < PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE; z += 1) {
+    for (let y = 0; y < PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE; y += 1) {
+      for (let x = 0; x < PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE; x += 1) {
+        const index = getPartialBlockLatticeCellIndex(x, y, z);
+        if (index === null) continue;
+        cells.push({
+          x,
+          y,
+          z,
+          index,
+          center: {
+            x: (x + 0.5) * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+            y: (y + 0.5) * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+            z: (z + 0.5) * PARTIAL_BLOCK_LATTICE_CELL_SIZE
+          }
+        });
+      }
+    }
+  }
+  return cells;
+}
