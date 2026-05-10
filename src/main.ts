@@ -10,7 +10,8 @@ import {
 import {
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
-  getDistributedBlockFragmentIndex
+  getDistributedBlockFragmentIndex,
+  getTerrainImpactFragmentCount
 } from "./blockFragments";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
@@ -1301,8 +1302,22 @@ function handlePhysicsImpact(
 
   // Core impacts now spend the projectile on the terrain event itself. A hit
   // either leaves a carved partial block behind or finishes an already chipped
-  // voxel and fractures it into loose debris.
+  // voxel, but every carve can kick out the material slice it just removed.
   impact.source.expire();
+
+  const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
+  const fragmentCount = getTerrainImpactFragmentCount(
+    qualityController.preset.blockFragmentCount,
+    ejectedMaterialUnits,
+    result.destroyed
+  );
+  if (fragmentCount > 0) {
+    spawnBlockFragments(result.block, result.position, impact, {
+      fragmentCount,
+      materialUnits: ejectedMaterialUnits,
+      chipOnly: !result.destroyed
+    });
+  }
 
   if (!result.destroyed) return;
 
@@ -1310,21 +1325,25 @@ function handlePhysicsImpact(
     position: result.position,
     block: result.block,
     impactSpeed: impact.speed,
-    fragmentCount: qualityController.preset.blockFragmentCount
+    fragmentCount
   });
-
-  spawnBlockFragments(result.block, result.position, impact);
 }
 
 function spawnBlockFragments(
   block: number,
   position: { readonly x: number; readonly y: number; readonly z: number },
-  impact: PhysicsImpact
+  impact: PhysicsImpact,
+  options: {
+    readonly fragmentCount: number;
+    readonly materialUnits: number;
+    readonly chipOnly?: boolean;
+  }
 ): void {
   const fragmentBaseSpeed = Math.min(FRAGMENT_IMPACT_SPEED_CAP, impact.speed * FRAGMENT_IMPACT_SPEED_SCALE);
-  const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
-
-  const fragmentCount = qualityController.preset.blockFragmentCount;
+  const blockCenter = options.chipOnly
+    ? impact.position.clone().addScaledVector(impact.normal, 0.08)
+    : new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
+  const fragmentCount = options.fragmentCount;
   const fragments: PhysicsToy[] = [];
 
   for (let index = 0; index < fragmentCount; index += 1) {
@@ -1347,7 +1366,7 @@ function spawnBlockFragments(
       .add(scatter)
       .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
       .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
-    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
+    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount, options.materialUnits);
     const debrisShape = createDebrisShapeForBlock(block, {
       fragmentIndex: index,
       distributedFragmentIndex: fragmentGridIndex,

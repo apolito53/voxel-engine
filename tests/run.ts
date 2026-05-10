@@ -6,9 +6,11 @@ import {
   BLOCK_FRAGMENT_SPACING,
   BLOCK_FRAGMENT_VISUAL_SIZE,
   BLOCK_RUBBLE_MATERIAL_UNITS,
+  TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
+  getTerrainImpactFragmentCount,
   normalizeBlockFragmentCount
 } from "../src/blockFragments";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS } from "../src/blocks";
@@ -1698,6 +1700,11 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   });
 
   assert(firstHit && !firstHit.destroyed, "the first core hit should leave a partial terrain cell");
+  assertEqual(
+    firstHit.ejectedRubbleMaterialUnits,
+    Math.floor(BLOCK_RUBBLE_MATERIAL_UNITS / 2),
+    "the first carve step should eject only its material slice"
+  );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "partially carved terrain should stay in the voxel grid");
   assert(world.isSolid(2, 3, 4), "partial terrain should keep full collision for the first pass");
   assert(!world.isRenderableSolid(2, 3, 4), "normal terrain meshing should hand carved cells to custom geometry");
@@ -1716,6 +1723,11 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   });
 
   assert(secondHit?.destroyed, "a second carved health step should fracture a two-health block");
+  assertEqual(
+    secondHit.ejectedRubbleMaterialUnits,
+    BLOCK_RUBBLE_MATERIAL_UNITS - Math.floor(BLOCK_RUBBLE_MATERIAL_UNITS / 2),
+    "the final fracture should eject only the material still left inside the block"
+  );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
   assert(!world.isSolid(2, 3, 4), "fractured terrain should stop behaving like a full collision cube");
   const surfaceCell = world.getPartialBlock(2, 3, 4);
@@ -1830,6 +1842,59 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   assert(bounds.max.y > 5.25 && bounds.max.y < 6, "surface samples should create a partial-height walkable patch");
 
   field.dispose();
+});
+
+test("fractured terrain creates connected wrinkled support patches", () => {
+  const world = new VoxelWorld({ seed: "partial-surface-patch-test" });
+  const target = { x: 8, y: 3, z: 8 };
+  for (let dz = -1; dz <= 1; dz += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      world.setBlock(target.x + dx, target.y - 1, target.z + dz, BLOCK.stone);
+      world.setBlock(target.x + dx, target.y, target.z + dz, BLOCK.air);
+      world.setBlock(target.x + dx, target.y + 1, target.z + dz, BLOCK.air);
+    }
+  }
+  world.setBlock(target.x, target.y, target.z, BLOCK.stone);
+
+  world.carveBlock({
+    x: target.x,
+    y: target.y,
+    z: target.z,
+    point: new THREE.Vector3(target.x, target.y + 0.52, target.z + 0.48),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  world.carveBlock({
+    x: target.x,
+    y: target.y,
+    z: target.z,
+    point: new THREE.Vector3(target.x, target.y + 0.52, target.z + 0.48),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const surfaceCells = world.getPartialBlocks().filter((cell) =>
+    cell.surfaceSamples?.length &&
+    cell.position.y === target.y &&
+    Math.abs(cell.position.x - target.x) <= 1 &&
+    Math.abs(cell.position.z - target.z) <= 1
+  );
+  assert(surfaceCells.length >= 4, "a final terrain fracture should create a multi-cell wrinkled patch");
+
+  const neighborSupportHeight = world.getSupportHeight({
+    minX: target.x - 0.85,
+    maxX: target.x - 0.15,
+    minY: target.y,
+    maxY: target.y + 0.7,
+    minZ: target.z + 0.15,
+    maxZ: target.z + 0.85
+  });
+  assert(
+    neighborSupportHeight !== null && neighborSupportHeight > target.y && neighborSupportHeight < target.y + 1,
+    "neighboring patch cells should be walkable terrain support, not decoration"
+  );
 });
 
 test("chunk meshing skips carved cells and exposes adjacent terrain faces", () => {
@@ -2108,6 +2173,42 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
     if (fragmentCount === BLOCK_FRAGMENT_COUNT) {
       assert(shapeIds.size > 1, "full-quality fractures should visibly mix shard shapes");
     }
+  }
+});
+
+test("terrain impact fragment counts eject chips without duplicating material", () => {
+  assertEqual(
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, true),
+    BLOCK_FRAGMENT_COUNT,
+    "a whole-block fracture can use the full visible debris budget"
+  );
+  assertEqual(
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, 2, true),
+    2,
+    "a nearly-empty final fracture should only spawn debris for the remaining material"
+  );
+  assertEqual(
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, false),
+    TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
+    "non-final chip hits should stay visually small even when they remove a large material slice"
+  );
+  assertEqual(
+    getTerrainImpactFragmentCount(QUALITY_PRESETS.potato.blockFragmentCount, BLOCK_RUBBLE_MATERIAL_UNITS, false),
+    1,
+    "Potato chip hits should still spawn a visible shard without flooding the CPU"
+  );
+
+  for (const materialUnits of [1, 2, 13, 14, BLOCK_RUBBLE_MATERIAL_UNITS]) {
+    const fragmentCount = getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, materialUnits, materialUnits <= 2);
+    let carriedUnits = 0;
+    for (let index = 0; index < fragmentCount; index += 1) {
+      carriedUnits += getBlockFragmentMaterialUnits(index, fragmentCount, materialUnits);
+    }
+    assertEqual(
+      carriedUnits,
+      materialUnits,
+      "proportional terrain debris should carry exactly the material slice it ejected"
+    );
   }
 });
 

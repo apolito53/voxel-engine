@@ -1,4 +1,5 @@
 import type * as THREE from "three";
+import { BLOCK_RUBBLE_MATERIAL_UNITS } from "./blockFragments";
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
@@ -17,7 +18,8 @@ import {
   getPartialBlockSupportHeight,
   type PartialBlockCell,
   type PartialBlockCut,
-  type PartialBlockPosition
+  type PartialBlockPosition,
+  type PartialBlockSurfaceSample
 } from "./partialBlocks";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext } from "./terrain";
 
@@ -33,6 +35,11 @@ const VIEW_PRIORITY_FRONT_DOT = 0.42;
 const VIEW_PRIORITY_SIDE_DOT = -0.15;
 const FRUSTUM_PRIORITY_PADDING = CHUNK_SIZE * 0.5;
 const STORAGE_SAVE_DEBOUNCE_MS = 250;
+const PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS = 1;
+const PARTIAL_BLOCK_SURFACE_PATCH_MIN_STRENGTH = 0.34;
+const PARTIAL_BLOCK_SURFACE_PATCH_FORWARD_BONUS = 0.18;
+const PARTIAL_BLOCK_SURFACE_PATCH_BACK_PENALTY = 0.12;
+const PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL = 8;
 
 export type WorldStats = {
   readonly loadedChunks: number;
@@ -72,6 +79,7 @@ export type BlockDamageResult = {
   readonly remainingHealth: number;
   readonly maxHealth: number;
   readonly destroyed: boolean;
+  readonly ejectedRubbleMaterialUnits?: number;
 };
 
 export type BlockCarveInput = {
@@ -89,6 +97,24 @@ export type VoxelBlockPosition = {
   readonly y: number;
   readonly z: number;
 };
+
+function getEjectedRubbleMaterialUnits(previousDamage: number, nextDamage: number, maxHealth: number): number {
+  if (maxHealth <= 0) return 0;
+  const previousFraction = Math.max(0, Math.min(1, previousDamage / maxHealth));
+  const nextFraction = Math.max(previousFraction, Math.min(1, nextDamage / maxHealth));
+  const previousUnits = Math.floor(previousFraction * BLOCK_RUBBLE_MATERIAL_UNITS);
+  const nextUnits = Math.floor(nextFraction * BLOCK_RUBBLE_MATERIAL_UNITS);
+  return Math.max(0, nextUnits - previousUnits);
+}
+
+function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
+  if (samples.length <= PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL) return [...samples];
+  return samples.slice(samples.length - PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL);
+}
+
+function clamp01ForWorld(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
 
 type HorizontalViewDirection = Pick<THREE.Vector3, "x" | "z">;
 
@@ -843,8 +869,14 @@ export class VoxelWorld implements CollisionWorld {
 
     const key = this.damageKey(position.x, position.y, position.z);
     const amount = Math.max(0, input.amount ?? 1);
-    const nextDamage = (this.blockDamage.get(key) ?? 0) + amount;
+    const previousDamage = this.blockDamage.get(key) ?? 0;
+    const nextDamage = previousDamage + amount;
     const remainingHealth = Math.max(0, definition.health - nextDamage);
+    const ejectedRubbleMaterialUnits = getEjectedRubbleMaterialUnits(
+      previousDamage,
+      nextDamage,
+      definition.health
+    );
 
     if (remainingHealth > 0) {
       this.blockDamage.set(key, nextDamage);
@@ -853,7 +885,14 @@ export class VoxelWorld implements CollisionWorld {
         normal: input.normal,
         speed: input.speed
       });
-      return { block, position, remainingHealth, maxHealth: definition.health, destroyed: false };
+      return {
+        block,
+        position,
+        remainingHealth,
+        maxHealth: definition.health,
+        destroyed: false,
+        ejectedRubbleMaterialUnits
+      };
     }
 
     const finalCut = createPartialBlockCut({
@@ -871,8 +910,15 @@ export class VoxelWorld implements CollisionWorld {
 
     this.blockDamage.delete(key);
     this.setBlock(position.x, position.y, position.z, BLOCK.air);
-    this.addPartialBlockSurface(block, position, definition.health, cuts);
-    return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
+    this.addPartialBlockSurfacePatch(block, position, definition.health, cuts, finalCut.normal, input.point);
+    return {
+      block,
+      position,
+      remainingHealth: 0,
+      maxHealth: definition.health,
+      destroyed: true,
+      ejectedRubbleMaterialUnits
+    };
   }
 
   getBlockDamage(x: number, y: number, z: number): number {
@@ -979,15 +1025,131 @@ export class VoxelWorld implements CollisionWorld {
     maxHealth: number,
     cuts: readonly PartialBlockCut[]
   ): void {
+    const key = createPartialBlockKey(position);
+    const existing = this.partialBlocks.get(key);
+    const existingSurfaceSamples = existing?.surfaceSamples ?? [];
+    const nextCuts = existing && existingSurfaceSamples.length > 0
+      ? [...existing.cuts, ...cuts]
+      : [...cuts];
+    while (nextCuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+      nextCuts.shift();
+    }
+    const surfaceSamples = trimPartialSurfaceSamples([
+      ...existingSurfaceSamples,
+      ...createPartialBlockSurfaceSamples(position, nextCuts)
+    ]);
+
     this.partialBlocks.set(createPartialBlockKey(position), {
       block,
       position,
-      cuts: [...cuts],
-      surfaceSamples: createPartialBlockSurfaceSamples(position, cuts),
+      cuts: nextCuts,
+      surfaceSamples,
       damage: maxHealth,
       maxHealth
     });
     this.markPartialBlockDirty(position);
+  }
+
+  private addPartialBlockSurfacePatch(
+    block: number,
+    originPosition: VoxelBlockPosition,
+    maxHealth: number,
+    cuts: readonly PartialBlockCut[],
+    impactNormal: PartialBlockPosition,
+    impactPoint: Pick<THREE.Vector3, "x" | "z">
+  ): void {
+    for (let dz = -PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dz <= PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dz += 1) {
+      for (let dx = -PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dx <= PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dx += 1) {
+        const strength = this.getPartialSurfacePatchStrength(originPosition, dx, dz, impactNormal, impactPoint);
+        if (strength < PARTIAL_BLOCK_SURFACE_PATCH_MIN_STRENGTH) continue;
+
+        const patchPosition = this.resolvePartialSurfacePatchPosition(originPosition, dx, dz);
+        if (!patchPosition) continue;
+
+        this.addPartialBlockSurface(
+          block,
+          patchPosition,
+          maxHealth,
+          this.createPartialSurfacePatchCuts(originPosition, patchPosition, cuts, strength)
+        );
+      }
+    }
+  }
+
+  private getPartialSurfacePatchStrength(
+    originPosition: VoxelBlockPosition,
+    dx: number,
+    dz: number,
+    impactNormal: PartialBlockPosition,
+    impactPoint: Pick<THREE.Vector3, "x" | "z">
+  ): number {
+    if (dx === 0 && dz === 0) return 1;
+
+    const offsetDistance = Math.hypot(dx, dz);
+    const candidateCenterX = originPosition.x + dx + 0.5;
+    const candidateCenterZ = originPosition.z + dz + 0.5;
+    const impactDistance = Math.hypot(candidateCenterX - impactPoint.x, candidateCenterZ - impactPoint.z);
+    const forwardDot = dx * impactNormal.x + dz * impactNormal.z;
+    const forwardBias = forwardDot > 0
+      ? PARTIAL_BLOCK_SURFACE_PATCH_FORWARD_BONUS
+      : forwardDot < 0
+        ? -PARTIAL_BLOCK_SURFACE_PATCH_BACK_PENALTY
+        : 0;
+
+    return 1 - offsetDistance * 0.38 - Math.max(0, impactDistance - 0.75) * 0.16 + forwardBias;
+  }
+
+  private resolvePartialSurfacePatchPosition(
+    originPosition: VoxelBlockPosition,
+    dx: number,
+    dz: number
+  ): VoxelBlockPosition | null {
+    const sameLevel = {
+      x: originPosition.x + dx,
+      y: originPosition.y,
+      z: originPosition.z + dz
+    };
+    if (dx === 0 && dz === 0) return sameLevel;
+    if (this.getBlock(sameLevel.x, sameLevel.y, sameLevel.z) === BLOCK.air) {
+      return this.hasPartialSurfaceBase(sameLevel) ? sameLevel : null;
+    }
+
+    const aboveSolid = {
+      x: sameLevel.x,
+      y: sameLevel.y + 1,
+      z: sameLevel.z
+    };
+    if (aboveSolid.y >= WORLD_HEIGHT) return null;
+    return this.getBlock(aboveSolid.x, aboveSolid.y, aboveSolid.z) === BLOCK.air ? aboveSolid : null;
+  }
+
+  private hasPartialSurfaceBase(position: VoxelBlockPosition): boolean {
+    if (position.y <= 0) return true;
+    if (this.isSolid(position.x, position.y - 1, position.z)) return true;
+    return Boolean(this.partialBlocks.get(createPartialBlockKey({
+      x: position.x,
+      y: position.y - 1,
+      z: position.z
+    }))?.surfaceSamples?.length);
+  }
+
+  private createPartialSurfacePatchCuts(
+    originPosition: VoxelBlockPosition,
+    patchPosition: VoxelBlockPosition,
+    cuts: readonly PartialBlockCut[],
+    strength: number
+  ): PartialBlockCut[] {
+    return cuts.map((cut, index) => ({
+      ...cut,
+      localPoint: {
+        x: clamp01ForWorld(originPosition.x + cut.localPoint.x - patchPosition.x),
+        y: cut.localPoint.y,
+        z: clamp01ForWorld(originPosition.z + cut.localPoint.z - patchPosition.z)
+      },
+      radius: cut.radius * (0.72 + strength * 0.28),
+      depth: cut.depth * strength,
+      seed: (cut.seed ^ Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(patchPosition.x + 31, 0x85ebca77) ^ Math.imul(patchPosition.z + 17, 0xc2b2ae3d)) >>> 0
+    }));
   }
 
   private removePartialBlock(position: VoxelBlockPosition): void {

@@ -7,6 +7,7 @@ export const BLOCK_RUBBLE_MATERIAL_UNITS = BLOCK_FRAGMENT_COUNT;
 export const BLOCK_FRAGMENT_SPACING = 0.28;
 export const BLOCK_FRAGMENT_VISUAL_SIZE = 0.24;
 export const BLOCK_FRAGMENT_COLLISION_RADIUS = 0.16;
+export const TERRAIN_CHIP_FRAGMENT_MAX_COUNT = 4;
 
 export type BlockFragmentOffset = {
   readonly x: number;
@@ -68,6 +69,25 @@ export function getBlockFragmentMaterialUnits(
   const startUnit = Math.floor((fragmentIndex * normalizedMaterialUnits) / normalizedCount);
   const endUnit = Math.floor(((fragmentIndex + 1) * normalizedMaterialUnits) / normalizedCount);
   return Math.max(1, endUnit - startUnit);
+}
+
+export function getTerrainImpactFragmentCount(
+  maxVisibleFragmentCount: number,
+  materialUnits: number,
+  destroyed: boolean
+): number {
+  const normalizedMaxVisible = normalizeBlockFragmentCount(maxVisibleFragmentCount);
+  const normalizedMaterialUnits = Math.max(0, Math.min(
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    Number.isFinite(materialUnits) ? Math.round(materialUnits) : 0
+  ));
+  if (normalizedMaterialUnits <= 0) return 0;
+
+  const maxCountByMaterial = Math.min(normalizedMaxVisible, normalizedMaterialUnits);
+  if (destroyed) return maxCountByMaterial;
+
+  const qualityScaledChipCap = Math.max(1, Math.ceil(normalizedMaxVisible * 0.2));
+  return Math.min(maxCountByMaterial, TERRAIN_CHIP_FRAGMENT_MAX_COUNT, qualityScaledChipCap);
 }
 
 export function normalizeBlockFragmentCount(fragmentCount: number): number {

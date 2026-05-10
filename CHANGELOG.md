@@ -10,7 +10,7 @@
 - Folded chat and commands into Nova Terminal: Enter/F9 now opens one panel that accepts normal chat, slash commands, and bare known admin commands.
 - Added a pause-menu `Health Bars` toggle that persists locally, suppresses block/rubble damage bars, and clears active bars immediately when disabled.
 - Added a white cube-space target outline for destructible settled-rubble cells, including direct destroy-action hits against the targeted rubble proxy instead of terrain behind it.
-- Added in-memory partial-block terrain carving for Physics Core impacts: chipped terrain keeps collision and health, then destroyed carved cells leave wrinkled partial-height support surfaces that player/debris systems can stand on.
+- Added in-memory partial-block terrain carving for Physics Core impacts: chipped terrain keeps collision and health, sheds a small material-budgeted burst of debris, then destroyed carved cells leave connected wrinkled partial-height support surfaces that player/debris systems can stand on.
 - Added a capped `ImpactCraterField` prototype for faceted visual crater/scar experiments; it is currently parked behind the partial-block terrain carve path.
 - Added a shared debris-shape catalog for varied low-poly active fragments, with non-uniform shard scales, cuboid physics envelopes, and baked rubble visuals that preserve the settled shard shape.
 - Split pause-menu `Settings` into `Graphics` and `Gameplay` tabs so visual/performance tuning stays separate from core feel, health bars, and cleanup.
@@ -18,7 +18,8 @@
 
 ### Changed
 
-- Changed Physics Core terrain hits from one-shot block deletion plus visual scars into one-health carve steps; ordinary terrain now chips first, then fractures into debris and a real low-poly terrain surface once its health is exhausted.
+- Changed Physics Core terrain hits from one-shot block deletion plus visual scars into one-health carve steps; ordinary terrain now chips first, ejects debris as material is removed, then fractures into leftover debris and real low-poly terrain surfaces once its health is exhausted.
+- Changed final terrain-fracture debris counts to scale with the material still left inside the block, so nearly-broken blocks no longer explode as if they were untouched full voxels.
 
 ### Fixed
 

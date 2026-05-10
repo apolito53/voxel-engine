@@ -100,7 +100,7 @@ export class PartialBlockMeshField {
       })
     );
     this.mesh.name = "Partial block field";
-    this.mesh.castShadow = true;
+    this.mesh.castShadow = false;
     this.mesh.receiveShadow = true;
     this.mesh.visible = false;
     this.scene.add(this.mesh);
@@ -327,7 +327,6 @@ function addPartialBlockSurfaceGeometry(
 ): void {
   const grid = createPartialSurfaceGrid(cell, surfaceCells);
   addPartialSurfaceTop(geometry, cell, grid);
-  addPartialSurfaceBottom(geometry, cell, grid);
   if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x, y: cell.position.y, z: cell.position.z - 1 }))) {
     addPartialSurfaceSide(geometry, cell, grid, "north");
   }
@@ -431,27 +430,6 @@ function addPartialSurfaceTop(
       }
     }
   }
-}
-
-function addPartialSurfaceBottom(
-  geometry: MutablePartialBlockGeometry,
-  cell: PartialBlockCell,
-  grid: PartialBlockSurfaceGrid
-): void {
-  addTriangle(
-    geometry,
-    cell,
-    [grid.minX, grid.baseY, grid.minZ],
-    [grid.maxX, grid.baseY, grid.maxZ],
-    [grid.minX, grid.baseY, grid.maxZ]
-  );
-  addTriangle(
-    geometry,
-    cell,
-    [grid.minX, grid.baseY, grid.minZ],
-    [grid.maxX, grid.baseY, grid.minZ],
-    [grid.maxX, grid.baseY, grid.maxZ]
-  );
 }
 
 function addPartialSurfaceSide(
