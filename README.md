@@ -46,7 +46,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, stamping a faceted visual crater on the struck face, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled Rapier-driven shard fragments. Nearby fragments tumble, collide through cheap cuboid envelopes, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; targeted rubble cells use a white cube-space outline, unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Physics Core impacts above 2 m/s carve one health step out of terrain as a faceted partial-block volume, spend the core on contact, show short debug health bars, and fracture the voxel into quality-scaled Rapier-driven shard fragments once the block's health is exhausted. This first pass keeps carved cells full-cube for collision/raycast and does not persist carved shapes to saves yet. Destructible rubble piles still take the full 30 core damage. Nearby fragments tumble, collide through cheap cuboid envelopes, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; targeted rubble cells use a white cube-space outline, unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and rubble cover
@@ -87,12 +87,13 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds, player resume location, and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker, including the reserved superflat test-lab seed
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
-- `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
+- `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building, including partial-block render masks
 - `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, voxel collision, and partial-height rubble support stepping
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
 - `src/targetHighlighter.ts`: thin target outline rendering for terrain blocks and settled rubble cube cells
-- `src/impactCraterField.ts`: capped static faceted crater/scar mesh stamped from physics-core terrain impact points
+- `src/partialBlocks.ts`: in-memory partial-block terrain carving, faceted custom-cell mesh generation, and core-hit carve constants
+- `src/impactCraterField.ts`: parked capped faceted crater/scar prototype retained for later visual experiments
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
 - `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
 - `src/debrisShapes.ts`: shared low-poly shard geometry catalog and material-aware shape assignment helpers
@@ -100,7 +101,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/fragmentRubble.ts`: orphan debris-to-rubble eligibility rules for active-bubble distance, explicit expiration, and material-preserving fallback cleanup
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
-- `src/physics.ts`: simple swept sphere-vs-voxel physics cores, fragment render/material/shape state, rigid-debris sync hooks, sleep-aware core/debris broadphase collision, and impact reporting
+- `src/physics.ts`: simple swept sphere-vs-voxel physics cores, fragment render/material/shape state, rigid-debris sync hooks, sleep-aware core/debris broadphase collision, and impact reporting for terrain carving
 - `src/physicsInstancing.ts`: instanced rendering batches for debris fragments keyed by source block and shard shape, including per-fragment tumble rotation and non-uniform scale
 - `src/rigidDebris.ts`: Rapier WASM initialization, dynamic cuboid debris bodies with per-fragment envelopes, temporary terrain/rubble support colliders, transform sync back into fragment render proxies, sleeping stats, and cleanup
 - `src/rubble.ts`: persistent destructible rubble cover patches, sample-sized hidden support footprints, parked draped-sheet rendering, batched absorption, scaled durability separate from material volume, baked static shard-pile visuals, local direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks

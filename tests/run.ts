@@ -121,6 +121,11 @@ import {
   ImpactCraterField,
   createImpactCraterStampForTerrainImpact
 } from "../src/impactCraterField";
+import {
+  PARTIAL_BLOCK_CORE_DAMAGE,
+  PartialBlockMeshField,
+  type PartialBlockCell
+} from "../src/partialBlocks";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
@@ -1675,28 +1680,107 @@ test("block damage tracks health before removing voxels", () => {
   assertEqual(world.getBlockDamage(2, 3, 4), 0, "destroyed blocks should clear transient damage state");
 });
 
-test("physics core impact damage overwhelms ordinary terrain health", () => {
+test("physics core carving chips ordinary terrain before fracture", () => {
   const world = new VoxelWorld({ seed: "core-damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
-  world.setBlock(3, 3, 4, BLOCK.rubble);
 
-  assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "physics cores should deal the tuned impact damage");
+  assertEqual(PARTIAL_BLOCK_CORE_DAMAGE, 1, "terrain-core hits should carve one health step at a time");
+  assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "full core damage stays available for rubble cover impacts");
+
+  const firstHit = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(firstHit && !firstHit.destroyed, "the first core hit should leave a partial terrain cell");
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "partially carved terrain should stay in the voxel grid");
+  assert(world.isSolid(2, 3, 4), "partial terrain should keep full collision for the first pass");
+  assert(!world.isRenderableSolid(2, 3, 4), "normal terrain meshing should hand carved cells to custom geometry");
+  assertEqual(world.getPartialBlock(2, 3, 4)?.cuts.length, 1, "the carved block should remember its visual cut");
+  world.clearDamageForChunk(0, 0);
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "partial terrain should keep its damage while chunks stream out");
+
+  const secondHit = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.55, 4.45),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(secondHit?.destroyed, "a second carved health step should fracture a two-health block");
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
+  assertEqual(world.getPartialBlock(2, 3, 4), null, "destroyed terrain should clear its partial geometry state");
+});
+
+test("partial block field renders faceted custom terrain cells", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.42,
+      depth: 0.5,
+      seed: 1234
+    }]
+  };
+
+  field.update([cell], () => true);
+  const positionAttribute = field.mesh.geometry.getAttribute("position");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
+
+  assertEqual(scene.children[0], field.mesh, "partial block field should own one shared scene mesh");
+  assert(field.mesh.visible, "custom partial terrain should become visible when cells exist");
+  assertEqual(field.getStats().cells, 1, "one cell should be represented in the partial terrain mesh");
+  assert(positionAttribute.count > 24, "carved cells should have more geometry than a plain six-face cube");
+  assert(bounds.min.x >= 1 && bounds.max.x <= 2, "partial block geometry should stay inside its voxel x bounds");
+  assert(bounds.min.y >= 2 && bounds.max.y <= 3, "partial block geometry should stay inside its voxel y bounds");
+  assert(bounds.min.z >= 3 && bounds.max.z <= 4, "partial block geometry should stay inside its voxel z bounds");
+
+  field.dispose();
+  assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
+});
+
+test("chunk meshing skips carved cells and exposes adjacent terrain faces", () => {
+  const chunk = new Chunk(0, 0);
+  chunk.setLocal(1, 1, 1, BLOCK.stone);
+  chunk.setLocal(2, 1, 1, BLOCK.stone);
+
+  const meshWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      if (y < 0) return true;
+      return chunk.getLocal(Math.floor(x), Math.floor(y), Math.floor(z)) !== BLOCK.air;
+    },
+    isRenderableSolid(x: number, y: number, z: number): boolean {
+      if (Math.floor(x) === 1 && Math.floor(y) === 1 && Math.floor(z) === 1) return false;
+      return this.isSolid(x, y, z);
+    }
+  };
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const mesh = chunk.rebuildMesh(meshWorld, material);
+  const positions = mesh.geometry.getAttribute("position");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positions);
+
+  assert(positions.count > 0, "the neighbor of a carved cell should expose a visible terrain face");
   assert(
-    PHYSICS_CORE_BLOCK_DAMAGE > BLOCKS[BLOCK.stone].health,
-    "core impact damage should one-shot ordinary two-health terrain blocks"
-  );
-  assert(
-    PHYSICS_CORE_BLOCK_DAMAGE > BLOCKS[BLOCK.rubble].health,
-    "core impact damage should also one-shot generated rubble terrain blocks"
+    bounds.min.x >= 2,
+    "the carved block itself should be absent from normal chunk geometry so the custom mesh can own it"
   );
 
-  const stoneHit = world.damageBlock(2, 3, 4, PHYSICS_CORE_BLOCK_DAMAGE);
-  const rubbleHit = world.damageBlock(3, 3, 4, PHYSICS_CORE_BLOCK_DAMAGE);
-
-  assert(stoneHit?.destroyed, "a core hit should destroy a normal terrain block in one impact");
-  assert(rubbleHit?.destroyed, "a core hit should destroy a generated rubble block in one impact");
-  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed stone should leave the voxel grid");
-  assertEqual(world.getBlock(3, 3, 4), BLOCK.air, "destroyed rubble terrain should leave the voxel grid");
+  mesh.geometry.dispose();
+  material.dispose();
 });
 
 test("impact crater field stamps faceted scars on impacted block faces", () => {

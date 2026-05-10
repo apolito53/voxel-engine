@@ -12,6 +12,16 @@ export type ChunkNeighborBlocks = {
   readonly positiveZ: Uint8Array | null;
 };
 
+export type ChunkPartialBlockMaskBuffers = {
+  readonly current: ArrayBuffer;
+  readonly neighbors: ChunkNeighborBuffers;
+};
+
+export type ChunkPartialBlockMasks = {
+  readonly current: Uint8Array;
+  readonly neighbors: ChunkNeighborBlocks;
+};
+
 export type ChunkGenerateRequest = {
   readonly type: "generate";
   readonly requestId: number;
@@ -28,6 +38,7 @@ export type ChunkMeshRequest = {
   readonly revision: number;
   readonly blocks: ArrayBuffer;
   readonly neighbors: ChunkNeighborBuffers;
+  readonly partialBlockMasks: ChunkPartialBlockMaskBuffers;
 };
 
 export type ChunkWorkerRequest = ChunkGenerateRequest | ChunkMeshRequest;

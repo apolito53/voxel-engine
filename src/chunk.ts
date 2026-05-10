@@ -14,6 +14,7 @@ export type TopBlock = {
 
 type MeshWorld = {
   isSolid(x: number, y: number, z: number): boolean;
+  isRenderableSolid?(x: number, y: number, z: number): boolean;
 };
 
 type MeshNumberBuffer = number[];
@@ -396,8 +397,13 @@ function exposedBlock(
   _normalZ: number
 ): number {
   const block = chunk.getLocal(x, y, z);
-  if (!BLOCKS[block].solid || world.isSolid(nx, ny, nz)) return BLOCK.air;
-  return createBlockMeshKey(block, nx - _normalX, ny - _normalY, nz - _normalZ);
+  const worldX = nx - _normalX;
+  const worldY = ny - _normalY;
+  const worldZ = nz - _normalZ;
+  const selfRenderable = world.isRenderableSolid?.(worldX, worldY, worldZ) ?? BLOCKS[block].solid;
+  const neighborRenderable = world.isRenderableSolid?.(nx, ny, nz) ?? world.isSolid(nx, ny, nz);
+  if (!BLOCKS[block].solid || !selfRenderable || neighborRenderable) return BLOCK.air;
+  return createBlockMeshKey(block, worldX, worldY, worldZ);
 }
 
 function emitGreedyFaces(

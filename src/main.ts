@@ -60,10 +60,6 @@ import {
   createVoxelSandboxItemRegistry,
   type ItemAction
 } from "./items";
-import {
-  ImpactCraterField,
-  createImpactCraterStampForTerrainImpact
-} from "./impactCraterField";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
@@ -71,6 +67,7 @@ import { NovaChatPanel } from "./novaChatPanel";
 import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
+import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
@@ -317,6 +314,7 @@ let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
+let renderedPartialBlockRevision = -1;
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -360,7 +358,7 @@ type TargetHit =
 type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
-const impactCraterField = new ImpactCraterField(scene);
+const partialBlockMeshField = new PartialBlockMeshField(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
@@ -970,6 +968,7 @@ function animate(): void {
     recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
+    updatePartialBlockMesh(activeWorld);
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
     updateHud();
@@ -1251,6 +1250,17 @@ function updateTargetBlockHighlighter(): void {
   targetBlockHighlighter.showBlock(hit.block, hit.kind);
 }
 
+function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
+  const revision = activeWorld.getPartialBlockGeometryRevision();
+  if (revision === renderedPartialBlockRevision) return;
+
+  partialBlockMeshField.update(
+    activeWorld.getPartialBlocks(),
+    (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
+  );
+  renderedPartialBlockRevision = revision;
+}
+
 function handlePhysicsImpact(
   activeWorld: VoxelWorld,
   impact: PhysicsImpact,
@@ -1263,19 +1273,16 @@ function handlePhysicsImpact(
   if (damagedBlocksThisFrame.has(damageKey)) return;
   damagedBlocksThisFrame.add(damageKey);
 
-  const result = activeWorld.damageBlock(
-    impact.block.x,
-    impact.block.y,
-    impact.block.z,
-    PHYSICS_CORE_BLOCK_DAMAGE
-  );
+  const result = activeWorld.carveBlock({
+    x: impact.block.x,
+    y: impact.block.y,
+    z: impact.block.z,
+    point: impact.position,
+    normal: impact.normal,
+    speed: impact.speed,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
   if (!result) return;
-
-  if (result.destroyed) {
-    impactCraterField.removeBlock(result.position);
-  }
-  const craterStamp = createImpactCraterStampForTerrainImpact(activeWorld, result, impact);
-  if (craterStamp) impactCraterField.stamp(craterStamp);
 
   engineEvents.emit("block:damaged", {
     position: result.position,
@@ -1286,12 +1293,12 @@ function handlePhysicsImpact(
   });
   showBlockDamageIndicator(result);
 
-  if (!result.destroyed) return;
-
-  // The core is now a breaching charge instead of a forever-drilling marble:
-  // one destroyed voxel consumes the projectile and the normal prune path
-  // removes it from scene/collider bookkeeping at the end of the physics pass.
+  // Core impacts now spend the projectile on the terrain event itself. A hit
+  // either leaves a carved partial block behind or finishes an already chipped
+  // voxel and fractures it into loose debris.
   impact.source.expire();
+
+  if (!result.destroyed) return;
 
   engineEvents.emit("block:destroyed", {
     position: result.position,
@@ -1839,6 +1846,8 @@ async function loadWorld(worldId: string): Promise<void> {
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed);
+    partialBlockMeshField.clear();
+    renderedPartialBlockRevision = -1;
     await activeWorld.preloadSavedChunksAround(
       loadOrigin.x,
       loadOrigin.z,
@@ -1943,6 +1952,8 @@ async function exitToHome(): Promise<void> {
     clearToys();
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
+    partialBlockMeshField.clear();
+    renderedPartialBlockRevision = -1;
     inWorld = false;
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
@@ -2083,7 +2094,6 @@ function clearToys(): void {
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
-  impactCraterField.clear();
   rubbleField.clear();
 }
 
@@ -2154,7 +2164,7 @@ function disposeRuntime(): void {
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();
-  impactCraterField.dispose();
+  partialBlockMeshField.dispose();
   skybox.dispose();
   worldMaterial.dispose();
   renderer.renderLists.dispose();

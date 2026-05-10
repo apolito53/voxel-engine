@@ -9,6 +9,14 @@ import type {
 } from "./chunkProtocol";
 import type { CollisionWorld } from "./collision";
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
+import {
+  PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
+  createPartialBlockCut,
+  createPartialBlockKey,
+  type PartialBlockCell,
+  type PartialBlockCut,
+  type PartialBlockPosition
+} from "./partialBlocks";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext } from "./terrain";
 
 const LOAD_RADIUS = 4;
@@ -62,6 +70,16 @@ export type BlockDamageResult = {
   readonly remainingHealth: number;
   readonly maxHealth: number;
   readonly destroyed: boolean;
+};
+
+export type BlockCarveInput = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly speed: number;
+  readonly amount?: number;
 };
 
 export type VoxelBlockPosition = {
@@ -176,6 +194,8 @@ export class VoxelWorld implements CollisionWorld {
   lastMeshedChunks: number;
   lastRequestedMeshes: number;
   private readonly blockDamage: Map<string, number>;
+  private readonly partialBlocks: Map<string, PartialBlockCell>;
+  private partialBlockGeometryRevision: number;
 
   constructor({ storage = createNullChunkStorage(), seed = "" }: WorldOptions = {}) {
     this.chunks = new Map();
@@ -223,6 +243,8 @@ export class VoxelWorld implements CollisionWorld {
     this.lastMeshedChunks = 0;
     this.lastRequestedMeshes = 0;
     this.blockDamage = new Map();
+    this.partialBlocks = new Map();
+    this.partialBlockGeometryRevision = 0;
   }
 
   async switchStorage(storage: ChunkStorage, scene: THREE.Scene, seed = ""): Promise<void> {
@@ -234,6 +256,8 @@ export class VoxelWorld implements CollisionWorld {
     this.terrain = createTerrainContext(this.seed);
     this.savedChunks.clear();
     this.blockDamage.clear();
+    this.partialBlocks.clear();
+    this.partialBlockGeometryRevision += 1;
     this.invalidateChunkQueueWindow();
     this.invalidateChunkUnloadWindow();
     await this.loadSavedChunkIndex();
@@ -284,6 +308,8 @@ export class VoxelWorld implements CollisionWorld {
     this.workerResults.length = 0;
     this.savedChunkResults.length = 0;
     this.blockDamage.clear();
+    this.partialBlocks.clear();
+    this.partialBlockGeometryRevision += 1;
     this.dirtyChunkKeys.clear();
     this.modifiedChunkKeys.clear();
   }
@@ -763,9 +789,11 @@ export class VoxelWorld implements CollisionWorld {
     const chunk = this.ensureChunk(cx, cz);
     if (!chunk.setLocal(lx, blockY, lz, block)) {
       if (block === BLOCK.air) this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
+      this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
       return;
     }
     this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
+    this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
     chunk.modified = true;
     this.dirtyChunkKeys.add(key);
     this.modifiedChunkKeys.add(key);
@@ -801,8 +829,73 @@ export class VoxelWorld implements CollisionWorld {
     return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
   }
 
+  carveBlock(input: BlockCarveInput): BlockDamageResult | null {
+    const position = {
+      x: Math.floor(input.x),
+      y: Math.floor(input.y),
+      z: Math.floor(input.z)
+    };
+    const block = this.getBlock(position.x, position.y, position.z);
+    const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
+    if (!definition.solid || definition.health <= 0) return null;
+
+    const key = this.damageKey(position.x, position.y, position.z);
+    const amount = Math.max(0, input.amount ?? 1);
+    const nextDamage = (this.blockDamage.get(key) ?? 0) + amount;
+    const remainingHealth = Math.max(0, definition.health - nextDamage);
+
+    if (remainingHealth > 0) {
+      this.blockDamage.set(key, nextDamage);
+      this.addPartialBlockCut(block, position, definition.health, nextDamage, {
+        point: input.point,
+        normal: input.normal,
+        speed: input.speed
+      });
+      return { block, position, remainingHealth, maxHealth: definition.health, destroyed: false };
+    }
+
+    this.blockDamage.delete(key);
+    this.setBlock(position.x, position.y, position.z, BLOCK.air);
+    return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
+  }
+
   getBlockDamage(x: number, y: number, z: number): number {
     return this.blockDamage.get(this.damageKey(Math.floor(x), Math.floor(y), Math.floor(z))) ?? 0;
+  }
+
+  getPartialBlock(x: number, y: number, z: number): PartialBlockCell | null {
+    return this.partialBlocks.get(createPartialBlockKey({
+      x: Math.floor(x),
+      y: Math.floor(y),
+      z: Math.floor(z)
+    })) ?? null;
+  }
+
+  getPartialBlocks(): readonly PartialBlockCell[] {
+    return Array.from(this.partialBlocks.values());
+  }
+
+  getPartialBlockGeometryRevision(): number {
+    return this.partialBlockGeometryRevision;
+  }
+
+  isRenderableSolid(x: number, y: number, z: number): boolean {
+    if (y < 0) return true;
+    const blockX = Math.floor(x);
+    const blockY = Math.floor(y);
+    const blockZ = Math.floor(z);
+    if (this.getPartialBlock(blockX, blockY, blockZ)) return false;
+    return this.isSolid(blockX, blockY, blockZ);
+  }
+
+  shouldRenderPartialBlockFace(
+    cell: PartialBlockCell,
+    normal: PartialBlockPosition
+  ): boolean {
+    const neighborX = cell.position.x + normal.x;
+    const neighborY = cell.position.y + normal.y;
+    const neighborZ = cell.position.z + normal.z;
+    return !this.isRenderableSolid(neighborX, neighborY, neighborZ);
   }
 
   damageKey(x: number, y: number, z: number): string {
@@ -818,9 +911,66 @@ export class VoxelWorld implements CollisionWorld {
     for (const key of this.blockDamage.keys()) {
       const [x, , z] = key.split(",").map(Number);
       if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
+        if (this.partialBlocks.has(key)) continue;
         this.blockDamage.delete(key);
       }
     }
+  }
+
+  private addPartialBlockCut(
+    block: number,
+    position: VoxelBlockPosition,
+    maxHealth: number,
+    damage: number,
+    cutInput: {
+      readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly speed: number;
+    }
+  ): void {
+    const key = createPartialBlockKey(position);
+    const existing = this.partialBlocks.get(key);
+    const cuts: PartialBlockCut[] = existing ? [...existing.cuts] : [];
+    cuts.push(createPartialBlockCut({
+      block,
+      position,
+      point: cutInput.point,
+      normal: cutInput.normal,
+      speed: cutInput.speed,
+      cutIndex: cuts.length
+    }));
+    while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+      cuts.shift();
+    }
+
+    this.partialBlocks.set(key, {
+      block,
+      position,
+      cuts,
+      damage,
+      maxHealth
+    });
+    this.markPartialBlockDirty(position);
+  }
+
+  private removePartialBlock(position: VoxelBlockPosition): void {
+    const key = createPartialBlockKey(position);
+    if (!this.partialBlocks.delete(key)) return;
+    this.markPartialBlockDirty(position);
+  }
+
+  private markPartialBlockDirty(position: VoxelBlockPosition): void {
+    const { cx, cz, lx, lz } = this.toChunkCoords(position.x, position.z);
+    const chunk = this.getChunk(cx, cz);
+    if (chunk) {
+      chunk.revision += 1;
+      this.markChunkDirty(chunk);
+    }
+    if (lx === 0) this.markDirty(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
+    if (lz === 0) this.markDirty(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+    this.partialBlockGeometryRevision += 1;
   }
 
   markDirty(cx: number, cz: number): void {
@@ -1257,10 +1407,13 @@ export class VoxelWorld implements CollisionWorld {
     const requestId = this.nextWorkerRequestId();
     const blocks = chunk.blocks.slice();
     const neighbors = this.snapshotNeighborBlocks(chunk.cx, chunk.cz);
+    const partialBlockMasks = this.snapshotPartialBlockMasks(chunk.cx, chunk.cz);
     const blocksBuffer = transferChunkBuffer(blocks);
     const transfers: Transferable[] = [
       blocksBuffer,
-      ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
+      partialBlockMasks.current,
+      ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer)),
+      ...Object.values(partialBlockMasks.neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
     ];
 
     this.pendingMeshKeys.add(key);
@@ -1275,7 +1428,8 @@ export class VoxelWorld implements CollisionWorld {
       cz: chunk.cz,
       revision: chunk.revision,
       blocks: blocksBuffer,
-      neighbors
+      neighbors,
+      partialBlockMasks
     };
     this.worker.postMessage(message, transfers);
   }
@@ -1287,6 +1441,45 @@ export class VoxelWorld implements CollisionWorld {
       negativeZ: cloneChunkBuffer(this.getChunk(cx, cz - 1)),
       positiveZ: cloneChunkBuffer(this.getChunk(cx, cz + 1))
     };
+  }
+
+  snapshotPartialBlockMasks(cx: number, cz: number): {
+    readonly current: ArrayBuffer;
+    readonly neighbors: ChunkNeighborBuffers;
+  } {
+    return {
+      current: transferChunkBuffer(this.createPartialBlockMask(cx, cz)),
+      neighbors: {
+        negativeX: this.createPartialBlockMaskBufferForExistingChunk(cx - 1, cz),
+        positiveX: this.createPartialBlockMaskBufferForExistingChunk(cx + 1, cz),
+        negativeZ: this.createPartialBlockMaskBufferForExistingChunk(cx, cz - 1),
+        positiveZ: this.createPartialBlockMaskBufferForExistingChunk(cx, cz + 1)
+      }
+    };
+  }
+
+  createPartialBlockMaskBufferForExistingChunk(cx: number, cz: number): ArrayBuffer | null {
+    if (!this.getChunk(cx, cz)) return null;
+    return transferChunkBuffer(this.createPartialBlockMask(cx, cz));
+  }
+
+  createPartialBlockMask(cx: number, cz: number): Uint8Array {
+    const mask = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+    const minX = cx * CHUNK_SIZE;
+    const maxX = minX + CHUNK_SIZE - 1;
+    const minZ = cz * CHUNK_SIZE;
+    const maxZ = minZ + CHUNK_SIZE - 1;
+
+    for (const cell of this.partialBlocks.values()) {
+      const { x, y, z } = cell.position;
+      if (y < 0 || y >= WORLD_HEIGHT) continue;
+      if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
+      const localX = x - minX;
+      const localZ = z - minZ;
+      mask[localX + CHUNK_SIZE * (localZ + CHUNK_SIZE * y)] = 1;
+    }
+
+    return mask;
   }
 
   getStats(): WorldStats {
