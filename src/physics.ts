@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import {
   BLOCK_FRAGMENT_COLLISION_RADIUS,
+  BLOCK_FRAGMENT_COUNT,
+  BLOCK_RUBBLE_MATERIAL_UNITS,
   BLOCK_FRAGMENT_VISUAL_SIZE
 } from "./blockFragments";
 import { BLOCKS } from "./blocks";
@@ -151,7 +153,7 @@ export class PhysicsToy {
     block: number,
     position: THREE.Vector3,
     velocity: THREE.Vector3,
-    rubbleMaterialUnits = 1,
+    rubbleMaterialUnits = BLOCK_RUBBLE_MATERIAL_UNITS / BLOCK_FRAGMENT_COUNT,
     debrisShape: DebrisShape = createDefaultDebrisShape()
   ): PhysicsToy {
     return new PhysicsToy(position, velocity, {
@@ -956,7 +958,7 @@ function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boo
 
   const numericValue = value ?? 1;
   if (!Number.isFinite(numericValue)) return 1;
-  return Math.max(1, Math.round(numericValue));
+  return Math.max(0.0001, numericValue);
 }
 
 function createFragmentAngularVelocity(velocity: THREE.Vector3): THREE.Vector3 {

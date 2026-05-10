@@ -1,9 +1,8 @@
 export const BLOCK_FRAGMENT_GRID_SIZE = 3;
 export const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
-// Gameplay rubble uses a fixed material budget per destroyed block. Quality
-// settings can lower the number of visible flying shards, but they should not
-// make low-end machines produce less cover or different terrain outcomes.
-export const BLOCK_RUBBLE_MATERIAL_UNITS = BLOCK_FRAGMENT_COUNT;
+// Gameplay rubble uses normalized block-volume material. A whole terrain block
+// is 1.0 no matter how many visible shards the current quality tier spawns.
+export const BLOCK_RUBBLE_MATERIAL_UNITS = 1;
 export const BLOCK_FRAGMENT_SPACING = 0.28;
 export const BLOCK_FRAGMENT_VISUAL_SIZE = 0.24;
 export const BLOCK_FRAGMENT_COLLISION_RADIUS = 0.16;
@@ -59,16 +58,16 @@ export function getBlockFragmentMaterialUnits(
     throw new RangeError(`Fragment material index ${fragmentIndex} is outside the ${normalizedCount}-piece budget.`);
   }
 
-  // Split the fixed rubble material across however many visible shards the
-  // current quality tier spawns. A 2-shard Potato fracture therefore still
-  // settles into the same 27 material units as a full 27-shard Ultra fracture.
+  // Split normalized block-volume material across however many visible shards
+  // the current quality tier spawns. A 2-shard Potato fracture therefore still
+  // settles into the same full-block material as a 27-shard Ultra fracture, and
+  // chip damage can carry fractional volume instead of rounding HP loss.
   const normalizedMaterialUnits = Math.max(
-    normalizedCount,
-    Number.isFinite(materialUnits) ? Math.round(materialUnits) : BLOCK_RUBBLE_MATERIAL_UNITS
+    0,
+    Number.isFinite(materialUnits) ? materialUnits : BLOCK_RUBBLE_MATERIAL_UNITS
   );
-  const startUnit = Math.floor((fragmentIndex * normalizedMaterialUnits) / normalizedCount);
-  const endUnit = Math.floor(((fragmentIndex + 1) * normalizedMaterialUnits) / normalizedCount);
-  return Math.max(1, endUnit - startUnit);
+  if (normalizedMaterialUnits <= 0) return 0;
+  return normalizedMaterialUnits / normalizedCount;
 }
 
 export function getTerrainImpactFragmentCount(
@@ -79,15 +78,54 @@ export function getTerrainImpactFragmentCount(
   const normalizedMaxVisible = normalizeBlockFragmentCount(maxVisibleFragmentCount);
   const normalizedMaterialUnits = Math.max(0, Math.min(
     BLOCK_RUBBLE_MATERIAL_UNITS,
-    Number.isFinite(materialUnits) ? Math.round(materialUnits) : 0
+    Number.isFinite(materialUnits) ? materialUnits : 0
   ));
   if (normalizedMaterialUnits <= 0) return 0;
 
-  const maxCountByMaterial = Math.min(normalizedMaxVisible, normalizedMaterialUnits);
-  if (destroyed) return maxCountByMaterial;
+  const proportionalCount = Math.max(
+    1,
+    Math.ceil((normalizedMaterialUnits / BLOCK_RUBBLE_MATERIAL_UNITS) * normalizedMaxVisible)
+  );
+  if (destroyed) return Math.min(normalizedMaxVisible, proportionalCount);
 
   const qualityScaledChipCap = Math.max(1, Math.ceil(normalizedMaxVisible * 0.2));
-  return Math.min(maxCountByMaterial, TERRAIN_CHIP_FRAGMENT_MAX_COUNT, qualityScaledChipCap);
+  return Math.min(proportionalCount, TERRAIN_CHIP_FRAGMENT_MAX_COUNT, qualityScaledChipCap);
+}
+
+export function getBlockRubbleMaterialUnitsForHealth(
+  remainingHealth: number,
+  maxHealth: number,
+  materialUnits = BLOCK_RUBBLE_MATERIAL_UNITS
+): number {
+  const normalizedMaterialUnits = Math.max(
+    0,
+    Number.isFinite(materialUnits) ? materialUnits : BLOCK_RUBBLE_MATERIAL_UNITS
+  );
+  if (normalizedMaterialUnits <= 0 || maxHealth <= 0) return 0;
+
+  const remainingFraction = Math.max(0, Math.min(1, remainingHealth / maxHealth));
+  return Math.max(0, Math.min(normalizedMaterialUnits, normalizedMaterialUnits * remainingFraction));
+}
+
+export function getEjectedBlockRubbleMaterialUnits(
+  previousDamage: number,
+  nextDamage: number,
+  maxHealth: number,
+  materialUnits = BLOCK_RUBBLE_MATERIAL_UNITS
+): number {
+  const previousRemainingHealth = Math.max(0, maxHealth - Math.max(0, previousDamage));
+  const nextRemainingHealth = Math.max(0, maxHealth - Math.max(previousDamage, nextDamage));
+  const previousMaterialUnits = getBlockRubbleMaterialUnitsForHealth(
+    previousRemainingHealth,
+    maxHealth,
+    materialUnits
+  );
+  const nextMaterialUnits = getBlockRubbleMaterialUnitsForHealth(
+    nextRemainingHealth,
+    maxHealth,
+    materialUnits
+  );
+  return Math.max(0, previousMaterialUnits - nextMaterialUnits);
 }
 
 export function normalizeBlockFragmentCount(fragmentCount: number): number {

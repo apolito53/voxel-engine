@@ -21,19 +21,19 @@ const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = RUBBLE_MAX_VISUAL_PIECES;
 // gameplay rubble heightfield still exists for support, raycasts, and material
 // accounting, but settled debris should currently read as baked shard piles.
 const RUBBLE_RENDER_DRAPED_SHEET_MESH = false;
-// Promotion intentionally needs more material than the visible pile cap and a
-// single 27-piece block fracture. Piles can keep accruing hidden material after
-// the proxy mesh stops growing, so craters do not seal from one normal break.
-export const RUBBLE_BLOCK_PROMOTION_PIECES = 48;
+// Promotion intentionally needs more than one full block-volume of material.
+// Piles can keep accruing hidden material after the proxy mesh stops growing,
+// so craters do not seal from one normal break.
+export const RUBBLE_BLOCK_PROMOTION_PIECES = 2;
 const RUBBLE_MAX_PATCH_CELLS = 18;
-// `pieces` is material volume for cover shape/promotion; health is gameplay
-// durability. A full block fracture produces 27 material units, but it should
-// not also create a 27-HP object when ordinary terrain has 2-3 HP.
+// `pieces` is normalized block-volume material for cover shape/promotion;
+// health is gameplay durability. A full block of rubble material is about as
+// sturdy as one generated Rubble terrain block.
 export const RUBBLE_FULL_BLOCK_HEALTH = 3;
 const RUBBLE_PIECE_HEALTH = RUBBLE_FULL_BLOCK_HEALTH / BLOCK_RUBBLE_MATERIAL_UNITS;
 const RUBBLE_NEARBY_SEARCH_PADDING = 1.25;
 const RUBBLE_MIN_HEIGHT = 0.04;
-const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.032;
+const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.17;
 const RUBBLE_HEIGHT_VARIATION = 0.03;
 const RUBBLE_MAX_HEIGHT = 0.5;
 const RUBBLE_SOLID_NEIGHBOR_CORNER_RISE = 0.08;
@@ -629,7 +629,7 @@ export class RubbleField {
     const hitHealthBefore = targetPile.health;
     const hitDamage = Math.min(targetPile.health, Math.max(0, amount));
     targetPile.health -= hitDamage;
-    targetPile.pieces = Math.ceil(targetPile.health / RUBBLE_PIECE_HEALTH);
+    targetPile.pieces = Math.max(0, targetPile.health / RUBBLE_PIECE_HEALTH);
 
     const destroyedTargetPile = targetPile.health <= RUBBLE_COLLISION_EPSILON || targetPile.pieces <= 0;
     this.recordDamageEvent(cluster.block, targetPile, hitHealthBefore, destroyedTargetPile, false);
@@ -668,7 +668,7 @@ export class RubbleField {
       if (chipDamage <= 0) continue;
 
       pile.health = Math.max(RUBBLE_COLLISION_EPSILON, pile.health - chipDamage);
-      pile.pieces = Math.max(1, Math.ceil(pile.health / RUBBLE_PIECE_HEALTH));
+      pile.pieces = Math.max(0, pile.health / RUBBLE_PIECE_HEALTH);
       this.recordDamageEvent(cluster.block, pile, healthBefore, false, true);
     }
   }
@@ -1081,7 +1081,7 @@ function distanceFromPileCenterSq(chunk: RubbleStoredVisualChunkSample): number 
 
 function normalizeRubblePieceCount(pieces: number): number {
   if (!Number.isFinite(pieces)) return 1;
-  return Math.max(1, Math.round(pieces));
+  return Math.max(0.0001, pieces);
 }
 
 function boundsOverlapPileHorizontally(bounds: CollisionBounds, pile: RubbleCellPile): boolean {
@@ -1425,12 +1425,12 @@ function getRubblePileFootprint(pile: RubbleCellPile): RubbleLocalFootprint {
 }
 
 function getRubblePileFootprintRadius(pile: RubbleCellPile): number {
-  // One lonely shard should remain a little mound. As material approaches a
-  // whole block-fracture budget, the proxy grows into real cover that can span
-  // the cell. This keeps the gameplay value stable without making confetti
-  // behave like a poured concrete square.
+  // Tiny chips should remain little mounds. As material approaches one whole
+  // block-volume, the proxy grows into real cover that can span the cell. This
+  // keeps the gameplay value stable without making confetti behave like a
+  // poured concrete square.
   const materialRatio = clamp(
-    (Math.max(1, pile.pieces) - 1) / Math.max(1, BLOCK_RUBBLE_MATERIAL_UNITS - 1),
+    pile.pieces / BLOCK_RUBBLE_MATERIAL_UNITS,
     0,
     1
   );
@@ -1438,7 +1438,10 @@ function getRubblePileFootprintRadius(pile: RubbleCellPile): number {
 }
 
 function getRubblePileEdgeHeight(pile: RubbleCellPile): number {
-  const visualWeight = Math.min(RUBBLE_MAX_VISUAL_PIECES, Math.max(1, pile.pieces));
+  const visualWeight = Math.min(
+    RUBBLE_MAX_VISUAL_PIECES,
+    Math.max(0.05, pile.pieces / BLOCK_RUBBLE_MATERIAL_UNITS)
+  );
   const height = RUBBLE_MIN_HEIGHT
     + Math.sqrt(visualWeight) * RUBBLE_HEIGHT_PER_ROOT_PIECE
     + (getCellNoise(pile.cell) - 0.5) * RUBBLE_HEIGHT_VARIATION;

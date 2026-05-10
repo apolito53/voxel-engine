@@ -7,6 +7,8 @@ import {
   BLOCK_FRAGMENT_VISUAL_SIZE,
   BLOCK_RUBBLE_MATERIAL_UNITS,
   TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
+  getBlockRubbleMaterialUnitsForHealth,
+  getEjectedBlockRubbleMaterialUnits,
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
@@ -276,6 +278,12 @@ function assertEqual<T>(actual: T, expected: T, message: string): void {
   }
 }
 
+function assertClose(actual: number, expected: number, epsilon: number, message: string): void {
+  if (Math.abs(actual - expected) > epsilon) {
+    throw new Error(`${message}. Expected ${expected}, got ${actual}.`);
+  }
+}
+
 function assertDeepEqual(actual: unknown, expected: unknown, message: string): void {
   const actualJson = JSON.stringify(actual);
   const expectedJson = JSON.stringify(expected);
@@ -296,6 +304,7 @@ function assertUint8ArraysEqual(actual: Uint8Array, expected: Uint8Array, messag
 function expectedRubbleHealthForPieces(pieces: number): number {
   return (pieces / BLOCK_RUBBLE_MATERIAL_UNITS) * RUBBLE_FULL_BLOCK_HEALTH;
 }
+const TEST_FRAGMENT_MATERIAL_UNITS = BLOCK_RUBBLE_MATERIAL_UNITS / BLOCK_FRAGMENT_COUNT;
 
 function hasAnyDifference(left: Uint8Array, right: Uint8Array): boolean {
   assertEqual(left.length, right.length, "Compared chunk payloads should have equal length");
@@ -1649,6 +1658,8 @@ test("delete-world dialog copy names the save and warns about permanence", () =>
 test("block damage tracks health before removing voxels", () => {
   const world = new VoxelWorld({ seed: "damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
+  const maxHealth = BLOCKS[BLOCK.stone].health;
+  assert(maxHealth >= 8, "ordinary terrain blocks should have room for repeated chip hits");
 
   const firstHit = world.damageBlock(2, 3, 4, 1);
   assertDeepEqual(
@@ -1656,27 +1667,27 @@ test("block damage tracks health before removing voxels", () => {
     {
       block: BLOCK.stone,
       position: { x: 2, y: 3, z: 4 },
-      remainingHealth: 1,
-      maxHealth: 2,
+      remainingHealth: maxHealth - 1,
+      maxHealth,
       destroyed: false
     },
-    "first meaningful hit should damage but not remove a two-health block"
+    "first meaningful hit should damage but not remove a sturdy terrain block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "damaged block should remain in the voxel grid");
   assertEqual(world.getBlockDamage(2, 3, 4), 1, "world should remember sparse block damage");
   assertEqual(world.getStats().damagedBlocks, 1, "debug stats should count damaged blocks");
 
-  const secondHit = world.damageBlock(2, 3, 4, 1);
+  const secondHit = world.damageBlock(2, 3, 4, maxHealth - 1);
   assertDeepEqual(
     secondHit,
     {
       block: BLOCK.stone,
       position: { x: 2, y: 3, z: 4 },
       remainingHealth: 0,
-      maxHealth: 2,
+      maxHealth,
       destroyed: true
     },
-    "second meaningful hit should destroy a two-health block"
+    "enough accumulated damage should destroy the sturdy terrain block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed block should leave the voxel grid");
   assertEqual(world.getBlockDamage(2, 3, 4), 0, "destroyed blocks should clear transient damage state");
@@ -1685,6 +1696,7 @@ test("block damage tracks health before removing voxels", () => {
 test("physics core carving chips ordinary terrain before fracture", () => {
   const world = new VoxelWorld({ seed: "core-damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
+  const maxHealth = BLOCKS[BLOCK.stone].health;
 
   assertEqual(PARTIAL_BLOCK_CORE_DAMAGE, 1, "terrain-core hits should carve one health step at a time");
   assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "full core damage stays available for rubble cover impacts");
@@ -1700,9 +1712,10 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   });
 
   assert(firstHit && !firstHit.destroyed, "the first core hit should leave a partial terrain cell");
-  assertEqual(
+  assertClose(
     firstHit.ejectedRubbleMaterialUnits,
-    Math.floor(BLOCK_RUBBLE_MATERIAL_UNITS / 2),
+    getEjectedBlockRubbleMaterialUnits(0, PARTIAL_BLOCK_CORE_DAMAGE, maxHealth),
+    0.000001,
     "the first carve step should eject only its material slice"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "partially carved terrain should stay in the voxel grid");
@@ -1712,20 +1725,27 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   world.clearDamageForChunk(0, 0);
   assertEqual(world.getBlockDamage(2, 3, 4), 1, "partial terrain should keep its damage while chunks stream out");
 
-  const secondHit = world.carveBlock({
-    x: 2,
-    y: 3,
-    z: 4,
-    point: new THREE.Vector3(2, 3.55, 4.45),
-    normal: new THREE.Vector3(-1, 0, 0),
-    speed: 18,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
-  });
+  let finalHit = firstHit;
+  for (let hit = 2; hit <= maxHealth; hit += 1) {
+    finalHit = world.carveBlock({
+      x: 2,
+      y: 3,
+      z: 4,
+      point: new THREE.Vector3(2, 3.45 + hit * 0.01, 4.45),
+      normal: new THREE.Vector3(-1, 0, 0),
+      speed: 18,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    });
+    if (hit < maxHealth) {
+      assert(finalHit && !finalHit.destroyed, "ordinary terrain should survive intermediate chip hits");
+    }
+  }
 
-  assert(secondHit?.destroyed, "a second carved health step should fracture a two-health block");
-  assertEqual(
-    secondHit.ejectedRubbleMaterialUnits,
-    BLOCK_RUBBLE_MATERIAL_UNITS - Math.floor(BLOCK_RUBBLE_MATERIAL_UNITS / 2),
+  assert(finalHit?.destroyed, "the final carved health step should fracture the terrain block");
+  assertClose(
+    finalHit.ejectedRubbleMaterialUnits,
+    getEjectedBlockRubbleMaterialUnits(maxHealth - PARTIAL_BLOCK_CORE_DAMAGE, maxHealth, maxHealth),
+    0.000001,
     "the final fracture should eject only the material still left inside the block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
@@ -1856,24 +1876,17 @@ test("fractured terrain creates connected wrinkled support patches", () => {
   }
   world.setBlock(target.x, target.y, target.z, BLOCK.stone);
 
-  world.carveBlock({
-    x: target.x,
-    y: target.y,
-    z: target.z,
-    point: new THREE.Vector3(target.x, target.y + 0.52, target.z + 0.48),
-    normal: new THREE.Vector3(-1, 0, 0),
-    speed: 20,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
-  });
-  world.carveBlock({
-    x: target.x,
-    y: target.y,
-    z: target.z,
-    point: new THREE.Vector3(target.x, target.y + 0.52, target.z + 0.48),
-    normal: new THREE.Vector3(-1, 0, 0),
-    speed: 20,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
-  });
+  for (let hit = 0; hit < BLOCKS[BLOCK.stone].health; hit += 1) {
+    world.carveBlock({
+      x: target.x,
+      y: target.y,
+      z: target.z,
+      point: new THREE.Vector3(target.x, target.y + 0.52, target.z + 0.48),
+      normal: new THREE.Vector3(-1, 0, 0),
+      speed: 20,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    });
+  }
 
   const surfaceCells = world.getPartialBlocks().filter((cell) =>
     cell.surfaceSamples?.length &&
@@ -2164,9 +2177,10 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
         origin: { x: 4, y: 8, z: 12 }
       }).shapeId);
     }
-    assertEqual(
+    assertClose(
       totalMaterialUnits,
       BLOCK_RUBBLE_MATERIAL_UNITS,
+      0.000001,
       "quality-scaled visible fragments should still carry one full block of rubble material"
     );
     assert(shapeIds.size >= 1, "shape assignment should not affect fragment material accounting");
@@ -2177,14 +2191,43 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
 });
 
 test("terrain impact fragment counts eject chips without duplicating material", () => {
+  assertClose(
+    getBlockRubbleMaterialUnitsForHealth(7, 10),
+    BLOCK_RUBBLE_MATERIAL_UNITS * 0.7,
+    0.000001,
+    "7/10 HP should leave exactly 70 percent of one block-volume material budget"
+  );
+  assertClose(
+    getEjectedBlockRubbleMaterialUnits(0, 1, 10),
+    BLOCK_RUBBLE_MATERIAL_UNITS * 0.1,
+    0.000001,
+    "the first 10-HP chip should eject the difference between 100% and 90% material"
+  );
+  assertClose(
+    getEjectedBlockRubbleMaterialUnits(9, 10, 10),
+    BLOCK_RUBBLE_MATERIAL_UNITS * 0.1,
+    0.000001,
+    "the final 10-HP chip should eject the last remaining material"
+  );
+  let tenHitMaterialTotal = 0;
+  for (let damage = 0; damage < 10; damage += 1) {
+    tenHitMaterialTotal += getEjectedBlockRubbleMaterialUnits(damage, damage + 1, 10);
+  }
+  assertClose(
+    tenHitMaterialTotal,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    0.000001,
+    "ten one-damage chips should still emit exactly one full block of material"
+  );
+
   assertEqual(
     getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, true),
     BLOCK_FRAGMENT_COUNT,
     "a whole-block fracture can use the full visible debris budget"
   );
   assertEqual(
-    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, 2, true),
-    2,
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS * 0.1, true),
+    3,
     "a nearly-empty final fracture should only spawn debris for the remaining material"
   );
   assertEqual(
@@ -2198,15 +2241,16 @@ test("terrain impact fragment counts eject chips without duplicating material", 
     "Potato chip hits should still spawn a visible shard without flooding the CPU"
   );
 
-  for (const materialUnits of [1, 2, 13, 14, BLOCK_RUBBLE_MATERIAL_UNITS]) {
-    const fragmentCount = getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, materialUnits, materialUnits <= 2);
+  for (const materialUnits of [0.04, 0.1, 0.27, 0.5, BLOCK_RUBBLE_MATERIAL_UNITS]) {
+    const fragmentCount = getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, materialUnits, materialUnits <= 0.1);
     let carriedUnits = 0;
     for (let index = 0; index < fragmentCount; index += 1) {
       carriedUnits += getBlockFragmentMaterialUnits(index, fragmentCount, materialUnits);
     }
-    assertEqual(
+    assertClose(
       carriedUnits,
       materialUnits,
+      0.000001,
       "proportional terrain debris should carry exactly the material slice it ejected"
     );
   }
@@ -2544,7 +2588,7 @@ function createTestFragment(
   x: number,
   y: number,
   z: number,
-  rubbleMaterialUnits = 1
+  rubbleMaterialUnits = TEST_FRAGMENT_MATERIAL_UNITS
 ): PhysicsToy {
   return PhysicsToy.createBlockFragment(
     block,
@@ -2975,8 +3019,8 @@ test("debris settler finalizes potato fragments into full rubble material", () =
 
   const afterFinalize = settler.update(0.02, rubble);
   assertEqual(afterFinalize.finalizedBatches, 1, "region should finalize shortly after the delay");
-  assertEqual(afterFinalize.finalizedPieces, BLOCK_RUBBLE_MATERIAL_UNITS, "two Potato shards should expand into full rubble material");
-  assertEqual(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, "rubble field should receive all gameplay material");
+  assertClose(afterFinalize.finalizedPieces, BLOCK_RUBBLE_MATERIAL_UNITS, 0.000001, "two Potato shards should expand into full rubble material");
+  assertClose(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, 0.000001, "rubble field should receive all gameplay material");
   assert(fragments.every((fragment) => fragment.isExpired), "finalized visible fragments should be marked for pruning");
   assert(
     fragments.every((fragment) => settler.owns(fragment)),
@@ -3136,7 +3180,12 @@ test("debris settler pressure relief finalizes farthest regions first", () => {
   assertEqual(stats.regions, 1, "one nearby region should remain active after farthest-region relief");
   assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
   assert(farFragment.isExpired, "the farthest debris region should be the one converted");
-  assertEqual(rubble.getStats().pieces, 1, "pressure relief should preserve the far region's material");
+  assertClose(
+    rubble.getStats().pieces,
+    TEST_FRAGMENT_MATERIAL_UNITS,
+    0.000001,
+    "pressure relief should preserve the far region's material"
+  );
   assertEqual(rubble.getStats().visualChunks, 1, "pressure relief should keep a static shard pose instead of making invisible support-only rubble");
 });
 
@@ -3156,7 +3205,12 @@ test("debris settler pressure relief prefers sleeping regions before awake debri
   assertEqual(removed, 1, "pressure relief should convert one sleeping region when that is enough");
   assert(nearSleepingFragment.isExpired, "sleeping debris should be the first pressure-relief candidate");
   assert(settler.owns(farAwakeFragment), "awake debris should stay active while sleeping material can relieve pressure");
-  assertEqual(rubble.getStats().pieces, 1, "sleeping pressure relief should still preserve material");
+  assertClose(
+    rubble.getStats().pieces,
+    TEST_FRAGMENT_MATERIAL_UNITS,
+    0.000001,
+    "sleeping pressure relief should still preserve material"
+  );
 });
 
 test("debris settler waits for quiet fragments before soft finalization", () => {
@@ -3259,16 +3313,16 @@ test("batched rubble absorption preserves material and scales health", () => {
   world.setBlock(0, 0, 0, BLOCK.stone);
 
   rubble.absorbBatch([
-    { block: BLOCK.stone, position: new THREE.Vector3(0.25, 1.1, 0.25), pieces: 6 },
-    { block: BLOCK.stone, position: new THREE.Vector3(0.75, 1.1, 0.75), pieces: 5 }
+    { block: BLOCK.stone, position: new THREE.Vector3(0.25, 1.1, 0.25), pieces: 0.6 },
+    { block: BLOCK.stone, position: new THREE.Vector3(0.75, 1.1, 0.75), pieces: 0.5 }
   ]);
   rubble.settle(world);
 
   const stats = rubble.getStats();
-  assertEqual(stats.pieces, 11, "batched rubble should preserve piece totals");
+  assertClose(stats.pieces, 1.1, 0.000001, "batched rubble should preserve material volume totals");
   assertNearlyEqual(
     stats.health,
-    expectedRubbleHealthForPieces(11),
+    expectedRubbleHealthForPieces(1.1),
     "batched rubble health should scale separately from material totals"
   );
   assertEqual(stats.clusters, 1, "batched nearby samples should merge into one cover patch");
@@ -3306,11 +3360,16 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assertEqual(scene.children.length, 1, "merged rubble should render as one cheap cover proxy");
   const rubbleStats = rubble.getStats();
   assertEqual(rubbleStats.clusters, 1, "absorbed fragments should merge into one cluster");
-  assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
+  assertClose(
+    rubbleStats.pieces,
+    TEST_FRAGMENT_MATERIAL_UNITS * 2,
+    0.000001,
+    "absorbed fragments should count their carried material volume"
+  );
   assertEqual(rubbleStats.visualChunks, 2, "absorbed fragments should leave baked visual chunks for the hybrid pile");
   assertNearlyEqual(
     rubbleStats.health,
-    expectedRubbleHealthForPieces(2),
+    expectedRubbleHealthForPieces(TEST_FRAGMENT_MATERIAL_UNITS * 2),
     "absorbed fragments should add scaled destructible cover health"
   );
   assert(
@@ -3486,8 +3545,8 @@ test("rubble damage removes the impacted pile and only chips immediate neighbors
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.5, 0.2, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 0.25);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.5, 0.2, 0.5), 1.5);
   assertEqual(rubble.getStats().clusters, 1, "adjacent setup should merge into one broad rubble patch");
 
   assert(
@@ -3509,14 +3568,19 @@ test("rubble damage removes the impacted pile and only chips immediate neighbors
 
   assertEqual(targetCellHit, null, "the impacted pile should be removed first");
   assert(neighborCellHit, "the healthier neighboring pile should survive sharing a cluster");
-  assertEqual(rubble.getStats().pieces, 4, "the neighboring pile should only lose a small collateral chip");
+  assertClose(
+    rubble.getStats().pieces,
+    1.5 - (0.25 / RUBBLE_FULL_BLOCK_HEALTH),
+    0.000001,
+    "the neighboring pile should only lose a small collateral chip"
+  );
   assertEqual(damageEvents.length, 2, "destroying one pile should emit direct and collateral damage events");
   assertEqual(damageEvents[0]?.destroyed, true, "the first event should describe the direct destroyed pile");
   assertEqual(damageEvents[0]?.collateral, false, "the direct hit should not be marked as collateral");
   assertEqual(damageEvents[1]?.collateral, true, "neighboring chip damage should be marked as collateral");
   assertNearlyEqual(
     damageEvents[1]?.remainingHealth,
-    expectedRubbleHealthForPieces(6) - 0.25,
+    expectedRubbleHealthForPieces(1.5) - 0.25,
     "collateral damage should chip neighboring rubble instead of deleting it"
   );
   assertEqual(
@@ -3530,7 +3594,7 @@ test("single-piece rubble stays in a local footprint instead of filling the whol
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), TEST_FRAGMENT_MATERIAL_UNITS);
 
   const centerHit = rubble.raycast(
     new THREE.Vector3(0.5, 0.08, -2),
@@ -3553,7 +3617,8 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   for (let index = 0; index < 6; index += 1) {
     rubble.absorb(
       BLOCK.dirt,
-      new THREE.Vector3(0.48 + index * 0.01, 0.18, 0.52)
+      new THREE.Vector3(0.48 + index * 0.01, 0.18, 0.52),
+      TEST_FRAGMENT_MATERIAL_UNITS
     );
   }
 
@@ -3582,7 +3647,7 @@ test("terrain impacts resolve before adjacent rubble can take same-frame damage"
 
   world.setBlock(0, targetY, 0, BLOCK.stone);
   world.setBlock(1, targetY - 1, 0, BLOCK.stone);
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.12, targetY + 0.16, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.12, targetY + 0.16, 0.5), 1.5);
   rubble.settle(world);
 
   const rubbleHealthBefore = rubble.getStats().health;
@@ -3634,7 +3699,7 @@ test("supported rubble survives manual removal of adjacent terrain", () => {
   world.setBlock(0, 0, 0, BLOCK.stone);
   world.setBlock(1, 1, 0, BLOCK.stone);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 1.5);
   rubble.settle(world);
   const healthBefore = rubble.getStats().health;
 
@@ -3689,7 +3754,8 @@ test("block fragments rest on rubble support instead of sinking into finalized p
     const column = index % 4;
     rubble.absorb(
       BLOCK.dirt,
-      new THREE.Vector3(0.42 + column * 0.05, 1.1, 0.42 + row * 0.06)
+      new THREE.Vector3(0.42 + column * 0.05, 1.1, 0.42 + row * 0.06),
+      BLOCK_RUBBLE_MATERIAL_UNITS / 12
     );
   }
   rubble.settle(world);
@@ -3746,7 +3812,7 @@ test("rubble support height produces walkable slopes toward nearby terrain", () 
   world.setBlock(0, 0, 0, BLOCK.stone);
   world.setBlock(1, 1, 0, BLOCK.stone);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 1.5);
   rubble.settle(world);
 
   const westSupportY = rubble.getSupportHeight({
@@ -3792,14 +3858,14 @@ test("unsupported rubble piles fall and merge with piles below", () => {
   const rubble = new RubbleField(scene);
   world.setBlock(0, 0, 0, BLOCK.stone);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5));
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 2.1, 0.5));
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 0.5);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 2.1, 0.5), 0.5);
 
   assertEqual(rubble.getStats().clusters, 2, "setup should start with stacked rubble piles");
   rubble.settle(world);
 
   assertEqual(rubble.getStats().clusters, 1, "unsupported upper pile should merge into the pile below");
-  assertEqual(rubble.getStats().pieces, 2, "merged rubble should keep the total piece count");
+  assertEqual(rubble.getStats().pieces, 1, "merged rubble should keep the total material volume");
   assertEqual(scene.children.length, 1, "merged rubble should render as one cover proxy");
   assertEqual(world.getBlock(0, 1, 0), BLOCK.air, "small merged piles should stay as proxies, not terrain");
 });
@@ -3811,19 +3877,17 @@ test("one full block worth of rubble stays as cover instead of refilling terrain
   world.setBlock(0, 0, 0, BLOCK.stone);
 
   assert(
-    RUBBLE_BLOCK_PROMOTION_PIECES > BLOCK_FRAGMENT_COUNT,
-    "rubble promotion should require more pieces than one maximum-quality block fracture"
+    RUBBLE_BLOCK_PROMOTION_PIECES > BLOCK_RUBBLE_MATERIAL_UNITS,
+    "rubble promotion should require more than one full block of material"
   );
 
-  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
-    rubble.absorb(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5));
-  }
+  rubble.absorb(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5), BLOCK_RUBBLE_MATERIAL_UNITS);
 
   rubble.settle(world);
 
   assertEqual(world.getBlock(0, 1, 0), BLOCK.air, "one destroyed block should leave an open space");
   assertEqual(rubble.getStats().clusters, 1, "sub-threshold rubble should remain as a cover proxy");
-  assertEqual(rubble.getStats().pieces, BLOCK_FRAGMENT_COUNT, "the proxy should keep the full debris count");
+  assertEqual(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, "the proxy should keep the full block material");
   assertEqual(scene.children.length, 1, "sub-threshold rubble should keep its proxy mesh");
 });
 

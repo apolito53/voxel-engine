@@ -153,7 +153,7 @@ function createRubbleReply(context: NovaContextSnapshot): string {
   if (context.runtime.rubblePatchCount === 0) {
     return "No rubble cover is active right now. The terrain is still pretending it has dignity.";
   }
-  return `${context.runtime.rubblePatchCount} rubble patch${context.runtime.rubblePatchCount === 1 ? "" : "es"} with ${context.runtime.rubblePieceCount} pieces are currently doing their best impression of tactical cover.`;
+  return `${context.runtime.rubblePatchCount} rubble patch${context.runtime.rubblePatchCount === 1 ? "" : "es"} with ${context.runtime.rubblePieceCount.toFixed(2)} blocks of loose material are currently doing their best impression of tactical cover.`;
 }
 
 function createStatusReply(context: NovaContextSnapshot): string {

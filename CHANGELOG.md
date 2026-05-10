@@ -20,6 +20,8 @@
 
 - Changed Physics Core terrain hits from one-shot block deletion plus visual scars into one-health carve steps; ordinary terrain now chips first, ejects debris as material is removed, then fractures into leftover debris and real low-poly terrain surfaces once its health is exhausted.
 - Changed final terrain-fracture debris counts to scale with the material still left inside the block, so nearly-broken blocks no longer explode as if they were untouched full voxels.
+- Changed rubble material accounting from the old 27-piece debris grid to normalized block volume: a full block is `1.0`, HP ratio directly controls remaining material, and visible shard count is only presentation/performance.
+- Increased ordinary terrain block health from 2 to 10 HP so Physics Core carving has enough hits to show repeated deformation and chip debris before final fracture.
 
 ### Fixed
 

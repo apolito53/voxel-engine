@@ -88,7 +88,7 @@ export class DebugHud {
       `rigid debris ${rigidDebrisStats.bodies}/${rigidDebrisBodyBudget} body sleep ${rigidDebrisStats.sleepingBodies} col ${rigidDebrisStats.terrainColliders}/${rigidDebrisStats.rubbleSupportColliders}`,
       `frag inst ${fragmentRenderStats.instances} batches ${fragmentRenderStats.batches} cap ${fragmentRenderStats.capacity}`,
       `settle ${debrisSettlerStats.regions} rg ${debrisSettlerStats.fragments} frag active ${debrisSettlerStats.activeFragments} pairs ${debrisSettlerStats.pairChecks} hit ${debrisSettlerStats.resolvedPairs} done ${debrisSettlerStats.finalizedBatches}/${debrisSettlerStats.forcedFinalizations}`,
-      `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces} pcs chunks ${rubbleStats.visualChunks} cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
+      `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces.toFixed(2)} mat chunks ${rubbleStats.visualChunks} cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x debris ${qualityPreset.debrisActiveRadiusMeters}m px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,

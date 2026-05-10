@@ -948,12 +948,14 @@ export class DebrisSettler {
     for (const fragment of region.fragments) {
       if (!fragment.isInstancedFragment || fragment.fragmentBlock === null) continue;
 
-      const materialUnits = Math.max(1, fragment.rubbleMaterialUnits);
-      for (let unitIndex = 0; unitIndex < materialUnits; unitIndex += 1) {
+      const materialUnits = Math.max(0.0001, fragment.rubbleMaterialUnits);
+      const sampleCount = Math.max(1, Math.ceil(materialUnits));
+      const piecesPerSample = materialUnits / sampleCount;
+      for (let unitIndex = 0; unitIndex < sampleCount; unitIndex += 1) {
         samples.push({
           block,
-          position: this.getSamplePosition(fragment, unitIndex, materialUnits),
-          pieces: 1,
+          position: this.getSamplePosition(fragment, unitIndex, sampleCount),
+          pieces: piecesPerSample,
           visualChunk: unitIndex === 0 && (fragment.isSleeping || includeAwakeVisualChunks)
             ? this.createVisualChunkSample(fragment)
             : undefined

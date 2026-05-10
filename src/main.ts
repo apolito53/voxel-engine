@@ -1624,8 +1624,8 @@ function absorbSettledFragmentsIntoRubble(): void {
 
     // Once debris has settled or aged out, it graduates from "expensive little
     // physics shard" into cheap cover material. A low visual debris count can
-    // still carry several material units, so graphics settings do not alter
-    // gameplay even when a tiny Potato shard sample expires before sleeping.
+    // still carry a large share of the block volume, so graphics settings do
+    // not alter gameplay even when a tiny Potato shard expires before sleeping.
     absorbFragmentToyIntoRubble(toy);
     removePhysicsToyAt(index);
   }

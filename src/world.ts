@@ -1,5 +1,5 @@
 import type * as THREE from "three";
-import { BLOCK_RUBBLE_MATERIAL_UNITS } from "./blockFragments";
+import { getEjectedBlockRubbleMaterialUnits } from "./blockFragments";
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
@@ -97,15 +97,6 @@ export type VoxelBlockPosition = {
   readonly y: number;
   readonly z: number;
 };
-
-function getEjectedRubbleMaterialUnits(previousDamage: number, nextDamage: number, maxHealth: number): number {
-  if (maxHealth <= 0) return 0;
-  const previousFraction = Math.max(0, Math.min(1, previousDamage / maxHealth));
-  const nextFraction = Math.max(previousFraction, Math.min(1, nextDamage / maxHealth));
-  const previousUnits = Math.floor(previousFraction * BLOCK_RUBBLE_MATERIAL_UNITS);
-  const nextUnits = Math.floor(nextFraction * BLOCK_RUBBLE_MATERIAL_UNITS);
-  return Math.max(0, nextUnits - previousUnits);
-}
 
 function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
   if (samples.length <= PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL) return [...samples];
@@ -872,7 +863,7 @@ export class VoxelWorld implements CollisionWorld {
     const previousDamage = this.blockDamage.get(key) ?? 0;
     const nextDamage = previousDamage + amount;
     const remainingHealth = Math.max(0, definition.health - nextDamage);
-    const ejectedRubbleMaterialUnits = getEjectedRubbleMaterialUnits(
+    const ejectedRubbleMaterialUnits = getEjectedBlockRubbleMaterialUnits(
       previousDamage,
       nextDamage,
       definition.health
