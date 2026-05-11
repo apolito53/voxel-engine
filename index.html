@@ -54,7 +54,14 @@
           <div class="home-title">Voxel Sandbox Engine</div>
           <div class="home-meta-row">
             <div class="home-subtitle">Local worlds</div>
-            <div class="app-version" data-app-version aria-label="Application version"></div>
+            <button
+              class="app-version"
+              type="button"
+              data-app-version
+              aria-label="Open release notes"
+              aria-haspopup="dialog"
+              aria-controls="changelog-dialog"
+            ></button>
           </div>
         </div>
         <div class="home-grid">
@@ -127,7 +134,14 @@
       <div class="menu-panel">
         <div class="menu-title-row">
           <div class="menu-title">Voxel Sandbox Engine</div>
-          <div class="app-version" data-app-version aria-label="Application version"></div>
+          <button
+            class="app-version"
+            type="button"
+            data-app-version
+            aria-label="Open release notes"
+            aria-haspopup="dialog"
+            aria-controls="changelog-dialog"
+          ></button>
         </div>
         <div class="menu-actions">
           <button id="resume-button" class="menu-button menu-main-action" type="button">Resume</button>
@@ -340,6 +354,26 @@
             Exit to Home
           </button>
         </div>
+      </div>
+    </div>
+    <div
+      id="changelog-dialog"
+      class="changelog-dialog is-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-hidden="true"
+      aria-labelledby="changelog-title"
+      aria-describedby="changelog-current-version"
+    >
+      <div class="changelog-pane">
+        <div class="changelog-header">
+          <div>
+            <div id="changelog-title" class="changelog-title">Release Notes</div>
+            <div id="changelog-current-version" class="changelog-current-version"></div>
+          </div>
+          <button id="changelog-close-button" class="changelog-close-button" type="button">Close</button>
+        </div>
+        <div id="changelog-list" class="changelog-list" aria-label="Release notes, newest first"></div>
       </div>
     </div>
     <div id="crosshair"></div>

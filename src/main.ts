@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import changelogMarkdown from "../CHANGELOG.md?raw";
 import packageManifest from "../package.json";
 import "./style.css";
 import {
@@ -22,6 +23,7 @@ import {
   type SavedWorld,
   type WorldRegistry
 } from "./chunkStorage";
+import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
 import type { CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
@@ -164,6 +166,7 @@ import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
 const APP_VERSION = packageManifest.version;
+const CHANGELOG_ENTRIES = parseChangelogEntries(changelogMarkdown);
 const TARGET_HIT_EPSILON = 0.0001;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
@@ -218,6 +221,11 @@ const deleteWorldCopy = requireElement<HTMLElement>("#delete-world-copy");
 const deleteWorldError = requireElement<HTMLElement>("#delete-world-error");
 const cancelDeleteWorldButton = requireElement<HTMLButtonElement>("#cancel-delete-world-button");
 const confirmDeleteWorldButton = requireElement<HTMLButtonElement>("#confirm-delete-world-button");
+const versionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-app-version]"));
+const changelogDialog = requireElement<HTMLElement>("#changelog-dialog");
+const changelogCurrentVersion = requireElement<HTMLElement>("#changelog-current-version");
+const changelogList = requireElement<HTMLElement>("#changelog-list");
+const changelogCloseButton = requireElement<HTMLButtonElement>("#changelog-close-button");
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
@@ -260,9 +268,11 @@ const novaChatCloseButton = requireElement<HTMLButtonElement>("#nova-chat-close"
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 const damageIndicatorRoot = requireElement<HTMLElement>("#damage-indicators");
 
-for (const versionLabel of document.querySelectorAll<HTMLElement>("[data-app-version]")) {
-  versionLabel.textContent = `v${APP_VERSION}`;
+for (const versionButton of versionButtons) {
+  versionButton.textContent = `v${APP_VERSION}`;
+  versionButton.title = "Open release notes";
 }
+renderChangelogEntries();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -599,6 +609,15 @@ function wireMenuControls(): void {
   superflatWorldButton.addEventListener("click", () => {
     void createSuperflatWorld();
   }, eventListenerOptions);
+  for (const versionButton of versionButtons) {
+    versionButton.addEventListener("click", openChangelogDialog, eventListenerOptions);
+  }
+  changelogCloseButton.addEventListener("click", closeChangelogDialog, eventListenerOptions);
+  changelogDialog.addEventListener("pointerdown", (event) => {
+    if (event.target === changelogDialog) {
+      closeChangelogDialog();
+    }
+  }, eventListenerOptions);
   cancelDeleteWorldButton.addEventListener("click", closeDeleteWorldDialog, eventListenerOptions);
   confirmDeleteWorldButton.addEventListener("click", () => {
     void confirmPendingWorldDeletion();
@@ -608,6 +627,104 @@ function wireMenuControls(): void {
       closeDeleteWorldDialog();
     }
   }, eventListenerOptions);
+}
+
+function renderChangelogEntries(): void {
+  changelogCurrentVersion.textContent = `Current build v${APP_VERSION}`;
+  changelogList.replaceChildren(...CHANGELOG_ENTRIES.map(createChangelogEntryElement));
+}
+
+function createChangelogEntryElement(entry: ChangelogEntry): HTMLElement {
+  const article = document.createElement("article");
+  article.className = "changelog-entry";
+
+  const header = document.createElement("div");
+  header.className = "changelog-entry-header";
+
+  const title = document.createElement("h3");
+  title.className = "changelog-entry-title";
+  title.textContent = entry.version ? `v${entry.version}` : entry.title;
+  header.appendChild(title);
+
+  if (entry.date) {
+    const date = document.createElement("div");
+    date.className = "changelog-entry-date";
+    date.textContent = entry.date;
+    header.appendChild(date);
+  }
+
+  const body = document.createElement("div");
+  body.className = "changelog-entry-body";
+  appendChangelogBody(body, entry.body);
+
+  article.append(header, body);
+  return article;
+}
+
+function appendChangelogBody(container: HTMLElement, markdown: string): void {
+  let activeList: HTMLUListElement | null = null;
+
+  for (const line of markdown.split("\n")) {
+    const trimmedLine = line.trim();
+    if (trimmedLine.length === 0) {
+      activeList = null;
+      continue;
+    }
+
+    if (trimmedLine.startsWith("### ")) {
+      activeList = null;
+      const heading = document.createElement("h4");
+      heading.textContent = trimmedLine.slice(4);
+      container.appendChild(heading);
+      continue;
+    }
+
+    if (trimmedLine.startsWith("- ")) {
+      if (!activeList) {
+        activeList = document.createElement("ul");
+        container.appendChild(activeList);
+      }
+      const item = document.createElement("li");
+      appendInlineChangelogMarkdown(item, trimmedLine.slice(2));
+      activeList.appendChild(item);
+      continue;
+    }
+
+    activeList = null;
+    const paragraph = document.createElement("p");
+    appendInlineChangelogMarkdown(paragraph, trimmedLine);
+    container.appendChild(paragraph);
+  }
+}
+
+function appendInlineChangelogMarkdown(container: HTMLElement, text: string): void {
+  const parts = text.split(/(`[^`]+`)/g);
+  for (const part of parts) {
+    if (part.length === 0) continue;
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
+      const code = document.createElement("code");
+      code.textContent = part.slice(1, -1);
+      container.appendChild(code);
+      continue;
+    }
+    container.appendChild(document.createTextNode(part));
+  }
+}
+
+function openChangelogDialog(): void {
+  changelogDialog.classList.remove("is-hidden");
+  changelogDialog.setAttribute("aria-hidden", "false");
+  changelogList.scrollTop = 0;
+  changelogCloseButton.focus();
+}
+
+function closeChangelogDialog(): void {
+  changelogDialog.classList.add("is-hidden");
+  changelogDialog.setAttribute("aria-hidden", "true");
+}
+
+function isChangelogDialogOpen(): boolean {
+  return !changelogDialog.classList.contains("is-hidden");
 }
 
 function resumeFromPause(): void {
@@ -696,6 +813,13 @@ window.addEventListener("resize", () => {
 
 document.addEventListener("keydown", (event) => {
   noteUserActivity();
+  if (event.code === "Escape" && isChangelogDialogOpen()) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeChangelogDialog();
+    return;
+  }
+
   if (novaChatPanel.isOpen) {
     if (event.code === "Escape") {
       event.preventDefault();

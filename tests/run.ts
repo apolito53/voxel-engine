@@ -182,6 +182,7 @@ import {
   createWorldRegistry,
   type ChunkStorage
 } from "../src/chunkStorage";
+import { parseChangelogEntries } from "../src/changelog";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import {
   DEBRIS_REGION_CONTACT_BREAKUP_SECONDS,
@@ -1664,6 +1665,47 @@ test("delete-world dialog copy names the save and warns about permanence", () =>
   assert(copy.includes("Definitely Important"), "delete confirmation should name the target save");
   assert(copy.includes("permanently removes"), "delete confirmation should warn about permanent removal");
   assert(copy.includes("cannot be undone"), "delete confirmation should say the deletion cannot be undone");
+});
+
+test("changelog entries sort newest first for the version modal", () => {
+  const entries = parseChangelogEntries(`
+# Changelog
+
+## 0.4.9 - 2026-05-06
+
+### Fixed
+
+- older patch
+
+## Unreleased
+
+### Added
+
+- upcoming work
+
+## 0.10.0 - 2026-05-08
+
+### Changed
+
+- newest numbered release
+
+## 0.5.0 - 2026-05-07
+
+### Added
+
+- current stable release with \`code\`
+`);
+
+  assertDeepEqual(
+    entries.map((entry) => entry.title),
+    ["Unreleased", "0.10.0", "0.5.0", "0.4.9"],
+    "release notes should sort Unreleased first, then semantic versions descending"
+  );
+  assertEqual(entries[2]?.date, "2026-05-07", "release dates should be parsed from headings");
+  assert(
+    entries[2]?.body.includes("current stable release"),
+    "entry bodies should preserve their markdown content for rendering"
+  );
 });
 
 test("block damage tracks health before removing voxels", () => {
