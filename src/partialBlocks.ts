@@ -41,6 +41,8 @@ export type PartialBlockPosition = {
 export type PartialBlockCut = {
   readonly normal: PartialBlockPosition;
   readonly localPoint: PartialBlockPosition;
+  readonly trajectory?: PartialBlockPosition;
+  readonly coreRadius?: number;
   readonly radius: number;
   readonly depth: number;
   readonly seed: number;
@@ -209,6 +211,8 @@ export function createPartialBlockCut({
   position,
   point,
   normal,
+  incomingDirection,
+  coreRadius,
   speed,
   cutIndex
 }: {
@@ -216,6 +220,8 @@ export function createPartialBlockCut({
   readonly position: PartialBlockPosition;
   readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
   readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly incomingDirection?: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly coreRadius?: number;
   readonly speed: number;
   readonly cutIndex: number;
 }): PartialBlockCut {
@@ -225,12 +231,22 @@ export function createPartialBlockCut({
     z: clamp01(point.z - Math.floor(position.z))
   };
   const normalizedNormal = normalizeAxisNormal(normal);
+  const trajectory = normalizeDirection(incomingDirection) ?? {
+    x: -normalizedNormal.x,
+    y: -normalizedNormal.y,
+    z: -normalizedNormal.z
+  };
   const speedT = clamp01((speed - 2) / 22);
   const seed = hashPartialBlockCut(block, position, normalizedNormal, cutIndex);
+  const safeCoreRadius = typeof coreRadius === "number" && Number.isFinite(coreRadius) && coreRadius > 0
+    ? coreRadius
+    : undefined;
 
   return {
     normal: normalizedNormal,
     localPoint,
+    trajectory,
+    coreRadius: safeCoreRadius,
     radius: lerp(PARTIAL_BLOCK_MIN_RADIUS, PARTIAL_BLOCK_MAX_RADIUS, speedT) *
       (0.88 + hashUnit(seed ^ 0x9e3779b9) * 0.24),
     depth: lerp(PARTIAL_BLOCK_MIN_DEPTH, PARTIAL_BLOCK_MAX_DEPTH, speedT) *
@@ -377,8 +393,8 @@ export function createPartialBlockRemovedVisualCellIndexes(
   for (const index of previousIndexes) {
     if (!Number.isInteger(index) || index < 0 || index >= PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT) continue;
     removed.add(index);
-    if (removed.size >= targetRemovedCount) return [...removed];
   }
+  if (removed.size >= targetRemovedCount) return [...removed];
 
   const rankedCells = PARTIAL_BLOCK_LATTICE_CELLS
     .map((latticeCell) => ({
@@ -411,9 +427,9 @@ function scorePartialBlockLatticeCellForRemoval(
 
   let bestScore = Number.POSITIVE_INFINITY;
   for (const cut of cell.cuts) {
-    // Rank cells from the struck face inward so repeated hits look like bites
-    // taken from the impact point instead of a generic shrink-wrap effect.
-    const inward = {
+    // Rank cells around the swept projectile path. Tiny cores naturally pick a
+    // narrow tunnel, while bigger cores spend their damage on a wider face bite.
+    const trajectory = cut.trajectory ?? {
       x: -cut.normal.x,
       y: -cut.normal.y,
       z: -cut.normal.z
@@ -423,16 +439,16 @@ function scorePartialBlockLatticeCellForRemoval(
       y: latticeCell.center.y - cut.localPoint.y,
       z: latticeCell.center.z - cut.localPoint.z
     };
-    const depth = delta.x * inward.x + delta.y * inward.y + delta.z * inward.z;
+    const depth = delta.x * trajectory.x + delta.y * trajectory.y + delta.z * trajectory.z;
     const lateral = {
-      x: delta.x - inward.x * depth,
-      y: delta.y - inward.y * depth,
-      z: delta.z - inward.z * depth
+      x: delta.x - trajectory.x * depth,
+      y: delta.y - trajectory.y * depth,
+      z: delta.z - trajectory.z * depth
     };
     const lateralDistance = Math.sqrt(distanceSq(lateral, { x: 0, y: 0, z: 0 }));
-    const radiusScore = lateralDistance / Math.max(PARTIAL_BLOCK_LATTICE_CELL_SIZE, cut.radius);
-    const depthScore = Math.max(0, depth) /
-      Math.max(PARTIAL_BLOCK_LATTICE_CELL_SIZE, cut.depth + PARTIAL_BLOCK_LATTICE_CELL_SIZE);
+    const footprintRadius = Math.max(PARTIAL_BLOCK_LATTICE_CELL_SIZE * 0.32, cut.coreRadius ?? cut.radius);
+    const radiusScore = (lateralDistance / footprintRadius) ** 2 * 0.85;
+    const depthScore = Math.max(0, depth) / PARTIAL_BLOCK_LATTICE_CELL_SIZE * 0.55;
     const behindFacePenalty = depth < -PARTIAL_BLOCK_SURFACE_EPSILON ? 8 : 0;
     const noise = hashUnit(cut.seed ^ Math.imul(latticeCell.index + 1, 0x9e3779b1)) * 0.12;
     const score = radiusScore + depthScore * PARTIAL_BLOCK_BITE_DEPTH_SCORE_SCALE + behindFacePenalty + noise;
@@ -994,6 +1010,17 @@ function normalizeAxisNormal(normal: Pick<THREE.Vector3, "x" | "y" | "z">): Part
   if (ax >= ay && ax >= az) return { x: normal.x >= 0 ? 1 : -1, y: 0, z: 0 };
   if (ay >= ax && ay >= az) return { x: 0, y: normal.y >= 0 ? 1 : -1, z: 0 };
   return { x: 0, y: 0, z: normal.z >= 0 ? 1 : -1 };
+}
+
+function normalizeDirection(direction: Pick<THREE.Vector3, "x" | "y" | "z"> | undefined): PartialBlockPosition | null {
+  if (!direction) return null;
+  const length = Math.hypot(direction.x, direction.y, direction.z);
+  if (!Number.isFinite(length) || length <= PARTIAL_BLOCK_SURFACE_EPSILON) return null;
+  return {
+    x: direction.x / length,
+    y: direction.y / length,
+    z: direction.z / length
+  };
 }
 
 function dotPosition(left: PartialBlockPosition, right: PartialBlockPosition): number {

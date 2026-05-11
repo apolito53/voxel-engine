@@ -304,6 +304,14 @@ function assertUint8ArraysEqual(actual: Uint8Array, expected: Uint8Array, messag
   }
 }
 
+function decodeTestLatticeIndex(index: number): { readonly x: number; readonly y: number; readonly z: number } {
+  return {
+    x: index % BLOCK_FRAGMENT_GRID_SIZE,
+    y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
+    z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
+  };
+}
+
 function expectedRubbleHealthForPieces(pieces: number): number {
   return (pieces / BLOCK_RUBBLE_MATERIAL_UNITS) * RUBBLE_FULL_BLOCK_HEALTH;
 }
@@ -1825,6 +1833,65 @@ test("partial block damage lattice approximates remaining material fraction", ()
   );
 });
 
+test("partial block bite footprint follows tiny core trajectory through the lattice", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-tiny-footprint-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
+
+  assertEqual(removedCells.length, 3, "one 10-HP carve step should remove three presentation cells");
+  assert(
+    removedCells.every((cell) => cell.y === 1 && cell.z === 1),
+    "tiny cores should remove a narrow same-column tunnel through the lattice"
+  );
+  assertDeepEqual(
+    removedCells.map((cell) => cell.x).sort(),
+    [0, 1, 2],
+    "tiny core tunnel should reach all three depths along the impact axis"
+  );
+});
+
+test("partial block bite footprint widens for large cores before drilling deep", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-large-footprint-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: 0.42,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
+  const entryPlaneCells = removedCells.filter((cell) => cell.x === 0);
+  const lateralSlots = new Set(entryPlaneCells.map((cell) => `${cell.y},${cell.z}`));
+
+  assertEqual(removedCells.length, 3, "one 10-HP carve step should still remove three presentation cells");
+  assert(
+    entryPlaneCells.length >= 2 && lateralSlots.size >= 2,
+    "large cores should spend early damage on a wider entry-face footprint"
+  );
+});
+
 test("partial block bite lattice keeps older damage from visually refilling", () => {
   const world = new VoxelWorld({ seed: "partial-bite-no-refill-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
@@ -1857,6 +1924,87 @@ test("partial block bite lattice keeps older damage from visually refilling", ()
     firstBites.every((index) => secondBites.has(index)),
     "a later hit from a different side should not make earlier removed bite cells reappear"
   );
+});
+
+test("tiny fast partial-block bites can pierce through an open tunnel", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(result?.pierceContinuation, "tiny fast cores should continue after opening a complete lattice tunnel");
+  assert(result.pierceContinuation.position.x > 3, "piercing should place the core just beyond the exit face");
+  assertClose(result.pierceContinuation.speed, 18 - 3 * 2.8, 0.000001, "exit speed should pay tunnel material cost");
+  assert(result.pierceContinuation.velocity.x > 0, "pierce continuation should keep forward velocity");
+});
+
+test("large fast partial-block bites gouge instead of piercing", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-large-no-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: 0.42,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(!result?.pierceContinuation, "wide cores should not pierce even when they are fast");
+});
+
+test("tiny slow partial-block bites chip without piercing", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-slow-no-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 13,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(!result?.pierceContinuation, "slow cores should not pierce even when the footprint is tiny");
+});
+
+test("tiny fast partial-block bites stop when the exit space is solid", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-solid-exit-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(!result?.pierceContinuation, "tiny fast cores should not pierce into an immediately solid exit cell");
 });
 
 test("partial block bites open wrinkled interior faces at the impact point", () => {
@@ -4039,6 +4187,12 @@ test("physics impacts report speed so block damage can be thresholded", () => {
     "faster impacts should clear the current block damage gate"
   );
   assertEqual(fastImpacts[0].source, fastToy, "impact payloads should carry the core that caused them");
+  assertEqual(fastImpacts[0].radius, fastToy.radius, "impact payloads should carry the core footprint radius");
+  assertDeepEqual(
+    fastImpacts[0].incomingVelocity.toArray(),
+    [BLOCK_DAMAGE_IMPACT_SPEED + 0.5, 0, 0],
+    "impact payloads should preserve incoming velocity before terrain bounce"
+  );
 });
 
 test("fast small physics cores hit the first block along their swept path", () => {
@@ -4065,6 +4219,66 @@ test("fast small physics cores hit the first block along their swept path", () =
     fastSmallCore.mesh.position.x < 1,
     "swept core contact should leave the core in front of the impacted block"
   );
+});
+
+test("small fast physics cores can pierce a block and damage one behind an air gap", () => {
+  const world = new VoxelWorld({ seed: "small-core-pierce-runtime-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+  world.setBlock(4, 3, 4, BLOCK.stone);
+  world.setBlock(5, 3, 4, BLOCK.air);
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.6, 3.5, 4.5),
+    new THREE.Vector3(30, 0, 0),
+    { radius: PHYSICS_CORE_BASE_RADIUS * 0.3 }
+  );
+  const damagedThisFrame = new Set<string>();
+
+  for (let frame = 0; frame < 10 && world.getBlockDamage(4, 3, 4) === 0; frame += 1) {
+    damagedThisFrame.clear();
+    const impacts = core.update(1 / 30, world);
+    const continuedSources = new Set<PhysicsToy>();
+
+    for (const impact of impacts) {
+      if (continuedSources.has(impact.source)) continue;
+      const key = world.damageKey(impact.block.x, impact.block.y, impact.block.z);
+      if (damagedThisFrame.has(key)) continue;
+      damagedThisFrame.add(key);
+      const result = world.carveBlock({
+        x: impact.block.x,
+        y: impact.block.y,
+        z: impact.block.z,
+        point: impact.position,
+        normal: impact.normal,
+        incomingDirection: impact.incomingVelocity,
+        coreRadius: impact.radius,
+        speed: impact.speed,
+        amount: PARTIAL_BLOCK_CORE_DAMAGE
+      });
+      if (result?.pierceContinuation) {
+        core.continueAfterPierce(
+          new THREE.Vector3(
+            result.pierceContinuation.position.x,
+            result.pierceContinuation.position.y,
+            result.pierceContinuation.position.z
+          ),
+          new THREE.Vector3(
+            result.pierceContinuation.velocity.x,
+            result.pierceContinuation.velocity.y,
+            result.pierceContinuation.velocity.z
+          )
+        );
+        continuedSources.add(impact.source);
+      } else if (result) {
+        core.expire();
+      }
+    }
+  }
+
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "front block should take the first piercing chip");
+  assertEqual(world.getBlockDamage(4, 3, 4), 1, "back block should be hit after the core crosses the air gap");
+  assert(!core.isExpired, "a successfully piercing core should not be expired by the first terrain hit");
+  assert(core.velocity.x > 0, "a successfully piercing core should keep forward velocity");
 });
 
 test("destroying an impacted block can consume the source physics core", () => {

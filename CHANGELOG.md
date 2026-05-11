@@ -15,10 +15,12 @@
 - Added a shared debris-shape catalog for varied low-poly active fragments, with non-uniform shard scales, cuboid physics envelopes, and baked rubble visuals that preserve the settled shard shape.
 - Split pause-menu `Settings` into `Graphics` and `Gameplay` tabs so visual/performance tuning stays separate from core feel, health bars, and cleanup.
 - Added pause-menu physics-core size and velocity sliders, with smaller/faster first-pass defaults and local persistence for future throw tuning.
+- Added projectile-footprint carving and tiny-core piercing: small fast cores can open a complete bite-lattice tunnel and continue into air with reduced speed, while wider cores chew a broader face gouge and stop.
 
 ### Changed
 
 - Changed damaged partial-terrain visuals from surface dents into hidden 3x3x3 apple-bite volumes: removed visual cells now follow damage/maxHealth, exposed bite interiors render as wrinkled faceted surfaces, and the lattice stays presentation-only while gameplay material remains normalized.
+- Changed partial-terrain bite ranking to follow the core's swept trajectory and radius, so tiny cores remove a narrow column and larger cores remove neighboring face cells before drilling deeper.
 - Changed Physics Core terrain hits from one-shot block deletion plus visual scars into one-health carve steps; ordinary terrain now chips first, ejects debris as material is removed, then fractures into leftover debris once its health is exhausted.
 - Changed final partial-terrain fracture to leave air instead of stamping the old wrinkled surface puddle.
 - Changed final terrain-fracture debris counts to scale with the material still left inside the block, so nearly-broken blocks no longer explode as if they were untouched full voxels.

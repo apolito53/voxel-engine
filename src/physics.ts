@@ -45,6 +45,8 @@ export type PhysicsImpact = {
   readonly normal: THREE.Vector3;
   readonly speed: number;
   readonly position: THREE.Vector3;
+  readonly incomingVelocity: THREE.Vector3;
+  readonly radius: number;
 };
 
 type PhysicsToyOptions = {
@@ -227,6 +229,19 @@ export class PhysicsToy {
     this.angularVelocity.set(0, 0, 0);
   }
 
+  continueAfterPierce(position: THREE.Vector3, velocity: THREE.Vector3): void {
+    if (this.expired) return;
+
+    // Terrain piercing is resolved after the normal terrain collision has
+    // already bounced the core. This method is the deliberate override that
+    // places the projectile at the tunnel exit and restores its forward speed.
+    this.sleeping = false;
+    this.supportAnchoredSleep = false;
+    this.settledSeconds = 0;
+    this.mesh.position.copy(position);
+    this.velocity.copy(velocity);
+  }
+
   sleepInPlace(supportAnchored = true): void {
     if (!this.isInstancedFragment || this.expired) return;
 
@@ -317,7 +332,9 @@ export class PhysicsToy {
             block: { x: sweptBlockHit.x, y: sweptBlockHit.y, z: sweptBlockHit.z },
             normal: sweptBlockHit.normal.clone(),
             speed: -impact,
-            position: p.clone()
+            position: p.clone(),
+            incomingVelocity: this.velocity.clone(),
+            radius: this.radius
           });
         }
         this.resolveBlockBounce(sweptBlockHit.normal, impact);
@@ -361,7 +378,9 @@ export class PhysicsToy {
                 block: { x, y, z },
                 normal: normal.clone(),
                 speed: -impact,
-                position: p.clone()
+                position: p.clone(),
+                incomingVelocity: this.velocity.clone(),
+                radius: this.radius
               });
             }
             this.resolveBlockBounce(normal, impact);

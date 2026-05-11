@@ -1156,10 +1156,14 @@ function processPhysicsImpacts(
   endIndex: number,
   damagedBlocksThisFrame: Set<string>
 ): void {
+  const continuedSources = new Set<PhysicsToy>();
   for (let index = startIndex; index < endIndex; index += 1) {
     const impact = physicsImpacts[index];
     if (!impact) continue;
-    handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame);
+    if (continuedSources.has(impact.source)) continue;
+    if (handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame)) {
+      continuedSources.add(impact.source);
+    }
   }
 }
 
@@ -1272,12 +1276,12 @@ function handlePhysicsImpact(
   activeWorld: VoxelWorld,
   impact: PhysicsImpact,
   damagedBlocksThisFrame: Set<string>
-): void {
-  if (impact.source.isExpired) return;
-  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return;
+): boolean {
+  if (impact.source.isExpired) return false;
+  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return false;
 
   const damageKey = activeWorld.damageKey(impact.block.x, impact.block.y, impact.block.z);
-  if (damagedBlocksThisFrame.has(damageKey)) return;
+  if (damagedBlocksThisFrame.has(damageKey)) return false;
   damagedBlocksThisFrame.add(damageKey);
 
   const result = activeWorld.carveBlock({
@@ -1286,10 +1290,12 @@ function handlePhysicsImpact(
     z: impact.block.z,
     point: impact.position,
     normal: impact.normal,
+    incomingDirection: impact.incomingVelocity,
+    coreRadius: impact.radius,
     speed: impact.speed,
     amount: PARTIAL_BLOCK_CORE_DAMAGE
   });
-  if (!result) return;
+  if (!result) return false;
 
   engineEvents.emit("block:damaged", {
     position: result.position,
@@ -1300,10 +1306,26 @@ function handlePhysicsImpact(
   });
   showBlockDamageIndicator(result);
 
-  // Core impacts now spend the projectile on the terrain event itself. A hit
-  // either leaves a carved partial block behind or finishes an already chipped
-  // voxel, but every carve can kick out the material slice it just removed.
-  impact.source.expire();
+  const pierceContinuation = result.pierceContinuation;
+  if (pierceContinuation) {
+    impact.source.continueAfterPierce(
+      new THREE.Vector3(
+        pierceContinuation.position.x,
+        pierceContinuation.position.y,
+        pierceContinuation.position.z
+      ),
+      new THREE.Vector3(
+        pierceContinuation.velocity.x,
+        pierceContinuation.velocity.y,
+        pierceContinuation.velocity.z
+      )
+    );
+  } else {
+    // Most terrain impacts still spend the projectile on the terrain event.
+    // Small fast cores are the one exception: a complete bite-lattice tunnel
+    // can hand back an exit pose and reduced forward speed.
+    impact.source.expire();
+  }
 
   const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
   const fragmentCount = getTerrainImpactFragmentCount(
@@ -1319,7 +1341,7 @@ function handlePhysicsImpact(
     });
   }
 
-  if (!result.destroyed) return;
+  if (!result.destroyed) return Boolean(pierceContinuation);
 
   engineEvents.emit("block:destroyed", {
     position: result.position,
@@ -1327,6 +1349,7 @@ function handlePhysicsImpact(
     impactSpeed: impact.speed,
     fragmentCount
   });
+  return Boolean(pierceContinuation);
 }
 
 function spawnBlockFragments(
