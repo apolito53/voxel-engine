@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import packageManifest from "../package.json";
 import "./style.css";
 import {
   ADMIN_COMMAND_TOGGLE_KEY,
@@ -162,6 +163,7 @@ import { VoxelWorld, type BlockDamageResult, type ChunkCoords, type WorldStats }
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
+const APP_VERSION = packageManifest.version;
 const TARGET_HIT_EPSILON = 0.0001;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
@@ -257,6 +259,10 @@ const novaChatInput = requireElement<HTMLInputElement>("#nova-chat-input");
 const novaChatCloseButton = requireElement<HTMLButtonElement>("#nova-chat-close");
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 const damageIndicatorRoot = requireElement<HTMLElement>("#damage-indicators");
+
+for (const versionLabel of document.querySelectorAll<HTMLElement>("[data-app-version]")) {
+  versionLabel.textContent = `v${APP_VERSION}`;
+}
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
