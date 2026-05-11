@@ -356,6 +356,12 @@ export class PhysicsToy {
       for (let z = minZ; z <= maxZ; z += 1) {
         for (let x = minX; x <= maxX; x += 1) {
           if (!world.isSolid(x, y, z)) continue;
+          if (
+            !this.isInstancedFragment &&
+            !canProjectileHitBlock(world, x, y, z, this.previousPosition, this.movementStep, this.radius)
+          ) {
+            continue;
+          }
 
           this.closestPoint.set(
             clampToBlock(p.x, x),
@@ -418,6 +424,7 @@ export class PhysicsToy {
       for (let z = minZ; z <= maxZ; z += 1) {
         for (let x = minX; x <= maxX; x += 1) {
           if (!world.isSolid(x, y, z)) continue;
+          if (!canProjectileHitBlock(world, x, y, z, start, movement, this.radius)) continue;
 
           const hitT = intersectMovingPointWithExpandedBlock(
             start,
@@ -859,6 +866,18 @@ export class PhysicsToyCollider {
 
 function clampToBlock(value: number, blockCoordinate: number): number {
   return Math.max(blockCoordinate, Math.min(value, blockCoordinate + 1));
+}
+
+function canProjectileHitBlock(
+  world: CollisionWorld,
+  x: number,
+  y: number,
+  z: number,
+  start: THREE.Vector3,
+  movement: THREE.Vector3,
+  radius: number
+): boolean {
+  return world.canProjectileHitBlock?.(x, y, z, start, movement, radius) ?? true;
 }
 
 function intersectMovingPointWithExpandedBlock(

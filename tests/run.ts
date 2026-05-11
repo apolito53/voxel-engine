@@ -4249,6 +4249,84 @@ test("fast small physics cores hit the first block along their swept path", () =
   );
 });
 
+test("small fast physics cores pass through existing visual holes in partial blocks", () => {
+  const world = new VoxelWorld({ seed: "small-core-existing-hole-test" });
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: getPhysicsCoreRadius(tinyFastSettings),
+    speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.6, 3.5, 4.5),
+    new THREE.Vector3(
+      PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+      0,
+      0
+    ),
+    { radius: getPhysicsCoreRadius(tinyFastSettings) }
+  );
+  const impacts = core.update(1 / 20, world);
+
+  assertEqual(impacts.length, 1, "the open visual tunnel should not consume the next core impact");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 3, y: 3, z: 4 },
+    "the next core should hit the visible block behind the already-open bite tunnel"
+  );
+});
+
+test("small fast physics cores still hit remaining partial-block material", () => {
+  const world = new VoxelWorld({ seed: "small-core-partial-material-test" });
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: getPhysicsCoreRadius(tinyFastSettings),
+    speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.6, 3.84, 4.84),
+    new THREE.Vector3(
+      PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+      0,
+      0
+    ),
+    { radius: getPhysicsCoreRadius(tinyFastSettings) }
+  );
+  const impacts = core.update(1 / 20, world);
+
+  assertEqual(impacts.length, 1, "remaining visual material should still collide with tiny cores");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 2, y: 3, z: 4 },
+    "partial terrain should only open the removed tunnel, not the whole voxel"
+  );
+});
+
 test("small fast physics cores can pierce a block and damage one behind an air gap", () => {
   const world = new VoxelWorld({ seed: "small-core-pierce-runtime-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);

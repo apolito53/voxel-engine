@@ -8,7 +8,7 @@ import type {
   ChunkWorkerRequest,
   ChunkWorkerResult
 } from "./chunkProtocol";
-import type { CollisionBounds, CollisionWorld } from "./collision";
+import type { CollisionBounds, CollisionVector, CollisionWorld } from "./collision";
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
@@ -127,6 +127,68 @@ function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]
 
 function clamp01ForWorld(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function segmentIntersectsAabb(
+  start: CollisionVector,
+  movement: CollisionVector,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+  minZ: number,
+  maxZ: number
+): boolean {
+  let entryTime = 0;
+  let exitTime = 1;
+  const xHit = getAxisSegmentTimes(start.x, movement.x, minX, maxX);
+  if (!xHit) return false;
+  entryTime = Math.max(entryTime, xHit.entryTime);
+  exitTime = Math.min(exitTime, xHit.exitTime);
+  if (entryTime > exitTime) return false;
+
+  const yHit = getAxisSegmentTimes(start.y, movement.y, minY, maxY);
+  if (!yHit) return false;
+  entryTime = Math.max(entryTime, yHit.entryTime);
+  exitTime = Math.min(exitTime, yHit.exitTime);
+  if (entryTime > exitTime) return false;
+
+  const zHit = getAxisSegmentTimes(start.z, movement.z, minZ, maxZ);
+  if (!zHit) return false;
+  entryTime = Math.max(entryTime, zHit.entryTime);
+  exitTime = Math.min(exitTime, zHit.exitTime);
+  return entryTime <= exitTime;
+}
+
+function getAxisSegmentTimes(
+  start: number,
+  movement: number,
+  min: number,
+  max: number
+): { readonly entryTime: number; readonly exitTime: number } | null {
+  if (Math.abs(movement) <= 0.000001) {
+    return start >= min && start <= max
+      ? { entryTime: 0, exitTime: 1 }
+      : null;
+  }
+
+  const inverseMovement = 1 / movement;
+  let entryTime = (min - start) * inverseMovement;
+  let exitTime = (max - start) * inverseMovement;
+  if (entryTime > exitTime) {
+    const previousEntryTime = entryTime;
+    entryTime = exitTime;
+    exitTime = previousEntryTime;
+  }
+  return { entryTime, exitTime };
+}
+
+function decodePartialBlockVisualCell(index: number): { readonly x: number; readonly y: number; readonly z: number } {
+  return {
+    x: index % BLOCK_FRAGMENT_GRID_SIZE,
+    y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
+    z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
+  };
 }
 
 function normalizeVoxelVector(vector: Pick<THREE.Vector3, "x" | "y" | "z"> | undefined): VoxelVector | null {
@@ -1451,6 +1513,43 @@ export class VoxelWorld implements CollisionWorld {
     if (y < 0) return true;
     const block = this.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
     return block !== BLOCK.air;
+  }
+
+  canProjectileHitBlock(
+    x: number,
+    y: number,
+    z: number,
+    start: CollisionVector,
+    movement: CollisionVector,
+    radius: number
+  ): boolean {
+    const blockX = Math.floor(x);
+    const blockY = Math.floor(y);
+    const blockZ = Math.floor(z);
+    const cell = this.getPartialBlock(blockX, blockY, blockZ);
+    if (!cell) return true;
+
+    const removedCells = new Set(
+      cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
+    );
+    const safeRadius = Number.isFinite(radius) ? Math.max(0, radius) : 0;
+    const cellSize = 1 / BLOCK_FRAGMENT_GRID_SIZE;
+
+    for (let index = 0; index < BLOCK_FRAGMENT_GRID_SIZE ** 3; index += 1) {
+      if (removedCells.has(index)) continue;
+      const visualCell = decodePartialBlockVisualCell(index);
+      const minX = blockX + visualCell.x * cellSize - safeRadius;
+      const maxX = blockX + (visualCell.x + 1) * cellSize + safeRadius;
+      const minY = blockY + visualCell.y * cellSize - safeRadius;
+      const maxY = blockY + (visualCell.y + 1) * cellSize + safeRadius;
+      const minZ = blockZ + visualCell.z * cellSize - safeRadius;
+      const maxZ = blockZ + (visualCell.z + 1) * cellSize + safeRadius;
+      if (segmentIntersectsAabb(start, movement, minX, maxX, minY, maxY, minZ, maxZ)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   rebuildDirty(

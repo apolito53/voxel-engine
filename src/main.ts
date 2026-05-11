@@ -370,6 +370,8 @@ const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // so feet, loose debris, and rigid debris can treat them as walkable/contact
   // surfaces without promoting every patch to a solid voxel.
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
+  canProjectileHitBlock: (x, y, z, start, movement, radius) =>
+    requireWorld().canProjectileHitBlock(x, y, z, start, movement, radius),
   getSupportHeight: (bounds) => {
     const terrainSupportY = requireWorld().getSupportHeight(bounds);
     const rubbleSupportY = rubbleField.getSupportHeight(bounds);

@@ -31,6 +31,7 @@
 
 - Fixed damaged partial-terrain bites visually refilling when later hits arrive from a different side; removed bite cells now persist and only expand as damage increases.
 - Fixed tiny fast Physics Cores failing to pierce when the hit landed near a 3x3x3 bite-lattice seam; tiny cores now reserve the nearest continuous tunnel before the pierce check runs.
+- Fixed thrown cores colliding with a chipped block's full invisible cube after a visual tunnel already exists; projectile collision now checks the remaining bite-lattice material while player/debris/raycast behavior stays full-cube until final fracture.
 - Fixed Physics Core launches inheriting an upward arc instead of firing straight along the current aim direction.
 - Fixed small fast Physics Cores tunneling through the front terrain block and damaging a block behind it.
 - Fixed fast rigid debris sometimes outrunning its temporary terrain-collider bubble before landing.
