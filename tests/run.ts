@@ -1949,6 +1949,34 @@ test("tiny fast partial-block bites can pierce through an open tunnel", () => {
   assert(result.pierceContinuation.velocity.x > 0, "pierce continuation should keep forward velocity");
 });
 
+test("tiny fast off-center bites still reserve a continuous pierce tunnel", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-off-center-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.34, 4.34),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.2,
+    speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * (PHYSICS_CORE_VELOCITY_MAX_PERCENT / 100),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
+
+  assert(result?.pierceContinuation, "tiny fast cores should pierce even when the aim point is near lattice seams");
+  assertEqual(removedCells.length, 3, "one tiny pierce should still spend one carve step of visual material");
+  assertDeepEqual(
+    removedCells.map((cell) => cell.x).sort(),
+    [0, 1, 2],
+    "off-center tiny cores should reserve one continuous through-depth tunnel"
+  );
+});
+
 test("large fast partial-block bites gouge instead of piercing", () => {
   const world = new VoxelWorld({ seed: "partial-bite-large-no-pierce-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
@@ -4227,10 +4255,18 @@ test("small fast physics cores can pierce a block and damage one behind an air g
   world.setBlock(3, 3, 4, BLOCK.air);
   world.setBlock(4, 3, 4, BLOCK.stone);
   world.setBlock(5, 3, 4, BLOCK.air);
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
   const core = new PhysicsToy(
-    new THREE.Vector3(1.6, 3.5, 4.5),
-    new THREE.Vector3(30, 0, 0),
-    { radius: PHYSICS_CORE_BASE_RADIUS * 0.3 }
+    new THREE.Vector3(1.6, 3.34, 4.34),
+    new THREE.Vector3(
+      PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+      0,
+      0
+    ),
+    { radius: getPhysicsCoreRadius(tinyFastSettings) }
   );
   const damagedThisFrame = new Set<string>();
 

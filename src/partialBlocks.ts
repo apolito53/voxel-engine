@@ -101,6 +101,7 @@ type PartialBlockLatticeCell = {
   readonly index: number;
   readonly center: PartialBlockPosition;
 };
+type PartialBlockAxis = "x" | "y" | "z";
 
 export class PartialBlockMeshField {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
@@ -396,6 +397,23 @@ export function createPartialBlockRemovedVisualCellIndexes(
   }
   if (removed.size >= targetRemovedCount) return [...removed];
 
+  for (let cutIndex = cell.cuts.length - 1; cutIndex >= 0; cutIndex -= 1) {
+    const cut = cell.cuts[cutIndex];
+    if (!cut || !isTinyCoreCut(cut)) continue;
+
+    for (const tunnelIndex of createPartialBlockTrajectoryTunnelCellIndexes(
+      cut.localPoint,
+      cut.trajectory ?? {
+        x: -cut.normal.x,
+        y: -cut.normal.y,
+        z: -cut.normal.z
+      }
+    )) {
+      removed.add(tunnelIndex);
+      if (removed.size >= targetRemovedCount) return [...removed];
+    }
+  }
+
   const rankedCells = PARTIAL_BLOCK_LATTICE_CELLS
     .map((latticeCell) => ({
       index: latticeCell.index,
@@ -409,6 +427,37 @@ export function createPartialBlockRemovedVisualCellIndexes(
   }
 
   return [...removed];
+}
+
+export function createPartialBlockTrajectoryTunnelCellIndexes(
+  localPoint: PartialBlockPosition,
+  trajectory: PartialBlockPosition
+): readonly number[] {
+  const direction = normalizeDirection(trajectory);
+  if (!direction) return [];
+
+  const dominantAxis = getDominantPartialBlockAxis(direction);
+  const axisDirection = direction[dominantAxis];
+  const depthSlots = createPartialBlockDepthSlots(axisDirection);
+  const indexes: number[] = [];
+
+  for (const depthSlot of depthSlots) {
+    const axisCenter = getPartialBlockLatticeSlotCenter(depthSlot);
+    const travel = Math.abs(axisDirection) > PARTIAL_BLOCK_SURFACE_EPSILON
+      ? (axisCenter - localPoint[dominantAxis]) / axisDirection
+      : 0;
+    const pointOnLine = {
+      x: localPoint.x + direction.x * travel,
+      y: localPoint.y + direction.y * travel,
+      z: localPoint.z + direction.z * travel
+    };
+    const x = dominantAxis === "x" ? depthSlot : getNearestPartialBlockLatticeSlot(pointOnLine.x);
+    const y = dominantAxis === "y" ? depthSlot : getNearestPartialBlockLatticeSlot(pointOnLine.y);
+    const z = dominantAxis === "z" ? depthSlot : getNearestPartialBlockLatticeSlot(pointOnLine.z);
+    indexes.push(x + y * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE + z * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ** 2);
+  }
+
+  return indexes;
 }
 
 function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<number> {
@@ -455,6 +504,42 @@ function scorePartialBlockLatticeCellForRemoval(
     bestScore = Math.min(bestScore, score);
   }
   return bestScore;
+}
+
+function isTinyCoreCut(cut: PartialBlockCut): boolean {
+  return typeof cut.coreRadius === "number" &&
+    Number.isFinite(cut.coreRadius) &&
+    cut.coreRadius <= PARTIAL_BLOCK_LATTICE_CELL_SIZE * 0.5;
+}
+
+function createPartialBlockDepthSlots(axisDirection: number): readonly number[] {
+  return Array.from(
+    { length: PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE },
+    (_, index) => axisDirection >= 0 ? index : PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE - 1 - index
+  );
+}
+
+function getPartialBlockLatticeSlotCenter(slot: number): number {
+  return (slot + 0.5) / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
+}
+
+function getNearestPartialBlockLatticeSlot(value: number): number {
+  return Math.max(
+    0,
+    Math.min(
+      PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE - 1,
+      Math.round(clamp01(value) * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE - 0.5)
+    )
+  );
+}
+
+function getDominantPartialBlockAxis(vector: PartialBlockPosition): PartialBlockAxis {
+  const ax = Math.abs(vector.x);
+  const ay = Math.abs(vector.y);
+  const az = Math.abs(vector.z);
+  if (ax >= ay && ax >= az) return "x";
+  if (ay >= ax && ay >= az) return "y";
+  return "z";
 }
 
 function addPartialBlockLatticeGeometry(

@@ -16,6 +16,7 @@ import {
   createPartialBlockKey,
   createPartialBlockRemovedVisualCellIndexes,
   createPartialBlockSurfaceSamples,
+  createPartialBlockTrajectoryTunnelCellIndexes,
   getPartialBlockSupportHeight,
   type PartialBlockCell,
   type PartialBlockCut,
@@ -46,7 +47,6 @@ const PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED = 14;
 const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
 const PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST = 2.8;
 const PARTIAL_BLOCK_PIERCE_EXIT_MARGIN = 0.02;
-const PARTIAL_BLOCK_PIERCE_TUNNEL_RADIUS_PADDING = 0.09;
 
 export type WorldStats = {
   readonly loadedChunks: number;
@@ -120,8 +120,6 @@ export type VoxelVector = {
   readonly z: number;
 };
 
-type VoxelAxis = "x" | "y" | "z";
-
 function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
   if (samples.length <= PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL) return [...samples];
   return samples.slice(samples.length - PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL);
@@ -145,58 +143,15 @@ function normalizeVoxelVector(vector: Pick<THREE.Vector3, "x" | "y" | "z"> | und
 function getPartialBlockPierceTunnelCellCount(
   cell: PartialBlockCell,
   cut: PartialBlockCut,
-  trajectory: VoxelVector,
-  coreRadius: number
+  trajectory: VoxelVector
 ): number {
   const removedIndexes = cell.removedVisualCellIndexes ?? [];
   if (removedIndexes.length === 0) return 0;
 
-  const dominantAxis = getDominantAxis(trajectory);
-  const openDepths = new Set<number>();
-  const tunnelRadius = coreRadius + PARTIAL_BLOCK_PIERCE_TUNNEL_RADIUS_PADDING;
-
-  for (const index of removedIndexes) {
-    const latticeCell = decodePartialBlockLatticeIndex(index);
-    if (!latticeCell) continue;
-
-    const center = {
-      x: (latticeCell.x + 0.5) / BLOCK_FRAGMENT_GRID_SIZE,
-      y: (latticeCell.y + 0.5) / BLOCK_FRAGMENT_GRID_SIZE,
-      z: (latticeCell.z + 0.5) / BLOCK_FRAGMENT_GRID_SIZE
-    };
-    if (getDistanceFromTrajectory(center, cut.localPoint, trajectory) > tunnelRadius) continue;
-    openDepths.add(latticeCell[dominantAxis]);
-  }
-
-  return openDepths.size === BLOCK_FRAGMENT_GRID_SIZE ? openDepths.size : 0;
-}
-
-function decodePartialBlockLatticeIndex(index: number): { readonly x: number; readonly y: number; readonly z: number } | null {
-  if (!Number.isInteger(index) || index < 0 || index >= BLOCK_FRAGMENT_GRID_SIZE ** 3) return null;
-  return {
-    x: index % BLOCK_FRAGMENT_GRID_SIZE,
-    y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
-    z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
-  };
-}
-
-function getDistanceFromTrajectory(
-  point: VoxelVector,
-  origin: VoxelVector,
-  direction: VoxelVector
-): number {
-  const delta = {
-    x: point.x - origin.x,
-    y: point.y - origin.y,
-    z: point.z - origin.z
-  };
-  const depth = delta.x * direction.x + delta.y * direction.y + delta.z * direction.z;
-  const lateral = {
-    x: delta.x - direction.x * depth,
-    y: delta.y - direction.y * depth,
-    z: delta.z - direction.z * depth
-  };
-  return Math.hypot(lateral.x, lateral.y, lateral.z);
+  const removedSet = new Set(removedIndexes);
+  const tunnelIndexes = createPartialBlockTrajectoryTunnelCellIndexes(cut.localPoint, trajectory);
+  const openTunnelCellCount = tunnelIndexes.filter((index) => removedSet.has(index)).length;
+  return openTunnelCellCount === BLOCK_FRAGMENT_GRID_SIZE ? openTunnelCellCount : 0;
 }
 
 function createPartialBlockPierceExitPosition(
@@ -226,15 +181,6 @@ function getAxisExitDistance(localCoordinate: number, direction: number): number
   if (direction > 0.000001) return (1 - localCoordinate) / direction;
   if (direction < -0.000001) return -localCoordinate / direction;
   return Number.POSITIVE_INFINITY;
-}
-
-function getDominantAxis(vector: VoxelVector): VoxelAxis {
-  const ax = Math.abs(vector.x);
-  const ay = Math.abs(vector.y);
-  const az = Math.abs(vector.z);
-  if (ax >= ay && ax >= az) return "x";
-  if (ay >= ax && ay >= az) return "y";
-  return "z";
 }
 
 type HorizontalViewDirection = Pick<THREE.Vector3, "x" | "z">;
@@ -1167,7 +1113,7 @@ export class VoxelWorld implements CollisionWorld {
       y: -cut.normal.y,
       z: -cut.normal.z
     };
-    const tunnelCellCount = getPartialBlockPierceTunnelCellCount(cell, cut, trajectory, coreRadius);
+    const tunnelCellCount = getPartialBlockPierceTunnelCellCount(cell, cut, trajectory);
     if (tunnelCellCount < BLOCK_FRAGMENT_GRID_SIZE) return undefined;
 
     const exitSpeed = input.speed -
