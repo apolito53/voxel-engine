@@ -1176,18 +1176,22 @@ body:not(.in-world) #crosshair {
   left: 50%;
   top: 50%;
   z-index: 11;
-  width: 14px;
-  height: 14px;
+  width: 38px;
+  height: 38px;
   transform: translate(-50%, -50%);
   pointer-events: none;
+  --crosshair-color: rgba(255, 255, 255, 0.9);
+  --crosshair-shadow: rgba(0, 0, 0, 0.72);
 }
 
 #crosshair::before,
 #crosshair::after {
   content: "";
   position: absolute;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
 }
 
 @media (max-width: 720px) {
@@ -1201,15 +1205,39 @@ body:not(.in-world) #crosshair {
 }
 
 #crosshair::before {
-  left: 6px;
-  top: 0;
-  width: 2px;
-  height: 14px;
+  width: 38px;
+  height: 38px;
+  background:
+    linear-gradient(
+      to right,
+      var(--crosshair-shadow) 0 10px,
+      transparent 10px 28px,
+      var(--crosshair-shadow) 28px 38px
+    ) center / 100% 4px no-repeat,
+    linear-gradient(
+      to bottom,
+      var(--crosshair-shadow) 0 10px,
+      transparent 10px 28px,
+      var(--crosshair-shadow) 28px 38px
+    ) center / 4px 100% no-repeat,
+    radial-gradient(circle, transparent 0 5px, var(--crosshair-shadow) 5px 10px, transparent 10px);
 }
 
 #crosshair::after {
-  left: 0;
-  top: 6px;
-  width: 14px;
-  height: 2px;
+  width: 36px;
+  height: 36px;
+  background:
+    linear-gradient(
+      to right,
+      var(--crosshair-color) 0 9px,
+      transparent 9px 27px,
+      var(--crosshair-color) 27px 36px
+    ) center / 100% 2px no-repeat,
+    linear-gradient(
+      to bottom,
+      var(--crosshair-color) 0 9px,
+      transparent 9px 27px,
+      var(--crosshair-color) 27px 36px
+    ) center / 2px 100% no-repeat,
+    radial-gradient(circle, transparent 0 6px, var(--crosshair-color) 6px 8px, transparent 8px);
 }
