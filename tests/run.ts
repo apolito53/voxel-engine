@@ -172,9 +172,11 @@ import {
   snapShadowAnchorToTexelGrid
 } from "../src/shadows";
 import {
+  ADS_FOV_MULTIPLIER,
   BASE_CAMERA_FOV,
   SPRINT_FOV_MULTIPLIER,
   SPRINT_FOV_RESPONSE,
+  getPlayerCameraTargetFov,
   getSprintFeedbackTargetFov,
   smoothSprintFeedbackFov
 } from "../src/sprintFeedback";
@@ -1196,9 +1198,17 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
 
 test("sprint feedback widens FOV smoothly without touching base camera setup", () => {
   const sprintFov = BASE_CAMERA_FOV * SPRINT_FOV_MULTIPLIER;
+  const adsFov = BASE_CAMERA_FOV * ADS_FOV_MULTIPLIER;
 
   assertEqual(getSprintFeedbackTargetFov(false), BASE_CAMERA_FOV, "inactive sprint feedback should use base FOV");
   assertEqual(getSprintFeedbackTargetFov(true), sprintFov, "active sprint feedback should widen FOV by 15 percent");
+  assertEqual(getPlayerCameraTargetFov(false, false), BASE_CAMERA_FOV, "inactive camera feedback should use base FOV");
+  assertEqual(getPlayerCameraTargetFov(false, true), adsFov, "ADS should zoom camera FOV inward by 15 percent");
+  assertEqual(
+    getPlayerCameraTargetFov(true, true),
+    sprintFov * ADS_FOV_MULTIPLIER,
+    "ADS should layer onto the current movement feedback target"
+  );
   assert(SPRINT_FOV_RESPONSE > 0, "sprint feedback FOV smoothing should move toward its target");
 
   const firstSprintStep = smoothSprintFeedbackFov(BASE_CAMERA_FOV, sprintFov, 1 / 60);
@@ -1211,6 +1221,12 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
   assert(
     firstReleaseStep > BASE_CAMERA_FOV && firstReleaseStep < sprintFov,
     "sprint feedback should ease back to base FOV"
+  );
+
+  const firstAdsStep = smoothSprintFeedbackFov(BASE_CAMERA_FOV, adsFov, 1 / 60);
+  assert(
+    firstAdsStep > adsFov && firstAdsStep < BASE_CAMERA_FOV,
+    "ADS zoom should ease inward instead of snapping"
   );
 });
 

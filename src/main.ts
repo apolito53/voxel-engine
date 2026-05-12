@@ -48,6 +48,8 @@ import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "
 import { readGpuInfo } from "./gpu";
 import {
   createHotbarItems,
+  canFireHitscanCoreWithHotbarItem,
+  canThrowCoreWithHotbarItem,
   getHotbarIndexFromDigitCode,
   getHotbarItemLabel,
   getHotbarItemCategory,
@@ -162,7 +164,7 @@ import {
 import {
   BASE_CAMERA_FOV,
   SPRINT_FEEDBACK_ACTIVE_CLASS,
-  getSprintFeedbackTargetFov,
+  getPlayerCameraTargetFov,
   smoothSprintFeedbackFov
 } from "./sprintFeedback";
 import { createSkybox } from "./skybox";
@@ -1169,7 +1171,7 @@ function animate(): void {
     updateHud();
     updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
-    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), delta);
+    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), isPlayerCoreAdsActive(), delta);
     damageIndicators.update(camera, window.innerWidth, window.innerHeight);
     recordTimingSection("otherMs");
     minimapRenderer.update(delta);
@@ -1179,7 +1181,7 @@ function animate(): void {
   } else {
     targetBlockHighlighter.hide();
     damageIndicators.clear();
-    updateSprintFeedback(false, delta);
+    updateSprintFeedback(false, false, delta);
     recordTimingSection("otherMs");
   }
 
@@ -1394,8 +1396,8 @@ function selectHotbarIndex(index: number): void {
   updateHud();
 }
 
-function updateSprintFeedback(active: boolean, delta: number): void {
-  const targetFov = getSprintFeedbackTargetFov(active);
+function updateSprintFeedback(sprintActive: boolean, adsActive: boolean, delta: number): void {
+  const targetFov = getPlayerCameraTargetFov(sprintActive, adsActive);
   const nextFov = smoothSprintFeedbackFov(camera.fov, targetFov, delta);
 
   if (camera.fov !== nextFov) {
@@ -1403,7 +1405,14 @@ function updateSprintFeedback(active: boolean, delta: number): void {
     camera.updateProjectionMatrix();
   }
 
-  sprintOverlay.classList.toggle(SPRINT_FEEDBACK_ACTIVE_CLASS, active);
+  sprintOverlay.classList.toggle(SPRINT_FEEDBACK_ACTIVE_CLASS, sprintActive);
+}
+
+function isPlayerCoreAdsActive(): boolean {
+  if (!rightMouseButtonDown) return false;
+  const selectedItem = getSelectedHotbarItem();
+  return canThrowCoreWithHotbarItem(selectedItem, itemRegistry)
+    || canFireHitscanCoreWithHotbarItem(selectedItem, itemRegistry);
 }
 
 function getTargetHit(): TargetHit | null {

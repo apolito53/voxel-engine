@@ -5,6 +5,7 @@
 ### Changed
 
 - Changed the in-world crosshair to a circular reticle with separated ticks and an open center for clearer aiming.
+- Changed core ADS to apply a slight 15% camera zoom while right click is held on Physics Core or Hitscan Core.
 
 ## 0.6.0 - 2026-05-12
 
