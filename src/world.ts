@@ -1,4 +1,5 @@
 import type * as THREE from "three";
+import { BLOCK_FRAGMENT_GRID_SIZE, getEjectedBlockRubbleMaterialUnits } from "./blockFragments";
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
@@ -7,8 +8,21 @@ import type {
   ChunkWorkerRequest,
   ChunkWorkerResult
 } from "./chunkProtocol";
-import type { CollisionWorld } from "./collision";
+import type { CollisionBounds, CollisionVector, CollisionWorld } from "./collision";
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
+import {
+  PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
+  createPartialBlockCut,
+  createPartialBlockKey,
+  createPartialBlockRemovedVisualCellIndexes,
+  createPartialBlockSurfaceSamples,
+  createPartialBlockTrajectoryTunnelCellIndexes,
+  getPartialBlockSupportHeight,
+  type PartialBlockCell,
+  type PartialBlockCut,
+  type PartialBlockPosition,
+  type PartialBlockSurfaceSample
+} from "./partialBlocks";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext } from "./terrain";
 
 const LOAD_RADIUS = 4;
@@ -23,6 +37,16 @@ const VIEW_PRIORITY_FRONT_DOT = 0.42;
 const VIEW_PRIORITY_SIDE_DOT = -0.15;
 const FRUSTUM_PRIORITY_PADDING = CHUNK_SIZE * 0.5;
 const STORAGE_SAVE_DEBOUNCE_MS = 250;
+const PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS = 1;
+const PARTIAL_BLOCK_SURFACE_PATCH_MIN_STRENGTH = 0.34;
+const PARTIAL_BLOCK_SURFACE_PATCH_FORWARD_BONUS = 0.18;
+const PARTIAL_BLOCK_SURFACE_PATCH_BACK_PENALTY = 0.12;
+const PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL = 8;
+const PARTIAL_BLOCK_PIERCE_MAX_CORE_RADIUS = 1 / (BLOCK_FRAGMENT_GRID_SIZE * 2);
+const PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED = 14;
+const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
+const PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST = 2.8;
+const PARTIAL_BLOCK_PIERCE_EXIT_MARGIN = 0.02;
 
 export type WorldStats = {
   readonly loadedChunks: number;
@@ -62,6 +86,26 @@ export type BlockDamageResult = {
   readonly remainingHealth: number;
   readonly maxHealth: number;
   readonly destroyed: boolean;
+  readonly ejectedRubbleMaterialUnits?: number;
+  readonly pierceContinuation?: BlockPierceContinuation;
+};
+
+export type BlockPierceContinuation = {
+  readonly position: VoxelVector;
+  readonly velocity: VoxelVector;
+  readonly speed: number;
+};
+
+export type BlockCarveInput = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly incomingDirection?: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly coreRadius?: number;
+  readonly speed: number;
+  readonly amount?: number;
 };
 
 export type VoxelBlockPosition = {
@@ -69,6 +113,137 @@ export type VoxelBlockPosition = {
   readonly y: number;
   readonly z: number;
 };
+
+export type VoxelVector = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
+function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
+  if (samples.length <= PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL) return [...samples];
+  return samples.slice(samples.length - PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL);
+}
+
+function clamp01ForWorld(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function segmentIntersectsAabb(
+  start: CollisionVector,
+  movement: CollisionVector,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+  minZ: number,
+  maxZ: number
+): boolean {
+  let entryTime = 0;
+  let exitTime = 1;
+  const xHit = getAxisSegmentTimes(start.x, movement.x, minX, maxX);
+  if (!xHit) return false;
+  entryTime = Math.max(entryTime, xHit.entryTime);
+  exitTime = Math.min(exitTime, xHit.exitTime);
+  if (entryTime > exitTime) return false;
+
+  const yHit = getAxisSegmentTimes(start.y, movement.y, minY, maxY);
+  if (!yHit) return false;
+  entryTime = Math.max(entryTime, yHit.entryTime);
+  exitTime = Math.min(exitTime, yHit.exitTime);
+  if (entryTime > exitTime) return false;
+
+  const zHit = getAxisSegmentTimes(start.z, movement.z, minZ, maxZ);
+  if (!zHit) return false;
+  entryTime = Math.max(entryTime, zHit.entryTime);
+  exitTime = Math.min(exitTime, zHit.exitTime);
+  return entryTime <= exitTime;
+}
+
+function getAxisSegmentTimes(
+  start: number,
+  movement: number,
+  min: number,
+  max: number
+): { readonly entryTime: number; readonly exitTime: number } | null {
+  if (Math.abs(movement) <= 0.000001) {
+    return start >= min && start <= max
+      ? { entryTime: 0, exitTime: 1 }
+      : null;
+  }
+
+  const inverseMovement = 1 / movement;
+  let entryTime = (min - start) * inverseMovement;
+  let exitTime = (max - start) * inverseMovement;
+  if (entryTime > exitTime) {
+    const previousEntryTime = entryTime;
+    entryTime = exitTime;
+    exitTime = previousEntryTime;
+  }
+  return { entryTime, exitTime };
+}
+
+function decodePartialBlockVisualCell(index: number): { readonly x: number; readonly y: number; readonly z: number } {
+  return {
+    x: index % BLOCK_FRAGMENT_GRID_SIZE,
+    y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
+    z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
+  };
+}
+
+function normalizeVoxelVector(vector: Pick<THREE.Vector3, "x" | "y" | "z"> | undefined): VoxelVector | null {
+  if (!vector) return null;
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (!Number.isFinite(length) || length <= 0.000001) return null;
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+    z: vector.z / length
+  };
+}
+
+function getPartialBlockPierceTunnelCellCount(
+  cell: PartialBlockCell,
+  cut: PartialBlockCut,
+  trajectory: VoxelVector
+): number {
+  const removedIndexes = cell.removedVisualCellIndexes ?? [];
+  if (removedIndexes.length === 0) return 0;
+
+  const removedSet = new Set(removedIndexes);
+  const tunnelIndexes = createPartialBlockTrajectoryTunnelCellIndexes(cut.localPoint, trajectory);
+  const openTunnelCellCount = tunnelIndexes.filter((index) => removedSet.has(index)).length;
+  return openTunnelCellCount === BLOCK_FRAGMENT_GRID_SIZE ? openTunnelCellCount : 0;
+}
+
+function createPartialBlockPierceExitPosition(
+  position: VoxelBlockPosition,
+  localPoint: VoxelVector,
+  trajectory: VoxelVector,
+  coreRadius: number
+): VoxelVector {
+  const exitDistance = getUnitCubeExitDistance(localPoint, trajectory);
+  const margin = coreRadius + PARTIAL_BLOCK_PIERCE_EXIT_MARGIN;
+  return {
+    x: position.x + localPoint.x + trajectory.x * (exitDistance + margin),
+    y: position.y + localPoint.y + trajectory.y * (exitDistance + margin),
+    z: position.z + localPoint.z + trajectory.z * (exitDistance + margin)
+  };
+}
+
+function getUnitCubeExitDistance(localPoint: VoxelVector, trajectory: VoxelVector): number {
+  let exitDistance = Number.POSITIVE_INFINITY;
+  exitDistance = Math.min(exitDistance, getAxisExitDistance(localPoint.x, trajectory.x));
+  exitDistance = Math.min(exitDistance, getAxisExitDistance(localPoint.y, trajectory.y));
+  exitDistance = Math.min(exitDistance, getAxisExitDistance(localPoint.z, trajectory.z));
+  return Number.isFinite(exitDistance) ? Math.max(0, exitDistance) : 0;
+}
+
+function getAxisExitDistance(localCoordinate: number, direction: number): number {
+  if (direction > 0.000001) return (1 - localCoordinate) / direction;
+  if (direction < -0.000001) return -localCoordinate / direction;
+  return Number.POSITIVE_INFINITY;
+}
 
 type HorizontalViewDirection = Pick<THREE.Vector3, "x" | "z">;
 
@@ -176,6 +351,8 @@ export class VoxelWorld implements CollisionWorld {
   lastMeshedChunks: number;
   lastRequestedMeshes: number;
   private readonly blockDamage: Map<string, number>;
+  private readonly partialBlocks: Map<string, PartialBlockCell>;
+  private partialBlockGeometryRevision: number;
 
   constructor({ storage = createNullChunkStorage(), seed = "" }: WorldOptions = {}) {
     this.chunks = new Map();
@@ -223,6 +400,8 @@ export class VoxelWorld implements CollisionWorld {
     this.lastMeshedChunks = 0;
     this.lastRequestedMeshes = 0;
     this.blockDamage = new Map();
+    this.partialBlocks = new Map();
+    this.partialBlockGeometryRevision = 0;
   }
 
   async switchStorage(storage: ChunkStorage, scene: THREE.Scene, seed = ""): Promise<void> {
@@ -234,6 +413,8 @@ export class VoxelWorld implements CollisionWorld {
     this.terrain = createTerrainContext(this.seed);
     this.savedChunks.clear();
     this.blockDamage.clear();
+    this.partialBlocks.clear();
+    this.partialBlockGeometryRevision += 1;
     this.invalidateChunkQueueWindow();
     this.invalidateChunkUnloadWindow();
     await this.loadSavedChunkIndex();
@@ -284,6 +465,8 @@ export class VoxelWorld implements CollisionWorld {
     this.workerResults.length = 0;
     this.savedChunkResults.length = 0;
     this.blockDamage.clear();
+    this.partialBlocks.clear();
+    this.partialBlockGeometryRevision += 1;
     this.dirtyChunkKeys.clear();
     this.modifiedChunkKeys.clear();
   }
@@ -763,9 +946,11 @@ export class VoxelWorld implements CollisionWorld {
     const chunk = this.ensureChunk(cx, cz);
     if (!chunk.setLocal(lx, blockY, lz, block)) {
       if (block === BLOCK.air) this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
+      this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
       return;
     }
     this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
+    this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
     chunk.modified = true;
     this.dirtyChunkKeys.add(key);
     this.modifiedChunkKeys.add(key);
@@ -801,8 +986,106 @@ export class VoxelWorld implements CollisionWorld {
     return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
   }
 
+  carveBlock(input: BlockCarveInput): BlockDamageResult | null {
+    const position = {
+      x: Math.floor(input.x),
+      y: Math.floor(input.y),
+      z: Math.floor(input.z)
+    };
+    const block = this.getBlock(position.x, position.y, position.z);
+    const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
+    if (!definition.solid || definition.health <= 0) return null;
+
+    const key = this.damageKey(position.x, position.y, position.z);
+    const amount = Math.max(0, input.amount ?? 1);
+    const previousDamage = this.blockDamage.get(key) ?? 0;
+    const nextDamage = previousDamage + amount;
+    const remainingHealth = Math.max(0, definition.health - nextDamage);
+    const ejectedRubbleMaterialUnits = getEjectedBlockRubbleMaterialUnits(
+      previousDamage,
+      nextDamage,
+      definition.health
+    );
+
+    if (remainingHealth > 0) {
+      this.blockDamage.set(key, nextDamage);
+      const partialCell = this.addPartialBlockCut(block, position, definition.health, nextDamage, {
+        point: input.point,
+        normal: input.normal,
+        incomingDirection: input.incomingDirection,
+        coreRadius: input.coreRadius,
+        speed: input.speed
+      });
+      const latestCut = partialCell.cuts[partialCell.cuts.length - 1] ?? null;
+      return {
+        block,
+        position,
+        remainingHealth,
+        maxHealth: definition.health,
+        destroyed: false,
+        ejectedRubbleMaterialUnits,
+        pierceContinuation: latestCut
+          ? this.createPartialBlockPierceContinuation(partialCell, latestCut, definition.health, input)
+          : undefined
+      };
+    }
+
+    this.blockDamage.delete(key);
+    // The damaged block has already shown its bite-lattice history while it was
+    // alive. On the final health step, clear that custom mesh and leave normal
+    // air instead of stamping a wrinkled support puddle into the terrain.
+    this.setBlock(position.x, position.y, position.z, BLOCK.air);
+    return {
+      block,
+      position,
+      remainingHealth: 0,
+      maxHealth: definition.health,
+      destroyed: true,
+      ejectedRubbleMaterialUnits
+    };
+  }
+
   getBlockDamage(x: number, y: number, z: number): number {
     return this.blockDamage.get(this.damageKey(Math.floor(x), Math.floor(y), Math.floor(z))) ?? 0;
+  }
+
+  getPartialBlock(x: number, y: number, z: number): PartialBlockCell | null {
+    return this.partialBlocks.get(createPartialBlockKey({
+      x: Math.floor(x),
+      y: Math.floor(y),
+      z: Math.floor(z)
+    })) ?? null;
+  }
+
+  getPartialBlocks(): readonly PartialBlockCell[] {
+    return Array.from(this.partialBlocks.values());
+  }
+
+  getPartialBlockGeometryRevision(): number {
+    return this.partialBlockGeometryRevision;
+  }
+
+  getSupportHeight(bounds: CollisionBounds): number | null {
+    return getPartialBlockSupportHeight(this.partialBlocks.values(), bounds);
+  }
+
+  isRenderableSolid(x: number, y: number, z: number): boolean {
+    if (y < 0) return true;
+    const blockX = Math.floor(x);
+    const blockY = Math.floor(y);
+    const blockZ = Math.floor(z);
+    if (this.getPartialBlock(blockX, blockY, blockZ)) return false;
+    return this.isSolid(blockX, blockY, blockZ);
+  }
+
+  shouldRenderPartialBlockFace(
+    cell: PartialBlockCell,
+    normal: PartialBlockPosition
+  ): boolean {
+    const neighborX = cell.position.x + normal.x;
+    const neighborY = cell.position.y + normal.y;
+    const neighborZ = cell.position.z + normal.z;
+    return !this.isRenderableSolid(neighborX, neighborY, neighborZ);
   }
 
   damageKey(x: number, y: number, z: number): string {
@@ -818,9 +1101,252 @@ export class VoxelWorld implements CollisionWorld {
     for (const key of this.blockDamage.keys()) {
       const [x, , z] = key.split(",").map(Number);
       if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
+        if (this.partialBlocks.has(key)) continue;
         this.blockDamage.delete(key);
       }
     }
+  }
+
+  private addPartialBlockCut(
+    block: number,
+    position: VoxelBlockPosition,
+    maxHealth: number,
+    damage: number,
+    cutInput: {
+      readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly incomingDirection?: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly coreRadius?: number;
+      readonly speed: number;
+    }
+  ): PartialBlockCell {
+    const key = createPartialBlockKey(position);
+    const existing = this.partialBlocks.get(key);
+    const cuts: PartialBlockCut[] = existing ? [...existing.cuts] : [];
+    cuts.push(createPartialBlockCut({
+      block,
+      position,
+      point: cutInput.point,
+      normal: cutInput.normal,
+      incomingDirection: cutInput.incomingDirection,
+      coreRadius: cutInput.coreRadius,
+      speed: cutInput.speed,
+      cutIndex: cuts.length
+    }));
+    while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+      cuts.shift();
+    }
+    const removedVisualCellIndexes = createPartialBlockRemovedVisualCellIndexes(
+      { cuts, damage, maxHealth },
+      existing?.removedVisualCellIndexes
+    );
+
+    const cell: PartialBlockCell = {
+      block,
+      position,
+      cuts,
+      removedVisualCellIndexes,
+      damage,
+      maxHealth
+    };
+    this.partialBlocks.set(key, cell);
+    this.markPartialBlockDirty(position);
+    return cell;
+  }
+
+  private createPartialBlockPierceContinuation(
+    cell: PartialBlockCell,
+    cut: PartialBlockCut,
+    maxHealth: number,
+    input: BlockCarveInput
+  ): BlockPierceContinuation | undefined {
+    const coreRadius = input.coreRadius;
+    if (
+      typeof coreRadius !== "number" ||
+      !Number.isFinite(coreRadius) ||
+      coreRadius > PARTIAL_BLOCK_PIERCE_MAX_CORE_RADIUS ||
+      input.speed < PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED
+    ) {
+      return undefined;
+    }
+
+    const trajectory = normalizeVoxelVector(input.incomingDirection) ?? cut.trajectory ?? {
+      x: -cut.normal.x,
+      y: -cut.normal.y,
+      z: -cut.normal.z
+    };
+    const tunnelCellCount = getPartialBlockPierceTunnelCellCount(cell, cut, trajectory);
+    if (tunnelCellCount < BLOCK_FRAGMENT_GRID_SIZE) return undefined;
+
+    const exitSpeed = input.speed -
+      tunnelCellCount * PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST * (maxHealth / 10);
+    if (exitSpeed < PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED) return undefined;
+
+    const exitPosition = createPartialBlockPierceExitPosition(cell.position, cut.localPoint, trajectory, coreRadius);
+    if (this.isSolid(exitPosition.x, exitPosition.y, exitPosition.z)) return undefined;
+
+    return {
+      position: exitPosition,
+      velocity: {
+        x: trajectory.x * exitSpeed,
+        y: trajectory.y * exitSpeed,
+        z: trajectory.z * exitSpeed
+      },
+      speed: exitSpeed
+    };
+  }
+
+  private addPartialBlockSurface(
+    block: number,
+    position: VoxelBlockPosition,
+    maxHealth: number,
+    cuts: readonly PartialBlockCut[]
+  ): void {
+    const key = createPartialBlockKey(position);
+    const existing = this.partialBlocks.get(key);
+    const existingSurfaceSamples = existing?.surfaceSamples ?? [];
+    const nextCuts = existing && existingSurfaceSamples.length > 0
+      ? [...existing.cuts, ...cuts]
+      : [...cuts];
+    while (nextCuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+      nextCuts.shift();
+    }
+    const surfaceSamples = trimPartialSurfaceSamples([
+      ...existingSurfaceSamples,
+      ...createPartialBlockSurfaceSamples(position, nextCuts)
+    ]);
+
+    this.partialBlocks.set(createPartialBlockKey(position), {
+      block,
+      position,
+      cuts: nextCuts,
+      surfaceSamples,
+      damage: maxHealth,
+      maxHealth
+    });
+    this.markPartialBlockDirty(position);
+  }
+
+  private addPartialBlockSurfacePatch(
+    block: number,
+    originPosition: VoxelBlockPosition,
+    maxHealth: number,
+    cuts: readonly PartialBlockCut[],
+    impactNormal: PartialBlockPosition,
+    impactPoint: Pick<THREE.Vector3, "x" | "z">
+  ): void {
+    for (let dz = -PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dz <= PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dz += 1) {
+      for (let dx = -PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dx <= PARTIAL_BLOCK_SURFACE_PATCH_RADIUS_CELLS; dx += 1) {
+        const strength = this.getPartialSurfacePatchStrength(originPosition, dx, dz, impactNormal, impactPoint);
+        if (strength < PARTIAL_BLOCK_SURFACE_PATCH_MIN_STRENGTH) continue;
+
+        const patchPosition = this.resolvePartialSurfacePatchPosition(originPosition, dx, dz);
+        if (!patchPosition) continue;
+
+        this.addPartialBlockSurface(
+          block,
+          patchPosition,
+          maxHealth,
+          this.createPartialSurfacePatchCuts(originPosition, patchPosition, cuts, strength)
+        );
+      }
+    }
+  }
+
+  private getPartialSurfacePatchStrength(
+    originPosition: VoxelBlockPosition,
+    dx: number,
+    dz: number,
+    impactNormal: PartialBlockPosition,
+    impactPoint: Pick<THREE.Vector3, "x" | "z">
+  ): number {
+    if (dx === 0 && dz === 0) return 1;
+
+    const offsetDistance = Math.hypot(dx, dz);
+    const candidateCenterX = originPosition.x + dx + 0.5;
+    const candidateCenterZ = originPosition.z + dz + 0.5;
+    const impactDistance = Math.hypot(candidateCenterX - impactPoint.x, candidateCenterZ - impactPoint.z);
+    const forwardDot = dx * impactNormal.x + dz * impactNormal.z;
+    const forwardBias = forwardDot > 0
+      ? PARTIAL_BLOCK_SURFACE_PATCH_FORWARD_BONUS
+      : forwardDot < 0
+        ? -PARTIAL_BLOCK_SURFACE_PATCH_BACK_PENALTY
+        : 0;
+
+    return 1 - offsetDistance * 0.38 - Math.max(0, impactDistance - 0.75) * 0.16 + forwardBias;
+  }
+
+  private resolvePartialSurfacePatchPosition(
+    originPosition: VoxelBlockPosition,
+    dx: number,
+    dz: number
+  ): VoxelBlockPosition | null {
+    const sameLevel = {
+      x: originPosition.x + dx,
+      y: originPosition.y,
+      z: originPosition.z + dz
+    };
+    if (dx === 0 && dz === 0) return sameLevel;
+    if (this.getBlock(sameLevel.x, sameLevel.y, sameLevel.z) === BLOCK.air) {
+      return this.hasPartialSurfaceBase(sameLevel) ? sameLevel : null;
+    }
+
+    const aboveSolid = {
+      x: sameLevel.x,
+      y: sameLevel.y + 1,
+      z: sameLevel.z
+    };
+    if (aboveSolid.y >= WORLD_HEIGHT) return null;
+    return this.getBlock(aboveSolid.x, aboveSolid.y, aboveSolid.z) === BLOCK.air ? aboveSolid : null;
+  }
+
+  private hasPartialSurfaceBase(position: VoxelBlockPosition): boolean {
+    if (position.y <= 0) return true;
+    if (this.isSolid(position.x, position.y - 1, position.z)) return true;
+    return Boolean(this.partialBlocks.get(createPartialBlockKey({
+      x: position.x,
+      y: position.y - 1,
+      z: position.z
+    }))?.surfaceSamples?.length);
+  }
+
+  private createPartialSurfacePatchCuts(
+    originPosition: VoxelBlockPosition,
+    patchPosition: VoxelBlockPosition,
+    cuts: readonly PartialBlockCut[],
+    strength: number
+  ): PartialBlockCut[] {
+    return cuts.map((cut, index) => ({
+      ...cut,
+      localPoint: {
+        x: clamp01ForWorld(originPosition.x + cut.localPoint.x - patchPosition.x),
+        y: cut.localPoint.y,
+        z: clamp01ForWorld(originPosition.z + cut.localPoint.z - patchPosition.z)
+      },
+      radius: cut.radius * (0.72 + strength * 0.28),
+      depth: cut.depth * strength,
+      seed: (cut.seed ^ Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(patchPosition.x + 31, 0x85ebca77) ^ Math.imul(patchPosition.z + 17, 0xc2b2ae3d)) >>> 0
+    }));
+  }
+
+  private removePartialBlock(position: VoxelBlockPosition): void {
+    const key = createPartialBlockKey(position);
+    if (!this.partialBlocks.delete(key)) return;
+    this.markPartialBlockDirty(position);
+  }
+
+  private markPartialBlockDirty(position: VoxelBlockPosition): void {
+    const { cx, cz, lx, lz } = this.toChunkCoords(position.x, position.z);
+    const chunk = this.getChunk(cx, cz);
+    if (chunk) {
+      chunk.revision += 1;
+      this.markChunkDirty(chunk);
+    }
+    if (lx === 0) this.markDirty(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
+    if (lz === 0) this.markDirty(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+    this.partialBlockGeometryRevision += 1;
   }
 
   markDirty(cx: number, cz: number): void {
@@ -987,6 +1513,43 @@ export class VoxelWorld implements CollisionWorld {
     if (y < 0) return true;
     const block = this.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
     return block !== BLOCK.air;
+  }
+
+  canProjectileHitBlock(
+    x: number,
+    y: number,
+    z: number,
+    start: CollisionVector,
+    movement: CollisionVector,
+    radius: number
+  ): boolean {
+    const blockX = Math.floor(x);
+    const blockY = Math.floor(y);
+    const blockZ = Math.floor(z);
+    const cell = this.getPartialBlock(blockX, blockY, blockZ);
+    if (!cell) return true;
+
+    const removedCells = new Set(
+      cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
+    );
+    const safeRadius = Number.isFinite(radius) ? Math.max(0, radius) : 0;
+    const cellSize = 1 / BLOCK_FRAGMENT_GRID_SIZE;
+
+    for (let index = 0; index < BLOCK_FRAGMENT_GRID_SIZE ** 3; index += 1) {
+      if (removedCells.has(index)) continue;
+      const visualCell = decodePartialBlockVisualCell(index);
+      const minX = blockX + visualCell.x * cellSize - safeRadius;
+      const maxX = blockX + (visualCell.x + 1) * cellSize + safeRadius;
+      const minY = blockY + visualCell.y * cellSize - safeRadius;
+      const maxY = blockY + (visualCell.y + 1) * cellSize + safeRadius;
+      const minZ = blockZ + visualCell.z * cellSize - safeRadius;
+      const maxZ = blockZ + (visualCell.z + 1) * cellSize + safeRadius;
+      if (segmentIntersectsAabb(start, movement, minX, maxX, minY, maxY, minZ, maxZ)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   rebuildDirty(
@@ -1257,10 +1820,13 @@ export class VoxelWorld implements CollisionWorld {
     const requestId = this.nextWorkerRequestId();
     const blocks = chunk.blocks.slice();
     const neighbors = this.snapshotNeighborBlocks(chunk.cx, chunk.cz);
+    const partialBlockMasks = this.snapshotPartialBlockMasks(chunk.cx, chunk.cz);
     const blocksBuffer = transferChunkBuffer(blocks);
     const transfers: Transferable[] = [
       blocksBuffer,
-      ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
+      partialBlockMasks.current,
+      ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer)),
+      ...Object.values(partialBlockMasks.neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
     ];
 
     this.pendingMeshKeys.add(key);
@@ -1275,7 +1841,8 @@ export class VoxelWorld implements CollisionWorld {
       cz: chunk.cz,
       revision: chunk.revision,
       blocks: blocksBuffer,
-      neighbors
+      neighbors,
+      partialBlockMasks
     };
     this.worker.postMessage(message, transfers);
   }
@@ -1287,6 +1854,45 @@ export class VoxelWorld implements CollisionWorld {
       negativeZ: cloneChunkBuffer(this.getChunk(cx, cz - 1)),
       positiveZ: cloneChunkBuffer(this.getChunk(cx, cz + 1))
     };
+  }
+
+  snapshotPartialBlockMasks(cx: number, cz: number): {
+    readonly current: ArrayBuffer;
+    readonly neighbors: ChunkNeighborBuffers;
+  } {
+    return {
+      current: transferChunkBuffer(this.createPartialBlockMask(cx, cz)),
+      neighbors: {
+        negativeX: this.createPartialBlockMaskBufferForExistingChunk(cx - 1, cz),
+        positiveX: this.createPartialBlockMaskBufferForExistingChunk(cx + 1, cz),
+        negativeZ: this.createPartialBlockMaskBufferForExistingChunk(cx, cz - 1),
+        positiveZ: this.createPartialBlockMaskBufferForExistingChunk(cx, cz + 1)
+      }
+    };
+  }
+
+  createPartialBlockMaskBufferForExistingChunk(cx: number, cz: number): ArrayBuffer | null {
+    if (!this.getChunk(cx, cz)) return null;
+    return transferChunkBuffer(this.createPartialBlockMask(cx, cz));
+  }
+
+  createPartialBlockMask(cx: number, cz: number): Uint8Array {
+    const mask = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+    const minX = cx * CHUNK_SIZE;
+    const maxX = minX + CHUNK_SIZE - 1;
+    const minZ = cz * CHUNK_SIZE;
+    const maxZ = minZ + CHUNK_SIZE - 1;
+
+    for (const cell of this.partialBlocks.values()) {
+      const { x, y, z } = cell.position;
+      if (y < 0 || y >= WORLD_HEIGHT) continue;
+      if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
+      const localX = x - minX;
+      const localZ = z - minZ;
+      mask[localX + CHUNK_SIZE * (localZ + CHUNK_SIZE * y)] = 1;
+    }
+
+    return mask;
   }
 
   getStats(): WorldStats {

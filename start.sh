@@ -17,4 +17,5 @@ if [ ! -d "$ROOT/node_modules" ]; then
 fi
 
 echo "Starting Voxel Sandbox Engine on http://127.0.0.1:$PORT"
+echo "Saved worlds are tied to that exact browser address. If the port is busy, this script fails instead of silently moving your save list."
 npm run dev -- --port "$PORT"

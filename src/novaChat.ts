@@ -123,7 +123,10 @@ function readForcedChat(message: string): string | null {
 function createHelpReply(context: NovaContextSnapshot): string {
   const selected = context.runtime.selectedItemLabel;
   if (selected === "Physics Core") {
-    return "Physics Core selected: left click launches it. Right click is still reserved, because apparently we are pretending to be organized now.";
+    return "Physics Core selected: left click launches from the offset muzzle. Hold right click while firing for centered reticle ADS, because yes, we accidentally invented a shooter.";
+  }
+  if (selected === "Hitscan Core") {
+    return "Hitscan Core selected: left click fires instantly from the offset muzzle. Hold right click while firing for reticle ADS if you want the surgical little laser mood.";
   }
   if (selected === "Unarmed") {
     return "Unarmed currently does nothing on both clicks. Peaceful. Suspicious. Very unlike us.";
@@ -153,7 +156,7 @@ function createRubbleReply(context: NovaContextSnapshot): string {
   if (context.runtime.rubblePatchCount === 0) {
     return "No rubble cover is active right now. The terrain is still pretending it has dignity.";
   }
-  return `${context.runtime.rubblePatchCount} rubble patch${context.runtime.rubblePatchCount === 1 ? "" : "es"} with ${context.runtime.rubblePieceCount} pieces are currently doing their best impression of tactical cover.`;
+  return `${context.runtime.rubblePatchCount} rubble patch${context.runtime.rubblePatchCount === 1 ? "" : "es"} with ${context.runtime.rubblePieceCount.toFixed(2)} blocks of loose material are currently doing their best impression of tactical cover.`;
 }
 
 function createStatusReply(context: NovaContextSnapshot): string {

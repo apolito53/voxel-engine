@@ -162,7 +162,14 @@ export class NovaContextJournal {
       playerCoreThrows: this.counters.playerCoreThrows + (event.source === "player" ? 1 : 0),
       novaCoreThrows: this.counters.novaCoreThrows + (event.source === "nova" ? 1 : 0)
     };
-    this.remember("Physics", event.source === "nova" ? "Nova threw a physics core." : "Player threw a physics core.");
+    this.remember(
+      "Physics",
+      event.source === "nova"
+        ? "Nova threw a physics core."
+        : event.mode === "hitscan"
+          ? "Player fired a hitscan core."
+          : "Player threw a physics core."
+    );
   }
 
   private onBlockDamaged(event: EngineEvents["block:damaged"]): void {

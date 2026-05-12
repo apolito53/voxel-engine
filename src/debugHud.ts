@@ -5,6 +5,7 @@ import { compactText, type GpuInfo } from "./gpu";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { QualityPreset } from "./qualityPresets";
+import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
 import type { ChunkCoords, WorldStats } from "./world";
 
@@ -50,6 +51,8 @@ export class DebugHud {
     physicsBodyCount: number,
     physicsBodyBudget: number,
     physicsCollisions: PhysicsToyCollisionStats,
+    rigidDebrisStats: RigidDebrisStats,
+    rigidDebrisBodyBudget: number,
     fragmentRenderStats: PhysicsFragmentRenderStats,
     debrisSettlerStats: DebrisSettlerStats,
     rubbleStats: RubbleFieldStats,
@@ -82,9 +85,10 @@ export class DebugHud {
       `saved ${stats.savedChunks} edited ${stats.modifiedChunks} saveq ${stats.pendingChunkSaves} dmg ${stats.damagedBlocks}`,
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
       `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
+      `rigid debris ${rigidDebrisStats.bodies}/${rigidDebrisBodyBudget} body sleep ${rigidDebrisStats.sleepingBodies} col ${rigidDebrisStats.terrainColliders}/${rigidDebrisStats.rubbleSupportColliders}`,
       `frag inst ${fragmentRenderStats.instances} batches ${fragmentRenderStats.batches} cap ${fragmentRenderStats.capacity}`,
       `settle ${debrisSettlerStats.regions} rg ${debrisSettlerStats.fragments} frag active ${debrisSettlerStats.activeFragments} pairs ${debrisSettlerStats.pairChecks} hit ${debrisSettlerStats.resolvedPairs} done ${debrisSettlerStats.finalizedBatches}/${debrisSettlerStats.forcedFinalizations}`,
-      `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces} pcs chunks ${rubbleStats.visualChunks} cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
+      `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces.toFixed(2)} mat chunks ${rubbleStats.visualChunks} cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,
       `req gen ${stats.requestedLoadsThisFrame} mesh ${stats.requestedMeshesThisFrame}`,
       `quality ${qualityPreset.label.toLowerCase()} ${qualityPreset.distanceScale}x debris ${qualityPreset.debrisActiveRadiusMeters}m px ${this.renderer.getPixelRatio()}`,
       `map slice ${lastMinimapMs.toFixed(1)}ms`,

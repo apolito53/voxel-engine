@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BLOCK, BLOCKS } from "./blocks";
+import { PARTIAL_BLOCK_CORE_DAMAGE } from "./partialBlocks";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import type { PlayerController } from "./player";
 import type { VoxelWorld } from "./world";
@@ -14,7 +15,7 @@ const CORE_BREAK_DONE_SECONDS = 1.6;
 const CORE_BREAK_STAGED_BLOCK = BLOCK.stone;
 
 export type TestAvatarScenarioId = "core-break";
-type TestAvatarStep = "idle" | "setup" | "aiming" | "shot-1" | "observe-1" | "shot-2" | "observe-2" | "done" | "failed";
+type TestAvatarStep = "idle" | "setup" | "aiming" | `shot-${number}` | `observe-${number}` | "done" | "failed";
 
 export type TestAvatarPosition = {
   readonly x: number;
@@ -58,6 +59,7 @@ export type TestAvatarHooks = {
 
 type CoreBreakScenarioState = {
   readonly plan: CoreBreakTestPlan;
+  readonly requiredShots: number;
   secondsInStep: number;
   shotsFired: number;
 };
@@ -163,21 +165,20 @@ export class TestAvatar {
 
     state.secondsInStep += deltaSeconds;
     if (this.step === "aiming" && state.secondsInStep >= CORE_BREAK_SHOT_DELAY_SECONDS) {
-      this.fireCore("shot-1", "First shot fired");
+      this.fireCore();
       return;
     }
 
-    if (this.step === "observe-1" && state.secondsInStep >= CORE_BREAK_OBSERVE_SECONDS) {
-      this.recordCoreBreakObservation("after first shot");
-      this.fireCore("shot-2", "Second shot fired");
-      return;
-    }
-
-    if (this.step === "observe-2" && state.secondsInStep >= CORE_BREAK_OBSERVE_SECONDS) {
-      this.recordCoreBreakObservation("after second shot");
-      this.step = "done";
-      state.secondsInStep = 0;
-      this.status = "Scenario complete";
+    if (this.step.startsWith("observe-") && state.secondsInStep >= CORE_BREAK_OBSERVE_SECONDS) {
+      this.recordCoreBreakObservation(`after shot ${state.shotsFired}`);
+      if (this.hasCoreBreakTargetFinished() || state.shotsFired >= state.requiredShots) {
+        this.step = "done";
+        state.secondsInStep = 0;
+        this.status = "Scenario complete";
+        this.renderOverlay();
+        return;
+      }
+      this.fireCore();
       this.renderOverlay();
       return;
     }
@@ -203,6 +204,7 @@ export class TestAvatar {
     this.hooks.getPlayer().teleportToFeetPosition(plan.feetPosition, plan.yaw, plan.pitch);
     this.coreBreak = {
       plan,
+      requiredShots: getRequiredCoreBreakShots(),
       secondsInStep: 0,
       shotsFired: 0
     };
@@ -212,20 +214,28 @@ export class TestAvatar {
     this.renderOverlay();
   }
 
-  private fireCore(nextStep: "shot-1" | "shot-2", label: string): void {
+  private fireCore(): void {
     const state = this.coreBreak;
     if (!state) {
       this.fail("Cannot fire without a target plan");
       return;
     }
 
-    this.step = nextStep;
-    this.status = label;
+    const shotNumber = state.shotsFired + 1;
+    this.step = `shot-${shotNumber}`;
+    this.status = `Shot ${shotNumber} fired`;
     this.hooks.throwPlayerCore();
     state.shotsFired += 1;
     state.secondsInStep = 0;
-    this.step = nextStep === "shot-1" ? "observe-1" : "observe-2";
+    this.step = `observe-${shotNumber}`;
     this.renderOverlay();
+  }
+
+  private hasCoreBreakTargetFinished(): boolean {
+    const state = this.coreBreak;
+    if (!state) return false;
+    const target = state.plan.target;
+    return this.hooks.getWorld().getBlock(target.x, target.y, target.z) === BLOCK.air;
   }
 
   private recordCoreBreakObservation(label: string): void {
@@ -315,6 +325,11 @@ export function createYawPitchToward(origin: THREE.Vector3, target: THREE.Vector
     yaw: Math.atan2(-direction.x, -direction.z),
     pitch: Math.atan2(direction.y, Math.hypot(direction.x, direction.z))
   };
+}
+
+function getRequiredCoreBreakShots(): number {
+  const health = BLOCKS[CORE_BREAK_STAGED_BLOCK]?.health ?? 1;
+  return Math.max(1, Math.ceil(health / Math.max(0.001, PARTIAL_BLOCK_CORE_DAMAGE)));
 }
 
 function createVantageFeetPosition(

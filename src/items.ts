@@ -2,6 +2,7 @@ import type { BlockDefinition, BlockId } from "./blocks";
 
 export const EMPTY_HANDS_ITEM_ID = "core:empty-hands";
 export const PHYSICS_CORE_ITEM_ID = "tool:physics-core";
+export const HITSCAN_CORE_ITEM_ID = "tool:hitscan-core";
 
 export type ItemId = string;
 
@@ -32,11 +33,16 @@ export type ThrowPhysicsCoreItemAction = {
   readonly kind: "physics:throw-core";
 };
 
+export type FireHitscanCoreItemAction = {
+  readonly kind: "physics:fire-hitscan-core";
+};
+
 export type ItemAction =
   | NoItemAction
   | DestroyBlockItemAction
   | PlaceBlockItemAction
-  | ThrowPhysicsCoreItemAction;
+  | ThrowPhysicsCoreItemAction
+  | FireHitscanCoreItemAction;
 
 export type ItemDefinition = {
   readonly id: ItemId;
@@ -152,6 +158,20 @@ export function createPhysicsCoreItemDefinition(): ItemDefinition {
   };
 }
 
+export function createHitscanCoreItemDefinition(): ItemDefinition {
+  return {
+    id: HITSCAN_CORE_ITEM_ID,
+    name: "Hitscan Core",
+    category: "weapon",
+    maxStack: 1,
+    tags: ["physics", "hitscan", "damage-source"],
+    actions: {
+      primary: { kind: "physics:fire-hitscan-core" },
+      secondary: NO_ITEM_ACTION
+    }
+  };
+}
+
 export function createVoxelSandboxItemDefinitions(
   blocks: Readonly<Record<number, BlockDefinition>>,
   placeableBlocks: readonly BlockId[]
@@ -159,7 +179,8 @@ export function createVoxelSandboxItemDefinitions(
   return [
     createEmptyHandsItemDefinition(),
     ...placeableBlocks.map((block) => createPlaceableBlockItemDefinition(block, blocks[block])),
-    createPhysicsCoreItemDefinition()
+    createPhysicsCoreItemDefinition(),
+    createHitscanCoreItemDefinition()
   ];
 }
 

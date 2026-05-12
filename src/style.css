@@ -27,6 +27,7 @@ body.playing canvas {
   position: fixed;
   inset: 0;
   z-index: 20;
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   background: rgba(9, 13, 18, 0.62);
@@ -69,6 +70,12 @@ body.playing canvas {
   font-weight: 700;
 }
 
+.home-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
 .home-grid {
   display: grid;
   grid-template-columns: minmax(260px, 0.92fr) minmax(280px, 1.08fr);
@@ -76,6 +83,7 @@ body.playing canvas {
 }
 
 .menu-panel {
+  box-sizing: border-box;
   width: min(320px, calc(100vw - 32px));
   padding: 22px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -90,12 +98,62 @@ body.playing canvas {
 
 #pause-menu .menu-panel {
   width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .menu-title {
   margin-bottom: 16px;
   font-size: 21px;
   font-weight: 800;
+}
+
+.menu-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.menu-title-row .menu-title {
+  margin-bottom: 0;
+}
+
+.app-version {
+  appearance: none;
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  color: rgba(237, 244, 248, 0.46);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.app-version:hover,
+.app-version:focus-visible {
+  color: rgba(237, 244, 248, 0.86);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.app-version:focus-visible {
+  outline: 2px solid rgba(241, 196, 83, 0.72);
+  outline-offset: 3px;
+}
+
+.world-save-origin {
+  margin: -8px 0 12px;
+  color: rgba(237, 244, 248, 0.58);
+  font-size: 11px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .world-form {
@@ -215,6 +273,43 @@ body.playing canvas {
   display: none;
 }
 
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(5, 8, 12, 0.32);
+  padding: 4px;
+}
+
+.settings-tab {
+  height: 34px;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(237, 244, 248, 0.72);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.settings-tab.is-active {
+  background: #edf4f8;
+  color: #17202a;
+}
+
+.settings-tab-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-tab-panel[hidden] {
+  display: none;
+}
+
 .settings-field {
   display: grid;
   gap: 9px;
@@ -244,6 +339,37 @@ body.playing canvas {
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.settings-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.07);
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.settings-toggle-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-toggle-title {
+  color: #edf4f8;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.settings-toggle-hint {
+  color: rgba(237, 244, 248, 0.64);
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .menu-select {
@@ -480,6 +606,152 @@ body.playing canvas {
   gap: 10px;
 }
 
+.changelog-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 28;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(9, 13, 18, 0.62);
+  color: #edf4f8;
+}
+
+.changelog-dialog.is-hidden {
+  display: none;
+}
+
+.changelog-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  box-sizing: border-box;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  padding: 22px;
+  border: 1px solid rgba(237, 244, 248, 0.16);
+  border-radius: 8px;
+  background: rgba(22, 29, 38, 0.97);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.52);
+}
+
+.changelog-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.changelog-title {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.changelog-current-version {
+  margin-top: 3px;
+  color: rgba(237, 244, 248, 0.56);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.changelog-close-button {
+  border: 1px solid rgba(237, 244, 248, 0.16);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #edf4f8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.changelog-close-button:hover,
+.changelog-close-button:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.changelog-close-button:focus-visible {
+  outline: 2px solid rgba(241, 196, 83, 0.72);
+  outline-offset: 3px;
+}
+
+.changelog-list {
+  display: grid;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 10px;
+  scrollbar-gutter: stable;
+}
+
+.changelog-entry {
+  display: grid;
+  gap: 9px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(237, 244, 248, 0.12);
+}
+
+.changelog-entry:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.changelog-entry-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.changelog-entry-title {
+  margin: 0;
+  color: #f8d36d;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.changelog-entry-date {
+  color: rgba(237, 244, 248, 0.5);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.changelog-entry-body {
+  display: grid;
+  gap: 8px;
+  color: rgba(237, 244, 248, 0.78);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.changelog-entry-body h4 {
+  margin: 4px 0 0;
+  color: rgba(237, 244, 248, 0.94);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.changelog-entry-body p {
+  margin: 0;
+}
+
+.changelog-entry-body ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.changelog-entry-body code {
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(237, 244, 248, 0.95);
+  font-size: 0.94em;
+}
+
 .test-avatar-panel {
   position: fixed;
   right: 18px;
@@ -545,6 +817,7 @@ body.playing canvas {
 .text-input:focus-visible,
 .menu-select:focus-visible,
 .range-input:focus-visible,
+.settings-tab:focus-visible,
 .stepper-button:focus-visible,
 .toggle-input:focus-visible,
 .nova-chat-input:focus-visible,
@@ -903,18 +1176,22 @@ body:not(.in-world) #crosshair {
   left: 50%;
   top: 50%;
   z-index: 11;
-  width: 14px;
-  height: 14px;
+  width: 30px;
+  height: 30px;
   transform: translate(-50%, -50%);
   pointer-events: none;
+  --crosshair-color: rgba(255, 255, 255, 0.68);
+  --crosshair-shadow: rgba(0, 0, 0, 0.42);
 }
 
 #crosshair::before,
 #crosshair::after {
   content: "";
   position: absolute;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
 }
 
 @media (max-width: 720px) {
@@ -928,15 +1205,39 @@ body:not(.in-world) #crosshair {
 }
 
 #crosshair::before {
-  left: 6px;
-  top: 0;
-  width: 2px;
-  height: 14px;
+  width: 30px;
+  height: 30px;
+  background:
+    linear-gradient(
+      to right,
+      var(--crosshair-shadow) 0 7px,
+      transparent 7px 23px,
+      var(--crosshair-shadow) 23px 30px
+    ) center / 100% 3px no-repeat,
+    linear-gradient(
+      to bottom,
+      var(--crosshair-shadow) 0 7px,
+      transparent 7px 23px,
+      var(--crosshair-shadow) 23px 30px
+    ) center / 3px 100% no-repeat,
+    radial-gradient(circle, transparent 0 5px, var(--crosshair-shadow) 5px 8px, transparent 8px);
 }
 
 #crosshair::after {
-  left: 0;
-  top: 6px;
-  width: 14px;
-  height: 2px;
+  width: 28px;
+  height: 28px;
+  background:
+    linear-gradient(
+      to right,
+      var(--crosshair-color) 0 6px,
+      transparent 6px 22px,
+      var(--crosshair-color) 22px 28px
+    ) center / 100% 1.5px no-repeat,
+    linear-gradient(
+      to bottom,
+      var(--crosshair-color) 0 6px,
+      transparent 6px 22px,
+      var(--crosshair-color) 22px 28px
+    ) center / 1.5px 100% no-repeat,
+    radial-gradient(circle, transparent 0 5.5px, var(--crosshair-color) 5.5px 7px, transparent 7px);
 }

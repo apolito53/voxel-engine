@@ -6,6 +6,7 @@ import type {
   ChunkMeshedResult,
   ChunkNeighborBlocks,
   ChunkNeighborBuffers,
+  ChunkPartialBlockMasks,
   ChunkWorkerRequest
 } from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
@@ -44,7 +45,8 @@ workerScope.onmessage = (event: MessageEvent<ChunkWorkerRequest>) => {
       cx: message.cx,
       cz: message.cz,
       blocks: new Uint8Array(message.blocks),
-      neighbors: readNeighbors(message.neighbors)
+      neighbors: readNeighbors(message.neighbors),
+      partialBlockMasks: readPartialBlockMasks(message.partialBlockMasks)
     });
 
     workerScope.postMessage(
@@ -89,16 +91,28 @@ function readNeighbors(neighbors: ChunkNeighborBuffers): ChunkNeighborBlocks {
   };
 }
 
+function readPartialBlockMasks(partialBlockMasks: {
+  readonly current: ArrayBuffer;
+  readonly neighbors: ChunkNeighborBuffers;
+}): ChunkPartialBlockMasks {
+  return {
+    current: new Uint8Array(partialBlockMasks.current),
+    neighbors: readNeighbors(partialBlockMasks.neighbors)
+  };
+}
+
 function buildChunkMesh({
   cx,
   cz,
   blocks,
-  neighbors
+  neighbors,
+  partialBlockMasks
 }: {
   cx: number;
   cz: number;
   blocks: Uint8Array;
   neighbors: ChunkNeighborBlocks;
+  partialBlockMasks: ChunkPartialBlockMasks;
 }): ChunkMeshData {
   const positions: number[] = [];
   const normals: number[] = [];
@@ -107,9 +121,9 @@ function buildChunkMesh({
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
 
-  buildXFaces(blocks, neighbors, ox, oz, positions, normals, colors, indices);
-  buildYFaces(blocks, neighbors, ox, oz, positions, normals, colors, indices);
-  buildZFaces(blocks, neighbors, ox, oz, positions, normals, colors, indices);
+  buildXFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, indices);
+  buildYFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, indices);
+  buildZFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, indices);
 
   return {
     positions: new Float32Array(positions),
@@ -122,6 +136,7 @@ function buildChunkMesh({
 function buildXFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
+  partialBlockMasks: ChunkPartialBlockMasks,
   ox: number,
   oz: number,
   positions: number[],
@@ -133,7 +148,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, x, y, z, x + 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x + 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -155,7 +170,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, x, y, z, x - 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x - 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -179,6 +194,7 @@ function buildXFaces(
 function buildYFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
+  partialBlockMasks: ChunkPartialBlockMasks,
   ox: number,
   oz: number,
   positions: number[],
@@ -190,7 +206,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, x, y, z, x, y + 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y + 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -212,7 +228,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, x, y, z, x, y - 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y - 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -236,6 +252,7 @@ function buildYFaces(
 function buildZFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
+  partialBlockMasks: ChunkPartialBlockMasks,
   ox: number,
   oz: number,
   positions: number[],
@@ -247,7 +264,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, x, y, z, x, y, z + 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y, z + 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -269,7 +286,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, x, y, z, x, y, z - 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y, z - 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -293,6 +310,7 @@ function buildZFaces(
 function exposedBlock(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
+  partialBlockMasks: ChunkPartialBlockMasks,
   x: number,
   y: number,
   z: number,
@@ -304,27 +322,73 @@ function exposedBlock(
   worldZ: number
 ): number {
   const block = blocks[index(x, y, z)];
-  if (!BLOCKS[block].solid || isSolidAt(blocks, neighbors, nx, ny, nz)) {
+  if (
+    !BLOCKS[block].solid ||
+    isPartialBlockAt(partialBlockMasks, x, y, z) ||
+    isRenderableSolidAt(blocks, neighbors, partialBlockMasks, nx, ny, nz)
+  ) {
     return BLOCK.air;
   }
   return createBlockMeshKey(block, worldX, worldY, worldZ);
 }
 
-function isSolidAt(
+function isRenderableSolidAt(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
+  partialBlockMasks: ChunkPartialBlockMasks,
   x: number,
   y: number,
   z: number
 ): boolean {
   if (y < 0) return true;
   if (y >= WORLD_HEIGHT) return false;
+  if (isPartialBlockAt(partialBlockMasks, x, y, z)) return false;
   const block = getBlockAt(blocks, neighbors, x, y, z);
 
   // Missing neighbor chunks are unknown, not air. Treat them as solid for this
   // mesh pass so streaming does not draw temporary chunk-edge walls that vanish
   // a few frames later when the real neighbor data arrives and marks us dirty.
   return block === null || BLOCKS[block].solid;
+}
+
+function isPartialBlockAt(
+  partialBlockMasks: ChunkPartialBlockMasks,
+  x: number,
+  y: number,
+  z: number
+): boolean {
+  if (y < 0 || y >= WORLD_HEIGHT) return false;
+  const mask = getPartialBlockMaskAt(partialBlockMasks, x, y, z);
+  return mask !== null && mask > 0;
+}
+
+function getPartialBlockMaskAt(
+  partialBlockMasks: ChunkPartialBlockMasks,
+  x: number,
+  y: number,
+  z: number
+): number | null {
+  if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
+    return partialBlockMasks.current[index(x, y, z)];
+  }
+
+  if (x < 0 && z >= 0 && z < CHUNK_SIZE && partialBlockMasks.neighbors.negativeX) {
+    return partialBlockMasks.neighbors.negativeX[index(CHUNK_SIZE - 1, y, z)];
+  }
+
+  if (x >= CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && partialBlockMasks.neighbors.positiveX) {
+    return partialBlockMasks.neighbors.positiveX[index(0, y, z)];
+  }
+
+  if (z < 0 && x >= 0 && x < CHUNK_SIZE && partialBlockMasks.neighbors.negativeZ) {
+    return partialBlockMasks.neighbors.negativeZ[index(x, y, CHUNK_SIZE - 1)];
+  }
+
+  if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && partialBlockMasks.neighbors.positiveZ) {
+    return partialBlockMasks.neighbors.positiveZ[index(x, y, 0)];
+  }
+
+  return null;
 }
 
 function getBlockAt(

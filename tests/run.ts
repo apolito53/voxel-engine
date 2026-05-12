@@ -6,9 +6,13 @@ import {
   BLOCK_FRAGMENT_SPACING,
   BLOCK_FRAGMENT_VISUAL_SIZE,
   BLOCK_RUBBLE_MATERIAL_UNITS,
+  TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
+  getBlockRubbleMaterialUnitsForHealth,
+  getEjectedBlockRubbleMaterialUnits,
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
+  getTerrainImpactFragmentCount,
   normalizeBlockFragmentCount
 } from "../src/blockFragments";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS } from "../src/blocks";
@@ -22,7 +26,12 @@ import {
 } from "../src/blockColors";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
-import type { CollisionBounds } from "../src/collision";
+import type { CollisionBounds, CollisionWorld } from "../src/collision";
+import {
+  createDebrisShape,
+  createDebrisShapeForBlock,
+  getDebrisShapeGeometry
+} from "../src/debrisShapes";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
@@ -31,6 +40,15 @@ import {
   createEmptyPhysicsToyCollisionStats,
   type PhysicsImpact
 } from "../src/physics";
+import {
+  PLAYER_CORE_MUZZLE_FORWARD_METERS,
+  PLAYER_CORE_MUZZLE_SCREEN_DOWN_FRACTION,
+  PLAYER_CORE_MUZZLE_SCREEN_RIGHT_FRACTION,
+  PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED,
+  createPlayerCoreMuzzleLocalOffset,
+  createPlayerCoreShotDirection,
+  createPlayerPhysicsCoreLaunchVelocity
+} from "../src/physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
 import {
   RUBBLE_BLOCK_PROMOTION_PIECES,
@@ -93,6 +111,33 @@ import {
   PHYSICS_OBJECT_BUDGET_STEP,
   stepPhysicsObjectBudget
 } from "../src/physicsBudget";
+import {
+  DEFAULT_PHYSICS_CORE_SETTINGS,
+  PHYSICS_CORE_BASE_RADIUS,
+  PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
+  PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+  PHYSICS_CORE_SIZE_MAX_PERCENT,
+  PHYSICS_CORE_SIZE_MIN_PERCENT,
+  PHYSICS_CORE_VELOCITY_MAX_PERCENT,
+  PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+  formatPhysicsCorePercent,
+  getPhysicsCoreRadius,
+  getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreSettings
+} from "../src/physicsCoreSettings";
+import {
+  IMPACT_CRATER_MAX_STAMPS,
+  ImpactCraterField,
+  createImpactCraterStampForTerrainImpact
+} from "../src/impactCraterField";
+import {
+  PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+  PARTIAL_BLOCK_CORE_DAMAGE,
+  PartialBlockMeshField,
+  getPartialBlockRemainingVisualCellCount,
+  getPartialBlockRemovedVisualCellCount,
+  type PartialBlockCell
+} from "../src/partialBlocks";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
@@ -116,14 +161,22 @@ import {
 } from "../src/qualitySettings";
 import { voxelRaycast } from "../src/raycast";
 import {
+  MAX_RIGID_DEBRIS_BODY_BUDGET,
+  MIN_RIGID_DEBRIS_BODY_BUDGET,
+  getRigidDebrisBodyBudget
+} from "../src/rigidDebrisBudget";
+import { RigidDebrisSimulation } from "../src/rigidDebris";
+import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "../src/shadows";
 import {
+  ADS_FOV_MULTIPLIER,
   BASE_CAMERA_FOV,
   SPRINT_FOV_MULTIPLIER,
   SPRINT_FOV_RESPONSE,
+  getPlayerCameraTargetFov,
   getSprintFeedbackTargetFov,
   smoothSprintFeedbackFov
 } from "../src/sprintFeedback";
@@ -136,6 +189,7 @@ import {
   createWorldRegistry,
   type ChunkStorage
 } from "../src/chunkStorage";
+import { parseChangelogEntries } from "../src/changelog";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import {
   DEBRIS_REGION_CONTACT_BREAKUP_SECONDS,
@@ -160,6 +214,7 @@ import {
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { shouldAbsorbFragmentIntoRubble } from "../src/fragmentRubble";
 import {
+  canFireHitscanCoreWithHotbarItem,
   canDestroyBlockWithHotbarItem,
   canPlaceBlockWithHotbarItem,
   canThrowCoreWithHotbarItem,
@@ -173,6 +228,7 @@ import {
 } from "../src/hotbar";
 import {
   EMPTY_HANDS_ITEM_ID,
+  HITSCAN_CORE_ITEM_ID,
   PHYSICS_CORE_ITEM_ID,
   createBlockItemId,
   createItemStack,
@@ -181,6 +237,12 @@ import {
   getItemDefinition,
   getItemLabel
 } from "../src/items";
+import {
+  HITSCAN_CORE_IMPACT_SPEED,
+  HITSCAN_CORE_RADIUS,
+  raycastHitscanCore
+} from "../src/hitscanCore";
+import { getHitscanBoltLifetimeSeconds } from "../src/hitscanBoltTracer";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import {
   appendNovaChatMessage,
@@ -235,6 +297,12 @@ function assertEqual<T>(actual: T, expected: T, message: string): void {
   }
 }
 
+function assertClose(actual: number, expected: number, epsilon: number, message: string): void {
+  if (Math.abs(actual - expected) > epsilon) {
+    throw new Error(`${message}. Expected ${expected}, got ${actual}.`);
+  }
+}
+
 function assertDeepEqual(actual: unknown, expected: unknown, message: string): void {
   const actualJson = JSON.stringify(actual);
   const expectedJson = JSON.stringify(expected);
@@ -252,9 +320,18 @@ function assertUint8ArraysEqual(actual: Uint8Array, expected: Uint8Array, messag
   }
 }
 
+function decodeTestLatticeIndex(index: number): { readonly x: number; readonly y: number; readonly z: number } {
+  return {
+    x: index % BLOCK_FRAGMENT_GRID_SIZE,
+    y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
+    z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
+  };
+}
+
 function expectedRubbleHealthForPieces(pieces: number): number {
   return (pieces / BLOCK_RUBBLE_MATERIAL_UNITS) * RUBBLE_FULL_BLOCK_HEALTH;
 }
+const TEST_FRAGMENT_MATERIAL_UNITS = BLOCK_RUBBLE_MATERIAL_UNITS / BLOCK_FRAGMENT_COUNT;
 
 function hasAnyDifference(left: Uint8Array, right: Uint8Array): boolean {
   assertEqual(left.length, right.length, "Compared chunk payloads should have equal length");
@@ -550,21 +627,41 @@ test("item registry describes reusable held-item actions", () => {
     "physics:throw-core",
     "physics core primary action should describe throwing a core"
   );
+  assertEqual(
+    getItemAction(itemRegistry, HITSCAN_CORE_ITEM_ID, "primary").kind,
+    "physics:fire-hitscan-core",
+    "hitscan core primary action should describe instant core fire"
+  );
+  assertEqual(
+    getItemDefinition(itemRegistry, HITSCAN_CORE_ITEM_ID).category,
+    "weapon",
+    "hitscan core should be registered as a weapon item"
+  );
 });
 
-test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", () => {
+test("hotbar scroll lane includes unarmed, placeable blocks, projectile core, and hitscan core", () => {
   const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
   const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
   const firstItem = hotbarItems[0];
-  const lastItem = hotbarItems[hotbarItems.length - 1];
+  const projectileCoreItem = hotbarItems[hotbarItems.length - 2];
+  const hitscanCoreItem = hotbarItems[hotbarItems.length - 1];
   const grassItem = createItemStack(createBlockItemId(BLOCK.grass));
 
   assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "hotbar should start in the explicit unarmed state");
-  assertEqual(lastItem?.itemId, PHYSICS_CORE_ITEM_ID, "hotbar should end with the physics core item");
+  assertEqual(
+    projectileCoreItem?.itemId,
+    PHYSICS_CORE_ITEM_ID,
+    "hotbar should keep the projectile physics core before the hitscan core"
+  );
+  assertEqual(
+    hitscanCoreItem?.itemId,
+    HITSCAN_CORE_ITEM_ID,
+    "hotbar should end with the hitscan core item"
+  );
   assertEqual(
     hotbarItems.length,
-    PLACEABLE_BLOCKS.length + 2,
-    "hotbar should contain unarmed, every placeable block, and the core"
+    PLACEABLE_BLOCKS.length + 3,
+    "hotbar should contain unarmed, every placeable block, and both core weapons"
   );
   assertEqual(
     getHotbarItemLabel(firstItem ?? createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
@@ -572,9 +669,14 @@ test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", 
     "unarmed slot should have a readable HUD label"
   );
   assertEqual(
-    getHotbarItemLabel(lastItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
+    getHotbarItemLabel(projectileCoreItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "Physics Core",
-    "core slot should have a readable HUD label"
+    "projectile core slot should have a readable HUD label"
+  );
+  assertEqual(
+    getHotbarItemLabel(hitscanCoreItem ?? createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    "Hitscan Core",
+    "hitscan core slot should have a readable HUD label"
   );
   assert(
     !canDestroyBlockWithHotbarItem(createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
@@ -589,12 +691,20 @@ test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", 
     "holding a core should not also break targeted blocks on left click"
   );
   assert(
+    !canDestroyBlockWithHotbarItem(createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    "holding a hitscan core should not also break targeted blocks on left click"
+  );
+  assert(
     canPlaceBlockWithHotbarItem(grassItem, itemRegistry),
     "selected blocks should place on right click"
   );
   assert(
     canThrowCoreWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "selected physics core should throw on left click"
+  );
+  assert(
+    canFireHitscanCoreWithHotbarItem(createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    "selected hitscan core should fire on left click"
   );
   assertEqual(
     getHotbarPrimaryAction(grassItem, itemRegistry).kind,
@@ -1088,9 +1198,17 @@ test("player movement tuning supports sprint, flight, crouch, and slide states",
 
 test("sprint feedback widens FOV smoothly without touching base camera setup", () => {
   const sprintFov = BASE_CAMERA_FOV * SPRINT_FOV_MULTIPLIER;
+  const adsFov = BASE_CAMERA_FOV * ADS_FOV_MULTIPLIER;
 
   assertEqual(getSprintFeedbackTargetFov(false), BASE_CAMERA_FOV, "inactive sprint feedback should use base FOV");
   assertEqual(getSprintFeedbackTargetFov(true), sprintFov, "active sprint feedback should widen FOV by 15 percent");
+  assertEqual(getPlayerCameraTargetFov(false, false), BASE_CAMERA_FOV, "inactive camera feedback should use base FOV");
+  assertEqual(getPlayerCameraTargetFov(false, true), adsFov, "ADS should zoom camera FOV inward by 15 percent");
+  assertEqual(
+    getPlayerCameraTargetFov(true, true),
+    sprintFov * ADS_FOV_MULTIPLIER,
+    "ADS should layer onto the current movement feedback target"
+  );
   assert(SPRINT_FOV_RESPONSE > 0, "sprint feedback FOV smoothing should move toward its target");
 
   const firstSprintStep = smoothSprintFeedbackFov(BASE_CAMERA_FOV, sprintFov, 1 / 60);
@@ -1103,6 +1221,12 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
   assert(
     firstReleaseStep > BASE_CAMERA_FOV && firstReleaseStep < sprintFov,
     "sprint feedback should ease back to base FOV"
+  );
+
+  const firstAdsStep = smoothSprintFeedbackFov(BASE_CAMERA_FOV, adsFov, 1 / 60);
+  assert(
+    firstAdsStep > adsFov && firstAdsStep < BASE_CAMERA_FOV,
+    "ADS zoom should ease inward instead of snapping"
   );
 });
 
@@ -1245,10 +1369,27 @@ test("target block highlighter follows targeted block positions", () => {
   assert(!highlighter.object.visible, "target highlighter should start hidden");
   highlighter.showBlock({ x: 4, y: 12, z: -3 });
   assert(highlighter.object.visible, "target highlighter should become visible when a block is targeted");
+  assertEqual(
+    highlighter.object.material.color.getHex(),
+    0x050505,
+    "terrain block targets should use the normal dark outline"
+  );
   assertVectorNearlyEqual(
     highlighter.object.position,
     new THREE.Vector3(4.5, 12.5, -2.5),
     "target highlighter should sit on the target block center"
+  );
+
+  highlighter.showBlock({ x: 1, y: 2, z: 3 }, "rubble");
+  assertEqual(
+    highlighter.object.material.color.getHex(),
+    0xffffff,
+    "settled rubble targets should use the white object outline"
+  );
+  assertVectorNearlyEqual(
+    highlighter.object.position,
+    new THREE.Vector3(1.5, 2.5, 3.5),
+    "rubble target outlines should still occupy the full cube space"
   );
 
   highlighter.hide();
@@ -1285,6 +1426,7 @@ test("nova pilot keeps a readable companion offset and throws forward", () => {
   );
   assert(launch.position.z < 3, "Nova-thrown cores should spawn in front of the pilot");
   assert(launch.velocity.z < -10, "Nova-thrown cores should travel along the pilot aim direction");
+  assertEqual(launch.velocity.y, 0, "Nova-thrown cores should not add an upward arc away from the aim direction");
   assert(launch.velocity.x > 0, "Nova-thrown cores should inherit a little pilot movement");
 });
 
@@ -1587,9 +1729,72 @@ test("delete-world dialog copy names the save and warns about permanence", () =>
   assert(copy.includes("cannot be undone"), "delete confirmation should say the deletion cannot be undone");
 });
 
+test("changelog entries sort newest first for the version modal", () => {
+  const entries = parseChangelogEntries(`
+# Changelog
+
+## 0.4.9 - 2026-05-06
+
+### Fixed
+
+- older patch
+
+## Unreleased
+
+### Added
+
+- upcoming work
+
+## 0.10.0 - 2026-05-08
+
+### Changed
+
+- newest numbered release
+
+## 0.5.0 - 2026-05-07
+
+### Added
+
+- current stable release with \`code\`
+`);
+
+  assertDeepEqual(
+    entries.map((entry) => entry.title),
+    ["Unreleased", "0.10.0", "0.5.0", "0.4.9"],
+    "release notes should sort Unreleased first, then semantic versions descending"
+  );
+  assertEqual(entries[2]?.date, "2026-05-07", "release dates should be parsed from headings");
+  assert(
+    entries[2]?.body.includes("current stable release"),
+    "entry bodies should preserve their markdown content for rendering"
+  );
+});
+
+test("changelog parser skips an empty Unreleased placeholder", () => {
+  const entries = parseChangelogEntries(`
+# Changelog
+
+## Unreleased
+
+## 0.6.0 - 2026-05-12
+
+### Added
+
+- shiny gameplay slice
+`);
+
+  assertDeepEqual(
+    entries.map((entry) => entry.title),
+    ["0.6.0"],
+    "empty Unreleased placeholders should not hide the current release notes"
+  );
+});
+
 test("block damage tracks health before removing voxels", () => {
   const world = new VoxelWorld({ seed: "damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
+  const maxHealth = BLOCKS[BLOCK.stone].health;
+  assert(maxHealth >= 8, "ordinary terrain blocks should have room for repeated chip hits");
 
   const firstHit = world.damageBlock(2, 3, 4, 1);
   assertDeepEqual(
@@ -1597,54 +1802,702 @@ test("block damage tracks health before removing voxels", () => {
     {
       block: BLOCK.stone,
       position: { x: 2, y: 3, z: 4 },
-      remainingHealth: 1,
-      maxHealth: 2,
+      remainingHealth: maxHealth - 1,
+      maxHealth,
       destroyed: false
     },
-    "first meaningful hit should damage but not remove a two-health block"
+    "first meaningful hit should damage but not remove a sturdy terrain block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "damaged block should remain in the voxel grid");
   assertEqual(world.getBlockDamage(2, 3, 4), 1, "world should remember sparse block damage");
   assertEqual(world.getStats().damagedBlocks, 1, "debug stats should count damaged blocks");
 
-  const secondHit = world.damageBlock(2, 3, 4, 1);
+  const secondHit = world.damageBlock(2, 3, 4, maxHealth - 1);
   assertDeepEqual(
     secondHit,
     {
       block: BLOCK.stone,
       position: { x: 2, y: 3, z: 4 },
       remainingHealth: 0,
-      maxHealth: 2,
+      maxHealth,
       destroyed: true
     },
-    "second meaningful hit should destroy a two-health block"
+    "enough accumulated damage should destroy the sturdy terrain block"
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed block should leave the voxel grid");
   assertEqual(world.getBlockDamage(2, 3, 4), 0, "destroyed blocks should clear transient damage state");
 });
 
-test("physics core impact damage overwhelms ordinary terrain health", () => {
+test("physics core carving chips ordinary terrain before fracture", () => {
   const world = new VoxelWorld({ seed: "core-damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
-  world.setBlock(3, 3, 4, BLOCK.rubble);
+  const maxHealth = BLOCKS[BLOCK.stone].health;
 
-  assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "physics cores should deal the tuned impact damage");
-  assert(
-    PHYSICS_CORE_BLOCK_DAMAGE > BLOCKS[BLOCK.stone].health,
-    "core impact damage should one-shot ordinary two-health terrain blocks"
+  assertEqual(PARTIAL_BLOCK_CORE_DAMAGE, 1, "terrain-core hits should carve one health step at a time");
+  assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "full core damage stays available for rubble cover impacts");
+
+  const firstHit = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(firstHit && !firstHit.destroyed, "the first core hit should leave a partial terrain cell");
+  assertClose(
+    firstHit.ejectedRubbleMaterialUnits,
+    getEjectedBlockRubbleMaterialUnits(0, PARTIAL_BLOCK_CORE_DAMAGE, maxHealth),
+    0.000001,
+    "the first carve step should eject only its material slice"
+  );
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.stone, "partially carved terrain should stay in the voxel grid");
+  assert(world.isSolid(2, 3, 4), "partial terrain should keep full collision for the first pass");
+  assert(!world.isRenderableSolid(2, 3, 4), "normal terrain meshing should hand carved cells to custom geometry");
+  assertEqual(world.getPartialBlock(2, 3, 4)?.cuts.length, 1, "the carved block should remember its visual cut");
+  world.clearDamageForChunk(0, 0);
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "partial terrain should keep its damage while chunks stream out");
+
+  let finalHit = firstHit;
+  for (let hit = 2; hit <= maxHealth; hit += 1) {
+    finalHit = world.carveBlock({
+      x: 2,
+      y: 3,
+      z: 4,
+      point: new THREE.Vector3(2, 3.45 + hit * 0.01, 4.45),
+      normal: new THREE.Vector3(-1, 0, 0),
+      speed: 18,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    });
+    if (hit < maxHealth) {
+      assert(finalHit && !finalHit.destroyed, "ordinary terrain should survive intermediate chip hits");
+    }
+  }
+
+  assert(finalHit?.destroyed, "the final carved health step should fracture the terrain block");
+  assertClose(
+    finalHit.ejectedRubbleMaterialUnits,
+    getEjectedBlockRubbleMaterialUnits(maxHealth - PARTIAL_BLOCK_CORE_DAMAGE, maxHealth, maxHealth),
+    0.000001,
+    "the final fracture should eject only the material still left inside the block"
+  );
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
+  assert(!world.isSolid(2, 3, 4), "fractured terrain should stop behaving like a full collision cube");
+  const surfaceCell = world.getPartialBlock(2, 3, 4);
+  assertEqual(surfaceCell, null, "final fracture should clear the bite mesh instead of leaving a surface puddle");
+  const supportHeight = world.getSupportHeight({
+    minX: 2.15,
+    maxX: 2.85,
+    minY: 3,
+    maxY: 3.7,
+    minZ: 4.15,
+    maxZ: 4.85
+  });
+  assertEqual(supportHeight, null, "destroyed carved terrain should leave air instead of break-time support");
+});
+
+test("partial block field renders faceted custom terrain cells", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.42,
+      depth: 0.5,
+      seed: 1234
+    }]
+  };
+
+  field.update([cell], () => true);
+  const positionAttribute = field.mesh.geometry.getAttribute("position");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
+
+  assertEqual(scene.children[0], field.mesh, "partial block field should own one shared scene mesh");
+  assert(field.mesh.visible, "custom partial terrain should become visible when cells exist");
+  assertEqual(field.getStats().cells, 1, "one cell should be represented in the partial terrain mesh");
+  assert(positionAttribute.count > 24, "carved cells should have more geometry than a plain six-face cube");
+  assert(bounds.min.x >= 1 && bounds.max.x <= 2, "partial block geometry should stay inside its voxel x bounds");
+  assert(bounds.min.y >= 2 && bounds.max.y <= 3, "partial block geometry should stay inside its voxel y bounds");
+  assert(bounds.min.z >= 3 && bounds.max.z <= 4, "partial block geometry should stay inside its voxel z bounds");
+
+  field.dispose();
+  assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
+});
+
+test("partial block damage lattice approximates remaining material fraction", () => {
+  const sevenTenthsRemaining = { damage: 3, maxHealth: 10 };
+  const threeTenthsRemaining = { damage: 7, maxHealth: 10 };
+
+  assertEqual(
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+    BLOCK_FRAGMENT_COUNT,
+    "partial-block visual damage should reuse the 3x3x3 fracture lattice as presentation resolution"
+  );
+  assertEqual(
+    getPartialBlockRemovedVisualCellCount(sevenTenthsRemaining),
+    8,
+    "30 percent damage should remove roughly 30 percent of the hidden visual cells"
+  );
+  assertEqual(
+    getPartialBlockRemainingVisualCellCount(sevenTenthsRemaining),
+    19,
+    "7/10 HP should keep about 70 percent of the hidden visual cells"
   );
   assert(
-    PHYSICS_CORE_BLOCK_DAMAGE > BLOCKS[BLOCK.rubble].health,
-    "core impact damage should also one-shot generated rubble terrain blocks"
+    Math.abs(getPartialBlockRemainingVisualCellCount(threeTenthsRemaining) / BLOCK_FRAGMENT_COUNT - 0.3) <
+      1 / BLOCK_FRAGMENT_COUNT,
+    "remaining visual cells should track remaining HP within one lattice-cell of precision"
+  );
+});
+
+test("partial block bite footprint follows tiny core trajectory through the lattice", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-tiny-footprint-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
+
+  assertEqual(removedCells.length, 3, "one 10-HP carve step should remove three presentation cells");
+  assert(
+    removedCells.every((cell) => cell.y === 1 && cell.z === 1),
+    "tiny cores should remove a narrow same-column tunnel through the lattice"
+  );
+  assertDeepEqual(
+    removedCells.map((cell) => cell.x).sort(),
+    [0, 1, 2],
+    "tiny core tunnel should reach all three depths along the impact axis"
+  );
+});
+
+test("partial block bite footprint widens for large cores before drilling deep", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-large-footprint-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: 0.42,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
+  const entryPlaneCells = removedCells.filter((cell) => cell.x === 0);
+  const lateralSlots = new Set(entryPlaneCells.map((cell) => `${cell.y},${cell.z}`));
+
+  assertEqual(removedCells.length, 3, "one 10-HP carve step should still remove three presentation cells");
+  assert(
+    entryPlaneCells.length >= 2 && lateralSlots.size >= 2,
+    "large cores should spend early damage on a wider entry-face footprint"
+  );
+});
+
+test("partial block bite lattice keeps older damage from visually refilling", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-no-refill-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const firstBites = [...(world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])];
+  assert(firstBites.length > 0, "the first damage step should remove visible bite cells");
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(3, 3.5, 4.5),
+    normal: new THREE.Vector3(1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const secondBites = new Set(world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? []);
+
+  assert(secondBites.size >= firstBites.length, "later damage should add bite cells instead of shrinking the bite set");
+  assert(
+    firstBites.every((index) => secondBites.has(index)),
+    "a later hit from a different side should not make earlier removed bite cells reappear"
+  );
+});
+
+test("tiny fast partial-block bites can pierce through an open tunnel", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(result?.pierceContinuation, "tiny fast cores should continue after opening a complete lattice tunnel");
+  assert(result.pierceContinuation.position.x > 3, "piercing should place the core just beyond the exit face");
+  assertClose(result.pierceContinuation.speed, 18 - 3 * 2.8, 0.000001, "exit speed should pay tunnel material cost");
+  assert(result.pierceContinuation.velocity.x > 0, "pierce continuation should keep forward velocity");
+});
+
+test("tiny fast off-center bites still reserve a continuous pierce tunnel", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-off-center-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.34, 4.34),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.2,
+    speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * (PHYSICS_CORE_VELOCITY_MAX_PERCENT / 100),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
+
+  assert(result?.pierceContinuation, "tiny fast cores should pierce even when the aim point is near lattice seams");
+  assertEqual(removedCells.length, 3, "one tiny pierce should still spend one carve step of visual material");
+  assertDeepEqual(
+    removedCells.map((cell) => cell.x).sort(),
+    [0, 1, 2],
+    "off-center tiny cores should reserve one continuous through-depth tunnel"
+  );
+});
+
+test("large fast partial-block bites gouge instead of piercing", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-large-no-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: 0.42,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(!result?.pierceContinuation, "wide cores should not pierce even when they are fast");
+});
+
+test("tiny slow partial-block bites chip without piercing", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-slow-no-pierce-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 13,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(!result?.pierceContinuation, "slow cores should not pierce even when the footprint is tiny");
+});
+
+test("tiny fast partial-block bites stop when the exit space is solid", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-solid-exit-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(!result?.pierceContinuation, "tiny fast cores should not pierce into an immediately solid exit cell");
+});
+
+test("partial block bites open wrinkled interior faces at the impact point", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 3,
+    maxHealth: 10,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.46,
+      depth: 0.55,
+      seed: 9876
+    }]
+  };
+
+  field.update([cell], () => true);
+  const positions = field.mesh.geometry.getAttribute("position");
+  const normals = field.mesh.geometry.getAttribute("normal");
+  let interiorBiteVertices = 0;
+  let wrinkledBiteVertices = 0;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const normalX = normals.getX(index);
+    if (normalX < -0.35 && x > 1.05 && x < 1.7) {
+      interiorBiteVertices += 1;
+      if (Math.abs(x - (1 + 1 / 3)) > 0.002 && Math.abs(x - (1 + 2 / 3)) > 0.002) {
+        wrinkledBiteVertices += 1;
+      }
+    }
+  }
+
+  assert(interiorBiteVertices > 0, "damage should reveal internal bite faces instead of only denting the outer cube");
+  assert(wrinkledBiteVertices > 0, "exposed bite faces should get faceted wrinkle vertices instead of staying planar");
+
+  field.dispose();
+});
+
+test("partial block cuts chew into neighboring exposed faces near edges", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.96, z: 0.5 },
+      radius: 0.48,
+      depth: 0.5,
+      seed: 4321
+    }]
+  };
+
+  field.update([cell], () => true);
+  const positions = field.mesh.geometry.getAttribute("position");
+  const normals = field.mesh.geometry.getAttribute("normal");
+  let pulledTopFaceVertices = 0;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const y = positions.getY(index);
+    const normalY = normals.getY(index);
+    if (normalY > 0.35 && y > 2.55 && y < 2.995) {
+      pulledTopFaceVertices += 1;
+    }
+  }
+
+  assert(
+    pulledTopFaceVertices > 0,
+    "edge-adjacent cuts should pull neighboring exposed faces inward instead of only denting the impact face"
   );
 
-  const stoneHit = world.damageBlock(2, 3, 4, PHYSICS_CORE_BLOCK_DAMAGE);
-  const rubbleHit = world.damageBlock(3, 3, 4, PHYSICS_CORE_BLOCK_DAMAGE);
+  field.dispose();
+});
 
-  assert(stoneHit?.destroyed, "a core hit should destroy a normal terrain block in one impact");
-  assert(rubbleHit?.destroyed, "a core hit should destroy a generated rubble block in one impact");
-  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "destroyed stone should leave the voxel grid");
-  assertEqual(world.getBlock(3, 3, 4), BLOCK.air, "destroyed rubble terrain should leave the voxel grid");
+test("partial block field renders broken cells as wrinkled support surfaces", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.grass,
+    position: { x: 4, y: 5, z: 6 },
+    damage: 2,
+    maxHealth: 2,
+    cuts: [],
+    surfaceSamples: [
+      { localX: 0.2, localZ: 0.3, height: 0.16, weight: 1 },
+      { localX: 0.78, localZ: 0.62, height: 0.42, weight: 1.2 }
+    ]
+  };
+
+  field.update([cell], () => true);
+  const positions = field.mesh.geometry.getAttribute("position");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positions);
+
+  assert(field.mesh.visible, "broken partial terrain should render as a visible surface patch");
+  assert(positions.count > 40, "surface patches should use a low-poly heightfield instead of a single quad");
+  assert(bounds.min.y >= 5, "partial support surfaces should stay inside their source cell base");
+  assert(bounds.max.y > 5.25 && bounds.max.y < 6, "surface samples should create a partial-height walkable patch");
+
+  field.dispose();
+});
+
+test("fractured terrain does not stamp a break-time surface puddle", () => {
+  const world = new VoxelWorld({ seed: "partial-surface-patch-test" });
+  const target = { x: 8, y: 3, z: 8 };
+  for (let dz = -1; dz <= 1; dz += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      world.setBlock(target.x + dx, target.y - 1, target.z + dz, BLOCK.stone);
+      world.setBlock(target.x + dx, target.y, target.z + dz, BLOCK.air);
+      world.setBlock(target.x + dx, target.y + 1, target.z + dz, BLOCK.air);
+    }
+  }
+  world.setBlock(target.x, target.y, target.z, BLOCK.stone);
+
+  for (let hit = 0; hit < BLOCKS[BLOCK.stone].health; hit += 1) {
+    world.carveBlock({
+      x: target.x,
+      y: target.y,
+      z: target.z,
+      point: new THREE.Vector3(target.x, target.y + 0.52, target.z + 0.48),
+      normal: new THREE.Vector3(-1, 0, 0),
+      speed: 20,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    });
+  }
+
+  const surfaceCells = world.getPartialBlocks().filter((cell) =>
+    cell.surfaceSamples?.length &&
+    cell.position.y === target.y &&
+    Math.abs(cell.position.x - target.x) <= 1 &&
+    Math.abs(cell.position.z - target.z) <= 1
+  );
+  assertEqual(surfaceCells.length, 0, "a final terrain fracture should not create a multi-cell wrinkled patch");
+
+  const neighborSupportHeight = world.getSupportHeight({
+    minX: target.x - 0.85,
+    maxX: target.x - 0.15,
+    minY: target.y,
+    maxY: target.y + 0.7,
+    minZ: target.z + 0.15,
+    maxZ: target.z + 0.85
+  });
+  assertEqual(neighborSupportHeight, null, "final break should leave neighboring terrain support untouched");
+});
+
+test("chunk meshing skips carved cells and exposes adjacent terrain faces", () => {
+  const chunk = new Chunk(0, 0);
+  chunk.setLocal(1, 1, 1, BLOCK.stone);
+  chunk.setLocal(2, 1, 1, BLOCK.stone);
+
+  const meshWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      if (y < 0) return true;
+      return chunk.getLocal(Math.floor(x), Math.floor(y), Math.floor(z)) !== BLOCK.air;
+    },
+    isRenderableSolid(x: number, y: number, z: number): boolean {
+      if (Math.floor(x) === 1 && Math.floor(y) === 1 && Math.floor(z) === 1) return false;
+      return this.isSolid(x, y, z);
+    }
+  };
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const mesh = chunk.rebuildMesh(meshWorld, material);
+  const positions = mesh.geometry.getAttribute("position");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positions);
+
+  assert(positions.count > 0, "the neighbor of a carved cell should expose a visible terrain face");
+  assert(
+    bounds.min.x >= 2,
+    "the carved block itself should be absent from normal chunk geometry so the custom mesh can own it"
+  );
+
+  mesh.geometry.dispose();
+  material.dispose();
+});
+
+test("impact crater field stamps faceted scars on impacted block faces", () => {
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+
+  assert(craters.stamp({
+    block: BLOCK.stone,
+    blockPosition: { x: 1, y: 2, z: 3 },
+    normal: new THREE.Vector3(-1, 0, 0),
+    point: new THREE.Vector3(0.92, 2.5, 3.5),
+    speed: 16,
+    destroyed: true
+  }), "meaningful block impacts should create a crater stamp");
+
+  const stats = craters.getStats();
+  const positionAttribute = craters.mesh.geometry.getAttribute("position");
+  const colorAttribute = craters.mesh.geometry.getAttribute("color");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
+
+  assertEqual(scene.children[0], craters.mesh, "crater field should own one scene mesh");
+  assert(craters.mesh.visible, "stamped crater mesh should become visible");
+  assertEqual(stats.craters, 1, "one impact should add one crater sample");
+  assert(stats.vertices > 0 && stats.triangles > 0, "crater stamps should build visible static geometry");
+  assertEqual(
+    colorAttribute.count,
+    positionAttribute.count,
+    "crater geometry should carry per-vertex scar colors"
+  );
+  assert(
+    bounds.max.x < 1,
+    "negative-X impact scars should sit just outside the hit block face instead of drifting into the voxel"
+  );
+  assert(
+    bounds.min.y > 2 && bounds.max.y < 3,
+    "face-clamped crater geometry should stay within the hit block's vertical face span"
+  );
+  assert(
+    bounds.min.z > 3 && bounds.max.z < 4,
+    "face-clamped crater geometry should stay within the hit block's horizontal face span"
+  );
+
+  craters.dispose();
+});
+
+test("impact crater field caps old stamps and clears its static mesh", () => {
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+
+  for (let index = 0; index < IMPACT_CRATER_MAX_STAMPS + 8; index += 1) {
+    craters.stamp({
+      block: BLOCK.dirt,
+      blockPosition: { x: index, y: 4, z: 0 },
+      normal: new THREE.Vector3(0, 1, 0),
+      point: new THREE.Vector3(index + 0.5, 5, 0.5),
+      speed: 10,
+      destroyed: false
+    });
+  }
+
+  assertEqual(
+    craters.getStats().craters,
+    IMPACT_CRATER_MAX_STAMPS,
+    "crater field should cap stale static scars before they become unbounded visual baggage"
+  );
+  craters.clear();
+  assertEqual(craters.getStats().craters, 0, "clearing should drop crater stats");
+  assert(!craters.mesh.visible, "clearing should hide the shared crater mesh");
+
+  craters.dispose();
+  assertEqual(scene.children.length, 0, "disposing should remove the crater mesh from the scene");
+});
+
+test("impact crater stamps destroyed hits onto surviving exposed faces", () => {
+  const hostWorld = {
+    getBlock(x: number, y: number, z: number): number {
+      return x === 2 && y === 2 && z === 3 ? BLOCK.stone : BLOCK.air;
+    }
+  };
+
+  const craterStamp = createImpactCraterStampForTerrainImpact(
+    hostWorld,
+    {
+      block: BLOCK.grass,
+      position: { x: 1, y: 2, z: 3 },
+      destroyed: true
+    },
+    {
+      normal: new THREE.Vector3(-1, 0, 0),
+      position: new THREE.Vector3(0.94, 2.55, 3.45),
+      speed: 14
+    }
+  );
+
+  assert(craterStamp, "destroyed block impacts should look for a surviving exposed host face");
+  assertDeepEqual(
+    craterStamp.blockPosition,
+    { x: 2, y: 2, z: 3 },
+    "the crater host should be the solid cell behind the destroyed voxel, not the air cell that just disappeared"
+  );
+  assertEqual(craterStamp.block, BLOCK.stone, "destroyed-block craters should inherit the surviving host material");
+  assertVectorNearlyEqual(
+    craterStamp.normal,
+    new THREE.Vector3(-1, 0, 0),
+    "the surviving host face should point back into the destroyed voxel"
+  );
+
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+  craters.stamp(craterStamp);
+  const bounds = new THREE.Box3().setFromBufferAttribute(craters.mesh.geometry.getAttribute("position"));
+  assert(
+    bounds.max.x < 2,
+    "destroyed-block crater geometry should sit against the surviving host face instead of floating at the removed voxel face"
+  );
+  craters.dispose();
+});
+
+test("impact crater field removes scars hosted by destroyed blocks", () => {
+  const scene = new THREE.Scene();
+  const craters = new ImpactCraterField(scene);
+  const host = { x: 3, y: 1, z: 2 };
+
+  craters.stamp({
+    block: BLOCK.stone,
+    blockPosition: host,
+    normal: new THREE.Vector3(0, 0, -1),
+    point: new THREE.Vector3(3.5, 1.5, 2),
+    speed: 8
+  });
+  assertEqual(craters.getStats().craters, 1, "setup should create one hosted crater");
+
+  craters.removeBlock(host);
+  assertEqual(craters.getStats().craters, 0, "destroying a crater host should remove its scar geometry");
+  assert(!craters.mesh.visible, "removing the final hosted crater should hide the mesh");
+  craters.dispose();
+});
+
+test("destroyed impact craters skip empty back faces instead of leaving floating decals", () => {
+  const emptyWorld = {
+    getBlock(): number {
+      return BLOCK.air;
+    }
+  };
+  const craterStamp = createImpactCraterStampForTerrainImpact(
+    emptyWorld,
+    {
+      block: BLOCK.grass,
+      position: { x: 1, y: 2, z: 3 },
+      destroyed: true
+    },
+    {
+      normal: new THREE.Vector3(-1, 0, 0),
+      position: new THREE.Vector3(0.94, 2.55, 3.45),
+      speed: 14
+    }
+  );
+
+  assertEqual(
+    craterStamp,
+    null,
+    "destroyed-block impacts without a surviving host face should not leave unsupported crater geometry"
+  );
 });
 
 test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
@@ -1712,13 +2565,90 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
 
   for (const fragmentCount of [2, 4, 7, 14, BLOCK_FRAGMENT_COUNT]) {
     let totalMaterialUnits = 0;
+    const shapeIds = new Set<string>();
     for (let index = 0; index < fragmentCount; index += 1) {
       totalMaterialUnits += getBlockFragmentMaterialUnits(index, fragmentCount);
+      shapeIds.add(createDebrisShapeForBlock(BLOCK.stone, {
+        fragmentIndex: index,
+        distributedFragmentIndex: getDistributedBlockFragmentIndex(index, fragmentCount),
+        origin: { x: 4, y: 8, z: 12 }
+      }).shapeId);
     }
-    assertEqual(
+    assertClose(
       totalMaterialUnits,
       BLOCK_RUBBLE_MATERIAL_UNITS,
+      0.000001,
       "quality-scaled visible fragments should still carry one full block of rubble material"
+    );
+    assert(shapeIds.size >= 1, "shape assignment should not affect fragment material accounting");
+    if (fragmentCount === BLOCK_FRAGMENT_COUNT) {
+      assert(shapeIds.size > 1, "full-quality fractures should visibly mix shard shapes");
+    }
+  }
+});
+
+test("terrain impact fragment counts eject chips without duplicating material", () => {
+  assertClose(
+    getBlockRubbleMaterialUnitsForHealth(7, 10),
+    BLOCK_RUBBLE_MATERIAL_UNITS * 0.7,
+    0.000001,
+    "7/10 HP should leave exactly 70 percent of one block-volume material budget"
+  );
+  assertClose(
+    getEjectedBlockRubbleMaterialUnits(0, 1, 10),
+    BLOCK_RUBBLE_MATERIAL_UNITS * 0.1,
+    0.000001,
+    "the first 10-HP chip should eject the difference between 100% and 90% material"
+  );
+  assertClose(
+    getEjectedBlockRubbleMaterialUnits(9, 10, 10),
+    BLOCK_RUBBLE_MATERIAL_UNITS * 0.1,
+    0.000001,
+    "the final 10-HP chip should eject the last remaining material"
+  );
+  let tenHitMaterialTotal = 0;
+  for (let damage = 0; damage < 10; damage += 1) {
+    tenHitMaterialTotal += getEjectedBlockRubbleMaterialUnits(damage, damage + 1, 10);
+  }
+  assertClose(
+    tenHitMaterialTotal,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    0.000001,
+    "ten one-damage chips should still emit exactly one full block of material"
+  );
+
+  assertEqual(
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, true),
+    BLOCK_FRAGMENT_COUNT,
+    "a whole-block fracture can use the full visible debris budget"
+  );
+  assertEqual(
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS * 0.1, true),
+    3,
+    "a nearly-empty final fracture should only spawn debris for the remaining material"
+  );
+  assertEqual(
+    getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, false),
+    TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
+    "non-final chip hits should stay visually small even when they remove a large material slice"
+  );
+  assertEqual(
+    getTerrainImpactFragmentCount(QUALITY_PRESETS.potato.blockFragmentCount, BLOCK_RUBBLE_MATERIAL_UNITS, false),
+    1,
+    "Potato chip hits should still spawn a visible shard without flooding the CPU"
+  );
+
+  for (const materialUnits of [0.04, 0.1, 0.27, 0.5, BLOCK_RUBBLE_MATERIAL_UNITS]) {
+    const fragmentCount = getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, materialUnits, materialUnits <= 0.1);
+    let carriedUnits = 0;
+    for (let index = 0; index < fragmentCount; index += 1) {
+      carriedUnits += getBlockFragmentMaterialUnits(index, fragmentCount, materialUnits);
+    }
+    assertClose(
+      carriedUnits,
+      materialUnits,
+      0.000001,
+      "proportional terrain debris should carry exactly the material slice it ejected"
     );
   }
 });
@@ -1726,31 +2656,44 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
 test("block fragments render through instanced batches instead of scene children", () => {
   const scene = new THREE.Scene();
   const instancer = new PhysicsFragmentInstancer(scene);
+  const chunkyShape = createDebrisShape("chunky-chip");
+  const slabShape = createDebrisShape("flat-slab");
   const grassFragment = PhysicsToy.createBlockFragment(
     BLOCK.grass,
     new THREE.Vector3(0, 2, 0),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    chunkyShape
   );
   const secondGrassFragment = PhysicsToy.createBlockFragment(
     BLOCK.grass,
     new THREE.Vector3(1, 2, 0),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    slabShape
   );
   const stoneFragment = PhysicsToy.createBlockFragment(
     BLOCK.stone,
     new THREE.Vector3(2, 2, 0),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    chunkyShape
   );
 
   assert(grassFragment.isInstancedFragment, "block debris should opt into instanced rendering");
   assertEqual(grassFragment.fragmentBlock, BLOCK.grass, "fragment should remember its source block");
+  assertEqual(grassFragment.debrisShape?.shapeId, "chunky-chip", "fragment should remember its shard shape");
   instancer.update([grassFragment, secondGrassFragment, stoneFragment]);
 
   const instancedMeshes = scene.children.filter((child) => child instanceof THREE.InstancedMesh);
-  assertEqual(instancedMeshes.length, 2, "fragments should batch into one instanced mesh per block type");
+  assertEqual(
+    instancedMeshes.length,
+    3,
+    "fragments should batch into one instanced mesh per block and shard shape"
+  );
   assertDeepEqual(
     instancer.getStats(),
-    { batches: 2, instances: 3, capacity: 3 },
+    { batches: 3, instances: 3, capacity: 3 },
     "instanced renderer should report visible fragment pressure"
   );
   grassFragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
@@ -1766,6 +2709,11 @@ test("block fragments render through instanced batches instead of scene children
   assert(
     instanceRotation.angleTo(grassFragment.mesh.quaternion) < 0.001,
     "instanced debris should render each fragment's tumble rotation, not just its position"
+  );
+  assertVectorNearlyEqual(
+    instanceScale,
+    chunkyShape.visualScale,
+    "instanced debris should render each fragment's non-uniform shard scale"
   );
 
   instancer.clear();
@@ -1804,7 +2752,7 @@ test("block fragments visually tumble while flying", () => {
 
   assert(
     fragment.mesh.quaternion.angleTo(startingRotation) > 0.001,
-    "flying cube debris should spin visibly during the short settling theater"
+    "flying shard debris should spin visibly during the short settling theater"
   );
 });
 
@@ -1906,12 +2854,138 @@ test("orphan fragments respect the active debris bubble before rubble absorption
   );
 });
 
+test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 360 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+
+  assert(fragment.isRigidDebrisDriven, "registered block debris should be driven by the rigid-body adapter");
+  assert(fragment.isSleeping, "rigid debris should use Rapier sleep instead of spinning forever");
+  assert(
+    fragment.mesh.position.y - BLOCK_FRAGMENT_VISUAL_SIZE * 0.5 >= -0.02,
+    "rigid cuboid debris should settle on top of the terrain collider"
+  );
+  assertEqual(rigidDebris.getStats().bodies, 1, "the adapter should keep the active fragment body registered");
+
+  rigidDebris.clear();
+  assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
+});
+
+test("rigid debris adapter keeps fast falling shards from outrunning terrain colliders", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 4.5, 0.5),
+    new THREE.Vector3(0, -42, 0),
+    1,
+    createDebrisShape("flat-slab")
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 180 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+
+  assert(
+    fragment.mesh.position.y > -0.2,
+    "fast falling rigid debris should not tunnel through the terrain collider bubble"
+  );
+  assert(
+    rigidDebris.getStats().terrainColliders > 0,
+    "fast falling rigid debris should build temporary terrain colliders along its predicted path"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter registers per-fragment cuboid half extents", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shardShape = createDebrisShape("long-splinter");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1,
+    shardShape
+  );
+
+  rigidDebris.registerFragment(fragment);
+  const registeredHalfExtents = rigidDebris.getRegisteredColliderHalfExtents(fragment);
+  assert(registeredHalfExtents, "registered rigid debris should expose its cuboid envelope");
+  assertVectorNearlyEqual(
+    registeredHalfExtents,
+    shardShape.colliderHalfExtents,
+    "rigid debris should use the fragment's own cuboid envelope instead of one global cuboid size"
+  );
+
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter builds temporary support colliders from rubble height queries", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const supportY = 0.5;
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  const supportWorld: CollisionWorld = {
+    isSolid(): boolean {
+      return false;
+    },
+    getSupportHeight(bounds): number | null {
+      return bounds.minX <= 0.5 && bounds.maxX >= 0.5 && bounds.minZ <= 0.5 && bounds.maxZ >= 0.5
+        ? supportY
+        : null;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 360 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, supportWorld);
+  }
+
+  assert(fragment.isSleeping, "rigid debris should settle on generated rubble support colliders");
+  assert(
+    fragment.mesh.position.y - BLOCK_FRAGMENT_VISUAL_SIZE * 0.5 >= supportY - 0.02,
+    "rigid debris should not sink through partial-height rubble support"
+  );
+  assert(
+    rigidDebris.getStats().rubbleSupportColliders > 0,
+    "the adapter should expose temporary rubble-support colliders near active debris"
+  );
+  rigidDebris.clear();
+});
+
 function createTestFragment(
   block: number,
   x: number,
   y: number,
   z: number,
-  rubbleMaterialUnits = 1
+  rubbleMaterialUnits = TEST_FRAGMENT_MATERIAL_UNITS
 ): PhysicsToy {
   return PhysicsToy.createBlockFragment(
     block,
@@ -2049,7 +3123,7 @@ test("debris settler lets dense fracture grids spread before contact damping sta
   );
 });
 
-test("debris settler does not pull fresh breakup debris back into cube formation", () => {
+test("debris settler does not pull fresh breakup debris back into intact-block formation", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const left = createTestFragment(BLOCK.grass, 0.2, 1.5, 0.5);
@@ -2097,7 +3171,7 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   assertEqual(
     left.angularVelocity.lengthSq() + right.angularVelocity.lengthSq(),
     0,
-    "glued debris contacts should stop independent cube spin once fragments stick together"
+    "glued debris contacts should stop independent shard spin once fragments stick together"
   );
 });
 
@@ -2342,8 +3416,8 @@ test("debris settler finalizes potato fragments into full rubble material", () =
 
   const afterFinalize = settler.update(0.02, rubble);
   assertEqual(afterFinalize.finalizedBatches, 1, "region should finalize shortly after the delay");
-  assertEqual(afterFinalize.finalizedPieces, BLOCK_RUBBLE_MATERIAL_UNITS, "two Potato shards should expand into full rubble material");
-  assertEqual(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, "rubble field should receive all gameplay material");
+  assertClose(afterFinalize.finalizedPieces, BLOCK_RUBBLE_MATERIAL_UNITS, 0.000001, "two Potato shards should expand into full rubble material");
+  assertClose(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, 0.000001, "rubble field should receive all gameplay material");
   assert(fragments.every((fragment) => fragment.isExpired), "finalized visible fragments should be marked for pruning");
   assert(
     fragments.every((fragment) => settler.owns(fragment)),
@@ -2395,6 +3469,78 @@ test("debris settler converts far bubble debris into rubble", () => {
   assertEqual(scene.children.length, 1, "far debris should become one persistent rubble mesh");
 });
 
+test("debris settler bakes far sleeping rigid debris without losing material", async () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    5
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+  let finalized = false;
+
+  rigidDebris.registerFragment(fragment);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 2.5, 0.5), [fragment]);
+  for (let frame = 0; frame < 420 && !finalized; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+    const stats = settler.update(1 / 60, rubble, {
+      activeCenter: new THREE.Vector3(20, 2.5, 0.5),
+      activeRadius: 4
+    });
+    finalized = stats.finalizedBatches > 0;
+  }
+
+  assert(finalized, "sleeping rigid debris outside the bubble should bake into rubble");
+  assert(fragment.isExpired, "baked rigid debris should be marked for normal toy pruning");
+  assertEqual(rubble.getStats().pieces, 5, "rigid bake-out should preserve carried material units");
+  rigidDebris.clear();
+});
+
+test("debris settler bakes nearby sleeping rigid debris into cheap rubble", async () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    4
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+  let finalized = false;
+
+  rigidDebris.registerFragment(fragment);
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.5, 2.5, 0.5), [fragment]);
+  for (let frame = 0; frame < 420 && !finalized; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+    const stats = settler.update(1 / 60, rubble, {
+      activeCenter: new THREE.Vector3(0.5, 2.5, 0.5),
+      activeRadius: 8
+    });
+    finalized = stats.finalizedBatches > 0;
+  }
+
+  assert(finalized, "nearby rigid debris should bake after it settles instead of staying as CPU work");
+  assert(fragment.isExpired, "settled rigid debris should leave through the normal prune path");
+  assertEqual(rubble.getStats().pieces, 4, "nearby rigid bake-out should keep material units");
+  rigidDebris.clear();
+});
+
 test("debris settler keeps far airborne bubble debris alive until it settles", () => {
   const scene = new THREE.Scene();
   const settler = new DebrisSettler();
@@ -2416,7 +3562,8 @@ test("debris settler keeps far airborne bubble debris alive until it settles", (
 
 test("debris settler pressure relief finalizes farthest regions first", () => {
   const settler = new DebrisSettler();
-  const rubble = new RubbleField(new THREE.Scene());
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
   const nearFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
   const farFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
 
@@ -2430,7 +3577,37 @@ test("debris settler pressure relief finalizes farthest regions first", () => {
   assertEqual(stats.regions, 1, "one nearby region should remain active after farthest-region relief");
   assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
   assert(farFragment.isExpired, "the farthest debris region should be the one converted");
-  assertEqual(rubble.getStats().pieces, 1, "pressure relief should preserve the far region's material");
+  assertClose(
+    rubble.getStats().pieces,
+    TEST_FRAGMENT_MATERIAL_UNITS,
+    0.000001,
+    "pressure relief should preserve the far region's material"
+  );
+  assertEqual(rubble.getStats().visualChunks, 1, "pressure relief should keep a static shard pose instead of making invisible support-only rubble");
+});
+
+test("debris settler pressure relief prefers sleeping regions before awake debris", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const nearSleepingFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  const farAwakeFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
+  sleepTestFragment(nearSleepingFragment);
+  farAwakeFragment.velocity.set(2, 0, 0);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [nearSleepingFragment]);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 1.1, 0.5), [farAwakeFragment]);
+
+  const removed = settler.finalizeRegionsForPressure(rubble, new THREE.Vector3(0.5, 1.1, 0.5), 1);
+
+  assertEqual(removed, 1, "pressure relief should convert one sleeping region when that is enough");
+  assert(nearSleepingFragment.isExpired, "sleeping debris should be the first pressure-relief candidate");
+  assert(settler.owns(farAwakeFragment), "awake debris should stay active while sleeping material can relieve pressure");
+  assertClose(
+    rubble.getStats().pieces,
+    TEST_FRAGMENT_MATERIAL_UNITS,
+    0.000001,
+    "sleeping pressure relief should still preserve material"
+  );
 });
 
 test("debris settler waits for quiet fragments before soft finalization", () => {
@@ -2533,16 +3710,16 @@ test("batched rubble absorption preserves material and scales health", () => {
   world.setBlock(0, 0, 0, BLOCK.stone);
 
   rubble.absorbBatch([
-    { block: BLOCK.stone, position: new THREE.Vector3(0.25, 1.1, 0.25), pieces: 6 },
-    { block: BLOCK.stone, position: new THREE.Vector3(0.75, 1.1, 0.75), pieces: 5 }
+    { block: BLOCK.stone, position: new THREE.Vector3(0.25, 1.1, 0.25), pieces: 0.6 },
+    { block: BLOCK.stone, position: new THREE.Vector3(0.75, 1.1, 0.75), pieces: 0.5 }
   ]);
   rubble.settle(world);
 
   const stats = rubble.getStats();
-  assertEqual(stats.pieces, 11, "batched rubble should preserve piece totals");
+  assertClose(stats.pieces, 1.1, 0.000001, "batched rubble should preserve material volume totals");
   assertNearlyEqual(
     stats.health,
-    expectedRubbleHealthForPieces(11),
+    expectedRubbleHealthForPieces(1.1),
     "batched rubble health should scale separately from material totals"
   );
   assertEqual(stats.clusters, 1, "batched nearby samples should merge into one cover patch");
@@ -2580,11 +3757,16 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assertEqual(scene.children.length, 1, "merged rubble should render as one cheap cover proxy");
   const rubbleStats = rubble.getStats();
   assertEqual(rubbleStats.clusters, 1, "absorbed fragments should merge into one cluster");
-  assertEqual(rubbleStats.pieces, 2, "absorbed fragments should count as rubble pieces");
+  assertClose(
+    rubbleStats.pieces,
+    TEST_FRAGMENT_MATERIAL_UNITS * 2,
+    0.000001,
+    "absorbed fragments should count their carried material volume"
+  );
   assertEqual(rubbleStats.visualChunks, 2, "absorbed fragments should leave baked visual chunks for the hybrid pile");
   assertNearlyEqual(
     rubbleStats.health,
-    expectedRubbleHealthForPieces(2),
+    expectedRubbleHealthForPieces(TEST_FRAGMENT_MATERIAL_UNITS * 2),
     "absorbed fragments should add scaled destructible cover health"
   );
   assert(
@@ -2605,21 +3787,25 @@ test("rubble field absorbs settled fragments into cover proxies", () => {
   assertEqual(scene.children.length, 0, "destroyed rubble should remove its visible proxy");
 });
 
-test("hybrid rubble meshes add baked chunks while keeping cheap support", () => {
+test("hybrid rubble meshes render baked chunks while keeping cheap support", () => {
   const smoothScene = new THREE.Scene();
   const smoothRubble = new RubbleField(smoothScene);
   smoothRubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
   smoothRubble.getStats();
   const smoothMesh = smoothScene.children[0];
-  assert(smoothMesh instanceof THREE.Mesh, "setup should create a support-only rubble mesh");
+  assert(smoothMesh instanceof THREE.Mesh, "setup should keep a support-only rubble mesh object");
   const smoothVertexCount = smoothMesh.geometry.getAttribute("position").count;
+  assertEqual(smoothVertexCount, 0, "support-only rubble should not render the parked draped sheet");
 
   const hybridScene = new THREE.Scene();
   const hybridRubble = new RubbleField(hybridScene);
+  const shardShape = createDebrisShape("wedge");
   const fragment = PhysicsToy.createBlockFragment(
     BLOCK.dirt,
     new THREE.Vector3(0.5, 0.2, 0.5),
-    new THREE.Vector3(0, 0, 0)
+    new THREE.Vector3(0, 0, 0),
+    1,
+    shardShape
   );
   fragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 5);
   fragment.sleepInPlace();
@@ -2633,11 +3819,12 @@ test("hybrid rubble meshes add baked chunks while keeping cheap support", () => 
   const chunkPositions = hybridMesh.geometry.getAttribute("position");
 
   assertEqual(hybridStats.visualChunks, 1, "hybrid rubble should store a capped static chunk sample");
-  assert(
-    hybridVertexCount > smoothVertexCount,
-    "hybrid rubble should add baked cuboid geometry on top of the support mound"
+  assertEqual(
+    hybridVertexCount,
+    getDebrisShapeGeometry(shardShape.shapeId).getAttribute("position").count,
+    "hybrid rubble should preserve the baked shard shape instead of reverting to a cube"
   );
-  for (let index = smoothVertexCount; index < hybridVertexCount; index += 1) {
+  for (let index = 0; index < hybridVertexCount; index += 1) {
     const outward = new THREE.Vector3(
       chunkPositions.getX(index) - fragment.mesh.position.x,
       chunkPositions.getY(index) - fragment.mesh.position.y,
@@ -2671,6 +3858,34 @@ test("hybrid rubble meshes add baked chunks while keeping cheap support", () => 
   assertEqual(hybridScene.children.length, 0, "full rubble cleanup should remove hybrid rubble meshes");
 });
 
+test("forced rubble absorption keeps awake shard visuals for budget relief", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+  const shardShape = createDebrisShape("narrow-shard");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 0.45, 0.5),
+    new THREE.Vector3(1.5, 0.2, 0),
+    1,
+    shardShape
+  );
+
+  assert(rubble.absorbFragment(fragment, { forceVisualChunk: true }), "budget relief should be able to bake an awake fragment");
+  const stats = rubble.getStats();
+  const mesh = scene.children[0];
+  assert(mesh instanceof THREE.Mesh, "forced budget rubble should still render through the rubble mesh");
+  assertEqual(stats.visualChunks, 1, "forced budget bake-out should preserve the visible shard pose");
+  const positionAttribute = mesh.geometry.getAttribute("position");
+  assert(positionAttribute.count > 0, "forced budget bake-out should not disappear now that the draped sheet is disabled");
+  const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
+  const boundsSize = new THREE.Vector3();
+  bounds.getSize(boundsSize);
+  assert(
+    boundsSize.length() > BLOCK_FRAGMENT_VISUAL_SIZE * 0.5,
+    "forced budget bake-out should create a sane visible shard bound"
+  );
+});
+
 test("adjacent rubble cells merge into one broad patch", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
@@ -2690,6 +3905,7 @@ test("adjacent rubble cells merge into one broad patch", () => {
   );
   assert(hit, "the merged patch should still cover the neighboring cell");
   assertEqual(hit.block, BLOCK.dirt, "merged patches should preserve their source material");
+  assertDeepEqual(hit.cell, { x: 1, y: 0, z: 0 }, "rubble raycasts should report the targeted cube cell");
 });
 
 test("quality-reduced fragments still settle into full rubble material", () => {
@@ -2726,8 +3942,8 @@ test("rubble damage removes the impacted pile and only chips immediate neighbors
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.5, 0.2, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 0.25);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.5, 0.2, 0.5), 1.5);
   assertEqual(rubble.getStats().clusters, 1, "adjacent setup should merge into one broad rubble patch");
 
   assert(
@@ -2749,14 +3965,19 @@ test("rubble damage removes the impacted pile and only chips immediate neighbors
 
   assertEqual(targetCellHit, null, "the impacted pile should be removed first");
   assert(neighborCellHit, "the healthier neighboring pile should survive sharing a cluster");
-  assertEqual(rubble.getStats().pieces, 4, "the neighboring pile should only lose a small collateral chip");
+  assertClose(
+    rubble.getStats().pieces,
+    1.5 - (0.25 / RUBBLE_FULL_BLOCK_HEALTH),
+    0.000001,
+    "the neighboring pile should only lose a small collateral chip"
+  );
   assertEqual(damageEvents.length, 2, "destroying one pile should emit direct and collateral damage events");
   assertEqual(damageEvents[0]?.destroyed, true, "the first event should describe the direct destroyed pile");
   assertEqual(damageEvents[0]?.collateral, false, "the direct hit should not be marked as collateral");
   assertEqual(damageEvents[1]?.collateral, true, "neighboring chip damage should be marked as collateral");
   assertNearlyEqual(
     damageEvents[1]?.remainingHealth,
-    expectedRubbleHealthForPieces(6) - 0.25,
+    expectedRubbleHealthForPieces(1.5) - 0.25,
     "collateral damage should chip neighboring rubble instead of deleting it"
   );
   assertEqual(
@@ -2770,7 +3991,7 @@ test("single-piece rubble stays in a local footprint instead of filling the whol
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), 1);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 0.2, 0.5), TEST_FRAGMENT_MATERIAL_UNITS);
 
   const centerHit = rubble.raycast(
     new THREE.Vector3(0.5, 0.08, -2),
@@ -2793,7 +4014,8 @@ test("rubble field lets moving cores collide with and chip cover proxies", () =>
   for (let index = 0; index < 6; index += 1) {
     rubble.absorb(
       BLOCK.dirt,
-      new THREE.Vector3(0.48 + index * 0.01, 0.18, 0.52)
+      new THREE.Vector3(0.48 + index * 0.01, 0.18, 0.52),
+      TEST_FRAGMENT_MATERIAL_UNITS
     );
   }
 
@@ -2822,7 +4044,7 @@ test("terrain impacts resolve before adjacent rubble can take same-frame damage"
 
   world.setBlock(0, targetY, 0, BLOCK.stone);
   world.setBlock(1, targetY - 1, 0, BLOCK.stone);
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.12, targetY + 0.16, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(1.12, targetY + 0.16, 0.5), 1.5);
   rubble.settle(world);
 
   const rubbleHealthBefore = rubble.getStats().health;
@@ -2874,7 +4096,7 @@ test("supported rubble survives manual removal of adjacent terrain", () => {
   world.setBlock(0, 0, 0, BLOCK.stone);
   world.setBlock(1, 1, 0, BLOCK.stone);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 1.5);
   rubble.settle(world);
   const healthBefore = rubble.getStats().health;
 
@@ -2929,7 +4151,8 @@ test("block fragments rest on rubble support instead of sinking into finalized p
     const column = index % 4;
     rubble.absorb(
       BLOCK.dirt,
-      new THREE.Vector3(0.42 + column * 0.05, 1.1, 0.42 + row * 0.06)
+      new THREE.Vector3(0.42 + column * 0.05, 1.1, 0.42 + row * 0.06),
+      BLOCK_RUBBLE_MATERIAL_UNITS / 12
     );
   }
   rubble.settle(world);
@@ -2986,7 +4209,7 @@ test("rubble support height produces walkable slopes toward nearby terrain", () 
   world.setBlock(0, 0, 0, BLOCK.stone);
   world.setBlock(1, 1, 0, BLOCK.stone);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 6);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 1.5);
   rubble.settle(world);
 
   const westSupportY = rubble.getSupportHeight({
@@ -3032,14 +4255,14 @@ test("unsupported rubble piles fall and merge with piles below", () => {
   const rubble = new RubbleField(scene);
   world.setBlock(0, 0, 0, BLOCK.stone);
 
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5));
-  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 2.1, 0.5));
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), 0.5);
+  rubble.absorb(BLOCK.dirt, new THREE.Vector3(0.5, 2.1, 0.5), 0.5);
 
   assertEqual(rubble.getStats().clusters, 2, "setup should start with stacked rubble piles");
   rubble.settle(world);
 
   assertEqual(rubble.getStats().clusters, 1, "unsupported upper pile should merge into the pile below");
-  assertEqual(rubble.getStats().pieces, 2, "merged rubble should keep the total piece count");
+  assertEqual(rubble.getStats().pieces, 1, "merged rubble should keep the total material volume");
   assertEqual(scene.children.length, 1, "merged rubble should render as one cover proxy");
   assertEqual(world.getBlock(0, 1, 0), BLOCK.air, "small merged piles should stay as proxies, not terrain");
 });
@@ -3051,19 +4274,17 @@ test("one full block worth of rubble stays as cover instead of refilling terrain
   world.setBlock(0, 0, 0, BLOCK.stone);
 
   assert(
-    RUBBLE_BLOCK_PROMOTION_PIECES > BLOCK_FRAGMENT_COUNT,
-    "rubble promotion should require more pieces than one maximum-quality block fracture"
+    RUBBLE_BLOCK_PROMOTION_PIECES > BLOCK_RUBBLE_MATERIAL_UNITS,
+    "rubble promotion should require more than one full block of material"
   );
 
-  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
-    rubble.absorb(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5));
-  }
+  rubble.absorb(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5), BLOCK_RUBBLE_MATERIAL_UNITS);
 
   rubble.settle(world);
 
   assertEqual(world.getBlock(0, 1, 0), BLOCK.air, "one destroyed block should leave an open space");
   assertEqual(rubble.getStats().clusters, 1, "sub-threshold rubble should remain as a cover proxy");
-  assertEqual(rubble.getStats().pieces, BLOCK_FRAGMENT_COUNT, "the proxy should keep the full debris count");
+  assertEqual(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, "the proxy should keep the full block material");
   assertEqual(scene.children.length, 1, "sub-threshold rubble should keep its proxy mesh");
 });
 
@@ -3118,6 +4339,254 @@ test("physics impacts report speed so block damage can be thresholded", () => {
     "faster impacts should clear the current block damage gate"
   );
   assertEqual(fastImpacts[0].source, fastToy, "impact payloads should carry the core that caused them");
+  assertEqual(fastImpacts[0].radius, fastToy.radius, "impact payloads should carry the core footprint radius");
+  assertDeepEqual(
+    fastImpacts[0].incomingVelocity.toArray(),
+    [BLOCK_DAMAGE_IMPACT_SPEED + 0.5, 0, 0],
+    "impact payloads should preserve incoming velocity before terrain bounce"
+  );
+});
+
+test("fast small physics cores hit the first block along their swept path", () => {
+  const collisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return y === 0 && z === 0 && (x === 1 || x === 2);
+    }
+  };
+  const fastSmallCore = new PhysicsToy(
+    new THREE.Vector3(0.2, 0.5, 0.5),
+    new THREE.Vector3(123, 0, 0),
+    { radius: 0.105 }
+  );
+
+  const impacts = fastSmallCore.update(1 / 60, collisionWorld);
+
+  assertEqual(impacts.length, 1, "swept core contact should report one front-block impact");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 1, y: 0, z: 0 },
+    "tiny fast cores should not tunnel through the front block and hit the one behind it"
+  );
+  assert(
+    fastSmallCore.mesh.position.x < 1,
+    "swept core contact should leave the core in front of the impacted block"
+  );
+});
+
+test("small fast physics cores pass through existing visual holes in partial blocks", () => {
+  const world = new VoxelWorld({ seed: "small-core-existing-hole-test" });
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: getPhysicsCoreRadius(tinyFastSettings),
+    speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.6, 3.5, 4.5),
+    new THREE.Vector3(
+      PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+      0,
+      0
+    ),
+    { radius: getPhysicsCoreRadius(tinyFastSettings) }
+  );
+  const impacts = core.update(1 / 20, world);
+
+  assertEqual(impacts.length, 1, "the open visual tunnel should not consume the next core impact");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 3, y: 3, z: 4 },
+    "the next core should hit the visible block behind the already-open bite tunnel"
+  );
+});
+
+test("small fast physics cores still hit remaining partial-block material", () => {
+  const world = new VoxelWorld({ seed: "small-core-partial-material-test" });
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: getPhysicsCoreRadius(tinyFastSettings),
+    speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.6, 3.84, 4.84),
+    new THREE.Vector3(
+      PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+      0,
+      0
+    ),
+    { radius: getPhysicsCoreRadius(tinyFastSettings) }
+  );
+  const impacts = core.update(1 / 20, world);
+
+  assertEqual(impacts.length, 1, "remaining visual material should still collide with tiny cores");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 2, y: 3, z: 4 },
+    "partial terrain should only open the removed tunnel, not the whole voxel"
+  );
+});
+
+test("hitscan cores pass through existing visual holes in partial blocks", () => {
+  const world = new VoxelWorld({ seed: "hitscan-existing-hole-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const hit = raycastHitscanCore(
+    world,
+    new THREE.Vector3(1.6, 3.5, 4.5),
+    new THREE.Vector3(1, 0, 0)
+  );
+
+  assert(hit, "hitscan setup should find a terrain target behind the opened tunnel");
+  assertDeepEqual(
+    hit.block,
+    { x: 3, y: 3, z: 4 },
+    "hitscan cores should use the bite-lattice projectile query instead of the chipped block's full cube"
+  );
+});
+
+test("hitscan cores still hit remaining partial-block material", () => {
+  const world = new VoxelWorld({ seed: "hitscan-partial-material-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const hit = raycastHitscanCore(
+    world,
+    new THREE.Vector3(1.6, 3.84, 4.84),
+    new THREE.Vector3(1, 0, 0)
+  );
+
+  assert(hit, "hitscan setup should still find terrain when the ray crosses remaining bite material");
+  assertDeepEqual(
+    hit.block,
+    { x: 2, y: 3, z: 4 },
+    "hitscan cores should only pass through removed bite cells, not every chipped voxel"
+  );
+});
+
+test("hitscan bolt tracer lifetime stays quick but readable", () => {
+  assertNearlyEqual(
+    getHitscanBoltLifetimeSeconds(),
+    0.14,
+    "hitscan beams should linger long enough to read without feeling like projectiles"
+  );
+});
+
+test("small fast physics cores can pierce a block and damage one behind an air gap", () => {
+  const world = new VoxelWorld({ seed: "small-core-pierce-runtime-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+  world.setBlock(4, 3, 4, BLOCK.stone);
+  world.setBlock(5, 3, 4, BLOCK.air);
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
+  const core = new PhysicsToy(
+    new THREE.Vector3(1.6, 3.34, 4.34),
+    new THREE.Vector3(
+      PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
+      0,
+      0
+    ),
+    { radius: getPhysicsCoreRadius(tinyFastSettings) }
+  );
+  const damagedThisFrame = new Set<string>();
+
+  for (let frame = 0; frame < 10 && world.getBlockDamage(4, 3, 4) === 0; frame += 1) {
+    damagedThisFrame.clear();
+    const impacts = core.update(1 / 30, world);
+    const continuedSources = new Set<PhysicsToy>();
+
+    for (const impact of impacts) {
+      if (continuedSources.has(impact.source)) continue;
+      const key = world.damageKey(impact.block.x, impact.block.y, impact.block.z);
+      if (damagedThisFrame.has(key)) continue;
+      damagedThisFrame.add(key);
+      const result = world.carveBlock({
+        x: impact.block.x,
+        y: impact.block.y,
+        z: impact.block.z,
+        point: impact.position,
+        normal: impact.normal,
+        incomingDirection: impact.incomingVelocity,
+        coreRadius: impact.radius,
+        speed: impact.speed,
+        amount: PARTIAL_BLOCK_CORE_DAMAGE
+      });
+      if (result?.pierceContinuation) {
+        core.continueAfterPierce(
+          new THREE.Vector3(
+            result.pierceContinuation.position.x,
+            result.pierceContinuation.position.y,
+            result.pierceContinuation.position.z
+          ),
+          new THREE.Vector3(
+            result.pierceContinuation.velocity.x,
+            result.pierceContinuation.velocity.y,
+            result.pierceContinuation.velocity.z
+          )
+        );
+        continuedSources.add(impact.source);
+      } else if (result) {
+        core.expire();
+      }
+    }
+  }
+
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "front block should take the first piercing chip");
+  assertEqual(world.getBlockDamage(4, 3, 4), 1, "back block should be hit after the core crosses the air gap");
+  assert(!core.isExpired, "a successfully piercing core should not be expired by the first terrain hit");
+  assert(core.velocity.x > 0, "a successfully piercing core should keep forward velocity");
 });
 
 test("destroying an impacted block can consume the source physics core", () => {
@@ -3379,7 +4848,7 @@ test("quality settings clamp custom menu overrides", () => {
   );
   assertEqual(formatRenderDistance(6), "6 chunks", "render distance label should stay human-readable");
   assertEqual(formatShadowQuality(0), "Off", "shadow quality label should call out disabled shadows");
-  assertEqual(formatBlockFragmentCount(0), "1 cube", "debris count label should show the clamped shard count");
+  assertEqual(formatBlockFragmentCount(0), "1 shard", "debris count label should show the clamped shard count");
 });
 
 test("physics object budget clamps and steps predictably", () => {
@@ -3413,6 +4882,168 @@ test("physics object budget clamps and steps predictably", () => {
     stepPhysicsObjectBudget(96, "decrease"),
     96 - PHYSICS_OBJECT_BUDGET_STEP,
     "decrease should move by one configured step"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(QUALITY_PRESETS.potato.physicsObjectBudget),
+    48,
+    "Potato should allow only a small Rapier debris slice"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(QUALITY_PRESETS.normal.physicsObjectBudget),
+    144,
+    "Normal should keep rigid debris below the total physics toy budget"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget),
+    MAX_RIGID_DEBRIS_BODY_BUDGET,
+    "Super Ultra should hard-cap CPU-heavy rigid debris bodies"
+  );
+  assertEqual(
+    getRigidDebrisBodyBudget(Number.NaN),
+    MIN_RIGID_DEBRIS_BODY_BUDGET,
+    "invalid rigid debris budgets should fall back to the minimum safety rail"
+  );
+});
+
+test("physics core settings clamp slider values", () => {
+  assertEqual(PHYSICS_CORE_SIZE_MIN_PERCENT, 10, "smallest projectile core setting should support bullet-scale shots");
+  assertEqual(PHYSICS_CORE_VELOCITY_MAX_PERCENT, 500, "fastest projectile core setting should support bullet-scale shots");
+  assertNearlyEqual(
+    HITSCAN_CORE_RADIUS,
+    PHYSICS_CORE_BASE_RADIUS * 0.1,
+    "hitscan cores should use the smallest core footprint"
+  );
+  assertEqual(
+    HITSCAN_CORE_IMPACT_SPEED,
+    PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * 5,
+    "hitscan cores should use the highest core impact speed"
+  );
+  assertDeepEqual(
+    DEFAULT_PHYSICS_CORE_SETTINGS,
+    {
+      sizePercent: PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
+      velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT
+    },
+    "default core tuning should expose the smaller faster first-pass feel"
+  );
+
+  const tinyFastCore = normalizePhysicsCoreSettings({
+    sizePercent: -40,
+    velocityPercent: 999
+  });
+  assertEqual(
+    tinyFastCore.sizePercent,
+    PHYSICS_CORE_SIZE_MIN_PERCENT,
+    "core size slider should clamp to the smallest safe percentage"
+  );
+  assertEqual(
+    tinyFastCore.velocityPercent,
+    PHYSICS_CORE_VELOCITY_MAX_PERCENT,
+    "core velocity slider should clamp to the fastest safe percentage"
+  );
+
+  const largeSlowCore = normalizePhysicsCoreSettings({
+    sizePercent: 999,
+    velocityPercent: -40
+  });
+  assertEqual(
+    largeSlowCore.sizePercent,
+    PHYSICS_CORE_SIZE_MAX_PERCENT,
+    "core size slider should clamp to the largest safe percentage"
+  );
+  assertEqual(
+    largeSlowCore.velocityPercent,
+    PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+    "core velocity slider should clamp to the slowest safe percentage"
+  );
+  assertNearlyEqual(
+    getPhysicsCoreRadius(DEFAULT_PHYSICS_CORE_SETTINGS),
+    PHYSICS_CORE_BASE_RADIUS * (PHYSICS_CORE_DEFAULT_SIZE_PERCENT / 100),
+    0.000001,
+    "core size percent should scale the thrown core radius"
+  );
+  assertNearlyEqual(
+    getPhysicsCoreVelocityMultiplier(DEFAULT_PHYSICS_CORE_SETTINGS),
+    PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT / 100,
+    0.000001,
+    "core velocity percent should become a launch multiplier"
+  );
+  assertEqual(formatPhysicsCorePercent(140), "140%", "core slider labels should be terse percentages");
+});
+
+test("player physics core launch inherits player velocity", () => {
+  const inheritedVelocity = new THREE.Vector3(3, -2, 5);
+  const launchVelocity = createPlayerPhysicsCoreLaunchVelocity(
+    new THREE.Vector3(0, 0, -2),
+    inheritedVelocity,
+    DEFAULT_PHYSICS_CORE_SETTINGS
+  );
+
+  assertVectorNearlyEqual(
+    launchVelocity,
+    new THREE.Vector3(
+      inheritedVelocity.x,
+      inheritedVelocity.y,
+      inheritedVelocity.z -
+        PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED *
+        getPhysicsCoreVelocityMultiplier(DEFAULT_PHYSICS_CORE_SETTINGS)
+    ),
+    "player-thrown cores should add muzzle velocity on top of player base velocity"
+  );
+});
+
+test("player core muzzle offset supports hip-fire and reticle ADS origins", () => {
+  const localOffset = createPlayerCoreMuzzleLocalOffset(90, 2);
+  assert(
+    localOffset.x > 0 && localOffset.y < 0,
+    "hip-fire muzzle should sit to the right and below the reticle in camera space"
+  );
+  assertNearlyEqual(
+    localOffset.x,
+    PLAYER_CORE_MUZZLE_FORWARD_METERS * 2 * PLAYER_CORE_MUZZLE_SCREEN_RIGHT_FRACTION,
+    "hip-fire muzzle horizontal offset should follow the requested screen fraction"
+  );
+  assertNearlyEqual(
+    localOffset.y,
+    -PLAYER_CORE_MUZZLE_FORWARD_METERS * PLAYER_CORE_MUZZLE_SCREEN_DOWN_FRACTION,
+    "hip-fire muzzle vertical offset should follow the requested screen fraction"
+  );
+  assertNearlyEqual(
+    localOffset.z,
+    -PLAYER_CORE_MUZZLE_FORWARD_METERS,
+    "hip-fire muzzle should still start in front of the camera"
+  );
+
+  const adsOrigin = new THREE.Vector3(0, 0, 0)
+    .addScaledVector(new THREE.Vector3(0, 0, -1), PLAYER_CORE_MUZZLE_FORWARD_METERS);
+  assertVectorNearlyEqual(
+    adsOrigin,
+    new THREE.Vector3(0, 0, -PLAYER_CORE_MUZZLE_FORWARD_METERS),
+    "ADS origin should stay centered on the reticle line"
+  );
+});
+
+test("player core hip-fire direction converges back through the reticle aim point", () => {
+  const cameraPosition = new THREE.Vector3(0, 0, 0);
+  const cameraForward = new THREE.Vector3(0, 0, -1);
+  const muzzlePosition = createPlayerCoreMuzzleLocalOffset(90, 1);
+  const shotDirection = createPlayerCoreShotDirection(
+    muzzlePosition,
+    cameraPosition,
+    cameraForward,
+    20
+  );
+  const aimPoint = cameraPosition.clone().addScaledVector(cameraForward, 20);
+  const expectedDirection = aimPoint.sub(muzzlePosition).normalize();
+
+  assertVectorNearlyEqual(
+    shotDirection,
+    expectedDirection,
+    "hip-fire shots should originate off-center but still aim back through the crosshair target"
+  );
+  assert(
+    shotDirection.x < 0 && shotDirection.y > 0 && shotDirection.z < 0,
+    "off-center hip-fire should visibly angle from the lowered right-side muzzle toward the reticle"
   );
 });
 
@@ -3462,6 +5093,10 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     assert(
       preset.physicsObjectBudget >= previousPhysicsBudget,
       `${preset.label} physics budget should not shrink as quality increases`
+    );
+    assert(
+      getRigidDebrisBodyBudget(preset.physicsObjectBudget) <= MAX_RIGID_DEBRIS_BODY_BUDGET,
+      `${preset.label} rigid debris budget should stay within the CPU safety cap`
     );
     assert(
       preset.blockFragmentCount >= 1 && preset.blockFragmentCount <= BLOCK_FRAGMENT_COUNT,

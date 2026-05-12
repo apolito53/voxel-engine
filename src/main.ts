@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import changelogMarkdown from "../CHANGELOG.md?raw";
+import packageManifest from "../package.json";
 import "./style.css";
 import {
   ADMIN_COMMAND_TOGGLE_KEY,
@@ -10,9 +12,10 @@ import {
 import {
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
-  getDistributedBlockFragmentIndex
+  getDistributedBlockFragmentIndex,
+  getTerrainImpactFragmentCount
 } from "./blockFragments";
-import { BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
+import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
   createChunkStorage,
   createWorldRegistry,
@@ -20,9 +23,11 @@ import {
   type SavedWorld,
   type WorldRegistry
 } from "./chunkStorage";
+import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
 import type { CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
+import { createDebrisShapeForBlock } from "./debrisShapes";
 import {
   DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
   DebrisSettler,
@@ -43,6 +48,8 @@ import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "
 import { readGpuInfo } from "./gpu";
 import {
   createHotbarItems,
+  canFireHitscanCoreWithHotbarItem,
+  canThrowCoreWithHotbarItem,
   getHotbarIndexFromDigitCode,
   getHotbarItemLabel,
   getHotbarItemCategory,
@@ -53,6 +60,14 @@ import {
   stepHotbarIndex,
   type HotbarItem
 } from "./hotbar";
+import {
+  HITSCAN_CORE_IMPACT_SPEED,
+  HITSCAN_CORE_MAX_IMPACTS,
+  HITSCAN_CORE_RADIUS,
+  HITSCAN_CORE_RANGE,
+  raycastHitscanCore
+} from "./hitscanCore";
+import { HitscanBoltTracer } from "./hitscanBoltTracer";
 import {
   EMPTY_HANDS_ITEM_ID,
   createItemStack,
@@ -66,6 +81,7 @@ import { NovaChatPanel } from "./novaChatPanel";
 import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
+import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
@@ -78,6 +94,12 @@ import {
   type PhysicsImpact,
   type PhysicsToyCollisionStats
 } from "./physics";
+import {
+  PLAYER_CORE_MUZZLE_FORWARD_METERS,
+  createPlayerCoreMuzzleLocalOffset,
+  createPlayerCoreShotDirection,
+  createPlayerPhysicsCoreLaunchVelocity
+} from "./physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "./physicsInstancing";
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -89,6 +111,23 @@ import {
   writePhysicsObjectBudgetPreference,
   type PhysicsBudgetDirection
 } from "./physicsBudget";
+import {
+  PHYSICS_CORE_SIZE_MAX_PERCENT,
+  PHYSICS_CORE_SIZE_MIN_PERCENT,
+  PHYSICS_CORE_SIZE_STEP_PERCENT,
+  PHYSICS_CORE_VELOCITY_MAX_PERCENT,
+  PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+  PHYSICS_CORE_VELOCITY_STEP_PERCENT,
+  formatPhysicsCorePercent,
+  getPhysicsCoreRadius,
+  getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreSettings,
+  normalizePhysicsCoreSizePercent,
+  normalizePhysicsCoreVelocityPercent,
+  readPhysicsCoreSettingsPreference,
+  writePhysicsCoreSettingsPreference,
+  type PhysicsCoreSettings
+} from "./physicsCoreSettings";
 import { QualityController, type QualityChangeSource } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import {
@@ -105,7 +144,18 @@ import {
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
-import { RubbleField, type RubbleDamageEvent, type RubbleFieldStats } from "./rubble";
+import { getRigidDebrisBodyBudget } from "./rigidDebrisBudget";
+import {
+  RigidDebrisSimulation,
+  createEmptyRigidDebrisStats,
+  type RigidDebrisStats
+} from "./rigidDebris";
+import {
+  RubbleField,
+  type RubbleDamageEvent,
+  type RubbleFieldStats,
+  type RubbleFragmentAbsorptionOptions
+} from "./rubble";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -114,7 +164,7 @@ import {
 import {
   BASE_CAMERA_FOV,
   SPRINT_FEEDBACK_ACTIVE_CLASS,
-  getSprintFeedbackTargetFov,
+  getPlayerCameraTargetFov,
   smoothSprintFeedbackFov
 } from "./sprintFeedback";
 import { createSkybox } from "./skybox";
@@ -126,10 +176,19 @@ import {
   TestAvatar,
   type TestAvatarApi
 } from "./testAvatar";
-import { VoxelWorld, type BlockDamageResult, type ChunkCoords, type WorldStats } from "./world";
+import {
+  VoxelWorld,
+  type BlockDamageResult,
+  type BlockPierceContinuation,
+  type ChunkCoords,
+  type WorldStats
+} from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
+const APP_VERSION = packageManifest.version;
+const CHANGELOG_ENTRIES = parseChangelogEntries(changelogMarkdown);
+const TARGET_HIT_EPSILON = 0.0001;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
 // Fragment launch is tuned separately from the later sticky-settling pass.
@@ -175,6 +234,7 @@ const worldNameInput = requireElement<HTMLInputElement>("#world-name-input");
 const worldSeedInput = requireElement<HTMLInputElement>("#world-seed-input");
 const randomSeedButton = requireElement<HTMLButtonElement>("#random-seed-button");
 const superflatWorldButton = requireElement<HTMLButtonElement>("#superflat-world-button");
+const worldSaveOrigin = requireElement<HTMLElement>("#world-save-origin");
 const homeWorldList = requireElement<HTMLElement>("#home-world-list");
 const deleteWorldDialog = requireElement<HTMLElement>("#delete-world-dialog");
 const deleteWorldName = requireElement<HTMLElement>("#delete-world-name");
@@ -182,12 +242,21 @@ const deleteWorldCopy = requireElement<HTMLElement>("#delete-world-copy");
 const deleteWorldError = requireElement<HTMLElement>("#delete-world-error");
 const cancelDeleteWorldButton = requireElement<HTMLButtonElement>("#cancel-delete-world-button");
 const confirmDeleteWorldButton = requireElement<HTMLButtonElement>("#confirm-delete-world-button");
+const versionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-app-version]"));
+const changelogDialog = requireElement<HTMLElement>("#changelog-dialog");
+const changelogCurrentVersion = requireElement<HTMLElement>("#changelog-current-version");
+const changelogList = requireElement<HTMLElement>("#changelog-list");
+const changelogCloseButton = requireElement<HTMLButtonElement>("#changelog-close-button");
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
 const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
 const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
 const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
+const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
+const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
+const settingsGraphicsPanel = requireElement<HTMLElement>("#settings-graphics-panel");
+const settingsGameplayPanel = requireElement<HTMLElement>("#settings-gameplay-panel");
 const qualitySelect = requireElement<HTMLSelectElement>("#quality-select");
 const renderDistanceSlider = requireElement<HTMLInputElement>("#render-distance-slider");
 const renderDistanceValue = requireElement<HTMLElement>("#render-distance-value");
@@ -200,6 +269,11 @@ const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-sl
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
+const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
+const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
+const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
+const coreVelocityValue = requireElement<HTMLElement>("#core-velocity-value");
+const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
@@ -214,6 +288,12 @@ const novaChatInput = requireElement<HTMLInputElement>("#nova-chat-input");
 const novaChatCloseButton = requireElement<HTMLButtonElement>("#nova-chat-close");
 const sprintOverlay = requireElement<HTMLElement>("#sprint-overlay");
 const damageIndicatorRoot = requireElement<HTMLElement>("#damage-indicators");
+
+for (const versionButton of versionButtons) {
+  versionButton.textContent = `v${APP_VERSION}`;
+  versionButton.title = "Open release notes";
+}
+renderChangelogEntries();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -259,6 +339,7 @@ let world: VoxelWorld | null = null;
 let player: PlayerController | null = null;
 let inWorld = false;
 let worldTransitioning = false;
+let homeWorldListRefreshGeneration = 0;
 let selectedHotbarIndex = 0;
 let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
@@ -270,6 +351,9 @@ let runtimeDisposed = false;
 let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
+let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
+let renderedPartialBlockRevision = -1;
+let rightMouseButtonDown = false;
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -288,17 +372,64 @@ const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
 const physicsImpacts: PhysicsImpact[] = [];
 const damagedBlockKeysThisFrame = new Set<string>();
+
+type TargetHit =
+  | {
+      readonly kind: "block";
+      readonly source: "voxel";
+      readonly block: VoxelRaycastHit["block"];
+      readonly normal: VoxelRaycastHit["normal"];
+      readonly distance: number;
+    }
+  | {
+      readonly kind: "rubble";
+      readonly source: "voxel";
+      readonly block: VoxelRaycastHit["block"];
+      readonly normal: VoxelRaycastHit["normal"];
+      readonly distance: number;
+    }
+  | {
+      readonly kind: "rubble";
+      readonly source: "rubble";
+      readonly block: VoxelRaycastHit["block"];
+      readonly distance: number;
+    };
+type CoreTerrainImpact = {
+  readonly block: VoxelRaycastHit["block"];
+  readonly normal: THREE.Vector3;
+  readonly speed: number;
+  readonly position: THREE.Vector3;
+  readonly incomingVelocity: THREE.Vector3;
+  readonly radius: number;
+};
+type PlayerCoreFiringSolution = {
+  readonly origin: THREE.Vector3;
+  readonly direction: THREE.Vector3;
+};
+type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
+const hitscanBoltTracer = new HitscanBoltTracer(scene);
+const partialBlockMeshField = new PartialBlockMeshField(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
+const rigidDebris = new RigidDebrisSimulation();
+const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
-  // Full terrain blocks still come from VoxelWorld. Partial-height cover such
-  // as rubble is layered in through the optional support-height query so both
-  // player feet and loose debris can treat piles as surfaces without promoting
-  // every patch to a solid voxel.
+  // Full terrain blocks still come from VoxelWorld. Partial-height terrain
+  // scars and rubble are layered in through the optional support-height query
+  // so feet, loose debris, and rigid debris can treat them as walkable/contact
+  // surfaces without promoting every patch to a solid voxel.
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
-  getSupportHeight: (bounds) => rubbleField.getSupportHeight(bounds)
+  canProjectileHitBlock: (x, y, z, start, movement, radius) =>
+    requireWorld().canProjectileHitBlock(x, y, z, start, movement, radius),
+  getSupportHeight: (bounds) => {
+    const terrainSupportY = requireWorld().getSupportHeight(bounds);
+    const rubbleSupportY = rubbleField.getSupportHeight(bounds);
+    if (terrainSupportY === null) return rubbleSupportY;
+    if (rubbleSupportY === null) return terrainSupportY;
+    return Math.max(terrainSupportY, rubbleSupportY);
+  }
 };
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
@@ -339,7 +470,7 @@ const testAvatar = new TestAvatar({
   getWorld: requireWorld,
   getPlayer: requirePlayer,
   getCamera: () => camera,
-  throwPlayerCore,
+  throwPlayerCore: () => throwPlayerCore(requirePlayer()),
   noteActivity: noteUserActivity
 });
 voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
@@ -348,8 +479,14 @@ voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
 voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
+let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
+let healthBarsEnabled = readHealthBarsEnabled();
+
+void rigidDebris.initialize().catch((error) => {
+  console.warn("Rigid debris physics failed to initialize; falling back to legacy fragment motion.", error);
+});
 
 const debugHud = new DebugHud({
   panel: debugPanel,
@@ -357,6 +494,8 @@ const debugHud = new DebugHud({
   gpuInfo,
   getQualityPreset: () => qualityController.preset
 });
+
+worldSaveOrigin.textContent = getWorldSaveOriginLabel();
 
 const minimapRenderer = new MinimapRenderer({
   canvas: minimap,
@@ -387,6 +526,8 @@ qualityController = new QualityController({
 qualityController.initialize();
 updateSettingsControls();
 updatePhysicsBudgetControls();
+updatePhysicsCoreControls();
+syncHealthBarsToggle();
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {
@@ -436,7 +577,10 @@ function wireMenuControls(): void {
 
   activePlayer.onPauseChange = (paused: boolean) => {
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
-    if (paused) void queueActivePlayerLocationSave(true);
+    if (paused) {
+      rightMouseButtonDown = false;
+      void queueActivePlayerLocationSave(true);
+    }
     if (!paused) setSettingsPanelOpen(false);
   };
 
@@ -449,6 +593,12 @@ function wireMenuControls(): void {
   resumeButton.addEventListener("click", resumeFromPause, eventListenerOptions);
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
+  }, eventListenerOptions);
+  settingsGraphicsTab.addEventListener("click", () => {
+    setSettingsCategory("graphics");
+  }, eventListenerOptions);
+  settingsGameplayTab.addEventListener("click", () => {
+    setSettingsCategory("gameplay");
   }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
@@ -475,6 +625,15 @@ function wireMenuControls(): void {
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
   }, eventListenerOptions);
+  coreSizeSlider.addEventListener("input", () => {
+    setPhysicsCoreSizePercent(coreSizeSlider.value);
+  }, eventListenerOptions);
+  coreVelocitySlider.addEventListener("input", () => {
+    setPhysicsCoreVelocityPercent(coreVelocitySlider.value);
+  }, eventListenerOptions);
+  healthBarsToggle.addEventListener("change", () => {
+    setHealthBarsEnabled(healthBarsToggle.checked);
+  }, eventListenerOptions);
   superUltraToggle.addEventListener("change", () => {
     qualityController.setSuperUltraEnabled(superUltraToggle.checked);
   }, eventListenerOptions);
@@ -488,6 +647,15 @@ function wireMenuControls(): void {
   superflatWorldButton.addEventListener("click", () => {
     void createSuperflatWorld();
   }, eventListenerOptions);
+  for (const versionButton of versionButtons) {
+    versionButton.addEventListener("click", openChangelogDialog, eventListenerOptions);
+  }
+  changelogCloseButton.addEventListener("click", closeChangelogDialog, eventListenerOptions);
+  changelogDialog.addEventListener("pointerdown", (event) => {
+    if (event.target === changelogDialog) {
+      closeChangelogDialog();
+    }
+  }, eventListenerOptions);
   cancelDeleteWorldButton.addEventListener("click", closeDeleteWorldDialog, eventListenerOptions);
   confirmDeleteWorldButton.addEventListener("click", () => {
     void confirmPendingWorldDeletion();
@@ -497,6 +665,104 @@ function wireMenuControls(): void {
       closeDeleteWorldDialog();
     }
   }, eventListenerOptions);
+}
+
+function renderChangelogEntries(): void {
+  changelogCurrentVersion.textContent = `Current build v${APP_VERSION}`;
+  changelogList.replaceChildren(...CHANGELOG_ENTRIES.map(createChangelogEntryElement));
+}
+
+function createChangelogEntryElement(entry: ChangelogEntry): HTMLElement {
+  const article = document.createElement("article");
+  article.className = "changelog-entry";
+
+  const header = document.createElement("div");
+  header.className = "changelog-entry-header";
+
+  const title = document.createElement("h3");
+  title.className = "changelog-entry-title";
+  title.textContent = entry.version ? `v${entry.version}` : entry.title;
+  header.appendChild(title);
+
+  if (entry.date) {
+    const date = document.createElement("div");
+    date.className = "changelog-entry-date";
+    date.textContent = entry.date;
+    header.appendChild(date);
+  }
+
+  const body = document.createElement("div");
+  body.className = "changelog-entry-body";
+  appendChangelogBody(body, entry.body);
+
+  article.append(header, body);
+  return article;
+}
+
+function appendChangelogBody(container: HTMLElement, markdown: string): void {
+  let activeList: HTMLUListElement | null = null;
+
+  for (const line of markdown.split("\n")) {
+    const trimmedLine = line.trim();
+    if (trimmedLine.length === 0) {
+      activeList = null;
+      continue;
+    }
+
+    if (trimmedLine.startsWith("### ")) {
+      activeList = null;
+      const heading = document.createElement("h4");
+      heading.textContent = trimmedLine.slice(4);
+      container.appendChild(heading);
+      continue;
+    }
+
+    if (trimmedLine.startsWith("- ")) {
+      if (!activeList) {
+        activeList = document.createElement("ul");
+        container.appendChild(activeList);
+      }
+      const item = document.createElement("li");
+      appendInlineChangelogMarkdown(item, trimmedLine.slice(2));
+      activeList.appendChild(item);
+      continue;
+    }
+
+    activeList = null;
+    const paragraph = document.createElement("p");
+    appendInlineChangelogMarkdown(paragraph, trimmedLine);
+    container.appendChild(paragraph);
+  }
+}
+
+function appendInlineChangelogMarkdown(container: HTMLElement, text: string): void {
+  const parts = text.split(/(`[^`]+`)/g);
+  for (const part of parts) {
+    if (part.length === 0) continue;
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
+      const code = document.createElement("code");
+      code.textContent = part.slice(1, -1);
+      container.appendChild(code);
+      continue;
+    }
+    container.appendChild(document.createTextNode(part));
+  }
+}
+
+function openChangelogDialog(): void {
+  changelogDialog.classList.remove("is-hidden");
+  changelogDialog.setAttribute("aria-hidden", "false");
+  changelogList.scrollTop = 0;
+  changelogCloseButton.focus();
+}
+
+function closeChangelogDialog(): void {
+  changelogDialog.classList.add("is-hidden");
+  changelogDialog.setAttribute("aria-hidden", "true");
+}
+
+function isChangelogDialogOpen(): boolean {
+  return !changelogDialog.classList.contains("is-hidden");
 }
 
 function resumeFromPause(): void {
@@ -522,6 +788,7 @@ function openNovaChatInputMode(): void {
 
 function closeNovaChatInputMode(): void {
   if (!inWorld) return;
+  rightMouseButtonDown = false;
   requirePlayer().resume();
 }
 
@@ -538,6 +805,43 @@ function setSettingsPanelOpen(open: boolean): void {
   }
 }
 
+function setSettingsCategory(category: SettingsCategory): void {
+  const showGraphics = category === "graphics";
+  settingsGraphicsPanel.hidden = !showGraphics;
+  settingsGameplayPanel.hidden = showGraphics;
+  settingsGraphicsTab.classList.toggle("is-active", showGraphics);
+  settingsGameplayTab.classList.toggle("is-active", !showGraphics);
+  settingsGraphicsTab.setAttribute("aria-selected", String(showGraphics));
+  settingsGameplayTab.setAttribute("aria-selected", String(!showGraphics));
+}
+
+function setHealthBarsEnabled(enabled: boolean): void {
+  healthBarsEnabled = enabled;
+  syncHealthBarsToggle();
+  writeHealthBarsEnabled(enabled);
+  if (!enabled) damageIndicators.clear();
+}
+
+function syncHealthBarsToggle(): void {
+  healthBarsToggle.checked = healthBarsEnabled;
+}
+
+function readHealthBarsEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(HEALTH_BARS_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function writeHealthBarsEnabled(enabled: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(HEALTH_BARS_STORAGE_KEY, String(enabled));
+  } catch {
+    // Local storage is only a convenience; the current session setting still applies.
+  }
+}
+
 window.addEventListener("resize", () => {
   noteUserActivity();
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -548,6 +852,13 @@ window.addEventListener("resize", () => {
 
 document.addEventListener("keydown", (event) => {
   noteUserActivity();
+  if (event.code === "Escape" && isChangelogDialogOpen()) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeChangelogDialog();
+    return;
+  }
+
   if (novaChatPanel.isOpen) {
     if (event.code === "Escape") {
       event.preventDefault();
@@ -634,6 +945,7 @@ document.addEventListener("visibilitychange", () => {
   noteUserActivity();
   drainFrameClockAfterIdle();
   if (document.hidden) {
+    rightMouseButtonDown = false;
     void queueActivePlayerLocationSave(true);
     enterIdleHeartbeat();
     return;
@@ -652,8 +964,12 @@ window.addEventListener("pageshow", () => {
   resumeAnimationLoopAfterIdle();
 }, eventListenerOptions);
 window.addEventListener("pagehide", () => {
+  rightMouseButtonDown = false;
   void queueActivePlayerLocationSave(true);
   enterIdleHeartbeat();
+}, eventListenerOptions);
+window.addEventListener("blur", () => {
+  rightMouseButtonDown = false;
 }, eventListenerOptions);
 window.addEventListener("beforeunload", () => {
   void queueActivePlayerLocationSave(true);
@@ -668,13 +984,23 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   const activePlayer = requirePlayer();
 
   if (event.button === 0) {
+    rightMouseButtonDown = (event.buttons & 2) !== 0;
     useSelectedHotbarPrimaryAction(activePlayer);
     return;
   }
 
   if (event.button === 2) {
+    rightMouseButtonDown = true;
     useSelectedHotbarSecondaryAction(activePlayer);
   }
+}, eventListenerOptions);
+document.addEventListener("mouseup", (event) => {
+  if (event.button === 2) {
+    rightMouseButtonDown = false;
+  }
+}, eventListenerOptions);
+document.addEventListener("pointercancel", () => {
+  rightMouseButtonDown = false;
 }, eventListenerOptions);
 renderer.domElement.addEventListener("wheel", (event) => {
   noteUserActivity();
@@ -708,21 +1034,30 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
       placeSelectedBlock(activePlayer, action.block);
       return;
     case "physics:throw-core":
-      if (activePlayer.isLooking()) throwPlayerCore();
+      if (activePlayer.isLooking()) throwPlayerCore(activePlayer);
+      return;
+    case "physics:fire-hitscan-core":
+      if (activePlayer.isLooking()) firePlayerHitscanCore();
       return;
   }
 }
 
 function destroyTargetBlock(): void {
-  const hit: VoxelRaycastHit | null = getTargetBlockHit();
+  const hit = getTargetHit();
   if (!hit) return;
+
+  if (hit.source === "rubble") {
+    damageTargetedRubbleCell(hit.block);
+    return;
+  }
 
   requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
 }
 
 function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): void {
-  const hit: VoxelRaycastHit | null = getTargetBlockHit();
+  const hit = getTargetHit();
   if (!hit) return;
+  if (hit.source !== "voxel") return;
 
   const target = {
     x: hit.block.x + hit.normal.x,
@@ -731,6 +1066,16 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
   };
   if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
   requireWorld().setBlock(target.x, target.y, target.z, block);
+}
+
+function damageTargetedRubbleCell(cell: VoxelRaycastHit["block"]): void {
+  // The rubble proxy is intentionally cheaper than real per-cube collision, but
+  // once the player is targeting its occupied cell the normal destroy action
+  // should hit that destructible cover instead of silently editing terrain
+  // behind it.
+  const cellCenter = new THREE.Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5);
+  rubbleField.damageNearest(cellCenter, PHYSICS_CORE_BLOCK_DAMAGE, 0.9);
+  emitRubbleDamageEvents();
 }
 
 function animate(): void {
@@ -801,27 +1146,32 @@ function animate(): void {
       }
     }
     emitRubbleDamageEvents();
+    rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld);
     debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
       activeCenter: camera.position,
       activeRadius: qualityController.preset.debrisActiveRadiusMeters
     });
     absorbSettledFragmentsIntoRubble();
+    enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
     debrisSettlerStats = debrisSettler.getStats();
     emitRubbleBatchEvents();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
+    rigidDebris.syncToyStatesToBodies();
     rubbleField.settle(activeWorld);
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
+    hitscanBoltTracer.update(delta);
     recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
+    updatePartialBlockMesh(activeWorld);
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
     updateHud();
     updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
-    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), delta);
+    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), isPlayerCoreAdsActive(), delta);
     damageIndicators.update(camera, window.innerWidth, window.innerHeight);
     recordTimingSection("otherMs");
     minimapRenderer.update(delta);
@@ -831,7 +1181,7 @@ function animate(): void {
   } else {
     targetBlockHighlighter.hide();
     damageIndicators.clear();
-    updateSprintFeedback(false, delta);
+    updateSprintFeedback(false, false, delta);
     recordTimingSection("otherMs");
   }
 
@@ -865,6 +1215,8 @@ function animate(): void {
       toys.length,
       physicsObjectBudget,
       physicsCollisionStats,
+      rigidDebrisStats,
+      getCurrentRigidDebrisBodyBudget(),
       physicsFragmentInstancer.getStats(),
       debrisSettlerStats,
       debugRubbleStats,
@@ -994,10 +1346,14 @@ function processPhysicsImpacts(
   endIndex: number,
   damagedBlocksThisFrame: Set<string>
 ): void {
+  const continuedSources = new Set<PhysicsToy>();
   for (let index = startIndex; index < endIndex; index += 1) {
     const impact = physicsImpacts[index];
     if (!impact) continue;
-    handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame);
+    if (continuedSources.has(impact.source)) continue;
+    if (handlePhysicsImpact(activeWorld, impact, damagedBlocksThisFrame)) {
+      continuedSources.add(impact.source);
+    }
   }
 }
 
@@ -1040,8 +1396,8 @@ function selectHotbarIndex(index: number): void {
   updateHud();
 }
 
-function updateSprintFeedback(active: boolean, delta: number): void {
-  const targetFov = getSprintFeedbackTargetFov(active);
+function updateSprintFeedback(sprintActive: boolean, adsActive: boolean, delta: number): void {
+  const targetFov = getPlayerCameraTargetFov(sprintActive, adsActive);
   const nextFov = smoothSprintFeedbackFov(camera.fov, targetFov, delta);
 
   if (camera.fov !== nextFov) {
@@ -1049,47 +1405,115 @@ function updateSprintFeedback(active: boolean, delta: number): void {
     camera.updateProjectionMatrix();
   }
 
-  sprintOverlay.classList.toggle(SPRINT_FEEDBACK_ACTIVE_CLASS, active);
+  sprintOverlay.classList.toggle(SPRINT_FEEDBACK_ACTIVE_CLASS, sprintActive);
 }
 
-function getTargetBlockHit(): VoxelRaycastHit | null {
+function isPlayerCoreAdsActive(): boolean {
+  if (!rightMouseButtonDown) return false;
+  const selectedItem = getSelectedHotbarItem();
+  return canThrowCoreWithHotbarItem(selectedItem, itemRegistry)
+    || canFireHitscanCoreWithHotbarItem(selectedItem, itemRegistry);
+}
+
+function getTargetHit(): TargetHit | null {
   if (!inWorld) return null;
   if (!requirePlayer().isLooking()) return null;
 
   camera.getWorldDirection(direction);
-  return voxelRaycast(requireWorld(), camera.position, direction, BLOCK_INTERACTION_REACH);
+
+  const activeWorld = requireWorld();
+  const blockHit = voxelRaycast(activeWorld, camera.position, direction, BLOCK_INTERACTION_REACH);
+  const rubbleHit = rubbleField.raycast(camera.position, direction, BLOCK_INTERACTION_REACH);
+
+  if (rubbleHit && (!blockHit || rubbleHit.distance < blockHit.distance - TARGET_HIT_EPSILON)) {
+    return {
+      kind: "rubble",
+      source: "rubble",
+      block: rubbleHit.cell,
+      distance: rubbleHit.distance
+    };
+  }
+
+  if (!blockHit) return null;
+
+  return {
+    kind: activeWorld.getBlock(blockHit.block.x, blockHit.block.y, blockHit.block.z) === BLOCK.rubble
+      ? "rubble"
+      : "block",
+    source: "voxel",
+    block: blockHit.block,
+    normal: blockHit.normal,
+    distance: blockHit.distance
+  };
 }
 
 function updateTargetBlockHighlighter(): void {
-  const hit = getTargetBlockHit();
+  const hit = getTargetHit();
 
   if (!hit) {
     targetBlockHighlighter.hide();
     return;
   }
 
-  targetBlockHighlighter.showBlock(hit.block);
+  targetBlockHighlighter.showBlock(hit.block, hit.kind);
+}
+
+function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
+  const revision = activeWorld.getPartialBlockGeometryRevision();
+  if (revision === renderedPartialBlockRevision) return;
+
+  partialBlockMeshField.update(
+    activeWorld.getPartialBlocks(),
+    (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
+  );
+  renderedPartialBlockRevision = revision;
 }
 
 function handlePhysicsImpact(
   activeWorld: VoxelWorld,
   impact: PhysicsImpact,
   damagedBlocksThisFrame: Set<string>
-): void {
-  if (impact.source.isExpired) return;
-  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return;
+): boolean {
+  if (impact.source.isExpired) return false;
+  const result = applyCoreTerrainImpact(activeWorld, impact, damagedBlocksThisFrame);
+  if (!result) return false;
+
+  const pierceContinuation = result.pierceContinuation;
+  if (pierceContinuation) {
+    continuePhysicsCoreAfterPierce(impact.source, pierceContinuation);
+  } else {
+    // Most terrain impacts still spend the projectile on the terrain event.
+    // Small fast cores are the one exception: a complete bite-lattice tunnel
+    // can hand back an exit pose and reduced forward speed.
+    impact.source.expire();
+  }
+
+  return Boolean(pierceContinuation);
+}
+
+function applyCoreTerrainImpact(
+  activeWorld: VoxelWorld,
+  impact: CoreTerrainImpact,
+  damagedBlocksThisFrame: Set<string>
+): BlockDamageResult | null {
+  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return null;
 
   const damageKey = activeWorld.damageKey(impact.block.x, impact.block.y, impact.block.z);
-  if (damagedBlocksThisFrame.has(damageKey)) return;
+  if (damagedBlocksThisFrame.has(damageKey)) return null;
   damagedBlocksThisFrame.add(damageKey);
 
-  const result = activeWorld.damageBlock(
-    impact.block.x,
-    impact.block.y,
-    impact.block.z,
-    PHYSICS_CORE_BLOCK_DAMAGE
-  );
-  if (!result) return;
+  const result = activeWorld.carveBlock({
+    x: impact.block.x,
+    y: impact.block.y,
+    z: impact.block.z,
+    point: impact.position,
+    normal: impact.normal,
+    incomingDirection: impact.incomingVelocity,
+    coreRadius: impact.radius,
+    speed: impact.speed,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  if (!result) return null;
 
   engineEvents.emit("block:damaged", {
     position: result.position,
@@ -1100,32 +1524,61 @@ function handlePhysicsImpact(
   });
   showBlockDamageIndicator(result);
 
-  if (!result.destroyed) return;
+  const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
+  const fragmentCount = getTerrainImpactFragmentCount(
+    qualityController.preset.blockFragmentCount,
+    ejectedMaterialUnits,
+    result.destroyed
+  );
+  if (fragmentCount > 0) {
+    spawnBlockFragments(result.block, result.position, impact, {
+      fragmentCount,
+      materialUnits: ejectedMaterialUnits,
+      chipOnly: !result.destroyed
+    });
+  }
 
-  // The core is now a breaching charge instead of a forever-drilling marble:
-  // one destroyed voxel consumes the projectile and the normal prune path
-  // removes it from scene/collider bookkeeping at the end of the physics pass.
-  impact.source.expire();
+  if (!result.destroyed) return result;
 
   engineEvents.emit("block:destroyed", {
     position: result.position,
     block: result.block,
     impactSpeed: impact.speed,
-    fragmentCount: qualityController.preset.blockFragmentCount
+    fragmentCount
   });
+  return result;
+}
 
-  spawnBlockFragments(result.block, result.position, impact);
+function continuePhysicsCoreAfterPierce(source: PhysicsToy, pierceContinuation: BlockPierceContinuation): void {
+  source.continueAfterPierce(
+    new THREE.Vector3(
+      pierceContinuation.position.x,
+      pierceContinuation.position.y,
+      pierceContinuation.position.z
+    ),
+    new THREE.Vector3(
+      pierceContinuation.velocity.x,
+      pierceContinuation.velocity.y,
+      pierceContinuation.velocity.z
+    )
+  );
 }
 
 function spawnBlockFragments(
   block: number,
   position: { readonly x: number; readonly y: number; readonly z: number },
-  impact: PhysicsImpact
+  impact: CoreTerrainImpact,
+  options: {
+    readonly fragmentCount: number;
+    readonly materialUnits: number;
+    readonly chipOnly?: boolean;
+  }
 ): void {
   const fragmentBaseSpeed = Math.min(FRAGMENT_IMPACT_SPEED_CAP, impact.speed * FRAGMENT_IMPACT_SPEED_SCALE);
-  const blockCenter = new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
-
-  const fragmentCount = qualityController.preset.blockFragmentCount;
+  const blockCenter = options.chipOnly
+    ? impact.position.clone().addScaledVector(impact.normal, 0.08)
+    : new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
+  const fragmentCount = options.fragmentCount;
   const fragments: PhysicsToy[] = [];
 
   for (let index = 0; index < fragmentCount; index += 1) {
@@ -1148,18 +1601,26 @@ function spawnBlockFragments(
       .add(scatter)
       .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
       .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
-    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount);
+    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount, options.materialUnits);
+    const debrisShape = createDebrisShapeForBlock(block, {
+      fragmentIndex: index,
+      distributedFragmentIndex: fragmentGridIndex,
+      origin: position
+    });
 
     const fragment = PhysicsToy.createBlockFragment(
       block,
       blockCenter.clone().add(offset).add(spawnJitter),
       velocity,
-      rubbleMaterialUnits
+      rubbleMaterialUnits,
+      debrisShape
     );
     addPhysicsToy(fragment);
+    rigidDebris.registerFragment(fragment);
     fragments.push(fragment);
   }
 
+  rigidDebris.invalidateStaticColliders();
   debrisSettler.registerFracture(block, blockCenter, fragments);
 }
 
@@ -1193,20 +1654,141 @@ function createFragmentSpawnJitter(): THREE.Vector3 {
   );
 }
 
-function throwPlayerCore(): void {
+function throwPlayerCore(activePlayer: PlayerController): void {
+  const firingSolution = createPlayerCoreFiringSolution(getPhysicsCoreRadius(physicsCoreSettings));
+  const launchVelocity = createPlayerPhysicsCoreLaunchVelocity(
+    firingSolution.direction,
+    activePlayer.velocity,
+    physicsCoreSettings
+  );
+  addPhysicsToy(createPhysicsCore(firingSolution.origin, launchVelocity));
+  engineEvents.emit("physics:core-thrown", { source: "player", mode: "projectile" });
+}
+
+function firePlayerHitscanCore(): void {
+  const activeWorld = requireWorld();
+  const firingSolution = createPlayerCoreFiringSolution(HITSCAN_CORE_RADIUS);
+  if (firingSolution.direction.lengthSq() <= 0.0001) return;
+
+  // Hitscan cores skip spawning a moving toy, but they deliberately reuse the
+  // terrain impact path so bite visuals, material ejection, health bars, and
+  // tunnel continuation stay aligned with projectile cores.
+  const shotDirection = firingSolution.direction;
+  const visualStart = firingSolution.origin;
+  let visualEnd = visualStart.clone().addScaledVector(shotDirection, Math.min(HITSCAN_CORE_RANGE, 32));
+  const damagedBlocksForShot = new Set<string>();
+  let rayOrigin = firingSolution.origin.clone();
+  let remainingRange = HITSCAN_CORE_RANGE;
+  let impactSpeed = HITSCAN_CORE_IMPACT_SPEED;
+
+  for (
+    let impactIndex = 0;
+    impactIndex < HITSCAN_CORE_MAX_IMPACTS &&
+    remainingRange > TARGET_HIT_EPSILON &&
+    impactSpeed > BLOCK_DAMAGE_IMPACT_SPEED;
+    impactIndex += 1
+  ) {
+    const terrainHit = raycastHitscanCore(
+      activeWorld,
+      rayOrigin,
+      shotDirection,
+      remainingRange,
+      HITSCAN_CORE_RADIUS
+    );
+    const rubbleHit = rubbleField.raycast(rayOrigin, shotDirection, remainingRange);
+
+    if (rubbleHit && (!terrainHit || rubbleHit.distance < terrainHit.distance - TARGET_HIT_EPSILON)) {
+      visualEnd = rayOrigin.clone().addScaledVector(shotDirection, rubbleHit.distance);
+      damageTargetedRubbleCell(rubbleHit.cell);
+      break;
+    }
+
+    if (!terrainHit) {
+      visualEnd = rayOrigin.clone().addScaledVector(shotDirection, Math.min(remainingRange, 32));
+      break;
+    }
+    visualEnd = terrainHit.position.clone();
+
+    const incomingVelocity = shotDirection.clone().multiplyScalar(impactSpeed);
+    const impactNormal = terrainHit.normal.lengthSq() > 0.0001
+      ? terrainHit.normal
+      : shotDirection.clone().multiplyScalar(-1);
+    const result = applyCoreTerrainImpact(activeWorld, {
+      block: terrainHit.block,
+      normal: impactNormal,
+      speed: impactSpeed,
+      position: terrainHit.position,
+      incomingVelocity,
+      radius: HITSCAN_CORE_RADIUS
+    }, damagedBlocksForShot);
+
+    const pierceContinuation = result?.pierceContinuation;
+    if (!pierceContinuation) break;
+
+    const exitPosition = new THREE.Vector3(
+      pierceContinuation.position.x,
+      pierceContinuation.position.y,
+      pierceContinuation.position.z
+    );
+    visualEnd = exitPosition;
+    remainingRange = Math.max(0, remainingRange - rayOrigin.distanceTo(exitPosition));
+    rayOrigin = exitPosition;
+    impactSpeed = pierceContinuation.speed;
+  }
+
+  hitscanBoltTracer.spawn(visualStart, visualEnd);
+  engineEvents.emit("physics:core-thrown", { source: "player", mode: "hitscan" });
+}
+
+function createPlayerCoreFiringSolution(radius: number): PlayerCoreFiringSolution {
   camera.getWorldDirection(direction);
-  addPhysicsToy(createPhysicsCore(
-    camera.position.clone().addScaledVector(direction, 1.4),
-    direction.clone().multiplyScalar(16).add(new THREE.Vector3(0, 3.5, 0))
-  ));
-  engineEvents.emit("physics:core-thrown", { source: "player" });
+  const cameraDirection = direction.lengthSq() > 0.0001
+    ? direction.clone().normalize()
+    : new THREE.Vector3(0, 0, -1);
+  const adsOrigin = camera.position.clone().addScaledVector(cameraDirection, PLAYER_CORE_MUZZLE_FORWARD_METERS);
+
+  if (rightMouseButtonDown) {
+    return {
+      origin: adsOrigin,
+      direction: cameraDirection
+    };
+  }
+
+  camera.updateMatrixWorld();
+  const muzzleOrigin = camera.localToWorld(createPlayerCoreMuzzleLocalOffset(camera.fov, camera.aspect));
+  const aimDistance = getPlayerCoreAimDistance(cameraDirection, radius);
+
+  return {
+    origin: muzzleOrigin,
+    direction: createPlayerCoreShotDirection(
+      muzzleOrigin,
+      camera.position,
+      cameraDirection,
+      aimDistance
+    )
+  };
+}
+
+function getPlayerCoreAimDistance(cameraDirection: THREE.Vector3, radius: number): number {
+  const activeWorld = requireWorld();
+  const terrainHit = raycastHitscanCore(activeWorld, camera.position, cameraDirection, HITSCAN_CORE_RANGE, radius);
+  const rubbleHit = rubbleField.raycast(camera.position, cameraDirection, HITSCAN_CORE_RANGE);
+
+  if (rubbleHit && (!terrainHit || rubbleHit.distance < terrainHit.distance - TARGET_HIT_EPSILON)) {
+    return Math.max(1, rubbleHit.distance);
+  }
+  if (terrainHit) return Math.max(1, terrainHit.distance);
+  return HITSCAN_CORE_RANGE;
 }
 
 function throwNovaPilotCore(): void {
   const launch = novaPilot.createCoreLaunch();
   if (!launch) return;
-  addPhysicsToy(createPhysicsCore(launch.position, launch.velocity));
-  engineEvents.emit("physics:core-thrown", { source: "nova" });
+  addPhysicsToy(createPhysicsCore(
+    launch.position,
+    launch.velocity.clone().multiplyScalar(getPhysicsCoreVelocityMultiplier(physicsCoreSettings))
+  ));
+  engineEvents.emit("physics:core-thrown", { source: "nova", mode: "projectile" });
 }
 
 function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
@@ -1214,6 +1796,7 @@ function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): Ph
     // Thrown cores are the expensive, gameplay-relevant actors. Keep their
     // damage/collision behavior while moving, then let them sleep after
     // settling so old shots stop taxing the frame forever.
+    radius: getPhysicsCoreRadius(physicsCoreSettings),
     sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
     sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
   });
@@ -1276,6 +1859,43 @@ function updatePhysicsBudgetControls(): void {
   physicsBudgetSlider.value = String(physicsObjectBudget);
 }
 
+function setPhysicsCoreSizePercent(sizePercent: unknown): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    sizePercent: normalizePhysicsCoreSizePercent(sizePercent, physicsCoreSettings.sizePercent)
+  });
+}
+
+function setPhysicsCoreVelocityPercent(velocityPercent: unknown): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    velocityPercent: normalizePhysicsCoreVelocityPercent(
+      velocityPercent,
+      physicsCoreSettings.velocityPercent
+    )
+  });
+}
+
+function updatePhysicsCoreSettings(settings: PhysicsCoreSettings): void {
+  physicsCoreSettings = normalizePhysicsCoreSettings(settings, physicsCoreSettings);
+  writePhysicsCoreSettingsPreference(physicsCoreSettings);
+  updatePhysicsCoreControls();
+}
+
+function updatePhysicsCoreControls(): void {
+  coreSizeSlider.min = String(PHYSICS_CORE_SIZE_MIN_PERCENT);
+  coreSizeSlider.max = String(PHYSICS_CORE_SIZE_MAX_PERCENT);
+  coreSizeSlider.step = String(PHYSICS_CORE_SIZE_STEP_PERCENT);
+  coreSizeSlider.value = String(physicsCoreSettings.sizePercent);
+  coreSizeValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.sizePercent);
+
+  coreVelocitySlider.min = String(PHYSICS_CORE_VELOCITY_MIN_PERCENT);
+  coreVelocitySlider.max = String(PHYSICS_CORE_VELOCITY_MAX_PERCENT);
+  coreVelocitySlider.step = String(PHYSICS_CORE_VELOCITY_STEP_PERCENT);
+  coreVelocitySlider.value = String(physicsCoreSettings.velocityPercent);
+  coreVelocityValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.velocityPercent);
+}
+
 function emitQualityChanged(source: QualityChangeSource): void {
   const preset = qualityController.preset;
   engineEvents.emit("quality:changed", {
@@ -1327,6 +1947,23 @@ function enforcePhysicsToyBudget(): void {
   pruneOldestPhysicsCoresForBudget();
 }
 
+function enforceRigidDebrisBudget(): void {
+  const rigidDebrisBodyBudget = getCurrentRigidDebrisBodyBudget();
+  const overBudgetCount = rigidDebrisStats.bodies - rigidDebrisBodyBudget;
+  if (overBudgetCount <= 0) return;
+
+  // Rapier bodies are CPU-heavy. Convert sleeping/far debris regions back into
+  // cheap rubble before the main thread has to solve thousands of tiny cuboids.
+  debrisSettler.finalizeRegionsForPressure(rubbleField, camera.position, overBudgetCount);
+  absorbExpiredOrphanFragmentsIntoRubble();
+  pruneExpiredToys();
+  rigidDebrisStats = rigidDebris.getStats();
+}
+
+function getCurrentRigidDebrisBodyBudget(): number {
+  return getRigidDebrisBodyBudget(physicsObjectBudget);
+}
+
 function absorbSettledFragmentsIntoRubble(): void {
   for (let index = toys.length - 1; index >= 0; index -= 1) {
     const toy = toys[index];
@@ -1335,8 +1972,8 @@ function absorbSettledFragmentsIntoRubble(): void {
 
     // Once debris has settled or aged out, it graduates from "expensive little
     // physics shard" into cheap cover material. A low visual debris count can
-    // still carry several material units, so graphics settings do not alter
-    // gameplay even when a tiny Potato shard sample expires before sleeping.
+    // still carry a large share of the block volume, so graphics settings do
+    // not alter gameplay even when a tiny Potato shard expires before sleeping.
     absorbFragmentToyIntoRubble(toy);
     removePhysicsToyAt(index);
   }
@@ -1378,7 +2015,7 @@ function absorbOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
 
     const index = toys.indexOf(toy);
     if (index === -1) continue;
-    absorbFragmentToyIntoRubble(toy);
+    absorbFragmentToyIntoRubble(toy, { forceVisualChunk: !outsideBubbleOnly });
     removePhysicsToyAt(index);
   }
 }
@@ -1401,9 +2038,13 @@ function pruneOldestPhysicsCoresForBudget(): void {
   }
 }
 
-function absorbFragmentToyIntoRubble(toy: PhysicsToy): void {
-  if (!rubbleField.absorbFragment(toy)) return;
+function absorbFragmentToyIntoRubble(
+  toy: PhysicsToy,
+  options: RubbleFragmentAbsorptionOptions = {}
+): void {
+  if (!rubbleField.absorbFragment(toy, options)) return;
 
+  rigidDebris.invalidateStaticColliders();
   engineEvents.emit("rubble:formed", {
     position: {
       x: toy.mesh.position.x,
@@ -1416,7 +2057,10 @@ function absorbFragmentToyIntoRubble(toy: PhysicsToy): void {
 }
 
 function emitRubbleBatchEvents(): void {
-  for (const batch of debrisSettler.getFinalizedBatches()) {
+  const batches = debrisSettler.getFinalizedBatches();
+  if (batches.length > 0) rigidDebris.invalidateStaticColliders();
+
+  for (const batch of batches) {
     engineEvents.emit("rubble:formed", {
       position: batch.position,
       block: batch.block,
@@ -1426,7 +2070,10 @@ function emitRubbleBatchEvents(): void {
 }
 
 function emitRubbleDamageEvents(): void {
-  for (const event of rubbleField.consumeDamageEvents()) {
+  const events = rubbleField.consumeDamageEvents();
+  if (events.some((event) => event.destroyed)) rigidDebris.invalidateStaticColliders();
+
+  for (const event of events) {
     engineEvents.emit("rubble:damaged", {
       position: {
         x: event.position.x,
@@ -1444,6 +2091,8 @@ function emitRubbleDamageEvents(): void {
 }
 
 function showBlockDamageIndicator(result: BlockDamageResult): void {
+  if (!healthBarsEnabled) return;
+
   const blockCenter = new THREE.Vector3(
     result.position.x + 0.5,
     result.position.y + 1.18,
@@ -1461,6 +2110,8 @@ function showBlockDamageIndicator(result: BlockDamageResult): void {
 }
 
 function showRubbleDamageIndicator(event: RubbleDamageEvent): void {
+  if (!healthBarsEnabled) return;
+
   damageIndicators.show({
     id: `rubble:${event.cell.x},${event.cell.y},${event.cell.z}`,
     position: event.position,
@@ -1498,6 +2149,7 @@ function removePhysicsToyAt(index: number): void {
 
   debrisSettler.forget(removedToy);
   physicsToyCollider.forget(removedToy);
+  rigidDebris.forget(removedToy);
   if (!removedToy.isInstancedFragment) {
     scene.remove(removedToy.mesh);
   }
@@ -1505,7 +2157,20 @@ function removePhysicsToyAt(index: number): void {
 }
 
 async function refreshHomeWorldList(): Promise<void> {
-  await renderHomeWorldList(requireWorldRegistry(), homeWorldList, loadWorld, openDeleteWorldDialog);
+  const refreshGeneration = homeWorldListRefreshGeneration + 1;
+  homeWorldListRefreshGeneration = refreshGeneration;
+  await renderHomeWorldList(
+    requireWorldRegistry(),
+    homeWorldList,
+    loadWorld,
+    openDeleteWorldDialog,
+    { shouldCommit: () => refreshGeneration === homeWorldListRefreshGeneration }
+  );
+}
+
+function getWorldSaveOriginLabel(): string {
+  const origin = globalThis.location?.origin;
+  return origin ? `Save slot: ${origin}` : "Save slot: this browser address";
 }
 
 async function createWorldFromForm(event: SubmitEvent): Promise<void> {
@@ -1554,6 +2219,8 @@ async function loadWorld(worldId: string): Promise<void> {
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed);
+    partialBlockMeshField.clear();
+    renderedPartialBlockRevision = -1;
     await activeWorld.preloadSavedChunksAround(
       loadOrigin.x,
       loadOrigin.z,
@@ -1642,6 +2309,7 @@ async function confirmPendingWorldDeletion(): Promise<void> {
 async function exitToHome(): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
+  rightMouseButtonDown = false;
 
   try {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
@@ -1658,6 +2326,8 @@ async function exitToHome(): Promise<void> {
     clearToys();
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
+    partialBlockMeshField.clear();
+    renderedPartialBlockRevision = -1;
     inWorld = false;
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
@@ -1785,6 +2455,7 @@ function clearToys(): void {
   for (const toy of toys) {
     debrisSettler.forget(toy);
     physicsToyCollider.forget(toy);
+    rigidDebris.forget(toy);
     if (!toy.isInstancedFragment) {
       scene.remove(toy.mesh);
     }
@@ -1793,9 +2464,11 @@ function clearToys(): void {
   toys.length = 0;
   damageIndicators.clear();
   debrisSettler.clear();
+  rigidDebris.clear();
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
+  hitscanBoltTracer.clear();
   rubbleField.clear();
 }
 
@@ -1857,6 +2530,8 @@ function disposeRuntime(): void {
   // Firefox's GPU process until the browser finally decides to clean house.
   player?.dispose();
   clearToys();
+  hitscanBoltTracer.dispose();
+  rigidDebris.dispose();
   activeWorld?.dispose(scene);
   inWorld = false;
   novaPilotReactions.dispose();
@@ -1865,6 +2540,7 @@ function disposeRuntime(): void {
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();
+  partialBlockMeshField.dispose();
   skybox.dispose();
   worldMaterial.dispose();
   renderer.renderLists.dispose();

@@ -3,6 +3,11 @@ import { BLOCK_FRAGMENT_VISUAL_SIZE, BLOCK_RUBBLE_MATERIAL_UNITS } from "./block
 import { BLOCK } from "./blocks";
 import type { CollisionBounds } from "./collision";
 import {
+  createDefaultDebrisShape,
+  getDebrisShapeGeometry,
+  type DebrisShapeId
+} from "./debrisShapes";
+import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
   getFragmentMaterial,
@@ -11,20 +16,24 @@ import {
 
 const RUBBLE_CELL_SIZE = 1;
 const RUBBLE_MAX_VISUAL_PIECES = 36;
-const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = 18;
-// Promotion intentionally needs more material than the visible pile cap and a
-// single 27-piece block fracture. Piles can keep accruing hidden material after
-// the proxy mesh stops growing, so craters do not seal from one normal break.
-export const RUBBLE_BLOCK_PROMOTION_PIECES = 48;
+const RUBBLE_MAX_VISUAL_CHUNKS_PER_PILE = RUBBLE_MAX_VISUAL_PIECES;
+// Keep the old wrinkly cover sheet available as a parked rendering mode. The
+// gameplay rubble heightfield still exists for support, raycasts, and material
+// accounting, but settled debris should currently read as baked shard piles.
+const RUBBLE_RENDER_DRAPED_SHEET_MESH = false;
+// Promotion intentionally needs more than one full block-volume of material.
+// Piles can keep accruing hidden material after the proxy mesh stops growing,
+// so craters do not seal from one normal break.
+export const RUBBLE_BLOCK_PROMOTION_PIECES = 2;
 const RUBBLE_MAX_PATCH_CELLS = 18;
-// `pieces` is material volume for cover shape/promotion; health is gameplay
-// durability. A full block fracture produces 27 material units, but it should
-// not also create a 27-HP object when ordinary terrain has 2-3 HP.
+// `pieces` is normalized block-volume material for cover shape/promotion;
+// health is gameplay durability. A full block of rubble material is about as
+// sturdy as one generated Rubble terrain block.
 export const RUBBLE_FULL_BLOCK_HEALTH = 3;
 const RUBBLE_PIECE_HEALTH = RUBBLE_FULL_BLOCK_HEALTH / BLOCK_RUBBLE_MATERIAL_UNITS;
 const RUBBLE_NEARBY_SEARCH_PADDING = 1.25;
 const RUBBLE_MIN_HEIGHT = 0.04;
-const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.032;
+const RUBBLE_HEIGHT_PER_ROOT_PIECE = 0.17;
 const RUBBLE_HEIGHT_VARIATION = 0.03;
 const RUBBLE_MAX_HEIGHT = 0.5;
 const RUBBLE_SOLID_NEIGHBOR_CORNER_RISE = 0.08;
@@ -47,7 +56,7 @@ const RUBBLE_CORE_DAMPING = 0.95;
 const RUBBLE_COLLISION_EPSILON = 0.000001;
 const RUBBLE_NEIGHBOR_CHIP_DAMAGE = 0.25;
 
-type RubbleCell = {
+export type RubbleCell = {
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -73,7 +82,8 @@ type RubbleStoredVisualChunkSample = {
   readonly localY: number;
   readonly localZ: number;
   readonly quaternion: THREE.Quaternion;
-  readonly size: number;
+  readonly shapeId: DebrisShapeId;
+  readonly visualScale: THREE.Vector3;
 };
 
 type RubbleCluster = {
@@ -125,7 +135,12 @@ export type RubbleFieldStats = {
 export type RubbleVisualChunkSample = {
   readonly position: THREE.Vector3;
   readonly quaternion: THREE.Quaternion;
-  readonly size: number;
+  readonly shapeId: DebrisShapeId;
+  readonly visualScale: THREE.Vector3;
+};
+
+export type RubbleFragmentAbsorptionOptions = {
+  readonly forceVisualChunk?: boolean;
 };
 
 export type RubbleAbsorptionSample = {
@@ -138,6 +153,7 @@ export type RubbleAbsorptionSample = {
 export type RubbleRaycastHit = {
   readonly clusterId: number;
   readonly block: number;
+  readonly cell: RubbleCell;
   readonly distance: number;
   readonly point: THREE.Vector3;
 };
@@ -196,7 +212,7 @@ export class RubbleField {
     return this.stats;
   }
 
-  absorbFragment(fragment: PhysicsToy): boolean {
+  absorbFragment(fragment: PhysicsToy, options: RubbleFragmentAbsorptionOptions = {}): boolean {
     if (!fragment.isInstancedFragment || fragment.fragmentBlock === null) {
       return false;
     }
@@ -205,7 +221,7 @@ export class RubbleField {
       block: fragment.fragmentBlock,
       position: fragment.mesh.position.clone(),
       pieces: fragment.rubbleMaterialUnits,
-      visualChunk: shouldBakeFragmentVisualChunk(fragment)
+      visualChunk: shouldBakeFragmentVisualChunk(fragment, options)
         ? createRubbleVisualChunkSample(fragment)
         : undefined
     }]);
@@ -388,6 +404,7 @@ export class RubbleField {
         closestHit = {
           clusterId: cluster.id,
           block: cluster.block,
+          cell: { ...pile.cell },
           distance,
           point: origin.clone().addScaledVector(direction, distance)
         };
@@ -513,48 +530,49 @@ export class RubbleField {
     const indices: number[] = [];
     const bounds = new THREE.Box3();
 
-    // Build one low patch mesh out of all occupied cells. Internal vertical
-    // faces are skipped, so adjacent piles read as connected rubble instead of
-    // separate stacked tiles.
+    // Gameplay still treats rubble as cheap support/material cells. Visually,
+    // though, keep settled debris as baked shard geometry unless the parked
+    // draped-sheet mode is deliberately re-enabled later.
     for (const pile of cluster.cells.values()) {
-      const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
-      const footprint = getRubblePileFootprint(pile);
-      const surfaceGrid = createRubbleSurfaceGrid(cluster, pile, this.surfaceWorld, footprint);
+      expandRubbleGameplayBounds(bounds, pile);
 
-      bounds.expandByPoint(new THREE.Vector3(surfaceGrid.minX, baseY, surfaceGrid.minZ));
-      bounds.expandByPoint(new THREE.Vector3(surfaceGrid.maxX, surfaceGrid.maxY, surfaceGrid.maxZ));
+      if (RUBBLE_RENDER_DRAPED_SHEET_MESH) {
+        const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+        const footprint = getRubblePileFootprint(pile);
+        const surfaceGrid = createRubbleSurfaceGrid(cluster, pile, this.surfaceWorld, footprint);
 
-      addRubbleTopSurface(positions, normals, indices, surfaceGrid, pile);
-      addQuad(
-        positions,
-        normals,
-        indices,
-        [surfaceGrid.minX, baseY, surfaceGrid.minZ],
-        [surfaceGrid.maxX, baseY, surfaceGrid.minZ],
-        [surfaceGrid.maxX, baseY, surfaceGrid.maxZ],
-        [surfaceGrid.minX, baseY, surfaceGrid.maxZ],
-        [0, -1, 0]
-      );
+        addRubbleTopSurface(positions, normals, indices, surfaceGrid, pile);
+        addQuad(
+          positions,
+          normals,
+          indices,
+          [surfaceGrid.minX, baseY, surfaceGrid.minZ],
+          [surfaceGrid.maxX, baseY, surfaceGrid.minZ],
+          [surfaceGrid.maxX, baseY, surfaceGrid.maxZ],
+          [surfaceGrid.minX, baseY, surfaceGrid.maxZ],
+          [0, -1, 0]
+        );
 
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z - 1 }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
-      } else if (footprint.minZ > RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
-      }
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z + 1 }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
-      } else if (footprint.maxZ < 1 - RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
-      }
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x - 1, y: pile.cell.y, z: pile.cell.z }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
-      } else if (footprint.minX > RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
-      }
-      if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x + 1, y: pile.cell.y, z: pile.cell.z }))) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
-      } else if (footprint.maxX < 1 - RUBBLE_COLLISION_EPSILON) {
-        addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z - 1 }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
+        } else if (footprint.minZ > RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "north");
+        }
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x, y: pile.cell.y, z: pile.cell.z + 1 }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
+        } else if (footprint.maxZ < 1 - RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "south");
+        }
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x - 1, y: pile.cell.y, z: pile.cell.z }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
+        } else if (footprint.minX > RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "west");
+        }
+        if (!cluster.cells.has(getRubbleCellCoordinateKey({ x: pile.cell.x + 1, y: pile.cell.y, z: pile.cell.z }))) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+        } else if (footprint.maxX < 1 - RUBBLE_COLLISION_EPSILON) {
+          addRubbleBoundarySide(positions, normals, indices, surfaceGrid, "east");
+        }
       }
 
       addRubbleVisualChunks(positions, normals, indices, bounds, pile);
@@ -611,7 +629,7 @@ export class RubbleField {
     const hitHealthBefore = targetPile.health;
     const hitDamage = Math.min(targetPile.health, Math.max(0, amount));
     targetPile.health -= hitDamage;
-    targetPile.pieces = Math.ceil(targetPile.health / RUBBLE_PIECE_HEALTH);
+    targetPile.pieces = Math.max(0, targetPile.health / RUBBLE_PIECE_HEALTH);
 
     const destroyedTargetPile = targetPile.health <= RUBBLE_COLLISION_EPSILON || targetPile.pieces <= 0;
     this.recordDamageEvent(cluster.block, targetPile, hitHealthBefore, destroyedTargetPile, false);
@@ -650,7 +668,7 @@ export class RubbleField {
       if (chipDamage <= 0) continue;
 
       pile.health = Math.max(RUBBLE_COLLISION_EPSILON, pile.health - chipDamage);
-      pile.pieces = Math.max(1, Math.ceil(pile.health / RUBBLE_PIECE_HEALTH));
+      pile.pieces = Math.max(0, pile.health / RUBBLE_PIECE_HEALTH);
       this.recordDamageEvent(cluster.block, pile, healthBefore, false, true);
     }
   }
@@ -928,18 +946,24 @@ function clonePile(pile: RubbleCellPile): RubbleCellPile {
 }
 
 function createRubbleVisualChunkSample(fragment: PhysicsToy): RubbleVisualChunkSample {
+  const debrisShape = fragment.debrisShape ?? createDefaultDebrisShape();
   return {
     position: fragment.mesh.position.clone(),
     quaternion: fragment.mesh.quaternion.clone(),
-    size: BLOCK_FRAGMENT_VISUAL_SIZE
+    shapeId: debrisShape.shapeId,
+    visualScale: debrisShape.visualScale.clone()
   };
 }
 
-function shouldBakeFragmentVisualChunk(fragment: PhysicsToy): boolean {
+function shouldBakeFragmentVisualChunk(
+  fragment: PhysicsToy,
+  options: RubbleFragmentAbsorptionOptions = {}
+): boolean {
   // Baked chunks are persistent static geometry. Only settled debris should
-  // leave a cuboid silhouette; airborne fragments still preserve material via
-  // the rubble surface samples, but they must not become floating cube fossils.
-  return fragment.isSleeping && !fragment.isExpired;
+  // normally leave a cuboid silhouette. Budget pressure is the exception: with
+  // the draped sheet renderer parked, forced material bake-out needs to keep
+  // the current shard pose instead of becoming invisible support-only rubble.
+  return !fragment.isExpired && (fragment.isSleeping || options.forceVisualChunk === true);
 }
 
 function createStoredVisualChunkSample(
@@ -955,7 +979,8 @@ function createStoredVisualChunkSample(
     localY: sample.position.y - baseY,
     localZ: sample.position.z - baseZ,
     quaternion: sample.quaternion.clone(),
-    size: clamp(sample.size, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.35)
+    shapeId: sample.shapeId,
+    visualScale: clampVisualChunkScale(sample.visualScale)
   };
 }
 
@@ -967,8 +992,17 @@ function cloneStoredVisualChunkSample(
     localY: sample.localY,
     localZ: sample.localZ,
     quaternion: sample.quaternion.clone(),
-    size: sample.size
+    shapeId: sample.shapeId,
+    visualScale: sample.visualScale.clone()
   };
+}
+
+function clampVisualChunkScale(scale: THREE.Vector3): THREE.Vector3 {
+  return new THREE.Vector3(
+    clamp(scale.x, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.5),
+    clamp(scale.y, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.5),
+    clamp(scale.z, BLOCK_FRAGMENT_VISUAL_SIZE * 0.5, BLOCK_FRAGMENT_VISUAL_SIZE * 1.5)
+  );
 }
 
 function createRubbleSurfaceSamples(
@@ -985,7 +1019,7 @@ function createRubbleSurfaceSamples(
 
   // Surface samples are the "sheet over the heap" anchors. The old pile logic
   // only knew how many pieces were in a cell; this keeps where the temporary
-  // cubes actually settled so the final proxy does not collapse into a flat lid.
+  // shards actually settled so the final proxy does not collapse into a flat lid.
   const sampleHeight = clamp(
     position.y - baseY +
       RUBBLE_SURFACE_SAMPLE_HEIGHT_PADDING +
@@ -1047,7 +1081,7 @@ function distanceFromPileCenterSq(chunk: RubbleStoredVisualChunkSample): number 
 
 function normalizeRubblePieceCount(pieces: number): number {
   if (!Number.isFinite(pieces)) return 1;
-  return Math.max(1, Math.round(pieces));
+  return Math.max(0.0001, pieces);
 }
 
 function boundsOverlapPileHorizontally(bounds: CollisionBounds, pile: RubbleCellPile): boolean {
@@ -1391,12 +1425,12 @@ function getRubblePileFootprint(pile: RubbleCellPile): RubbleLocalFootprint {
 }
 
 function getRubblePileFootprintRadius(pile: RubbleCellPile): number {
-  // One lonely shard should remain a little mound. As material approaches a
-  // whole block-fracture budget, the proxy grows into real cover that can span
-  // the cell. This keeps the gameplay value stable without making confetti
-  // behave like a poured concrete square.
+  // Tiny chips should remain little mounds. As material approaches one whole
+  // block-volume, the proxy grows into real cover that can span the cell. This
+  // keeps the gameplay value stable without making confetti behave like a
+  // poured concrete square.
   const materialRatio = clamp(
-    (Math.max(1, pile.pieces) - 1) / Math.max(1, BLOCK_RUBBLE_MATERIAL_UNITS - 1),
+    pile.pieces / BLOCK_RUBBLE_MATERIAL_UNITS,
     0,
     1
   );
@@ -1404,7 +1438,10 @@ function getRubblePileFootprintRadius(pile: RubbleCellPile): number {
 }
 
 function getRubblePileEdgeHeight(pile: RubbleCellPile): number {
-  const visualWeight = Math.min(RUBBLE_MAX_VISUAL_PIECES, Math.max(1, pile.pieces));
+  const visualWeight = Math.min(
+    RUBBLE_MAX_VISUAL_PIECES,
+    Math.max(0.05, pile.pieces / BLOCK_RUBBLE_MATERIAL_UNITS)
+  );
   const height = RUBBLE_MIN_HEIGHT
     + Math.sqrt(visualWeight) * RUBBLE_HEIGHT_PER_ROOT_PIECE
     + (getCellNoise(pile.cell) - 0.5) * RUBBLE_HEIGHT_VARIATION;
@@ -1425,6 +1462,15 @@ function getSurfaceNoise(cell: RubbleCell, localX: number, localZ: number): numb
     localZ * 41.971
   ) * 24634.6345;
   return value - Math.floor(value);
+}
+
+function expandRubbleGameplayBounds(bounds: THREE.Box3, pile: RubbleCellPile): void {
+  const footprint = getRubblePileWorldFootprint(pile);
+  const baseY = pile.cell.y * RUBBLE_CELL_SIZE;
+  const maxY = baseY + getRubblePileVisualHeight(pile);
+
+  bounds.expandByPoint(new THREE.Vector3(footprint.minX, baseY, footprint.minZ));
+  bounds.expandByPoint(new THREE.Vector3(footprint.maxX, maxY, footprint.maxZ));
 }
 
 function createRubbleSurfaceGrid(
@@ -1589,70 +1635,44 @@ function addRubbleVisualChunks(
       pile.cell.y * RUBBLE_CELL_SIZE + chunk.localY,
       pile.cell.z * RUBBLE_CELL_SIZE + chunk.localZ
     );
-    const halfSize = chunk.size * 0.5;
-    const corners = createVisualChunkCorners(center, chunk.quaternion, halfSize);
+    const shapePositions = getDebrisShapeGeometry(chunk.shapeId).getAttribute("position");
 
-    for (const corner of corners) {
-      bounds.expandByPoint(corner);
+    // Baked chunks are static geometry inside the rubble mesh. Reusing the
+    // same shard catalog as active debris keeps the settled pile from snapping
+    // back into obvious cubes while preserving the cheap support/raycast proxy.
+    for (let vertexIndex = 0; vertexIndex < shapePositions.count; vertexIndex += 3) {
+      const first = getTransformedVisualChunkVertex(shapePositions, vertexIndex, center, chunk);
+      const second = getTransformedVisualChunkVertex(shapePositions, vertexIndex + 1, center, chunk);
+      const third = getTransformedVisualChunkVertex(shapePositions, vertexIndex + 2, center, chunk);
+
+      bounds.expandByPoint(first);
+      bounds.expandByPoint(second);
+      bounds.expandByPoint(third);
+      addTriangle(
+        positions,
+        normals,
+        indices,
+        vectorToRubbleVertex(first),
+        vectorToRubbleVertex(second),
+        vectorToRubbleVertex(third)
+      );
     }
-
-    // These static cubes are deliberately baked into the same rubble mesh as
-    // the support surface. They give the pile a chunky silhouette without
-    // creating persistent rigid bodies or extra draw calls.
-    // Keep every face wound outward. The first hybrid pass accidentally wound
-    // these inward, so WebGL culled the exterior faces and left spooky partial
-    // triangles in the crater instead of readable baked chunks.
-    addVisualChunkQuad(positions, normals, indices, corners[1], corners[3], corners[7], corners[5]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[4], corners[6], corners[2]);
-    addVisualChunkQuad(positions, normals, indices, corners[2], corners[6], corners[7], corners[3]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[1], corners[5], corners[4]);
-    addVisualChunkQuad(positions, normals, indices, corners[4], corners[5], corners[7], corners[6]);
-    addVisualChunkQuad(positions, normals, indices, corners[0], corners[2], corners[3], corners[1]);
   }
 }
 
-function createVisualChunkCorners(
+function getTransformedVisualChunkVertex(
+  positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  vertexIndex: number,
   center: THREE.Vector3,
-  quaternion: THREE.Quaternion,
-  halfSize: number
-): readonly THREE.Vector3[] {
-  return [
-    new THREE.Vector3(-halfSize, -halfSize, -halfSize),
-    new THREE.Vector3(halfSize, -halfSize, -halfSize),
-    new THREE.Vector3(-halfSize, halfSize, -halfSize),
-    new THREE.Vector3(halfSize, halfSize, -halfSize),
-    new THREE.Vector3(-halfSize, -halfSize, halfSize),
-    new THREE.Vector3(halfSize, -halfSize, halfSize),
-    new THREE.Vector3(-halfSize, halfSize, halfSize),
-    new THREE.Vector3(halfSize, halfSize, halfSize)
-  ].map((corner) => corner.applyQuaternion(quaternion).add(center));
-}
-
-function addVisualChunkQuad(
-  positions: number[],
-  normals: number[],
-  indices: number[],
-  first: THREE.Vector3,
-  second: THREE.Vector3,
-  third: THREE.Vector3,
-  fourth: THREE.Vector3
-): void {
-  addTriangle(
-    positions,
-    normals,
-    indices,
-    vectorToRubbleVertex(first),
-    vectorToRubbleVertex(second),
-    vectorToRubbleVertex(third)
-  );
-  addTriangle(
-    positions,
-    normals,
-    indices,
-    vectorToRubbleVertex(first),
-    vectorToRubbleVertex(third),
-    vectorToRubbleVertex(fourth)
-  );
+  chunk: RubbleStoredVisualChunkSample
+): THREE.Vector3 {
+  return new THREE.Vector3(
+    positions.getX(vertexIndex) * chunk.visualScale.x,
+    positions.getY(vertexIndex) * chunk.visualScale.y,
+    positions.getZ(vertexIndex) * chunk.visualScale.z
+  )
+    .applyQuaternion(chunk.quaternion)
+    .add(center);
 }
 
 function vectorToRubbleVertex(vector: THREE.Vector3): RubbleQuadVertex {

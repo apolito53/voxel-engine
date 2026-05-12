@@ -13,6 +13,7 @@ export type VoxelEventPosition = {
 };
 
 export type PhysicsCoreSource = "player" | "nova";
+export type PhysicsCoreMode = "projectile" | "hitscan";
 
 export type EngineEvents = {
   "world:loaded": {
@@ -32,6 +33,7 @@ export type EngineEvents = {
   };
   "physics:core-thrown": {
     readonly source: PhysicsCoreSource;
+    readonly mode?: PhysicsCoreMode;
   };
   "physics:cores-cleared": {
     readonly count: number;

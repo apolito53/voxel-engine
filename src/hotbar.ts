@@ -1,6 +1,7 @@
 import type { BlockId } from "./blocks";
 import {
   EMPTY_HANDS_ITEM_ID,
+  HITSCAN_CORE_ITEM_ID,
   PHYSICS_CORE_ITEM_ID,
   createBlockItemId,
   createItemStack,
@@ -24,7 +25,8 @@ export function createHotbarItems(placeableBlocks: readonly BlockId[]): readonly
   return [
     createItemStack(EMPTY_HANDS_ITEM_ID),
     ...placeableBlocks.map((block) => createItemStack(createBlockItemId(block))),
-    createItemStack(PHYSICS_CORE_ITEM_ID)
+    createItemStack(PHYSICS_CORE_ITEM_ID),
+    createItemStack(HITSCAN_CORE_ITEM_ID)
   ];
 }
 
@@ -84,4 +86,8 @@ export function canPlaceBlockWithHotbarItem(item: HotbarItem, registry: ItemRegi
 
 export function canThrowCoreWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
   return getHotbarPrimaryAction(item, registry).kind === "physics:throw-core";
+}
+
+export function canFireHitscanCoreWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
+  return getHotbarPrimaryAction(item, registry).kind === "physics:fire-hitscan-core";
 }

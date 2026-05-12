@@ -1,6 +1,6 @@
 # Voxel Sandbox Engine
 
-A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, while the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, held item actions, block edits, impact damage, and simple physics toys.
+A tiny strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering, Rapier handles active rigid-body block debris, and the engine code owns chunks, terrain generation, voxel meshing, collision, ray picking, held item actions, block edits, impact damage, rubble bake-out, projectile physics cores, and hitscan cores.
 
 World units are metric: `1 block = 1 meter`.
 
@@ -41,22 +41,24 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with an 80% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide
 - `Shift` sprint on ground, or use the stronger flight speed boost; active sprint/boost widens FOV and adds peripheral speed lines
-- `Mouse wheel` selects held items: Unarmed, placeable blocks, or Physics Core
+- `Mouse wheel` selects held items: Unarmed, placeable blocks, Physics Core, or Hitscan Core
 - `Unarmed` does nothing on either click for now
 - Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
-- Selected Physics Core uses `Left click` to throw a core; `Right click` is intentionally reserved
+- Selected Physics Core uses `Left click` to throw a core from the lowered right-side muzzle; hold `Right click` while firing to use centered reticle ADS with a slight 15% zoom
+- Selected Hitscan Core uses `Left click` to fire an instant 10%-radius, 500%-speed core trace from the lowered right-side muzzle through the same partial-block bite and piercing rules, with a short additive energy-beam flash drawn along the shot line; hold `Right click` while firing to use centered reticle ADS with a slight 15% zoom
 - `F` toggle flight mode
-- Physics Core impacts above 2 m/s deal 30 damage to terrain blocks and destructible rubble piles, destroying ordinary blocks in one hit, consuming the core when the hit target breaks, showing short debug health bars over damaged targets, and fracturing destroyed terrain into quality-scaled tumbling cube fragments. Nearby fragments stay active or sleeping inside the player-centered debris bubble, can still be shoved by later cores, and convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
+- Core impacts above 2 m/s carve one health step out of 10-HP ordinary terrain by taking hidden 3x3x3 bite cells out of a faceted partial-block volume, spend projectile cores on contact unless a tiny fast core pierces through to air, show short debug health bars, and eject a small material-budgeted chip burst from the struck point. Chipped cells stay full-cube for player/debris collision and raycast until they break, but projectile and hitscan cores collide against the remaining bite-lattice material so shots can pass through visual tunnels; visible fill tracks remaining HP, so a 7/10 HP block keeps about 70% of its presentation lattice. Bite cells persist once removed, so later hits cannot visually refill older damage. Final fractures release only the block material still left inside, clear the bite mesh, and leave air instead of stamping a wrinkled surface puddle. Impact trajectory and core radius rank bite cells, so tiny cores drill narrow lattice columns while larger cores chew a broader face footprint before reaching deeper cells; small fast cores can continue through a complete tunnel with reduced speed when the exit cell is empty, and Hitscan Core repeats that continuation instantly across its trace. This first pass does not persist carved shapes to saves yet. Destructible rubble piles still take the full 30 core damage. Nearby fragments tumble, collide through cheap cuboid envelopes, stack, sleep, and remain shoveable inside the player-centered debris bubble, then convert into hybrid walkable rubble piles once outside the bubble or under physics-budget pressure; targeted rubble cells use a white cube-space outline, unsupported piles fall/merge, and large dense piles compact into a solid `Rubble` block
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and rubble cover
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
-- Pause menu `Settings` contains a `Quality Preset` dropdown, plus sliders for render distance, physics body budget, shadow quality, and debris count; slider edits switch the dropdown to `Custom` so built-in presets stay clean
+- Pause menu `Settings` splits tuning into `Graphics` and `Gameplay` tabs: graphics owns quality, render distance, physics body budget, shadows, debris count, and Super Ultra; gameplay owns projectile core size/velocity, health bars, and cleanup. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
-- Settings `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
+- Gameplay `Health Bars` toggles block/rubble damage bars and clears any visible bars when turned off
+- Gameplay `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
 - `Esc` pause and release mouse
 
@@ -70,7 +72,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `Super Ultra`: 12x render distance, highest local shadow resolution, 4096 physics bodies, 27 visible debris shards, 72m active debris bubble, maximum stress-test mode; opt in from the pause menu once `Ultra` is selected
 - `Custom`: created automatically when settings sliders are changed, using the selected built-in preset as its baseline
 
-Lower visible debris counts are only a rendering/performance compromise. Destroyed blocks still contribute one full 3x3x3 block-fracture worth of gameplay rubble material, so sloped cover shape and dense-pile promotion do not change with graphics quality; durability is scaled separately so one full block's rubble is roughly as tough as a generated `Rubble` terrain block instead of becoming a 27-HP mini-fortress. Debris is temporary but no longer just timer-based: nearby fractures share a settling region, visible cubes burst apart, briefly collide, glue together on contact after a breakup grace, stack, clump, and then remain active or sleeping while inside the quality-scaled player bubble. Sleeping debris has to be grounded or supported through a stack-like chain, and glue links keep a small readable separation so clumps stick without preserving obvious cube overlap. Once the player leaves that bubble, or the physics budget needs relief, regions finalize into the cheap persistent rubble field. Final rubble keeps bounded surface samples for walkable support and capped baked cube chunks from the settled fragment poses, giving piles a jagged silhouette while preserving enough static chunk data for a later rubble-to-debris re-break feature. Sparse rubble uses a local footprint around its samples, while heavier piles grow toward full-cell walkable cover.
+Lower visible debris counts are only a rendering/performance compromise. A full destroyed block contributes `1.0` block-volume of gameplay rubble material, no matter whether the quality preset renders 2, 7, 14, or 27 visible shards. Physics Core carving releases that material over repeated chip hits instead of duplicating a whole block at the final break; remaining material is derived from remaining HP, so a block at 7/10 HP keeps about 70% of its material budget. The damaged-block mesh uses the same 27-cell fracture lattice only as presentation resolution, hiding roughly the damage fraction while gameplay material remains normalized. Support shape and dense-pile promotion do not change with graphics quality. Durability is scaled separately so one full block's rubble is roughly as tough as a generated `Rubble` terrain block instead of inheriting debris-shard count as health. Debris is temporary but no longer just timer-based: nearby fractures share a settling region, visible low-poly shards burst apart as Rapier cuboids, collide against each other, terrain, and temporary rubble-support colliders, then promote into the cheap persistent rubble field once the rigid-body stack sleeps. If the player leaves the bubble or the physics budget needs relief before that, the same material-preserving bake-out path runs, preferring sleeping debris before awake far debris so material is preserved before any core pruning happens. Final rubble keeps bounded surface samples for walkable support and capped baked shard chunks from the settled rigid-body poses; the old draped/wrinkly sheet mesh is parked behind a disabled flag, so persistent piles currently render as static shard piles while preserving enough data for future rubble-to-debris re-break and larger-scale rubble mechanics. Sparse rubble uses a local footprint around its samples, while heavier piles grow toward full-cell walkable cover.
 
 Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and physics work has drained, the app stops the animation loop after five minutes without input, and hidden/locked sessions use a low-frequency heartbeat instead of continuous WebGL frames.
 
@@ -86,21 +88,30 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/chunkStorage.ts`: IndexedDB adapter for saved worlds, player resume location, and edited chunk persistence
 - `src/terrain.ts`: seeded terrain generation shared by main-thread fallback and the worker, including the reserved superflat test-lab seed
 - `src/chunk.ts`: voxel storage, sync mesh fallback, worker mesh upload
-- `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building
+- `src/chunkWorker.ts`: worker-side terrain generation and greedy mesh building, including partial-block render masks
 - `src/player.ts`: first-person controller, pointer-lock/input listener lifecycle, voxel collision, and partial-height rubble support stepping
 - `src/sprintFeedback.ts`: sprint/boost FOV target and smoothing helpers
 - `src/raycast.ts`: grid DDA block picking
-- `src/targetHighlighter.ts`: thin block-target outline rendering
+- `src/targetHighlighter.ts`: thin target outline rendering for terrain blocks and settled rubble cube cells
+- `src/partialBlocks.ts`: in-memory partial-block terrain carving, core-footprint-ranked hidden 3x3x3 bite-lattice damage visuals, stitched wrinkled partial-height surface mesh/support generation, and core-hit carve constants
+- `src/impactCraterField.ts`: parked capped faceted crater/scar prototype retained for later visual experiments
 - `src/blockColors.ts`: deterministic per-block tint buckets for subtle voxel color variation
-- `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, stable rubble material units, and debris sizing constants
-- `src/debrisSettler.ts`: player-bubble-owned settling regions, breakup grace before same-region debris glue links, support-chain sleep checks, glue-overlap relaxation, pressure finalization, and batched debris-to-rubble finalization
+- `src/blockFragments.ts`: 3x3x3 block fracture pattern, visible debris sampling, proportional terrain chip counts, normalized block-volume rubble material, and debris sizing constants
+- `src/blocks.ts`: block IDs, colors, 10-HP ordinary terrain definitions, generated `Rubble`, and placeable palette
+- `src/debrisShapes.ts`: shared low-poly shard geometry catalog and material-aware shape assignment helpers
+- `src/debrisSettler.ts`: player-bubble-owned debris regions, material accounting, sleeping-first pressure finalization, and batched debris-to-rubble bake-out; legacy glue/contact helpers remain for non-Rapier test/fallback fragments
 - `src/fragmentRubble.ts`: orphan debris-to-rubble eligibility rules for active-bubble distance, explicit expiration, and material-preserving fallback cleanup
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
 - `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
-- `src/physics.ts`: simple sphere-vs-voxel rigid bodies, cube-fragment tumble state, sleep-aware split core/debris broadphase collision, impact reporting, and shared-resource cube fragments
-- `src/physicsInstancing.ts`: instanced rendering batches for debris fragments, including per-fragment tumble rotation, so thousands of shards do not become thousands of scene meshes
-- `src/rubble.ts`: persistent faceted destructible rubble cover patches, sample-sized footprints, batched absorption, scaled durability separate from material volume, baked static visual chunk samples, local direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
+- `src/physics.ts`: simple swept sphere-vs-voxel physics cores, fragment render/material/shape state, rigid-debris sync hooks, sleep-aware core/debris broadphase collision, and velocity/radius impact reporting for terrain carving and piercing
+- `src/hitscanCore.ts`: instant core ray traversal that reuses the partial-block bite lattice, open-tunnel projectile query, and fixed smallest/fastest core envelope
+- `src/hitscanBoltTracer.ts`: short-lived additive beam visuals for Hitscan Core, using the generated `src/assets/hitscan-energy-bolt.png` texture as a cylinder-like wrapper instead of a moving projectile sprite
+- `src/physicsInstancing.ts`: instanced rendering batches for debris fragments keyed by source block and shard shape, including per-fragment tumble rotation and non-uniform scale
+- `src/rigidDebris.ts`: Rapier WASM initialization, dynamic cuboid debris bodies with per-fragment envelopes, temporary terrain/rubble support colliders, transform sync back into fragment render proxies, sleeping stats, and cleanup
+- `src/rubble.ts`: persistent destructible rubble cover patches, sample-sized hidden support footprints, parked draped-sheet rendering, batched absorption, scaled durability separate from material volume, baked static shard-pile visuals, local direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support queries, fall behavior, and promotion into generated `Rubble` terrain blocks
 - `src/physicsBudget.ts`: per-quality persisted physics body budget bounds and step helpers
+- `src/physicsCoreSettings.ts`: persisted physics-core size/velocity tuning bounds and menu label formatting
+- `src/rigidDebrisBudget.ts`: CPU-facing Rapier debris body safety rail derived from the broader physics object budget
 - `src/lighting.ts`: shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring
 - `src/voxelLighting.ts`: worker-safe sun constants and light-aware baked face shading
 - `src/qualityController.ts`: quality preset persistence and renderer/light/camera application

@@ -1,16 +1,17 @@
 {
   "name": "voxel-sandbox-engine",
-  "version": "0.4.7",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && node scripts/run_tests.mjs"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "@vitejs/plugin-basic-ssl": "^2.1.0",
     "three": "^0.175.0",
     "vite": "^6.3.0"
