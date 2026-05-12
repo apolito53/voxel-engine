@@ -207,6 +207,7 @@ import {
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import { shouldAbsorbFragmentIntoRubble } from "../src/fragmentRubble";
 import {
+  canFireHitscanCoreWithHotbarItem,
   canDestroyBlockWithHotbarItem,
   canPlaceBlockWithHotbarItem,
   canThrowCoreWithHotbarItem,
@@ -220,6 +221,7 @@ import {
 } from "../src/hotbar";
 import {
   EMPTY_HANDS_ITEM_ID,
+  HITSCAN_CORE_ITEM_ID,
   PHYSICS_CORE_ITEM_ID,
   createBlockItemId,
   createItemStack,
@@ -228,6 +230,11 @@ import {
   getItemDefinition,
   getItemLabel
 } from "../src/items";
+import {
+  HITSCAN_CORE_IMPACT_SPEED,
+  HITSCAN_CORE_RADIUS,
+  raycastHitscanCore
+} from "../src/hitscanCore";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import {
   appendNovaChatMessage,
@@ -612,21 +619,41 @@ test("item registry describes reusable held-item actions", () => {
     "physics:throw-core",
     "physics core primary action should describe throwing a core"
   );
+  assertEqual(
+    getItemAction(itemRegistry, HITSCAN_CORE_ITEM_ID, "primary").kind,
+    "physics:fire-hitscan-core",
+    "hitscan core primary action should describe instant core fire"
+  );
+  assertEqual(
+    getItemDefinition(itemRegistry, HITSCAN_CORE_ITEM_ID).category,
+    "weapon",
+    "hitscan core should be registered as a weapon item"
+  );
 });
 
-test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", () => {
+test("hotbar scroll lane includes unarmed, placeable blocks, projectile core, and hitscan core", () => {
   const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
   const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
   const firstItem = hotbarItems[0];
-  const lastItem = hotbarItems[hotbarItems.length - 1];
+  const projectileCoreItem = hotbarItems[hotbarItems.length - 2];
+  const hitscanCoreItem = hotbarItems[hotbarItems.length - 1];
   const grassItem = createItemStack(createBlockItemId(BLOCK.grass));
 
   assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "hotbar should start in the explicit unarmed state");
-  assertEqual(lastItem?.itemId, PHYSICS_CORE_ITEM_ID, "hotbar should end with the physics core item");
+  assertEqual(
+    projectileCoreItem?.itemId,
+    PHYSICS_CORE_ITEM_ID,
+    "hotbar should keep the projectile physics core before the hitscan core"
+  );
+  assertEqual(
+    hitscanCoreItem?.itemId,
+    HITSCAN_CORE_ITEM_ID,
+    "hotbar should end with the hitscan core item"
+  );
   assertEqual(
     hotbarItems.length,
-    PLACEABLE_BLOCKS.length + 2,
-    "hotbar should contain unarmed, every placeable block, and the core"
+    PLACEABLE_BLOCKS.length + 3,
+    "hotbar should contain unarmed, every placeable block, and both core weapons"
   );
   assertEqual(
     getHotbarItemLabel(firstItem ?? createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
@@ -634,9 +661,14 @@ test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", 
     "unarmed slot should have a readable HUD label"
   );
   assertEqual(
-    getHotbarItemLabel(lastItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
+    getHotbarItemLabel(projectileCoreItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "Physics Core",
-    "core slot should have a readable HUD label"
+    "projectile core slot should have a readable HUD label"
+  );
+  assertEqual(
+    getHotbarItemLabel(hitscanCoreItem ?? createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    "Hitscan Core",
+    "hitscan core slot should have a readable HUD label"
   );
   assert(
     !canDestroyBlockWithHotbarItem(createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
@@ -651,12 +683,20 @@ test("hotbar scroll lane includes unarmed, placeable blocks, and physics core", 
     "holding a core should not also break targeted blocks on left click"
   );
   assert(
+    !canDestroyBlockWithHotbarItem(createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    "holding a hitscan core should not also break targeted blocks on left click"
+  );
+  assert(
     canPlaceBlockWithHotbarItem(grassItem, itemRegistry),
     "selected blocks should place on right click"
   );
   assert(
     canThrowCoreWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "selected physics core should throw on left click"
+  );
+  assert(
+    canFireHitscanCoreWithHotbarItem(createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    "selected hitscan core should fire on left click"
   );
   assertEqual(
     getHotbarPrimaryAction(grassItem, itemRegistry).kind,
@@ -4369,6 +4409,68 @@ test("small fast physics cores still hit remaining partial-block material", () =
   );
 });
 
+test("hitscan cores pass through existing visual holes in partial blocks", () => {
+  const world = new VoxelWorld({ seed: "hitscan-existing-hole-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const hit = raycastHitscanCore(
+    world,
+    new THREE.Vector3(1.6, 3.5, 4.5),
+    new THREE.Vector3(1, 0, 0)
+  );
+
+  assert(hit, "hitscan setup should find a terrain target behind the opened tunnel");
+  assertDeepEqual(
+    hit.block,
+    { x: 3, y: 3, z: 4 },
+    "hitscan cores should use the bite-lattice projectile query instead of the chipped block's full cube"
+  );
+});
+
+test("hitscan cores still hit remaining partial-block material", () => {
+  const world = new VoxelWorld({ seed: "hitscan-partial-material-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const hit = raycastHitscanCore(
+    world,
+    new THREE.Vector3(1.6, 3.84, 4.84),
+    new THREE.Vector3(1, 0, 0)
+  );
+
+  assert(hit, "hitscan setup should still find terrain when the ray crosses remaining bite material");
+  assertDeepEqual(
+    hit.block,
+    { x: 2, y: 3, z: 4 },
+    "hitscan cores should only pass through removed bite cells, not every chipped voxel"
+  );
+});
+
 test("small fast physics cores can pierce a block and damage one behind an air gap", () => {
   const world = new VoxelWorld({ seed: "small-core-pierce-runtime-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
@@ -4754,6 +4856,18 @@ test("physics object budget clamps and steps predictably", () => {
 });
 
 test("physics core settings clamp slider values", () => {
+  assertEqual(PHYSICS_CORE_SIZE_MIN_PERCENT, 10, "smallest projectile core setting should support bullet-scale shots");
+  assertEqual(PHYSICS_CORE_VELOCITY_MAX_PERCENT, 500, "fastest projectile core setting should support bullet-scale shots");
+  assertNearlyEqual(
+    HITSCAN_CORE_RADIUS,
+    PHYSICS_CORE_BASE_RADIUS * 0.1,
+    "hitscan cores should use the smallest core footprint"
+  );
+  assertEqual(
+    HITSCAN_CORE_IMPACT_SPEED,
+    PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * 5,
+    "hitscan cores should use the highest core impact speed"
+  );
   assertDeepEqual(
     DEFAULT_PHYSICS_CORE_SETTINGS,
     {

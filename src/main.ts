@@ -59,6 +59,13 @@ import {
   type HotbarItem
 } from "./hotbar";
 import {
+  HITSCAN_CORE_IMPACT_SPEED,
+  HITSCAN_CORE_MAX_IMPACTS,
+  HITSCAN_CORE_RADIUS,
+  HITSCAN_CORE_RANGE,
+  raycastHitscanCore
+} from "./hitscanCore";
+import {
   EMPTY_HANDS_ITEM_ID,
   createItemStack,
   createVoxelSandboxItemRegistry,
@@ -161,7 +168,13 @@ import {
   TestAvatar,
   type TestAvatarApi
 } from "./testAvatar";
-import { VoxelWorld, type BlockDamageResult, type ChunkCoords, type WorldStats } from "./world";
+import {
+  VoxelWorld,
+  type BlockDamageResult,
+  type BlockPierceContinuation,
+  type ChunkCoords,
+  type WorldStats
+} from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
 
 const BLOCK_INTERACTION_REACH = 8;
@@ -372,6 +385,14 @@ type TargetHit =
       readonly block: VoxelRaycastHit["block"];
       readonly distance: number;
     };
+type CoreTerrainImpact = {
+  readonly block: VoxelRaycastHit["block"];
+  readonly normal: THREE.Vector3;
+  readonly speed: number;
+  readonly position: THREE.Vector3;
+  readonly incomingVelocity: THREE.Vector3;
+  readonly radius: number;
+};
 type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
@@ -982,6 +1003,9 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
     case "physics:throw-core":
       if (activePlayer.isLooking()) throwPlayerCore(activePlayer);
       return;
+    case "physics:fire-hitscan-core":
+      if (activePlayer.isLooking()) firePlayerHitscanCore();
+      return;
   }
 }
 
@@ -1410,10 +1434,31 @@ function handlePhysicsImpact(
   damagedBlocksThisFrame: Set<string>
 ): boolean {
   if (impact.source.isExpired) return false;
-  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return false;
+  const result = applyCoreTerrainImpact(activeWorld, impact, damagedBlocksThisFrame);
+  if (!result) return false;
+
+  const pierceContinuation = result.pierceContinuation;
+  if (pierceContinuation) {
+    continuePhysicsCoreAfterPierce(impact.source, pierceContinuation);
+  } else {
+    // Most terrain impacts still spend the projectile on the terrain event.
+    // Small fast cores are the one exception: a complete bite-lattice tunnel
+    // can hand back an exit pose and reduced forward speed.
+    impact.source.expire();
+  }
+
+  return Boolean(pierceContinuation);
+}
+
+function applyCoreTerrainImpact(
+  activeWorld: VoxelWorld,
+  impact: CoreTerrainImpact,
+  damagedBlocksThisFrame: Set<string>
+): BlockDamageResult | null {
+  if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return null;
 
   const damageKey = activeWorld.damageKey(impact.block.x, impact.block.y, impact.block.z);
-  if (damagedBlocksThisFrame.has(damageKey)) return false;
+  if (damagedBlocksThisFrame.has(damageKey)) return null;
   damagedBlocksThisFrame.add(damageKey);
 
   const result = activeWorld.carveBlock({
@@ -1427,7 +1472,7 @@ function handlePhysicsImpact(
     speed: impact.speed,
     amount: PARTIAL_BLOCK_CORE_DAMAGE
   });
-  if (!result) return false;
+  if (!result) return null;
 
   engineEvents.emit("block:damaged", {
     position: result.position,
@@ -1437,27 +1482,6 @@ function handlePhysicsImpact(
     maxHealth: result.maxHealth
   });
   showBlockDamageIndicator(result);
-
-  const pierceContinuation = result.pierceContinuation;
-  if (pierceContinuation) {
-    impact.source.continueAfterPierce(
-      new THREE.Vector3(
-        pierceContinuation.position.x,
-        pierceContinuation.position.y,
-        pierceContinuation.position.z
-      ),
-      new THREE.Vector3(
-        pierceContinuation.velocity.x,
-        pierceContinuation.velocity.y,
-        pierceContinuation.velocity.z
-      )
-    );
-  } else {
-    // Most terrain impacts still spend the projectile on the terrain event.
-    // Small fast cores are the one exception: a complete bite-lattice tunnel
-    // can hand back an exit pose and reduced forward speed.
-    impact.source.expire();
-  }
 
   const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
   const fragmentCount = getTerrainImpactFragmentCount(
@@ -1473,7 +1497,7 @@ function handlePhysicsImpact(
     });
   }
 
-  if (!result.destroyed) return Boolean(pierceContinuation);
+  if (!result.destroyed) return result;
 
   engineEvents.emit("block:destroyed", {
     position: result.position,
@@ -1481,13 +1505,28 @@ function handlePhysicsImpact(
     impactSpeed: impact.speed,
     fragmentCount
   });
-  return Boolean(pierceContinuation);
+  return result;
+}
+
+function continuePhysicsCoreAfterPierce(source: PhysicsToy, pierceContinuation: BlockPierceContinuation): void {
+  source.continueAfterPierce(
+    new THREE.Vector3(
+      pierceContinuation.position.x,
+      pierceContinuation.position.y,
+      pierceContinuation.position.z
+    ),
+    new THREE.Vector3(
+      pierceContinuation.velocity.x,
+      pierceContinuation.velocity.y,
+      pierceContinuation.velocity.z
+    )
+  );
 }
 
 function spawnBlockFragments(
   block: number,
   position: { readonly x: number; readonly y: number; readonly z: number },
-  impact: PhysicsImpact,
+  impact: CoreTerrainImpact,
   options: {
     readonly fragmentCount: number;
     readonly materialUnits: number;
@@ -1585,7 +1624,73 @@ function throwPlayerCore(activePlayer: PlayerController): void {
     camera.position.clone().addScaledVector(direction, 1.4),
     launchVelocity
   ));
-  engineEvents.emit("physics:core-thrown", { source: "player" });
+  engineEvents.emit("physics:core-thrown", { source: "player", mode: "projectile" });
+}
+
+function firePlayerHitscanCore(): void {
+  const activeWorld = requireWorld();
+  camera.getWorldDirection(direction);
+  if (direction.lengthSq() <= 0.0001) return;
+
+  // Hitscan cores skip spawning a moving toy, but they deliberately reuse the
+  // terrain impact path so bite visuals, material ejection, health bars, and
+  // tunnel continuation stay aligned with projectile cores.
+  const shotDirection = direction.clone().normalize();
+  const damagedBlocksForShot = new Set<string>();
+  let rayOrigin = camera.position.clone();
+  let remainingRange = HITSCAN_CORE_RANGE;
+  let impactSpeed = HITSCAN_CORE_IMPACT_SPEED;
+
+  for (
+    let impactIndex = 0;
+    impactIndex < HITSCAN_CORE_MAX_IMPACTS &&
+    remainingRange > TARGET_HIT_EPSILON &&
+    impactSpeed > BLOCK_DAMAGE_IMPACT_SPEED;
+    impactIndex += 1
+  ) {
+    const terrainHit = raycastHitscanCore(
+      activeWorld,
+      rayOrigin,
+      shotDirection,
+      remainingRange,
+      HITSCAN_CORE_RADIUS
+    );
+    const rubbleHit = rubbleField.raycast(rayOrigin, shotDirection, remainingRange);
+
+    if (rubbleHit && (!terrainHit || rubbleHit.distance < terrainHit.distance - TARGET_HIT_EPSILON)) {
+      damageTargetedRubbleCell(rubbleHit.cell);
+      break;
+    }
+
+    if (!terrainHit) break;
+
+    const incomingVelocity = shotDirection.clone().multiplyScalar(impactSpeed);
+    const impactNormal = terrainHit.normal.lengthSq() > 0.0001
+      ? terrainHit.normal
+      : shotDirection.clone().multiplyScalar(-1);
+    const result = applyCoreTerrainImpact(activeWorld, {
+      block: terrainHit.block,
+      normal: impactNormal,
+      speed: impactSpeed,
+      position: terrainHit.position,
+      incomingVelocity,
+      radius: HITSCAN_CORE_RADIUS
+    }, damagedBlocksForShot);
+
+    const pierceContinuation = result?.pierceContinuation;
+    if (!pierceContinuation) break;
+
+    const exitPosition = new THREE.Vector3(
+      pierceContinuation.position.x,
+      pierceContinuation.position.y,
+      pierceContinuation.position.z
+    );
+    remainingRange = Math.max(0, remainingRange - rayOrigin.distanceTo(exitPosition));
+    rayOrigin = exitPosition;
+    impactSpeed = pierceContinuation.speed;
+  }
+
+  engineEvents.emit("physics:core-thrown", { source: "player", mode: "hitscan" });
 }
 
 function throwNovaPilotCore(): void {
@@ -1595,7 +1700,7 @@ function throwNovaPilotCore(): void {
     launch.position,
     launch.velocity.clone().multiplyScalar(getPhysicsCoreVelocityMultiplier(physicsCoreSettings))
   ));
-  engineEvents.emit("physics:core-thrown", { source: "nova" });
+  engineEvents.emit("physics:core-thrown", { source: "nova", mode: "projectile" });
 }
 
 function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {

@@ -109,6 +109,11 @@ export class NovaPilotReactions {
       return;
     }
 
+    if (event.mode === "hitscan") {
+      this.say("Instant gratification.", { pulse: true });
+      return;
+    }
+
     if (this.recentCoreThrows.length >= CORE_SPAM_COUNT) {
       this.recentCoreThrows = [];
       this.say("We are stress-testing again, I see.");
