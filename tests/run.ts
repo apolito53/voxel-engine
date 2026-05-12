@@ -1357,6 +1357,47 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
   }
 });
 
+test("performance hitch log versions records by debugging pass", () => {
+  const timings = {
+    playerMs: 1,
+    chunkMs: 2,
+    physicsMs: 31,
+    meshMs: 7,
+    minimapMs: 0.5,
+    renderMs: 5,
+    otherMs: 2,
+    frameMs: 52
+  };
+  const originalWarn = console.warn;
+  console.warn = () => undefined;
+
+  try {
+    let now = 100;
+    const log = new PerformanceHitchLog({
+      getNow: () => now,
+      maxRecords: 4,
+      sessionId: "test-session",
+      initialPassLabel: "first pass"
+    });
+    const firstRecord = log.record({ frameMs: timings.frameMs, timings, stats: createTestHitchStats() });
+    now = 200;
+    const secondPass = log.startPass("debris sleep repro");
+    const secondRecord = log.record({ frameMs: timings.frameMs, timings, stats: createTestHitchStats() });
+
+    assertEqual(firstRecord.logPass.passIndex, 1, "initial hitch records should include their pass index");
+    assertEqual(log.getRecent().length, 1, "starting a new pass should clear stale in-memory records");
+    assertEqual(secondRecord.id, 1, "record ids should restart inside each debugging pass");
+    assertEqual(secondRecord.logPass.passId, secondPass.passId, "new hitch records should carry the active pass id");
+    assert(
+      secondRecord.logPass.passId !== firstRecord.logPass.passId &&
+        secondRecord.logPass.passId.includes("debris-sleep-repro"),
+      "manual repro passes should get distinct readable ids for file splitting"
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("frame loop clamps simulation time and skips overnight resume frames", () => {
   assertEqual(clampSimulationDelta(-1), 0, "negative frame deltas should fail closed");
   assertEqual(
@@ -2957,6 +2998,48 @@ test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep
   assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
 });
 
+test("rigid debris adapter wakes sleeping shards when active debris hits them", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const sleepingFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 1.2, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(sleepingFragment);
+  for (let frame = 0; frame < 360 && !sleepingFragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+  assert(sleepingFragment.isSleeping, "target shard should start parked as sleeping rigid debris");
+
+  const startX = sleepingFragment.mesh.position.x;
+  const striker = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(startX - 0.45, sleepingFragment.mesh.position.y + 0.01, 0.5),
+    new THREE.Vector3(10, 0, 0),
+    1
+  );
+
+  rigidDebris.registerFragment(striker);
+  let wokeFromDebrisContact = false;
+  for (let frame = 0; frame < 90 && !wokeFromDebrisContact; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+    wokeFromDebrisContact =
+      !sleepingFragment.isSleeping &&
+      sleepingFragment.mesh.position.x > startX + 0.005;
+  }
+
+  assert(wokeFromDebrisContact, "an active shard should wake and shove sleeping rigid debris on contact");
+  rigidDebris.clear();
+});
+
 test("rigid debris adapter keeps fast falling shards from outrunning terrain colliders", async () => {
   const rigidDebris = new RigidDebrisSimulation();
   await rigidDebris.initialize();
@@ -3162,11 +3245,11 @@ test("debris settler lets fresh fractures break silhouette before glue can form"
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.62, 1.5, 0.5);
   left.angularVelocity.set(3, 0, 0);
   right.angularVelocity.set(0, 3, 0);
 
-  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.56, 1.5, 0.5), [left, right]);
   const stats = settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS - 0.02, rubble);
 
   assertEqual(stats.resolvedPairs, 1, "fresh near-touching debris should still use local contact resolution");
@@ -3180,11 +3263,11 @@ test("debris settler lets dense fracture grids spread before contact damping sta
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.62, 1.5, 0.5);
   left.velocity.set(-2, 0, 0);
   right.velocity.set(2, 0, 0);
 
-  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.56, 1.5, 0.5), [left, right]);
   const stats = settler.update(DEBRIS_REGION_CONTACT_BREAKUP_SECONDS - 0.01, rubble);
 
   assertEqual(stats.pairChecks, 0, "the earliest breakup frames should not damp dense grid contacts yet");
@@ -3216,7 +3299,7 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.62, 1.5, 0.5);
   left.velocity.set(-1.5, 0, 0);
   right.velocity.set(1.5, 0, 0);
   left.angularVelocity.set(3, 1, 0);
@@ -3224,7 +3307,7 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
 
   const distanceBefore = left.mesh.position.distanceTo(right.mesh.position);
   const relativeSpeedBefore = right.velocity.clone().sub(left.velocity).length();
-  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.56, 1.5, 0.5), [left, right]);
   const stats = settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble);
   const distanceAfter = left.mesh.position.distanceTo(right.mesh.position);
   const relativeSpeedAfter = right.velocity.clone().sub(left.velocity).length();
@@ -3232,8 +3315,8 @@ test("debris settler glue contacts arrest rotation and hold same-region fragment
   assertEqual(stats.pairChecks, 1, "near-touching same-region debris should still get one local pair check");
   assertEqual(stats.resolvedPairs, 1, "near-touching same-region debris should resolve as a sticky contact");
   assert(
-    distanceAfter <= distanceBefore,
-    "glued debris contacts should not let touching fragments drift apart before rubble finalization"
+    distanceAfter <= distanceBefore + BLOCK_FRAGMENT_VISUAL_SIZE,
+    "glued debris contacts should only separate tiny overlaps enough to make a readable clump"
   );
   assert(
     relativeSpeedAfter < relativeSpeedBefore * 0.5,
@@ -3282,9 +3365,9 @@ test("debris settler keeps glued fragments from sleeping with visible overlap", 
 test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
-  const activeCenter = new THREE.Vector3(0.64, 1.08, 0.5);
+  const activeCenter = new THREE.Vector3(0.56, 1.08, 0.5);
   const left = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 1.08, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.62, 1.08, 0.5);
   const floorWorld = {
     isSolid(_x: number, y: number, _z: number): boolean {
       return y === 0;
@@ -3322,9 +3405,9 @@ test("debris settler sleeps quiet glued bubble fragments so clumps stop spinning
 test("debris settler sleeps quiet supported clumps even when upper shards are still spinning", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
-  const activeCenter = new THREE.Vector3(0.64, 1.26, 0.5);
+  const activeCenter = new THREE.Vector3(0.54, 1.15, 0.5);
   const lower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
-  const upper = createTestFragment(BLOCK.grass, 0.68, 1.34, 0.5);
+  const upper = createTestFragment(BLOCK.grass, 0.55, 1.18, 0.5);
   const floorWorld = {
     isSolid(_x: number, y: number, _z: number): boolean {
       return y === 0;
@@ -3357,10 +3440,10 @@ test("debris settler sleeps quiet supported clumps even when upper shards are st
 test("debris settler only sleeps the supported component inside a mixed settling region", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
-  const activeCenter = new THREE.Vector3(0.64, 1.26, 0.5);
+  const activeCenter = new THREE.Vector3(0.54, 1.15, 0.5);
   const supportedLower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
-  const supportedUpper = createTestFragment(BLOCK.grass, 0.68, 1.34, 0.5);
-  const unsupportedFloater = createTestFragment(BLOCK.grass, 0.92, 1.34, 0.5);
+  const supportedUpper = createTestFragment(BLOCK.grass, 0.55, 1.18, 0.5);
+  const unsupportedFloater = createTestFragment(BLOCK.grass, 0.86, 1.18, 0.5);
   const floorWorld = {
     isSolid(_x: number, y: number, _z: number): boolean {
       return y === 0;
@@ -3396,7 +3479,7 @@ test("debris settler does not sleep quiet unsupported clumps in midair", () => {
   const rubble = new RubbleField(new THREE.Scene());
   const activeCenter = new THREE.Vector3(0.64, 3.5, 0.5);
   const left = createTestFragment(BLOCK.grass, 0.5, 3.5, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 3.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.62, 3.5, 0.5);
 
   left.velocity.set(0.05, 0, 0);
   right.velocity.set(-0.05, 0, 0);
@@ -3421,11 +3504,11 @@ test("debris settler keeps glue links shaping the heap after pair checks stop", 
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const left = createTestFragment(BLOCK.grass, 0.5, 1.5, 0.5);
-  const right = createTestFragment(BLOCK.grass, 0.75, 1.5, 0.5);
+  const right = createTestFragment(BLOCK.grass, 0.62, 1.5, 0.5);
   left.velocity.set(-0.4, 0, 0);
   right.velocity.set(0.4, 0, 0);
 
-  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.64, 1.5, 0.5), [left, right]);
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.56, 1.5, 0.5), [left, right]);
   settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble);
 
   const linkedDistance = left.mesh.position.distanceTo(right.mesh.position);
@@ -3453,7 +3536,7 @@ test("debris settler supports short-lived stacked fragment contacts", () => {
 
   assertEqual(stats.resolvedPairs, 1, "stacked same-region debris should use the local pair pass");
   assert(
-    upper.mesh.position.y - lower.mesh.position.y > 0.2,
+    upper.mesh.position.y - lower.mesh.position.y > BLOCK_FRAGMENT_VISUAL_SIZE * 0.85,
     "upper debris should be held above lower debris instead of passing straight through"
   );
   assert(
@@ -3576,7 +3659,7 @@ test("debris settler bakes far sleeping rigid debris without losing material", a
   rigidDebris.clear();
 });
 
-test("debris settler bakes nearby sleeping rigid debris into cheap rubble", async () => {
+test("debris settler keeps nearby sleeping rigid debris wakeable", async () => {
   const scene = new THREE.Scene();
   const settler = new DebrisSettler();
   const rubble = new RubbleField(scene);
@@ -3606,9 +3689,12 @@ test("debris settler bakes nearby sleeping rigid debris into cheap rubble", asyn
     finalized = stats.finalizedBatches > 0;
   }
 
-  assert(finalized, "nearby rigid debris should bake after it settles instead of staying as CPU work");
-  assert(fragment.isExpired, "settled rigid debris should leave through the normal prune path");
-  assertEqual(rubble.getStats().pieces, 4, "nearby rigid bake-out should keep material units");
+  assert(!finalized, "nearby sleeping rigid debris should not bake just because it settled");
+  assert(fragment.isSleeping, "nearby rigid debris should still be aggressively parked by Rapier sleep");
+  assert(!fragment.isExpired, "settled nearby rigid debris should remain wakeable instead of becoming rubble");
+  assert(settler.owns(fragment), "the settling region should keep ownership while debris is inside the bubble");
+  assertEqual(rigidDebris.getStats().bodies, 1, "the rigid body should remain registered for later wakeup");
+  assertEqual(rubble.getStats().pieces, 0, "active-bubble sleep should not create destructible rubble material");
   rigidDebris.clear();
 });
 
@@ -4716,7 +4802,7 @@ test("physics toy collider resolves nearby core and debris contacts through broa
   );
   const fragment = PhysicsToy.createBlockFragment(
     BLOCK.grass,
-    new THREE.Vector3(0.45, 2, 0),
+    new THREE.Vector3(0.4, 2, 0),
     new THREE.Vector3(0, 0, 0)
   );
   const fragmentStats = collider.resolve([core, fragment]);

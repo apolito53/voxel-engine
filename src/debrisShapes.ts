@@ -44,6 +44,7 @@ type RubbleShapeVertex = readonly [number, number, number];
 const DEBRIS_VISUAL_SCALE_MIN = BLOCK_FRAGMENT_VISUAL_SIZE * 0.65;
 const DEBRIS_VISUAL_SCALE_MAX = BLOCK_FRAGMENT_VISUAL_SIZE * 1.45;
 const DEBRIS_COLLIDER_PADDING = 1.08;
+const DEBRIS_SHARD_SIZE_SCALE = 0.5;
 
 const HEX_FACES: readonly (readonly number[])[] = [
   [1, 3, 7, 5],
@@ -192,7 +193,7 @@ const geometriesById = new Map<DebrisShapeId, THREE.BufferGeometry>();
 
 export function createDebrisShape(shapeId: DebrisShapeId): DebrisShape {
   const template = getDebrisShapeTemplate(shapeId);
-  return createDebrisShapeFromScale(shapeId, template.baseScale);
+  return createDebrisShapeFromScale(shapeId, scaleDebrisShape(template.baseScale, DEBRIS_SHARD_SIZE_SCALE));
 }
 
 export function createDefaultDebrisShape(): DebrisShape {
@@ -212,9 +213,9 @@ export function createDebrisShapeForBlock(block: number, seed: DebrisShapeSeed):
   const zJitter = 0.92 + hashUnit(seedValue ^ 0x85ebca6b) * 0.16;
 
   return createDebrisShapeFromScale(shapeId, [
-    template.baseScale[0] * xJitter,
-    template.baseScale[1] * yJitter,
-    template.baseScale[2] * zJitter
+    template.baseScale[0] * xJitter * DEBRIS_SHARD_SIZE_SCALE,
+    template.baseScale[1] * yJitter * DEBRIS_SHARD_SIZE_SCALE,
+    template.baseScale[2] * zJitter * DEBRIS_SHARD_SIZE_SCALE
   ]);
 }
 
@@ -251,6 +252,17 @@ function createDebrisShapeFromScale(
     // chipped visual face never pokes obviously through terrain while settling.
     colliderHalfExtents: visualScale.clone().multiplyScalar(0.5 * DEBRIS_COLLIDER_PADDING)
   };
+}
+
+function scaleDebrisShape(
+  scale: readonly [number, number, number],
+  multiplier: number
+): readonly [number, number, number] {
+  return [
+    scale[0] * multiplier,
+    scale[1] * multiplier,
+    scale[2] * multiplier
+  ];
 }
 
 function getDebrisShapeTemplate(shapeId: DebrisShapeId): DebrisShapeTemplate {

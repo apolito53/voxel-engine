@@ -28,9 +28,18 @@ export type PerformanceHitchStatsSnapshot = {
   readonly rubble: RubbleFieldStats;
 };
 
+export type PerformanceHitchLogPass = {
+  readonly sessionId: string;
+  readonly passId: string;
+  readonly passIndex: number;
+  readonly label: string;
+  readonly startedAtMs: number;
+};
+
 export type PerformanceHitchRecord = {
   readonly id: number;
   readonly timestampMs: number;
+  readonly logPass: PerformanceHitchLogPass;
   readonly frameMs: number;
   readonly primaryBucket: PerformanceHitchBucket;
   readonly primaryBucketMs: number;
@@ -64,8 +73,11 @@ export class PerformanceHitchLog {
   private readonly getNow: () => number;
   private readonly maxRecords: number;
   private readonly consoleLogIntervalMs: number;
+  private readonly sessionId: string;
   private records: PerformanceHitchRecord[] = [];
   private nextId = 1;
+  private nextPassIndex = 1;
+  private currentPass: PerformanceHitchLogPass;
   private lastConsoleLogAt = Number.NEGATIVE_INFINITY;
   private suppressedConsoleLogs = 0;
 
@@ -73,14 +85,18 @@ export class PerformanceHitchLog {
     readonly getNow?: () => number;
     readonly maxRecords?: number;
     readonly consoleLogIntervalMs?: number;
+    readonly sessionId?: string;
+    readonly initialPassLabel?: string;
   } = {}) {
     this.getNow = options.getNow ?? (() => performance.now());
     this.maxRecords = Math.max(1, Math.floor(options.maxRecords ?? DEFAULT_MAX_RECORDS));
     this.consoleLogIntervalMs = Math.max(0, options.consoleLogIntervalMs ?? DEFAULT_CONSOLE_LOG_INTERVAL_MS);
+    this.sessionId = sanitizeLogToken(options.sessionId ?? createHitchLogSessionId(), "session");
+    this.currentPass = this.createNextPass(options.initialPassLabel ?? "startup");
   }
 
   record(input: PerformanceHitchInput): PerformanceHitchRecord {
-    const record = createPerformanceHitchRecord(this.nextId, this.getNow(), input);
+    const record = createPerformanceHitchRecord(this.nextId, this.getNow(), input, this.currentPass);
     this.nextId += 1;
     this.records.unshift(record);
     if (this.records.length > this.maxRecords) {
@@ -97,6 +113,19 @@ export class PerformanceHitchLog {
 
   getRecent(limit = this.maxRecords): readonly PerformanceHitchRecord[] {
     return this.records.slice(0, Math.max(0, Math.floor(limit)));
+  }
+
+  getPass(): PerformanceHitchLogPass {
+    return this.currentPass;
+  }
+
+  startPass(label = "manual"): PerformanceHitchLogPass {
+    this.records = [];
+    this.nextId = 1;
+    this.suppressedConsoleLogs = 0;
+    this.lastConsoleLogAt = Number.NEGATIVE_INFINITY;
+    this.currentPass = this.createNextPass(label);
+    return this.currentPass;
   }
 
   clear(): void {
@@ -141,6 +170,19 @@ export class PerformanceHitchLog {
       // should never make hitch reporting create more noise than the hitch did.
     });
   }
+
+  private createNextPass(label: string): PerformanceHitchLogPass {
+    const passIndex = this.nextPassIndex;
+    this.nextPassIndex += 1;
+    const safeLabel = sanitizeLogToken(label, "pass");
+    return {
+      sessionId: this.sessionId,
+      passId: `${this.sessionId}-p${passIndex.toString().padStart(3, "0")}-${safeLabel}`,
+      passIndex,
+      label: safeLabel,
+      startedAtMs: this.getNow()
+    };
+  }
 }
 
 function canWriteLocalDevLog(): boolean {
@@ -152,7 +194,8 @@ function canWriteLocalDevLog(): boolean {
 export function createPerformanceHitchRecord(
   id: number,
   timestampMs: number,
-  input: PerformanceHitchInput
+  input: PerformanceHitchInput,
+  logPass: PerformanceHitchLogPass = createFallbackHitchLogPass(timestampMs)
 ): PerformanceHitchRecord {
   const [primaryBucket, primaryTimingKey] = getPrimaryTimingBucket(input.timings);
   const primaryBucketMs = input.timings[primaryTimingKey];
@@ -167,6 +210,7 @@ export function createPerformanceHitchRecord(
   return {
     id,
     timestampMs,
+    logPass,
     frameMs: input.frameMs,
     primaryBucket,
     primaryBucketMs,
@@ -333,4 +377,30 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
 
 function formatMs(value: number): string {
   return `${value.toFixed(1)}ms`;
+}
+
+function createHitchLogSessionId(): string {
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  const timePart = Date.now().toString(36);
+  return `s-${timePart}-${randomPart}`;
+}
+
+function createFallbackHitchLogPass(timestampMs: number): PerformanceHitchLogPass {
+  return {
+    sessionId: "manual",
+    passId: "manual-p000",
+    passIndex: 0,
+    label: "manual",
+    startedAtMs: timestampMs
+  };
+}
+
+function sanitizeLogToken(value: string, fallback: string): string {
+  const trimmed = value.trim().toLowerCase();
+  const safe = trimmed
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+  return safe.length > 0 ? safe : fallback;
 }

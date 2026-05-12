@@ -6,6 +6,17 @@
 
 - Changed the in-world crosshair to a circular reticle with separated ticks and an open center for clearer aiming.
 - Changed core ADS to apply a slight 15% camera zoom while right click is held on Physics Core or Hitscan Core.
+- Changed loose debris shards to render and collide at roughly half their previous size so piles snag less aggressively.
+- Changed sleeping rigid debris inside the active player bubble to remain wakeable physics instead of baking into destructible rubble immediately.
+
+### Added
+
+- Added dev-server start/stop markers under `logs/server-starts-YYYY-MM-DD.jsonl`, including port, package version, branch, commit, dirty files, short diff stats, and runtime metadata.
+- Added pass-versioned hitch logs plus browser hooks (`__VOXEL_HITCH_PASS__`, `__VOXEL_HITCH_START_PASS__`) so focused performance repros do not get mixed with stale logs.
+
+### Fixed
+
+- Fixed aggressively slept rigid debris losing the temporary support collider underneath it, which could wake/crash Rapier instead of staying parked.
 
 ## 0.6.0 - 2026-05-12
 

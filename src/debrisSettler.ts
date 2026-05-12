@@ -359,10 +359,10 @@ export class DebrisSettler {
       // baked pile while the player is studying it.
       if (this.isActiveBubbleConfigured(options)) {
         if (this.isRegionInsideActiveBubble(region, options)) {
-          if (this.shouldFinalizeSleepingRigidRegion(region)) {
-            this.finalizeRegion(region, rubbleField, false);
-            continue;
-          }
+          // Sleeping rigid debris inside the player bubble is still live
+          // physics state, just parked cheaply. Rapier can wake it when active
+          // debris hits it, and the core broadphase can wake it when a player
+          // shot shoves it, so do not bake it into destructible rubble here.
           this.sleepQuietRegionFragments(region);
           continue;
         }
@@ -540,18 +540,6 @@ export class DebrisSettler {
 
   private shouldFinalizeOutsideActiveBubble(region: SettlingRegion): boolean {
     if (region.settledAt === null) return false;
-    return this.elapsedSeconds >= region.finalizeAt;
-  }
-
-  private shouldFinalizeSleepingRigidRegion(region: SettlingRegion): boolean {
-    if (!this.isRigidBodyRegion(region)) return false;
-    if (region.settledAt === null) return false;
-
-    // Rapier bodies are the expensive truth only while debris is moving. Once a
-    // rigid-body region has genuinely slept, bake the actual settled shard poses
-    // into the rubble field even inside the player bubble. The player keeps the
-    // pile silhouette, support, material, and future re-break data without the
-    // CPU solving a dead stack forever.
     return this.elapsedSeconds >= region.finalizeAt;
   }
 

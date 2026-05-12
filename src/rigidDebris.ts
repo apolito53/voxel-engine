@@ -26,6 +26,10 @@ const RIGID_DEBRIS_ANGULAR_DAMPING = 0.85;
 const RIGID_DEBRIS_FRICTION = 0.92;
 const RIGID_DEBRIS_RESTITUTION = 0.08;
 const RIGID_DEBRIS_TERRAIN_FRICTION = 1.05;
+const RIGID_DEBRIS_FORCE_SLEEP_LINEAR_SPEED = 0.85;
+const RIGID_DEBRIS_FORCE_SLEEP_ANGULAR_SPEED = 3.5;
+const RIGID_DEBRIS_FORCE_SLEEP_SECONDS = 0.18;
+const RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE = 0.08;
 const RIGID_DEBRIS_SUPPORT_MIN_HEIGHT = 0.04;
 const RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION = 1000;
 const RAPIER_COMPAT_INIT_WARNING = "using deprecated parameters for the initialization function";
@@ -34,6 +38,8 @@ type RigidDebrisBody = {
   readonly toy: PhysicsToy;
   readonly body: RigidBody;
   readonly colliderHalfExtents: THREE.Vector3;
+  quietSeconds: number;
+  syncedExternalRevision: number;
 };
 
 type StaticColliderRecord = {
@@ -148,7 +154,7 @@ export class RigidDebrisSimulation {
       this.accumulatorSeconds = Math.min(this.accumulatorSeconds, RIGID_DEBRIS_FIXED_STEP);
     }
 
-    this.syncBodiesToToys();
+    this.syncBodiesToToys(substeps * RIGID_DEBRIS_FIXED_STEP, collisionWorld);
     this.refreshStats();
     return this.stats;
   }
@@ -157,7 +163,22 @@ export class RigidDebrisSimulation {
     if (!this.world) return;
 
     for (const record of this.bodiesByToy.values()) {
-      if (record.toy.isExpired || record.toy.isSleeping) continue;
+      if (record.toy.isExpired) continue;
+
+      if (record.toy.isSleeping) {
+        if (!record.body.isSleeping()) {
+          record.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
+          record.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+          record.body.sleep();
+          this.staticCollidersDirty = true;
+        }
+        continue;
+      }
+
+      const externalRevision = record.toy.rigidDebrisExternalMutationRevision;
+      const needsExternalSync = externalRevision !== record.syncedExternalRevision;
+      const bodyWasSleeping = record.body.isSleeping();
+      if (!needsExternalSync && !bodyWasSleeping) continue;
 
       const position = record.toy.mesh.position;
       const quaternion = record.toy.mesh.quaternion;
@@ -179,6 +200,9 @@ export class RigidDebrisSimulation {
         z: record.toy.angularVelocity.z
       }, true);
       record.body.wakeUp();
+      record.syncedExternalRevision = externalRevision;
+      record.quietSeconds = 0;
+      this.staticCollidersDirty = true;
     }
   }
 
@@ -238,7 +262,13 @@ export class RigidDebrisSimulation {
 
       const body = this.createBody(toy);
       const colliderHalfExtents = getFragmentColliderHalfExtents(toy);
-      this.bodiesByToy.set(toy, { toy, body, colliderHalfExtents });
+      this.bodiesByToy.set(toy, {
+        toy,
+        body,
+        colliderHalfExtents,
+        quietSeconds: 0,
+        syncedExternalRevision: toy.rigidDebrisExternalMutationRevision
+      });
       toy.attachRigidDebrisBody();
     }
     this.pendingFragments.clear();
@@ -283,12 +313,15 @@ export class RigidDebrisSimulation {
     }
   }
 
-  private syncBodiesToToys(): void {
+  private syncBodiesToToys(delta: number, collisionWorld: CollisionWorld): void {
     for (const record of this.bodiesByToy.values()) {
+      const toyWasSleeping = record.toy.isSleeping;
+      this.applyAggressiveSleep(record, delta, collisionWorld);
       const translation = record.body.translation();
       const rotation = record.body.rotation();
       const linvel = record.body.linvel();
       const angvel = record.body.angvel();
+      const bodyIsSleeping = record.body.isSleeping();
 
       this.syncPosition.set(translation.x, translation.y, translation.z);
       this.syncQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w).normalize();
@@ -299,9 +332,50 @@ export class RigidDebrisSimulation {
         quaternion: this.syncQuaternion,
         linearVelocity: this.syncLinearVelocity,
         angularVelocity: this.syncAngularVelocity,
-        sleeping: record.body.isSleeping()
+        sleeping: bodyIsSleeping
       });
+      if (toyWasSleeping !== bodyIsSleeping) {
+        record.quietSeconds = 0;
+        this.staticCollidersDirty = true;
+      }
     }
+  }
+
+  private applyAggressiveSleep(
+    record: RigidDebrisBody,
+    delta: number,
+    collisionWorld: CollisionWorld
+  ): void {
+    if (record.body.isSleeping() || record.toy.isExpired) {
+      record.quietSeconds = 0;
+      return;
+    }
+
+    const linvel = record.body.linvel();
+    const angvel = record.body.angvel();
+    const linearSpeedSq = getVectorLengthSq(linvel);
+    const angularSpeedSq = getVectorLengthSq(angvel);
+    const isQuiet =
+      linearSpeedSq <= RIGID_DEBRIS_FORCE_SLEEP_LINEAR_SPEED ** 2 &&
+      angularSpeedSq <= RIGID_DEBRIS_FORCE_SLEEP_ANGULAR_SPEED ** 2;
+
+    if (!isQuiet) {
+      record.quietSeconds = 0;
+      return;
+    }
+    if (!isRecordNearSupport(record, collisionWorld)) {
+      record.quietSeconds = 0;
+      return;
+    }
+
+    record.quietSeconds += Math.max(0, delta);
+    if (record.quietSeconds < RIGID_DEBRIS_FORCE_SLEEP_SECONDS) return;
+
+    record.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
+    record.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+    record.body.sleep();
+    record.quietSeconds = 0;
+    this.staticCollidersDirty = true;
   }
 
   private refreshStaticCollidersIfNeeded(delta: number, collisionWorld: CollisionWorld): void {
@@ -323,7 +397,13 @@ export class RigidDebrisSimulation {
   private collectActiveColliderCells(): void {
     this.activeColliderCells.clear();
     for (const record of this.bodiesByToy.values()) {
-      if (record.toy.isExpired || record.toy.isSleeping) continue;
+      if (record.toy.isExpired) continue;
+
+      if (record.toy.isSleeping) {
+        this.addSleepingSupportColliderCells(record);
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+        continue;
+      }
 
       const position = record.toy.mesh.position;
       const velocity = record.body.linvel();
@@ -342,6 +422,26 @@ export class RigidDebrisSimulation {
           position.z + velocity.z * lookaheadSeconds
         );
         this.addColliderCellsAround(this.colliderScanCenter);
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+      }
+    }
+  }
+
+  private addSleepingSupportColliderCells(record: RigidDebrisBody): void {
+    const position = record.body.translation();
+    const halfExtents = record.colliderHalfExtents;
+    const bottomY = position.y - halfExtents.y;
+    const supportProbeY = Math.floor(bottomY - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
+    const rubbleProbeY = Math.floor(bottomY);
+    const minX = Math.floor(position.x - halfExtents.x);
+    const maxX = Math.floor(position.x + halfExtents.x);
+    const minZ = Math.floor(position.z - halfExtents.z);
+    const maxZ = Math.floor(position.z + halfExtents.z);
+
+    for (let x = minX; x <= maxX; x += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        this.activeColliderCells.add(getStaticColliderCellKey(x, supportProbeY, z));
+        this.activeColliderCells.add(getStaticColliderCellKey(x, rubbleProbeY, z));
         if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
       }
     }
@@ -512,6 +612,44 @@ export class RigidDebrisSimulation {
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
   return toy.debrisShape?.colliderHalfExtents.clone()
     ?? createDefaultDebrisShape().colliderHalfExtents;
+}
+
+function isRecordNearSupport(record: RigidDebrisBody, collisionWorld: CollisionWorld): boolean {
+  const position = record.body.translation();
+  const halfExtents = record.colliderHalfExtents;
+  const bottomY = position.y - halfExtents.y;
+  const supportProbeY = Math.floor(bottomY - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
+  const minX = Math.floor(position.x - halfExtents.x);
+  const maxX = Math.floor(position.x + halfExtents.x);
+  const minZ = Math.floor(position.z - halfExtents.z);
+  const maxZ = Math.floor(position.z + halfExtents.z);
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let z = minZ; z <= maxZ; z += 1) {
+      if (
+        collisionWorld.isSolid(x, supportProbeY, z) &&
+        bottomY <= supportProbeY + 1 + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE
+      ) {
+        return true;
+      }
+    }
+  }
+
+  if (!collisionWorld.getSupportHeight) return false;
+  const supportHeight = collisionWorld.getSupportHeight({
+    minX: position.x - halfExtents.x,
+    maxX: position.x + halfExtents.x,
+    minY: bottomY - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE,
+    maxY: position.y + halfExtents.y,
+    minZ: position.z - halfExtents.z,
+    maxZ: position.z + halfExtents.z
+  });
+  return supportHeight !== null &&
+    bottomY <= supportHeight + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE;
+}
+
+function getVectorLengthSq(vector: { readonly x: number; readonly y: number; readonly z: number }): number {
+  return vector.x * vector.x + vector.y * vector.y + vector.z * vector.z;
 }
 
 function createCellSupportBounds(cell: StaticColliderCell): CollisionBounds {

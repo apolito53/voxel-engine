@@ -82,7 +82,11 @@ import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
-import { PerformanceHitchLog, type PerformanceHitchRecord } from "./performanceHitchLog";
+import {
+  PerformanceHitchLog,
+  type PerformanceHitchLogPass,
+  type PerformanceHitchRecord
+} from "./performanceHitchLog";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
@@ -214,6 +218,8 @@ type VoxelRuntimeGlobal = typeof globalThis & {
   __VOXEL_ADMIN__?: AdminCommandApi;
   __VOXEL_TEST_AVATAR__?: TestAvatarApi;
   __VOXEL_HITCHES__?: () => readonly PerformanceHitchRecord[];
+  __VOXEL_HITCH_PASS__?: () => PerformanceHitchLogPass;
+  __VOXEL_HITCH_START_PASS__?: (label?: string) => PerformanceHitchLogPass;
 };
 type ViteHotContext = {
   dispose(callback: () => void): void;
@@ -481,6 +487,8 @@ voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
 };
 voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
 voxelRuntimeGlobal.__VOXEL_HITCHES__ = () => performanceHitchLog.getRecent();
+voxelRuntimeGlobal.__VOXEL_HITCH_PASS__ = () => performanceHitchLog.getPass();
+voxelRuntimeGlobal.__VOXEL_HITCH_START_PASS__ = (label?: string) => performanceHitchLog.startPass(label);
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();

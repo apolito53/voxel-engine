@@ -4,8 +4,8 @@ export const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 // is 1.0 no matter how many visible shards the current quality tier spawns.
 export const BLOCK_RUBBLE_MATERIAL_UNITS = 1;
 export const BLOCK_FRAGMENT_SPACING = 0.28;
-export const BLOCK_FRAGMENT_VISUAL_SIZE = 0.24;
-export const BLOCK_FRAGMENT_COLLISION_RADIUS = 0.16;
+export const BLOCK_FRAGMENT_VISUAL_SIZE = 0.12;
+export const BLOCK_FRAGMENT_COLLISION_RADIUS = 0.08;
 export const TERRAIN_CHIP_FRAGMENT_MAX_COUNT = 4;
 
 export type BlockFragmentOffset = {

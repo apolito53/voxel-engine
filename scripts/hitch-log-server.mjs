@@ -74,13 +74,40 @@ async function readJsonRequestBody(request) {
 async function appendHitchLog(payload) {
   await mkdir(LOGS_DIRECTORY, { recursive: true });
   const dateStamp = new Date().toISOString().slice(0, 10);
-  const logPath = resolve(LOGS_DIRECTORY, `hitches-${dateStamp}.jsonl`);
+  const passToken = getPayloadPassToken(payload);
+  const logPath = resolve(LOGS_DIRECTORY, `hitches-${dateStamp}-${passToken}.jsonl`);
   await appendFile(
     logPath,
     `${JSON.stringify({ receivedAt: new Date().toISOString(), payload })}\n`,
     "utf8"
   );
   return logPath;
+}
+
+function getPayloadPassToken(payload) {
+  const passId = payload?.logPass?.passId;
+  if (typeof passId === "string") {
+    return sanitizeLogToken(passId, "unversioned");
+  }
+
+  const sessionId = typeof payload?.logPass?.sessionId === "string"
+    ? sanitizeLogToken(payload.logPass.sessionId, "session")
+    : "session";
+  const passIndex = Number.isFinite(payload?.logPass?.passIndex)
+    ? String(Math.max(0, Math.floor(payload.logPass.passIndex))).padStart(3, "0")
+    : "000";
+  return `${sessionId}-p${passIndex}-unversioned`;
+}
+
+function sanitizeLogToken(value, fallback) {
+  const safe = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 72);
+  return safe.length > 0 ? safe : fallback;
 }
 
 function setCorsHeaders(response) {

@@ -120,6 +120,7 @@ export class PhysicsToy {
   private sleeping = false;
   private expired = false;
   private rigidDebrisBodyAttached = false;
+  private rigidDebrisExternalRevision = 0;
 
   constructor(position: THREE.Vector3, velocity: THREE.Vector3, options: PhysicsToyOptions = {}) {
     this.radius = options.radius ?? 0.35;
@@ -202,6 +203,10 @@ export class PhysicsToy {
     return this.rigidDebrisBodyAttached;
   }
 
+  get rigidDebrisExternalMutationRevision(): number {
+    return this.rigidDebrisExternalRevision;
+  }
+
   get hadSupportContactLastUpdate(): boolean {
     return this.supportContactLastUpdate;
   }
@@ -213,6 +218,16 @@ export class PhysicsToy {
   wakeFromToyCollision(): void {
     if (!this.sleeping) return;
 
+    this.sleeping = false;
+    this.supportAnchoredSleep = false;
+    this.settledSeconds = 0;
+    this.markRigidDebrisExternalMutation();
+  }
+
+  markRigidDebrisExternalMutation(): void {
+    if (!this.rigidDebrisBodyAttached || this.expired) return;
+
+    this.rigidDebrisExternalRevision += 1;
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
@@ -263,6 +278,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.rigidDebrisExternalRevision = 0;
   }
 
   detachRigidDebrisBody(): void {
@@ -843,6 +859,8 @@ export class PhysicsToyCollider {
     const penetration = combinedRadius - distance;
     leftPosition.addScaledVector(this.normal, -(penetration * leftToy.inverseMass) / inverseMassSum);
     rightPosition.addScaledVector(this.normal, (penetration * rightToy.inverseMass) / inverseMassSum);
+    leftToy.markRigidDebrisExternalMutation();
+    rightToy.markRigidDebrisExternalMutation();
 
     this.relativeVelocity.copy(rightToy.velocity).sub(leftToy.velocity);
     const closingSpeed = this.relativeVelocity.dot(this.normal);
