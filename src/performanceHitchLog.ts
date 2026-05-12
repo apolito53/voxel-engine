@@ -49,6 +49,7 @@ export type PerformanceHitchInput = {
 
 const DEFAULT_MAX_RECORDS = 30;
 const DEFAULT_CONSOLE_LOG_INTERVAL_MS = 1000;
+const LOCAL_DEV_HITCH_LOG_ENDPOINT = "http://127.0.0.1:5174/__voxel_hitch_log";
 const TIMING_BUCKETS = [
   ["player", "playerMs"],
   ["chunk", "chunkMs"],
@@ -86,6 +87,7 @@ export class PerformanceHitchLog {
       this.records.length = this.maxRecords;
     }
     this.logToConsole(record);
+    this.writeToLocalDevLog(record);
     return record;
   }
 
@@ -123,6 +125,28 @@ export class PerformanceHitchLog {
       details: record.details
     });
   }
+
+  private writeToLocalDevLog(record: PerformanceHitchRecord): void {
+    if (!canWriteLocalDevLog()) return;
+
+    void fetch(LOCAL_DEV_HITCH_LOG_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(record),
+      keepalive: true
+    }).catch(() => {
+      // The endpoint exists only on the local Vite dev server. A failed write
+      // should never make hitch reporting create more noise than the hitch did.
+    });
+  }
+}
+
+function canWriteLocalDevLog(): boolean {
+  if (typeof window === "undefined" || typeof fetch !== "function") return false;
+  const hostname = window.location.hostname;
+  return hostname === "127.0.0.1" || hostname === "localhost";
 }
 
 export function createPerformanceHitchRecord(

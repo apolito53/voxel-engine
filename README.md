@@ -51,7 +51,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and rubble cover
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting. 45ms+ frame spikes also write a compact `[Voxel Hitch]` diagnosis to the browser console and keep recent records available at `globalThis.__VOXEL_HITCHES__()`
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting. 45ms+ frame spikes also write a compact `[Voxel Hitch]` diagnosis to the browser console, keep recent records available at `globalThis.__VOXEL_HITCHES__()`, and append JSONL records under `logs/` while `npm.cmd run debug:logs` is listening on `127.0.0.1:5174`
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
@@ -128,7 +128,8 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
-- `src/performanceHitchLog.ts`: bounded frame-spike black-box log, dominant-subsystem diagnosis, and console/Nova Terminal summaries
+- `src/performanceHitchLog.ts`: bounded frame-spike black-box log, dominant-subsystem diagnosis, local debug-log POSTs, and console/Nova Terminal summaries
+- `scripts/hitch-log-server.mjs`: tiny local `127.0.0.1:5174` receiver that appends hitch JSONL records into `logs/` without restarting the main `5173` Vite world
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation
 
 ## Development Checks
