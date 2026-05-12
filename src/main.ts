@@ -65,6 +65,7 @@ import {
   HITSCAN_CORE_RANGE,
   raycastHitscanCore
 } from "./hitscanCore";
+import { HitscanBoltTracer } from "./hitscanBoltTracer";
 import {
   EMPTY_HANDS_ITEM_ID,
   createItemStack,
@@ -91,7 +92,12 @@ import {
   type PhysicsImpact,
   type PhysicsToyCollisionStats
 } from "./physics";
-import { createPlayerPhysicsCoreLaunchVelocity } from "./physicsCoreLaunch";
+import {
+  PLAYER_CORE_MUZZLE_FORWARD_METERS,
+  createPlayerCoreMuzzleLocalOffset,
+  createPlayerCoreShotDirection,
+  createPlayerPhysicsCoreLaunchVelocity
+} from "./physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "./physicsInstancing";
 import {
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -345,6 +351,7 @@ let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
 let renderedPartialBlockRevision = -1;
+let rightMouseButtonDown = false;
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -393,9 +400,14 @@ type CoreTerrainImpact = {
   readonly incomingVelocity: THREE.Vector3;
   readonly radius: number;
 };
+type PlayerCoreFiringSolution = {
+  readonly origin: THREE.Vector3;
+  readonly direction: THREE.Vector3;
+};
 type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
+const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const partialBlockMeshField = new PartialBlockMeshField(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
@@ -563,7 +575,10 @@ function wireMenuControls(): void {
 
   activePlayer.onPauseChange = (paused: boolean) => {
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
-    if (paused) void queueActivePlayerLocationSave(true);
+    if (paused) {
+      rightMouseButtonDown = false;
+      void queueActivePlayerLocationSave(true);
+    }
     if (!paused) setSettingsPanelOpen(false);
   };
 
@@ -771,6 +786,7 @@ function openNovaChatInputMode(): void {
 
 function closeNovaChatInputMode(): void {
   if (!inWorld) return;
+  rightMouseButtonDown = false;
   requirePlayer().resume();
 }
 
@@ -927,6 +943,7 @@ document.addEventListener("visibilitychange", () => {
   noteUserActivity();
   drainFrameClockAfterIdle();
   if (document.hidden) {
+    rightMouseButtonDown = false;
     void queueActivePlayerLocationSave(true);
     enterIdleHeartbeat();
     return;
@@ -945,8 +962,12 @@ window.addEventListener("pageshow", () => {
   resumeAnimationLoopAfterIdle();
 }, eventListenerOptions);
 window.addEventListener("pagehide", () => {
+  rightMouseButtonDown = false;
   void queueActivePlayerLocationSave(true);
   enterIdleHeartbeat();
+}, eventListenerOptions);
+window.addEventListener("blur", () => {
+  rightMouseButtonDown = false;
 }, eventListenerOptions);
 window.addEventListener("beforeunload", () => {
   void queueActivePlayerLocationSave(true);
@@ -961,13 +982,23 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   const activePlayer = requirePlayer();
 
   if (event.button === 0) {
+    rightMouseButtonDown = (event.buttons & 2) !== 0;
     useSelectedHotbarPrimaryAction(activePlayer);
     return;
   }
 
   if (event.button === 2) {
+    rightMouseButtonDown = true;
     useSelectedHotbarSecondaryAction(activePlayer);
   }
+}, eventListenerOptions);
+document.addEventListener("mouseup", (event) => {
+  if (event.button === 2) {
+    rightMouseButtonDown = false;
+  }
+}, eventListenerOptions);
+document.addEventListener("pointercancel", () => {
+  rightMouseButtonDown = false;
 }, eventListenerOptions);
 renderer.domElement.addEventListener("wheel", (event) => {
   noteUserActivity();
@@ -1128,6 +1159,7 @@ function animate(): void {
     rubbleField.settle(activeWorld);
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
+    hitscanBoltTracer.update(delta);
     recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
@@ -1614,30 +1646,29 @@ function createFragmentSpawnJitter(): THREE.Vector3 {
 }
 
 function throwPlayerCore(activePlayer: PlayerController): void {
-  camera.getWorldDirection(direction);
+  const firingSolution = createPlayerCoreFiringSolution(getPhysicsCoreRadius(physicsCoreSettings));
   const launchVelocity = createPlayerPhysicsCoreLaunchVelocity(
-    direction,
+    firingSolution.direction,
     activePlayer.velocity,
     physicsCoreSettings
   );
-  addPhysicsToy(createPhysicsCore(
-    camera.position.clone().addScaledVector(direction, 1.4),
-    launchVelocity
-  ));
+  addPhysicsToy(createPhysicsCore(firingSolution.origin, launchVelocity));
   engineEvents.emit("physics:core-thrown", { source: "player", mode: "projectile" });
 }
 
 function firePlayerHitscanCore(): void {
   const activeWorld = requireWorld();
-  camera.getWorldDirection(direction);
-  if (direction.lengthSq() <= 0.0001) return;
+  const firingSolution = createPlayerCoreFiringSolution(HITSCAN_CORE_RADIUS);
+  if (firingSolution.direction.lengthSq() <= 0.0001) return;
 
   // Hitscan cores skip spawning a moving toy, but they deliberately reuse the
   // terrain impact path so bite visuals, material ejection, health bars, and
   // tunnel continuation stay aligned with projectile cores.
-  const shotDirection = direction.clone().normalize();
+  const shotDirection = firingSolution.direction;
+  const visualStart = firingSolution.origin;
+  let visualEnd = visualStart.clone().addScaledVector(shotDirection, Math.min(HITSCAN_CORE_RANGE, 32));
   const damagedBlocksForShot = new Set<string>();
-  let rayOrigin = camera.position.clone();
+  let rayOrigin = firingSolution.origin.clone();
   let remainingRange = HITSCAN_CORE_RANGE;
   let impactSpeed = HITSCAN_CORE_IMPACT_SPEED;
 
@@ -1658,11 +1689,16 @@ function firePlayerHitscanCore(): void {
     const rubbleHit = rubbleField.raycast(rayOrigin, shotDirection, remainingRange);
 
     if (rubbleHit && (!terrainHit || rubbleHit.distance < terrainHit.distance - TARGET_HIT_EPSILON)) {
+      visualEnd = rayOrigin.clone().addScaledVector(shotDirection, rubbleHit.distance);
       damageTargetedRubbleCell(rubbleHit.cell);
       break;
     }
 
-    if (!terrainHit) break;
+    if (!terrainHit) {
+      visualEnd = rayOrigin.clone().addScaledVector(shotDirection, Math.min(remainingRange, 32));
+      break;
+    }
+    visualEnd = terrainHit.position.clone();
 
     const incomingVelocity = shotDirection.clone().multiplyScalar(impactSpeed);
     const impactNormal = terrainHit.normal.lengthSq() > 0.0001
@@ -1685,12 +1721,55 @@ function firePlayerHitscanCore(): void {
       pierceContinuation.position.y,
       pierceContinuation.position.z
     );
+    visualEnd = exitPosition;
     remainingRange = Math.max(0, remainingRange - rayOrigin.distanceTo(exitPosition));
     rayOrigin = exitPosition;
     impactSpeed = pierceContinuation.speed;
   }
 
+  hitscanBoltTracer.spawn(visualStart, visualEnd);
   engineEvents.emit("physics:core-thrown", { source: "player", mode: "hitscan" });
+}
+
+function createPlayerCoreFiringSolution(radius: number): PlayerCoreFiringSolution {
+  camera.getWorldDirection(direction);
+  const cameraDirection = direction.lengthSq() > 0.0001
+    ? direction.clone().normalize()
+    : new THREE.Vector3(0, 0, -1);
+  const adsOrigin = camera.position.clone().addScaledVector(cameraDirection, PLAYER_CORE_MUZZLE_FORWARD_METERS);
+
+  if (rightMouseButtonDown) {
+    return {
+      origin: adsOrigin,
+      direction: cameraDirection
+    };
+  }
+
+  camera.updateMatrixWorld();
+  const muzzleOrigin = camera.localToWorld(createPlayerCoreMuzzleLocalOffset(camera.fov, camera.aspect));
+  const aimDistance = getPlayerCoreAimDistance(cameraDirection, radius);
+
+  return {
+    origin: muzzleOrigin,
+    direction: createPlayerCoreShotDirection(
+      muzzleOrigin,
+      camera.position,
+      cameraDirection,
+      aimDistance
+    )
+  };
+}
+
+function getPlayerCoreAimDistance(cameraDirection: THREE.Vector3, radius: number): number {
+  const activeWorld = requireWorld();
+  const terrainHit = raycastHitscanCore(activeWorld, camera.position, cameraDirection, HITSCAN_CORE_RANGE, radius);
+  const rubbleHit = rubbleField.raycast(camera.position, cameraDirection, HITSCAN_CORE_RANGE);
+
+  if (rubbleHit && (!terrainHit || rubbleHit.distance < terrainHit.distance - TARGET_HIT_EPSILON)) {
+    return Math.max(1, rubbleHit.distance);
+  }
+  if (terrainHit) return Math.max(1, terrainHit.distance);
+  return HITSCAN_CORE_RANGE;
 }
 
 function throwNovaPilotCore(): void {
@@ -2221,6 +2300,7 @@ async function confirmPendingWorldDeletion(): Promise<void> {
 async function exitToHome(): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
+  rightMouseButtonDown = false;
 
   try {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
@@ -2379,6 +2459,7 @@ function clearToys(): void {
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
+  hitscanBoltTracer.clear();
   rubbleField.clear();
 }
 
@@ -2440,6 +2521,7 @@ function disposeRuntime(): void {
   // Firefox's GPU process until the browser finally decides to clean house.
   player?.dispose();
   clearToys();
+  hitscanBoltTracer.dispose();
   rigidDebris.dispose();
   activeWorld?.dispose(scene);
   inWorld = false;

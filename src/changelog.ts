@@ -59,7 +59,7 @@ export function compareChangelogEntriesNewestFirst(left: ChangelogEntry, right: 
 function pushActiveEntry(entries: ChangelogEntry[], heading: string | null, bodyLines: readonly string[]): void {
   if (heading === null) return;
   const trimmedBody = trimBlankLines(bodyLines).join("\n");
-  if (trimmedBody.length === 0 && !isUnreleasedTitle(heading)) return;
+  if (trimmedBody.length === 0) return;
 
   const releaseMatch = heading.match(RELEASE_HEADING);
   const version = releaseMatch

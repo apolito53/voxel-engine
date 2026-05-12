@@ -41,7 +41,12 @@ import {
   type PhysicsImpact
 } from "../src/physics";
 import {
+  PLAYER_CORE_MUZZLE_FORWARD_METERS,
+  PLAYER_CORE_MUZZLE_SCREEN_DOWN_FRACTION,
+  PLAYER_CORE_MUZZLE_SCREEN_RIGHT_FRACTION,
   PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED,
+  createPlayerCoreMuzzleLocalOffset,
+  createPlayerCoreShotDirection,
   createPlayerPhysicsCoreLaunchVelocity
 } from "../src/physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
@@ -235,6 +240,7 @@ import {
   HITSCAN_CORE_RADIUS,
   raycastHitscanCore
 } from "../src/hitscanCore";
+import { getHitscanBoltLifetimeSeconds } from "../src/hitscanBoltTracer";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import {
   appendNovaChatMessage,
@@ -1745,6 +1751,26 @@ test("changelog entries sort newest first for the version modal", () => {
   assert(
     entries[2]?.body.includes("current stable release"),
     "entry bodies should preserve their markdown content for rendering"
+  );
+});
+
+test("changelog parser skips an empty Unreleased placeholder", () => {
+  const entries = parseChangelogEntries(`
+# Changelog
+
+## Unreleased
+
+## 0.6.0 - 2026-05-12
+
+### Added
+
+- shiny gameplay slice
+`);
+
+  assertDeepEqual(
+    entries.map((entry) => entry.title),
+    ["0.6.0"],
+    "empty Unreleased placeholders should not hide the current release notes"
   );
 });
 
@@ -4471,6 +4497,14 @@ test("hitscan cores still hit remaining partial-block material", () => {
   );
 });
 
+test("hitscan bolt tracer lifetime stays quick but readable", () => {
+  assertNearlyEqual(
+    getHitscanBoltLifetimeSeconds(),
+    0.14,
+    "hitscan beams should linger long enough to read without feeling like projectiles"
+  );
+});
+
 test("small fast physics cores can pierce a block and damage one behind an air gap", () => {
   const world = new VoxelWorld({ seed: "small-core-pierce-runtime-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
@@ -4939,6 +4973,61 @@ test("player physics core launch inherits player velocity", () => {
         getPhysicsCoreVelocityMultiplier(DEFAULT_PHYSICS_CORE_SETTINGS)
     ),
     "player-thrown cores should add muzzle velocity on top of player base velocity"
+  );
+});
+
+test("player core muzzle offset supports hip-fire and reticle ADS origins", () => {
+  const localOffset = createPlayerCoreMuzzleLocalOffset(90, 2);
+  assert(
+    localOffset.x > 0 && localOffset.y < 0,
+    "hip-fire muzzle should sit to the right and below the reticle in camera space"
+  );
+  assertNearlyEqual(
+    localOffset.x,
+    PLAYER_CORE_MUZZLE_FORWARD_METERS * 2 * PLAYER_CORE_MUZZLE_SCREEN_RIGHT_FRACTION,
+    "hip-fire muzzle horizontal offset should follow the requested screen fraction"
+  );
+  assertNearlyEqual(
+    localOffset.y,
+    -PLAYER_CORE_MUZZLE_FORWARD_METERS * PLAYER_CORE_MUZZLE_SCREEN_DOWN_FRACTION,
+    "hip-fire muzzle vertical offset should follow the requested screen fraction"
+  );
+  assertNearlyEqual(
+    localOffset.z,
+    -PLAYER_CORE_MUZZLE_FORWARD_METERS,
+    "hip-fire muzzle should still start in front of the camera"
+  );
+
+  const adsOrigin = new THREE.Vector3(0, 0, 0)
+    .addScaledVector(new THREE.Vector3(0, 0, -1), PLAYER_CORE_MUZZLE_FORWARD_METERS);
+  assertVectorNearlyEqual(
+    adsOrigin,
+    new THREE.Vector3(0, 0, -PLAYER_CORE_MUZZLE_FORWARD_METERS),
+    "ADS origin should stay centered on the reticle line"
+  );
+});
+
+test("player core hip-fire direction converges back through the reticle aim point", () => {
+  const cameraPosition = new THREE.Vector3(0, 0, 0);
+  const cameraForward = new THREE.Vector3(0, 0, -1);
+  const muzzlePosition = createPlayerCoreMuzzleLocalOffset(90, 1);
+  const shotDirection = createPlayerCoreShotDirection(
+    muzzlePosition,
+    cameraPosition,
+    cameraForward,
+    20
+  );
+  const aimPoint = cameraPosition.clone().addScaledVector(cameraForward, 20);
+  const expectedDirection = aimPoint.sub(muzzlePosition).normalize();
+
+  assertVectorNearlyEqual(
+    shotDirection,
+    expectedDirection,
+    "hip-fire shots should originate off-center but still aim back through the crosshair target"
+  );
+  assert(
+    shotDirection.x < 0 && shotDirection.y > 0 && shotDirection.z < 0,
+    "off-center hip-fire should visibly angle from the lowered right-side muzzle toward the reticle"
   );
 });
 

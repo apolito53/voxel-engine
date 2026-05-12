@@ -123,7 +123,10 @@ function readForcedChat(message: string): string | null {
 function createHelpReply(context: NovaContextSnapshot): string {
   const selected = context.runtime.selectedItemLabel;
   if (selected === "Physics Core") {
-    return "Physics Core selected: left click launches it. Right click is still reserved, because apparently we are pretending to be organized now.";
+    return "Physics Core selected: left click launches from the offset muzzle. Hold right click while firing for centered reticle ADS, because yes, we accidentally invented a shooter.";
+  }
+  if (selected === "Hitscan Core") {
+    return "Hitscan Core selected: left click fires instantly from the offset muzzle. Hold right click while firing for reticle ADS if you want the surgical little laser mood.";
   }
   if (selected === "Unarmed") {
     return "Unarmed currently does nothing on both clicks. Peaceful. Suspicious. Very unlike us.";

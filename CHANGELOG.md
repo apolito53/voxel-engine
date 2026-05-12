@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-05-12
+
 ### Added
 
 - Added main-branch testing tools: a `Superflat Lab` world shortcut, reserved `superflat` terrain seed, Nova Terminal admin command routing, and spawn commands for target walls, walls, pillars, and platforms.
@@ -17,6 +19,7 @@
 - Added pause-menu physics-core size and velocity sliders, with smaller/faster first-pass defaults and local persistence for future throw tuning.
 - Added projectile-footprint carving and tiny-core piercing: small fast cores can open a complete bite-lattice tunnel and continue into air with reduced speed, while wider cores chew a broader face gouge and stop.
 - Added `Hitscan Core` as a separate hotbar weapon that fires an instant smallest/fastest core trace through the same partial-block bite, material ejection, and tunnel-continuation rules.
+- Added a generated additive energy-beam visual for `Hitscan Core`, using a short-lived cylinder-style tracer wrapped with the bolt texture so the instant shot has a readable flash without becoming a physical projectile.
 
 ### Changed
 
@@ -28,6 +31,7 @@
 - Changed rubble material accounting from the old 27-piece debris grid to normalized block volume: a full block is `1.0`, HP ratio directly controls remaining material, and visible shard count is only presentation/performance.
 - Increased ordinary terrain block health from 2 to 10 HP so Physics Core carving has enough hits to show repeated deformation and chip debris before final fracture.
 - Expanded projectile Physics Core tuning to 10% minimum size and 500% maximum velocity for bullet-like experiments without replacing the thrown-core path.
+- Changed player-fired projectile and hitscan cores to hip-fire from a lowered right-side muzzle by default, with right-click ADS restoring centered reticle-origin shots.
 
 ### Fixed
 
