@@ -1,4 +1,5 @@
 import type { NovaContextSnapshot } from "./novaContext";
+import { formatPerformanceHitchRecord } from "./performanceHitchLog";
 
 export const NOVA_CHAT_TOGGLE_KEY = "Enter";
 export const NOVA_CHAT_MAX_INPUT_LENGTH = 240;
@@ -142,10 +143,10 @@ function createWorldReply(context: NovaContextSnapshot): string {
 }
 
 function createPerformanceReply(context: NovaContextSnapshot): string {
-  if (context.lastFrameSpikeMs === null) {
+  if (context.lastPerformanceHitch === null) {
     return `No frame hitch is in my recent notes. Quality is ${context.qualityLabel}, distance is ${context.renderDistance} chunks, and the physics budget is ${context.physicsObjectBudget}. Your machine is not currently screaming in a language I can hear.`;
   }
-  return `Last hitch I noticed was ${context.lastFrameSpikeMs.toFixed(1)} ms. Quality is ${context.qualityLabel}, physics is ${context.runtime.physicsObjectCount}/${context.physicsObjectBudget}, and yes, I am side-eyeing the debris experiments.`;
+  return `${formatPerformanceHitchRecord(context.lastPerformanceHitch)} Quality is ${context.qualityLabel}, physics is ${context.runtime.physicsObjectCount}/${context.physicsObjectBudget}. I logged the full counter snapshot in the browser console too.`;
 }
 
 function createPhysicsReply(context: NovaContextSnapshot): string {

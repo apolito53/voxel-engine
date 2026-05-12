@@ -212,6 +212,12 @@ import {
   shouldSkipExpensiveFrame
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
+import {
+  createPerformanceHitchRecord,
+  formatPerformanceHitchRecord,
+  PerformanceHitchLog,
+  type PerformanceHitchStatsSnapshot
+} from "../src/performanceHitchLog";
 import { shouldAbsorbFragmentIntoRubble } from "../src/fragmentRubble";
 import {
   canFireHitscanCoreWithHotbarItem,
@@ -1284,6 +1290,71 @@ test("frame timing smoothing keeps debug profiler values readable", () => {
     sample.frameMs,
     "blend values below zero should clamp to the previous sample"
   );
+});
+
+test("performance hitch diagnosis names the dominant subsystem and pressure counters", () => {
+  const timings = {
+    playerMs: 1,
+    chunkMs: 2,
+    physicsMs: 31,
+    meshMs: 7,
+    minimapMs: 0.5,
+    renderMs: 5,
+    otherMs: 2,
+    frameMs: 52
+  };
+  const record = createPerformanceHitchRecord(1, 250, {
+    frameMs: timings.frameMs,
+    timings,
+    stats: createTestHitchStats({
+      rigidDebris: {
+        initialized: true,
+        bodies: 120,
+        sleepingBodies: 20,
+        terrainColliders: 600,
+        rubbleSupportColliders: 24
+      },
+      fragmentRender: {
+        batches: 8,
+        instances: 120,
+        capacity: 160
+      }
+    })
+  });
+
+  assertEqual(record.primaryBucket, "physics", "largest timing bucket should become the reported hitch cause");
+  assert(
+    record.details.some((detail) => detail.includes("rigid debris bodies awake")),
+    "physics hitches should call out awake rigid debris pressure"
+  );
+  assert(
+    formatPerformanceHitchRecord(record).includes("physics led"),
+    "formatted hitch summaries should be readable from Nova Terminal"
+  );
+
+  const warnedMessages: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...data: unknown[]) => {
+    warnedMessages.push(String(data[0]));
+  };
+  try {
+    const log = new PerformanceHitchLog({
+      getNow: () => 250,
+      maxRecords: 1,
+      consoleLogIntervalMs: Number.POSITIVE_INFINITY
+    });
+    log.record({ frameMs: timings.frameMs, timings, stats: createTestHitchStats() });
+    log.record({ frameMs: timings.frameMs, timings, stats: createTestHitchStats() });
+
+    assertEqual(log.getRecent().length, 1, "hitch log should stay bounded");
+    assertEqual(warnedMessages.length, 1, "console logging should throttle repeated hitch spam");
+    assert(
+      warnedMessages[0]?.includes("[Voxel Hitch]") ?? false,
+      "console hitch logs should be easy to filter"
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test("frame loop clamps simulation time and skips overnight resume frames", () => {
@@ -5238,6 +5309,76 @@ console.log(`\n${passed}/${tests.length} engine robustness tests passed`);
 
 function isPowerOfTwo(value: number): boolean {
   return Number.isInteger(value) && value > 0 && (value & (value - 1)) === 0;
+}
+
+function createTestHitchStats(
+  overrides: Partial<PerformanceHitchStatsSnapshot> = {}
+): PerformanceHitchStatsSnapshot {
+  return {
+    qualityLabel: "Test",
+    physicsObjectCount: 0,
+    physicsObjectBudget: 192,
+    rigidDebrisBodyBudget: 128,
+    world: {
+      loadedChunks: 0,
+      visibleChunks: 0,
+      culledChunks: 0,
+      savedChunks: 0,
+      queuedChunks: 0,
+      loadedThisFrame: 0,
+      requestedLoadsThisFrame: 0,
+      pendingChunkLoads: 0,
+      meshedThisFrame: 0,
+      requestedMeshesThisFrame: 0,
+      pendingMeshBuilds: 0,
+      dirtyChunks: 0,
+      visibleDirtyChunks: 0,
+      culledDirtyChunks: 0,
+      modifiedChunks: 0,
+      damagedBlocks: 0,
+      pendingChunkSaves: 0
+    },
+    physics: {
+      activeBodies: 0,
+      sleepingBodies: 0,
+      broadphaseCells: 0,
+      sleepingBroadphaseCells: 0,
+      candidatePairs: 0,
+      resolvedContacts: 0,
+      skippedDebrisPairs: 0
+    },
+    rigidDebris: {
+      initialized: true,
+      bodies: 0,
+      sleepingBodies: 0,
+      terrainColliders: 0,
+      rubbleSupportColliders: 0
+    },
+    fragmentRender: {
+      batches: 0,
+      instances: 0,
+      capacity: 0
+    },
+    debrisSettler: {
+      regions: 0,
+      fragments: 0,
+      activeFragments: 0,
+      pairChecks: 0,
+      resolvedPairs: 0,
+      finalizedBatches: 0,
+      finalizedFragments: 0,
+      finalizedPieces: 0,
+      forcedFinalizations: 0
+    },
+    rubble: {
+      clusters: 0,
+      pieces: 0,
+      health: 0,
+      maxCoverHeight: 0,
+      visualChunks: 0
+    },
+    ...overrides
+  };
 }
 
 function assertNearlyInteger(value: number, message: string): void {

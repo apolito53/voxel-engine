@@ -3,6 +3,7 @@ import { EventBus } from "./eventBus";
 import type { FrameTimings } from "./frameTimings";
 import type { ItemCategory, ItemId } from "./items";
 import type { NovaChatRole } from "./novaContext";
+import type { PerformanceHitchRecord } from "./performanceHitchLog";
 import type { QualityChangeSource } from "./qualityController";
 import type { QualityPresetId } from "./qualityPresets";
 
@@ -88,6 +89,7 @@ export type EngineEvents = {
   "performance:frame-spike": {
     readonly frameMs: number;
     readonly timings: FrameTimings;
+    readonly diagnosis: PerformanceHitchRecord;
   };
 };
 

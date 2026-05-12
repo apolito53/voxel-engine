@@ -82,6 +82,7 @@ import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
+import { PerformanceHitchLog, type PerformanceHitchRecord } from "./performanceHitchLog";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
@@ -212,6 +213,7 @@ type VoxelRuntimeGlobal = typeof globalThis & {
   __VOXEL_SANDBOX_DISPOSE__?: () => void;
   __VOXEL_ADMIN__?: AdminCommandApi;
   __VOXEL_TEST_AVATAR__?: TestAvatarApi;
+  __VOXEL_HITCHES__?: () => readonly PerformanceHitchRecord[];
 };
 type ViteHotContext = {
   dispose(callback: () => void): void;
@@ -360,6 +362,7 @@ const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
 const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
 const fallbackHotbarItem = createItemStack(EMPTY_HANDS_ITEM_ID);
 const novaContext = new NovaContextJournal(engineEvents);
+const performanceHitchLog = new PerformanceHitchLog();
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const chunkStreamDirection = new THREE.Vector3();
@@ -477,6 +480,7 @@ voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
   run: (command) => runAdminCommand(adminCommandHooks, command)
 };
 voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
+voxelRuntimeGlobal.__VOXEL_HITCHES__ = () => performanceHitchLog.getRecent();
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
@@ -1194,9 +1198,26 @@ function animate(): void {
   frameTimingSample.renderMs = performance.now() - renderStartedAt;
   frameTimingSample.frameMs = performance.now() - frameStartedAt;
   if (inWorld && frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
+    const diagnosis = performanceHitchLog.record({
+      frameMs: frameTimingSample.frameMs,
+      timings: frameTimingSample,
+      stats: {
+        qualityLabel: qualityController.preset.label,
+        physicsObjectCount: toys.length,
+        physicsObjectBudget,
+        rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
+        world: debugWorldStats ?? requireWorld().getStats(),
+        physics: physicsCollisionStats,
+        rigidDebris: rigidDebrisStats,
+        fragmentRender: physicsFragmentInstancer.getStats(),
+        debrisSettler: debrisSettlerStats,
+        rubble: debugRubbleStats ?? rubbleField.getStats()
+      }
+    });
     engineEvents.emit("performance:frame-spike", {
       frameMs: frameTimingSample.frameMs,
-      timings: frameTimingSample
+      timings: frameTimingSample,
+      diagnosis
     });
   }
   smoothedFrameTimings = smoothFrameTimings(

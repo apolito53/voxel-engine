@@ -1,6 +1,7 @@
 import { BLOCKS } from "./blocks";
 import type { EngineEventBus, EngineEvents } from "./engineEvents";
 import type { FrameTimings } from "./frameTimings";
+import type { PerformanceHitchRecord } from "./performanceHitchLog";
 import type { PlayerMovementMode } from "./player";
 
 const MAX_RECENT_EVENTS = 14;
@@ -47,6 +48,7 @@ export type NovaContextSnapshot = {
   readonly blockFragmentCount: number;
   readonly lastFrameSpikeMs: number | null;
   readonly lastFrameTimings: FrameTimings | null;
+  readonly lastPerformanceHitch: PerformanceHitchRecord | null;
   readonly counters: NovaContextCounters;
   readonly recentEvents: readonly NovaContextEvent[];
 };
@@ -73,6 +75,7 @@ export class NovaContextJournal {
   private blockFragmentCount = 0;
   private lastFrameSpikeMs: number | null = null;
   private lastFrameTimings: FrameTimings | null = null;
+  private lastPerformanceHitch: PerformanceHitchRecord | null = null;
   private counters: NovaContextCounters = createEmptyCounters();
   private recentEvents: NovaContextEvent[] = [];
 
@@ -96,6 +99,7 @@ export class NovaContextJournal {
       blockFragmentCount: this.blockFragmentCount,
       lastFrameSpikeMs: this.lastFrameSpikeMs,
       lastFrameTimings: this.lastFrameTimings,
+      lastPerformanceHitch: this.lastPerformanceHitch,
       counters: this.counters,
       recentEvents: [...this.recentEvents]
     };
@@ -222,11 +226,12 @@ export class NovaContextJournal {
   private onFrameSpike(event: EngineEvents["performance:frame-spike"]): void {
     this.lastFrameSpikeMs = event.frameMs;
     this.lastFrameTimings = event.timings;
+    this.lastPerformanceHitch = event.diagnosis;
     this.counters = {
       ...this.counters,
       frameSpikes: this.counters.frameSpikes + 1
     };
-    this.remember("Performance", `Frame hitch recorded at ${event.frameMs.toFixed(1)} ms.`);
+    this.remember("Performance", event.diagnosis.summary);
   }
 
   private remember(label: string, summary: string): void {
