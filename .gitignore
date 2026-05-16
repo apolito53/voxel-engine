@@ -17,6 +17,7 @@ pnpm-debug.log*
 
 logs/*.log
 logs/*.jsonl
+logs/*.png
 
 Thumbs.db
 Desktop.ini

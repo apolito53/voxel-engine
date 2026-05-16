@@ -13,6 +13,7 @@
 
 - Added dev-server start/stop markers under `logs/server-starts-YYYY-MM-DD.jsonl`, including port, package version, branch, commit, dirty files, short diff stats, and runtime metadata.
 - Added pass-versioned hitch logs plus browser hooks (`__VOXEL_HITCH_PASS__`, `__VOXEL_HITCH_START_PASS__`) so focused performance repros do not get mixed with stale logs.
+- Added a `globalThis.__VOXEL_CODEX_PILOT__` play bridge for browser automation that can create Superflat labs, spawn scenarios, move/look/fire through real player systems, and start focused hitch-log passes.
 
 ### Fixed
 

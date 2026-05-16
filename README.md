@@ -55,6 +55,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - `npm.cmd run dev -- --port 5173` appends a `logs/server-starts-YYYY-MM-DD.jsonl` marker with branch, commit, dirty state, package version, port, and runtime metadata before Vite starts, so performance logs can be tied to the exact code pass that produced them.
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
+- Browser automation can use `globalThis.__VOXEL_CODEX_PILOT__` as a high-level play bridge for real in-world inputs: `superflat()`, `scenario("wall-range")`, `move(...)`, `lookAt(...)`, `fire(...)`, `play("wall-range")`, `snapshot()`, and `startPass("label")`
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Settings` splits tuning into `Graphics` and `Gameplay` tabs: graphics owns quality, render distance, physics body budget, shadows, debris count, and Super Ultra; gameplay owns projectile core size/velocity, health bars, and cleanup. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
@@ -82,6 +83,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
 - `src/adminCommands.ts`: admin command parsing/routing, Superflat Lab shortcut, and spawnable terrain test fixtures used by Nova Terminal
 - `src/testAvatar.ts`: F8 scripted runtime avatar for repeatable in-browser gameplay smoke checks
+- `src/codexPilot.ts`: high-level browser play bridge for automation-assisted roaming, aiming, movement, weapon fire, scenario setup, and focused hitch-log passes through real player/hotbar systems
 - `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
 - `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals

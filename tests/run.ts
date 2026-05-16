@@ -274,6 +274,13 @@ import {
   spawnPlatformFixture,
   spawnWallFixture
 } from "../src/adminCommands";
+import {
+  createCodexPilotLookAtAngles,
+  createCodexPilotMoveKeys,
+  normalizeCodexPilotFireInput,
+  normalizeCodexPilotMove,
+  normalizeCodexPilotWeapon
+} from "../src/codexPilot";
 import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar";
 import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
@@ -880,6 +887,56 @@ test("test avatar planning aims a staged target from a safe vantage", () => {
   const directAim = createYawPitchToward(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
   assertNearlyEqual(directAim.yaw, 0, 0.000001, "zero-yaw aim should face negative z");
   assertNearlyEqual(directAim.pitch, 0, 0.000001, "flat aim should have zero pitch");
+});
+
+test("codex pilot normalizes high-level play commands into safe controller inputs", () => {
+  const move = normalizeCodexPilotMove({
+    forward: 4,
+    right: -2,
+    up: 0.75,
+    seconds: 99,
+    sprint: true,
+    flight: true
+  });
+  assertDeepEqual(
+    move,
+    {
+      forward: 1,
+      right: -1,
+      up: 0.75,
+      seconds: 8,
+      sprint: true,
+      flight: true
+    },
+    "pilot movement should clamp axes and duration before touching the player controller"
+  );
+  assertDeepEqual(
+    createCodexPilotMoveKeys(move),
+    ["KeyW", "KeyA", "Space", "ShiftLeft"],
+    "pilot movement should translate intent into ordinary player key holds"
+  );
+
+  const fire = normalizeCodexPilotFireInput({
+    weapon: "hitscan-core",
+    count: 500,
+    intervalMs: 1,
+    ads: true
+  });
+  assertDeepEqual(
+    fire,
+    {
+      weapon: "hitscan-core",
+      count: 40,
+      intervalMs: 16,
+      ads: true
+    },
+    "pilot firing should clamp bursts and preserve explicit ADS"
+  );
+  assertEqual(normalizeCodexPilotWeapon("bad idea"), "selected", "unknown pilot weapons should fail closed");
+
+  const aim = createCodexPilotLookAtAngles(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5));
+  assertNearlyEqual(aim.yaw, 0, 0.000001, "pilot zero-yaw aim should face negative z");
+  assertNearlyEqual(aim.pitch, 0, 0.000001, "pilot flat aim should keep pitch level");
 });
 
 test("block color variants are deterministic and stay tied to block identity", () => {

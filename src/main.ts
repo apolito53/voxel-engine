@@ -24,6 +24,11 @@ import {
   type WorldRegistry
 } from "./chunkStorage";
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
+import {
+  CodexPilot,
+  type CodexPilotApi,
+  type CodexPilotWeapon
+} from "./codexPilot";
 import type { CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
@@ -216,6 +221,7 @@ type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 type VoxelRuntimeGlobal = typeof globalThis & {
   __VOXEL_SANDBOX_DISPOSE__?: () => void;
   __VOXEL_ADMIN__?: AdminCommandApi;
+  __VOXEL_CODEX_PILOT__?: CodexPilotApi;
   __VOXEL_TEST_AVATAR__?: TestAvatarApi;
   __VOXEL_HITCHES__?: () => readonly PerformanceHitchRecord[];
   __VOXEL_HITCH_PASS__?: () => PerformanceHitchLogPass;
@@ -482,9 +488,28 @@ const testAvatar = new TestAvatar({
   throwPlayerCore: () => throwPlayerCore(requirePlayer()),
   noteActivity: noteUserActivity
 });
+const codexPilot = new CodexPilot({
+  isWorldActive: () => inWorld,
+  getWorld: requireWorld,
+  getPlayer: requirePlayer,
+  getCamera: () => camera,
+  getSelectedItemLabel: () => getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry),
+  runAdminCommand: (command) => runAdminCommand(adminCommandHooks, command),
+  createSuperflatWorld,
+  selectWeapon: selectCodexPilotWeapon,
+  fireSelectedPrimary: () => useSelectedHotbarPrimaryAction(requirePlayer()),
+  setAdsActive: (active) => {
+    rightMouseButtonDown = active;
+  },
+  resumePlayer: () => requirePlayer().resume(),
+  startHitchPass: (label) => performanceHitchLog.startPass(label),
+  getRecentHitches: () => performanceHitchLog.getRecent(),
+  noteActivity: noteUserActivity
+});
 voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
   run: (command) => runAdminCommand(adminCommandHooks, command)
 };
+voxelRuntimeGlobal.__VOXEL_CODEX_PILOT__ = codexPilot.api;
 voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
 voxelRuntimeGlobal.__VOXEL_HITCHES__ = () => performanceHitchLog.getRecent();
 voxelRuntimeGlobal.__VOXEL_HITCH_PASS__ = () => performanceHitchLog.getPass();
@@ -1423,6 +1448,21 @@ function selectHotbarIndex(index: number): void {
   }
 
   updateHud();
+}
+
+function selectCodexPilotWeapon(weapon: CodexPilotWeapon): boolean {
+  if (weapon === "selected") return true;
+
+  const targetIndex = hotbarItems.findIndex((item) => {
+    const primaryAction = getHotbarPrimaryAction(item, itemRegistry);
+    if (weapon === "physics-core") return primaryAction.kind === "physics:throw-core";
+    if (weapon === "hitscan-core") return primaryAction.kind === "physics:fire-hitscan-core";
+    return false;
+  });
+
+  if (targetIndex < 0) return false;
+  selectHotbarIndex(targetIndex);
+  return true;
 }
 
 function updateSprintFeedback(sprintActive: boolean, adsActive: boolean, delta: number): void {
@@ -2557,6 +2597,7 @@ function disposeRuntime(): void {
   // The explicit teardown matters mostly in dev: Vite reloads and repeated
   // browser smoke navigations can otherwise leave old WebGL contexts alive in
   // Firefox's GPU process until the browser finally decides to clean house.
+  codexPilot.dispose();
   player?.dispose();
   clearToys();
   hitscanBoltTracer.dispose();
@@ -2582,6 +2623,7 @@ function disposeRuntime(): void {
     voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = undefined;
   }
   voxelRuntimeGlobal.__VOXEL_ADMIN__ = undefined;
+  voxelRuntimeGlobal.__VOXEL_CODEX_PILOT__ = undefined;
   voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = undefined;
 }
 
