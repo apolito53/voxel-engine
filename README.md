@@ -32,6 +32,8 @@ The dedicated local ports for this Vite project are:
 
 Run `npm.cmd run debug:logs` in a second terminal when you want the local hitch-log receiver on `127.0.0.1:5174`.
 
+The deployed Vercel site also writes 45ms+ hitch records to the private `voxel-engine-logs` Vercel Blob store through `/api/hitch-log`. Those remote JSONL blobs include the app version, hitch pass/session ids, source URL, browser user agent, Vercel environment, deployment URL, git commit, and branch. The local `.env.local` file contains the Blob token for CLI inspection; it is intentionally ignored by git.
+
 Pass a different base-server port as the first argument only for temporary one-off runs, for example `.\start.ps1 5193` or `./start.sh 5193`. Do not use `5174`; it is reserved for the hitch-log receiver.
 
 ## Controls
@@ -59,7 +61,7 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and any existing rubble cover experiments
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting. 45ms+ frame spikes also write a compact `[Voxel Hitch]` diagnosis to the browser console, keep recent records available at `globalThis.__VOXEL_HITCHES__()`, and append pass-versioned JSONL records under `logs/` while `npm.cmd run debug:logs` is listening on `127.0.0.1:5174`. Use `globalThis.__VOXEL_HITCH_START_PASS__("label")` before a focused repro to split fresh logs from stale ones.
+- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, instanced debris render counts, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting. 45ms+ frame spikes also write a compact `[Voxel Hitch]` diagnosis to the browser console, keep recent records available at `globalThis.__VOXEL_HITCHES__()`, and append pass-versioned JSONL records under `logs/` while `npm.cmd run debug:logs` is listening on `127.0.0.1:5174`. On the deployed Vercel build, the same records are batched to private Blob JSONL files through `/api/hitch-log` with app-version and deployment metadata. Use `globalThis.__VOXEL_HITCH_START_PASS__("label")` before a focused repro to split fresh logs from stale ones.
 - `npm.cmd run dev -- --port 5173` appends a `logs/server-starts-YYYY-MM-DD.jsonl` marker with branch, commit, dirty state, package version, port, and runtime metadata before Vite starts, so performance logs can be tied to the exact code pass that produced them.
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F6` toggles the Physics Core aim preview, drawing a dotted throw arc, predicted landing ring, and the 3x3x3 bite-lattice cells the next projectile impact would affect
@@ -146,6 +148,8 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/frameLoop.ts`: frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
 - `src/performanceHitchLog.ts`: bounded frame-spike black-box log, dominant-subsystem diagnosis, local debug-log POSTs, and console/Nova Terminal summaries
+- `src/remoteHitchLog.ts`: shared production hitch-log payload normalization, origin checks, app-version metadata, JSONL formatting, and Blob path grouping
+- `api/hitch-log.ts`: Vercel serverless receiver that writes deployed hitch batches into the private `voxel-engine-logs` Blob store
 - `scripts/dev-server.mjs`: dev-only Vite launcher that writes server-start/stop JSONL markers with repo metadata before handing off to Vite
 - `scripts/hitch-log-server.mjs`: tiny local `127.0.0.1:5174` receiver that appends hitch JSONL records into `logs/` without restarting the main `5173` Vite world
 - `src/worldMenu.ts`: saved-world list rendering and readable seed generation

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.8 - 2026-05-16
+
+### Added
+
+- Added a Vercel Blob-backed production hitch-log endpoint at `/api/hitch-log`, so deployed frame spikes can be captured as private JSONL blobs instead of only appearing in local `5174` logs.
+- Added remote hitch-log metadata for app version, session/pass ids, source URL, browser user agent, Vercel environment, deployment URL, git commit, and branch.
+
 ## 0.6.7 - 2026-05-16
 
 ### Changed

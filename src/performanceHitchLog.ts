@@ -5,6 +5,11 @@ import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
 import type { WorldStats } from "./world";
+import packageManifest from "../package.json";
+import {
+  REMOTE_HITCH_LOG_ENDPOINT,
+  REMOTE_HITCH_LOG_MAX_RECORDS
+} from "./remoteHitchLog";
 
 export type PerformanceHitchBucket =
   | "player"
@@ -59,6 +64,8 @@ export type PerformanceHitchInput = {
 const DEFAULT_MAX_RECORDS = 30;
 const DEFAULT_CONSOLE_LOG_INTERVAL_MS = 1000;
 const LOCAL_DEV_HITCH_LOG_ENDPOINT = "http://127.0.0.1:5174/__voxel_hitch_log";
+const REMOTE_HITCH_LOG_BATCH_DELAY_MS = 1000;
+const REMOTE_HITCH_LOG_KEEPALIVE_MAX_BYTES = 60 * 1024;
 const TIMING_BUCKETS = [
   ["player", "playerMs"],
   ["chunk", "chunkMs"],
@@ -80,6 +87,8 @@ export class PerformanceHitchLog {
   private currentPass: PerformanceHitchLogPass;
   private lastConsoleLogAt = Number.NEGATIVE_INFINITY;
   private suppressedConsoleLogs = 0;
+  private remoteQueue: PerformanceHitchRecord[] = [];
+  private remoteFlushTimer: number | null = null;
 
   constructor(options: {
     readonly getNow?: () => number;
@@ -104,6 +113,7 @@ export class PerformanceHitchLog {
     }
     this.logToConsole(record);
     this.writeToLocalDevLog(record);
+    this.queueRemoteProductionLog(record);
     return record;
   }
 
@@ -171,6 +181,56 @@ export class PerformanceHitchLog {
     });
   }
 
+  private queueRemoteProductionLog(record: PerformanceHitchRecord): void {
+    if (!canWriteRemoteProductionLog()) return;
+
+    this.remoteQueue.push(record);
+    if (this.remoteQueue.length > REMOTE_HITCH_LOG_MAX_RECORDS) {
+      this.remoteQueue.splice(0, this.remoteQueue.length - REMOTE_HITCH_LOG_MAX_RECORDS);
+    }
+
+    if (this.remoteQueue.length >= REMOTE_HITCH_LOG_MAX_RECORDS) {
+      this.flushRemoteProductionLog();
+      return;
+    }
+
+    if (this.remoteFlushTimer !== null) return;
+    this.remoteFlushTimer = window.setTimeout(() => {
+      this.remoteFlushTimer = null;
+      this.flushRemoteProductionLog();
+    }, REMOTE_HITCH_LOG_BATCH_DELAY_MS);
+  }
+
+  private flushRemoteProductionLog(): void {
+    if (!canWriteRemoteProductionLog() || this.remoteQueue.length === 0) return;
+
+    const records = this.remoteQueue.splice(0, REMOTE_HITCH_LOG_MAX_RECORDS);
+    const firstRecord = records[0];
+    const body = JSON.stringify({
+      source: "browser",
+      appVersion: packageManifest.version,
+      href: window.location.href,
+      userAgent: navigator.userAgent,
+      sessionId: firstRecord?.logPass.sessionId,
+      passId: firstRecord?.logPass.passId,
+      passLabel: firstRecord?.logPass.label,
+      passIndex: firstRecord?.logPass.passIndex,
+      records
+    });
+
+    void fetch(REMOTE_HITCH_LOG_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body,
+      keepalive: body.length <= REMOTE_HITCH_LOG_KEEPALIVE_MAX_BYTES
+    }).catch(() => {
+      // Remote logging is diagnostic only. The game should never hitch harder
+      // because the production log endpoint is unavailable or rate-limited.
+    });
+  }
+
   private createNextPass(label: string): PerformanceHitchLogPass {
     const passIndex = this.nextPassIndex;
     this.nextPassIndex += 1;
@@ -189,6 +249,13 @@ function canWriteLocalDevLog(): boolean {
   if (typeof window === "undefined" || typeof fetch !== "function") return false;
   const hostname = window.location.hostname;
   return hostname === "127.0.0.1" || hostname === "localhost";
+}
+
+function canWriteRemoteProductionLog(): boolean {
+  if (typeof window === "undefined" || typeof fetch !== "function") return false;
+  const hostname = window.location.hostname;
+  if (hostname === "127.0.0.1" || hostname === "localhost") return false;
+  return window.location.protocol === "https:";
 }
 
 export function createPerformanceHitchRecord(

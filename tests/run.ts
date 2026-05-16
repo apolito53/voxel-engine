@@ -235,6 +235,12 @@ import {
   PerformanceHitchLog,
   type PerformanceHitchStatsSnapshot
 } from "../src/performanceHitchLog";
+import {
+  REMOTE_HITCH_LOG_MAX_RECORDS,
+  createRemoteHitchLogBlobPath,
+  isRemoteHitchLogAllowedOrigin,
+  normalizeRemoteHitchLogPayload
+} from "../src/remoteHitchLog";
 import { shouldAbsorbFragmentIntoRubble } from "../src/fragmentRubble";
 import {
   canFireHitscanCoreWithHotbarItem,
@@ -1470,6 +1476,102 @@ test("performance hitch log versions records by debugging pass", () => {
   } finally {
     console.warn = originalWarn;
   }
+});
+
+test("remote hitch log payloads preserve version and deployment metadata", () => {
+  const timings = {
+    playerMs: 1,
+    chunkMs: 2,
+    physicsMs: 31,
+    meshMs: 7,
+    minimapMs: 0.5,
+    renderMs: 5,
+    otherMs: 2,
+    frameMs: 52
+  };
+  const record = createPerformanceHitchRecord(4, 500, {
+    frameMs: timings.frameMs,
+    timings,
+    stats: createTestHitchStats()
+  });
+
+  const normalized = normalizeRemoteHitchLogPayload({
+    source: "browser",
+    appVersion: "0.6.8",
+    href: "https://voxel-engine-coral.vercel.app/",
+    userAgent: "unit-test",
+    records: [record]
+  }, {
+    receivedAtIso: "2026-05-16T23:01:02.003Z",
+    deployment: {
+      vercelEnv: "production",
+      vercelUrl: "voxel-engine-coral.vercel.app",
+      gitCommitSha: "abcdef1234567890",
+      gitCommitRef: "main",
+      gitCommitMessage: "Add remote logs"
+    }
+  });
+
+  assert(normalized.ok, "valid remote hitch payloads should normalize");
+  assertEqual(normalized.recordCount, 1, "one hitch record should stay one JSONL row");
+  const line = JSON.parse(normalized.jsonLines.trim()) as {
+    readonly appVersion: string;
+    readonly deployment: { readonly gitCommitSha: string };
+    readonly hitch: { readonly summary: string };
+  };
+  assertEqual(line.appVersion, "0.6.8", "remote hitch lines should carry the app version");
+  assertEqual(line.deployment.gitCommitSha, "abcdef1234567890", "remote hitch lines should carry deployment metadata");
+  assert(
+    line.hitch.summary.includes("frame hitch"),
+    "remote hitch lines should retain the original diagnosis payload"
+  );
+
+  const path = createRemoteHitchLogBlobPath(normalized.envelope);
+  assert(
+    path.startsWith("hitches/2026-05-16/v0-6-8/abcdef123456/"),
+    "remote hitch blob paths should be grouped by date, version, and commit"
+  );
+});
+
+test("remote hitch log endpoint rejects oversized batches and unknown origins", () => {
+  assert(
+    isRemoteHitchLogAllowedOrigin(
+      "https://voxel-engine-coral.vercel.app",
+      "voxel-engine-coral.vercel.app"
+    ),
+    "the production alias should be allowed to write its own hitch logs"
+  );
+  assert(
+    isRemoteHitchLogAllowedOrigin(
+      "https://voxel-engine-preview-abc.vercel.app",
+      "voxel-engine-preview-abc.vercel.app"
+    ),
+    "same-host Vercel preview deployments should be allowed"
+  );
+  assert(
+    !isRemoteHitchLogAllowedOrigin(
+      "https://example.com",
+      "voxel-engine-coral.vercel.app"
+    ),
+    "unrelated origins should not be allowed to fill the Blob store"
+  );
+
+  const tooManyRecords = normalizeRemoteHitchLogPayload({
+    appVersion: "0.6.8",
+    records: Array.from({ length: REMOTE_HITCH_LOG_MAX_RECORDS + 1 }, (_, index) => ({ id: index }))
+  }, {
+    receivedAtIso: "2026-05-16T23:01:02.003Z",
+    deployment: {
+      vercelEnv: "production",
+      vercelUrl: "voxel-engine-coral.vercel.app",
+      gitCommitSha: "abcdef1234567890",
+      gitCommitRef: "main",
+      gitCommitMessage: "Add remote logs"
+    }
+  });
+
+  assert(!tooManyRecords.ok, "remote hitch batches should have a hard record cap");
+  assertEqual(tooManyRecords.status, 413, "oversized remote hitch batches should report a payload error");
 });
 
 test("frame loop clamps simulation time and skips overnight resume frames", () => {

@@ -20,6 +20,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "api/**/*.ts",
     "src/**/*.ts",
     "vite.config.ts"
   ]
