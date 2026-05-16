@@ -12,7 +12,7 @@
       <div id="player-speed-readout" class="row">Speed 0.0 m/s</div>
       <div class="row">WASD move | Space jump/up | C crouch/slide/down | Shift sprint/boost</div>
       <div class="row">Mouse wheel select | Unarmed no-op | Block L/R break/place | Cores L fire / hold R ADS</div>
-      <div class="row">F flight | Enter/F9 terminal | N pilot | B core | X cores | F3/F4 | F8 test | Esc pause</div>
+      <div class="row">F flight | Enter/F9 terminal | N pilot | B core | X cores | F3/F4/F6 | F8 test | Esc pause</div>
     </div>
     <div id="nova-message" aria-live="polite"></div>
     <div
@@ -327,6 +327,17 @@
                   max="500"
                   step="5"
                   value="140"
+                />
+              </label>
+              <label class="settings-toggle" for="core-aim-preview-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Core Aim Preview</span>
+                  <span class="settings-toggle-hint">Show the Physics Core arc, impact spot, and predicted bite cells</span>
+                </span>
+                <input
+                  id="core-aim-preview-toggle"
+                  class="toggle-input"
+                  type="checkbox"
                 />
               </label>
               <label class="settings-field" for="ground-debris-budget-slider">

@@ -106,6 +106,22 @@ export type BlockDamageBrushResult = {
   readonly pierceContinuation?: BlockPierceContinuation;
 };
 
+export type BlockDamageBrushPreview = {
+  readonly targets: readonly BlockDamageBrushPreviewTarget[];
+};
+
+export type BlockDamageBrushPreviewTarget = {
+  readonly block: number;
+  readonly position: VoxelBlockPosition;
+  readonly point: VoxelVector;
+  readonly normal: VoxelVector;
+  readonly primary: boolean;
+  readonly remainingHealth: number;
+  readonly maxHealth: number;
+  readonly destroyed: boolean;
+  readonly affectedVisualCellIndexes: readonly number[];
+};
+
 export type BlockPierceContinuation = {
   readonly position: VoxelVector;
   readonly velocity: VoxelVector;
@@ -1185,6 +1201,27 @@ export class VoxelWorld implements CollisionWorld {
     };
   }
 
+  previewBlockDamageBrush(
+    input: BlockCarveInput,
+    options: BlockDamageBrushOptions = {}
+  ): BlockDamageBrushPreview | null {
+    const previewTargets = this.createBlockDamageBrushTargets(input)
+      .filter((target) => !options.blockedDamageKeys?.has(
+        this.damageKey(target.position.x, target.position.y, target.position.z)
+      ))
+      .map((target) => this.previewBlockCarve({
+        ...input,
+        x: target.position.x,
+        y: target.position.y,
+        z: target.position.z,
+        point: target.point,
+        normal: target.normal
+      }, target))
+      .filter((target): target is BlockDamageBrushPreviewTarget => Boolean(target));
+
+    return previewTargets.length > 0 ? { targets: previewTargets } : null;
+  }
+
   carveBlock(input: BlockCarveInput): BlockDamageResult | null {
     const position = {
       x: Math.floor(input.x),
@@ -1370,6 +1407,95 @@ export class VoxelWorld implements CollisionWorld {
         left.position.x - right.position.x
       )
       .slice(0, PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_TARGETS);
+  }
+
+  private previewBlockCarve(
+    input: BlockCarveInput,
+    target: BlockDamageBrushTarget
+  ): BlockDamageBrushPreviewTarget | null {
+    const position = target.position;
+    const block = this.getBlock(position.x, position.y, position.z);
+    const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
+    if (!definition.solid || definition.health <= 0) return null;
+
+    const amount = Math.max(0, input.amount ?? 1);
+    const previousDamage = this.blockDamage.get(this.damageKey(position.x, position.y, position.z)) ?? 0;
+    const nextDamage = previousDamage + amount;
+    const remainingHealth = Math.max(0, definition.health - nextDamage);
+    const affectedVisualCellIndexes = remainingHealth > 0
+      ? this.previewPartialBlockCut(block, position, definition.health, nextDamage, {
+        point: input.point,
+        normal: input.normal,
+        incomingDirection: input.incomingDirection,
+        coreRadius: input.coreRadius,
+        speed: input.speed
+      })
+      : this.getRemainingPartialBlockVisualCellIndexes(position);
+
+    return {
+      block,
+      position,
+      point: target.point,
+      normal: target.normal,
+      primary: target.primary,
+      remainingHealth,
+      maxHealth: definition.health,
+      destroyed: remainingHealth <= 0,
+      affectedVisualCellIndexes
+    };
+  }
+
+  private previewPartialBlockCut(
+    block: number,
+    position: VoxelBlockPosition,
+    maxHealth: number,
+    damage: number,
+    cutInput: {
+      readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly incomingDirection?: Pick<THREE.Vector3, "x" | "y" | "z">;
+      readonly coreRadius?: number;
+      readonly speed: number;
+    }
+  ): readonly number[] {
+    const key = createPartialBlockKey(position);
+    const existing = this.partialBlocks.get(key);
+    const cuts: PartialBlockCut[] = existing ? [...existing.cuts] : [];
+    cuts.push(createPartialBlockCut({
+      block,
+      position,
+      point: cutInput.point,
+      normal: cutInput.normal,
+      incomingDirection: cutInput.incomingDirection,
+      coreRadius: cutInput.coreRadius,
+      speed: cutInput.speed,
+      cutIndex: cuts.length
+    }));
+    while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+      cuts.shift();
+    }
+
+    const removedVisualCellIndexes = createPartialBlockRemovedVisualCellIndexes(
+      { cuts, damage, maxHealth },
+      existing?.removedVisualCellIndexes
+    );
+    const previousRemovedVisualCells = new Set(existing?.removedVisualCellIndexes ?? []);
+    return removedVisualCellIndexes.filter((index) => !previousRemovedVisualCells.has(index));
+  }
+
+  private getRemainingPartialBlockVisualCellIndexes(position: VoxelBlockPosition): readonly number[] {
+    const existing = this.partialBlocks.get(createPartialBlockKey(position));
+    const removedVisualCells = new Set(
+      existing?.removedVisualCellIndexes ?? (
+        existing ? createPartialBlockRemovedVisualCellIndexes(existing) : []
+      )
+    );
+    const remainingIndexes: number[] = [];
+
+    for (let index = 0; index < BLOCK_FRAGMENT_GRID_SIZE ** 3; index += 1) {
+      if (!removedVisualCells.has(index)) remainingIndexes.push(index);
+    }
+    return remainingIndexes;
   }
 
   private addPartialBlockCut(

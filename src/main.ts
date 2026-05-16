@@ -34,6 +34,7 @@ import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebrisPoofRenderer } from "./debrisPoof";
 import { createDebrisShapeForBlock } from "./debrisShapes";
+import { PhysicsCoreAimPreview, predictPhysicsCoreTrajectory } from "./coreAimPreview";
 import {
   DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
   DebrisSettler,
@@ -236,6 +237,7 @@ const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
 const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
 const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
 const PLAYER_LOCATION_SAVE_PRECISION = 1000;
+const CORE_AIM_PREVIEW_TOGGLE_KEY = "F6";
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 type VoxelRuntimeGlobal = typeof globalThis & {
@@ -311,6 +313,7 @@ const groundDebrisBudgetSlider = requireElement<HTMLInputElement>("#ground-debri
 const groundDebrisBudgetValue = requireElement<HTMLElement>("#ground-debris-budget-value");
 const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-debris-lifetime-slider");
 const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
+const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
@@ -394,6 +397,7 @@ let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
 let renderedPartialBlockRevision = -1;
 let rightMouseButtonDown = false;
+let coreAimPreviewEnabled = false;
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
@@ -455,6 +459,7 @@ type PlayerCoreFiringSolution = {
 type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
+const coreAimPreview = new PhysicsCoreAimPreview(scene);
 const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const partialBlockMeshField = new PartialBlockMeshField(scene);
@@ -462,6 +467,7 @@ const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
+const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // Full terrain blocks still come from VoxelWorld. Partial-height terrain
   // scars and rubble are layered in through the optional support-height query
@@ -554,6 +560,7 @@ let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
 let healthBarsEnabled = readHealthBarsEnabled();
+coreAimPreviewEnabled = readCoreAimPreviewEnabled();
 
 void rigidDebris.initialize().catch((error) => {
   console.warn("Rigid debris physics failed to initialize; falling back to legacy fragment motion.", error);
@@ -600,6 +607,7 @@ updatePhysicsBudgetControls();
 updatePhysicsCoreControls();
 updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
+syncCoreAimPreviewToggle();
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {
@@ -708,6 +716,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   groundDebrisLifetimeSlider.addEventListener("input", () => {
     setGroundDebrisLifetime(groundDebrisLifetimeSlider.value);
+  }, eventListenerOptions);
+  coreAimPreviewToggle.addEventListener("change", () => {
+    setCoreAimPreviewEnabled(coreAimPreviewToggle.checked);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -904,6 +915,17 @@ function syncHealthBarsToggle(): void {
   healthBarsToggle.checked = healthBarsEnabled;
 }
 
+function setCoreAimPreviewEnabled(enabled: boolean): void {
+  coreAimPreviewEnabled = enabled;
+  syncCoreAimPreviewToggle();
+  writeCoreAimPreviewEnabled(enabled);
+  if (!enabled) coreAimPreview.hide();
+}
+
+function syncCoreAimPreviewToggle(): void {
+  coreAimPreviewToggle.checked = coreAimPreviewEnabled;
+}
+
 function readHealthBarsEnabled(): boolean {
   try {
     return globalThis.localStorage?.getItem(HEALTH_BARS_STORAGE_KEY) !== "false";
@@ -917,6 +939,22 @@ function writeHealthBarsEnabled(enabled: boolean): void {
     globalThis.localStorage?.setItem(HEALTH_BARS_STORAGE_KEY, String(enabled));
   } catch {
     // Local storage is only a convenience; the current session setting still applies.
+  }
+}
+
+function readCoreAimPreviewEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(CORE_AIM_PREVIEW_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeCoreAimPreviewEnabled(enabled: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(CORE_AIM_PREVIEW_STORAGE_KEY, String(enabled));
+  } catch {
+    // Same story as the other debug toggles: persistence is nice, not required.
   }
 }
 
@@ -968,6 +1006,12 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "F4") {
     event.preventDefault();
     qualityController.cycle();
+    return;
+  }
+
+  if (event.code === CORE_AIM_PREVIEW_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    setCoreAimPreviewEnabled(!coreAimPreviewEnabled);
     return;
   }
 
@@ -1251,6 +1295,7 @@ function animate(): void {
     updateHud();
     updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
+    updateCoreAimPreview(activeWorld, activePlayer);
     updateSprintFeedback(activePlayer.isSprintFeedbackActive(), isPlayerCoreAdsActive(), delta);
     damageIndicators.update(camera, window.innerWidth, window.innerHeight);
     recordTimingSection("otherMs");
@@ -1260,6 +1305,7 @@ function animate(): void {
     recordTimingSection("minimapMs");
   } else {
     targetBlockHighlighter.hide();
+    coreAimPreview.hide();
     damageIndicators.clear();
     updateSprintFeedback(false, false, delta);
     recordTimingSection("otherMs");
@@ -1568,6 +1614,52 @@ function updateTargetBlockHighlighter(): void {
   }
 
   targetBlockHighlighter.showBlock(hit.block, hit.kind);
+}
+
+function updateCoreAimPreview(activeWorld: VoxelWorld, activePlayer: PlayerController): void {
+  const selectedItem = getSelectedHotbarItem();
+  if (
+    !coreAimPreviewEnabled ||
+    !activePlayer.isLooking() ||
+    !canThrowCoreWithHotbarItem(selectedItem, itemRegistry)
+  ) {
+    coreAimPreview.hide();
+    return;
+  }
+
+  const radius = getPhysicsCoreRadius(physicsCoreSettings);
+  const firingSolution = createPlayerCoreFiringSolution(radius);
+  if (firingSolution.direction.lengthSq() <= TARGET_HIT_EPSILON) {
+    coreAimPreview.hide();
+    return;
+  }
+
+  const launchVelocity = createPlayerPhysicsCoreLaunchVelocity(
+    firingSolution.direction,
+    activePlayer.velocity,
+    physicsCoreSettings
+  );
+  const prediction = predictPhysicsCoreTrajectory(activeWorld, {
+    origin: firingSolution.origin,
+    velocity: launchVelocity,
+    radius
+  });
+  const impact = prediction.impact;
+  const brushPreview = impact && impact.speed > BLOCK_DAMAGE_IMPACT_SPEED
+    ? activeWorld.previewBlockDamageBrush({
+      x: impact.block.x,
+      y: impact.block.y,
+      z: impact.block.z,
+      point: impact.position,
+      normal: impact.normal,
+      incomingDirection: impact.incomingVelocity,
+      coreRadius: radius,
+      speed: impact.speed,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    })
+    : null;
+
+  coreAimPreview.update(prediction, brushPreview);
 }
 
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
@@ -2767,6 +2859,7 @@ function disposeRuntime(): void {
   codexPilot.dispose();
   player?.dispose();
   clearToys();
+  coreAimPreview.dispose();
   hitscanBoltTracer.dispose();
   debrisPoofRenderer.dispose();
   rigidDebris.dispose();

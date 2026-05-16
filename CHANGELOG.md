@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.6 - 2026-05-16
+
+### Added
+
+- Added a toggleable Physics Core aim preview: F6 or the Gameplay settings toggle draws a dotted projectile arc, impact ring, and the predicted 3x3x3 bite-lattice cells that the next thrown core would affect.
+
 ## 0.6.5 - 2026-05-16
 
 ### Added

@@ -27,6 +27,7 @@ import {
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import type { CollisionBounds, CollisionWorld } from "../src/collision";
+import { predictPhysicsCoreTrajectory } from "../src/coreAimPreview";
 import {
   createDebrisShape,
   createDebrisShapeForBlock,
@@ -2213,6 +2214,68 @@ test("damage brushes stay sparse when an impact is centered away from seams", ()
   assertEqual(world.getBlockDamage(2, 3, 4), 1, "the centered target should be chipped");
   assertEqual(world.getBlockDamage(2, 3, 5), 0, "the untouched neighbor should stay fully asleep");
   assertEqual(world.getPartialBlock(2, 3, 5), null, "the untouched neighbor should not get sparse partial state");
+});
+
+test("damage brush previews report bite cells without mutating terrain", () => {
+  const world = new VoxelWorld({ seed: "damage-brush-preview-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  const input = {
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2.5, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  };
+
+  const preview = world.previewBlockDamageBrush(input);
+  assert(preview, "a valid core impact should produce a brush preview");
+  assertEqual(preview.targets.length, 1, "a centered preview should target only the primary block");
+  assertEqual(preview.targets[0]?.primary, true, "the preview should mark the direct hit target");
+  assert(
+    (preview.targets[0]?.affectedVisualCellIndexes.length ?? 0) > 0,
+    "the preview should expose the lattice cells that would be removed"
+  );
+  assertEqual(world.getBlockDamage(2, 3, 4), 0, "previewing should not spend block health");
+  assertEqual(world.getPartialBlock(2, 3, 4), null, "previewing should not allocate partial terrain state");
+
+  const actual = world.carveBlockBrush(input);
+  assertEqual(
+    actual?.results[0]?.bitePoofPositions?.length,
+    preview.targets[0]?.affectedVisualCellIndexes.length,
+    "previewed bite cells should match the next real carve's new bite poofs"
+  );
+});
+
+test("damage brush previews include sparse seam neighbors", () => {
+  const world = new VoxelWorld({ seed: "damage-brush-preview-seam-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(2, 3, 5, BLOCK.stone);
+
+  const preview = world.previewBlockDamageBrush({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2.5, 3.5, 4.96),
+    normal: new THREE.Vector3(0, 0, -1),
+    incomingDirection: new THREE.Vector3(0, 0, 1),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const targetKeys = new Set(preview?.targets.map((target) =>
+    `${target.position.x},${target.position.y},${target.position.z}`
+  ));
+
+  assert(preview, "a seam impact should produce a brush preview");
+  assertEqual(preview.targets.length, 2, "the preview should show the same sparse neighbor fan-out as carving");
+  assert(targetKeys.has("2,3,4"), "the directly hit block should be previewed");
+  assert(targetKeys.has("2,3,5"), "the seam neighbor should be previewed");
+  assertEqual(world.getBlockDamage(2, 3, 4), 0, "previewing seam damage should not mutate primary health");
+  assertEqual(world.getBlockDamage(2, 3, 5), 0, "previewing seam damage should not mutate neighbor health");
 });
 
 test("partial block field renders faceted custom terrain cells", () => {
@@ -4849,6 +4912,29 @@ test("fast small physics cores hit the first block along their swept path", () =
   assert(
     fastSmallCore.mesh.position.x < 1,
     "swept core contact should leave the core in front of the impacted block"
+  );
+});
+
+test("physics core trajectory preview predicts the first swept terrain hit", () => {
+  const wallWorld: CollisionWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      return x === 4 && z === 0 && y >= 0 && y <= 3;
+    }
+  };
+
+  const prediction = predictPhysicsCoreTrajectory(wallWorld, {
+    origin: new THREE.Vector3(0.5, 2.5, 0.5),
+    velocity: new THREE.Vector3(18, 0, 0),
+    radius: 0.1,
+    maxSeconds: 1
+  });
+
+  assert(prediction.impact, "trajectory preview should report the first terrain impact");
+  assertEqual(prediction.impact.block.x, 4, "preview should hit the same front wall block column as the projectile sweep");
+  assert(prediction.points.length > 2, "preview should keep enough points to draw a readable dotted arc");
+  assert(
+    prediction.impact.speed > BLOCK_DAMAGE_IMPACT_SPEED,
+    "previewed impact speed should be usable for the damage lattice overlay"
   );
 });
 
