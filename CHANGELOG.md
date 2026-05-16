@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.6.2 - 2026-05-16
+
+### Changed
+
+- Changed `Max Ground Debris` to govern grounded shards after impact instead of throttling the initial destruction burst.
+- Changed grounded visual debris to blink faster near the end of its cleanup timer before disappearing.
+- Changed stale never-grounded debris to fall back into the same cleanup path after a grace window so floaters do not live forever.
+
+### Added
+
+- Added a gameplay `Ground Debris Lifetime` slider with a `Forever` setting for keeping grounded shards around.
+
 ## 0.6.1 - 2026-05-16
 
 ### Changed
