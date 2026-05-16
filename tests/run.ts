@@ -2146,6 +2146,75 @@ test("partial block carve results expose material poof positions for newly destr
   );
 });
 
+test("damage brushes carve neighboring macro blocks across seams", () => {
+  const world = new VoxelWorld({ seed: "damage-brush-seam-test" });
+  for (let z = 4; z <= 5; z += 1) {
+    for (let x = 1; x <= 3; x += 1) {
+      world.setBlock(x, 3, z, BLOCK.air);
+    }
+  }
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(2, 3, 5, BLOCK.stone);
+
+  const result = world.carveBlockBrush({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.96),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const damagedPositions = new Set(
+    result?.results.map((hit) => `${hit.position.x},${hit.position.y},${hit.position.z}`) ?? []
+  );
+
+  assert(result, "a seam brush should produce damage results");
+  assertEqual(result.results.length, 2, "a seam hit should wake only the two overlapped macro blocks");
+  assert(damagedPositions.has("2,3,4"), "the directly hit macro block should be damaged");
+  assert(damagedPositions.has("2,3,5"), "the neighboring macro block across the seam should be damaged");
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "the primary block should take one carve step");
+  assertEqual(world.getBlockDamage(2, 3, 5), 1, "the seam neighbor should take one carve step");
+  assert(world.getPartialBlock(2, 3, 4), "the primary block should get a sparse micro-damage lattice");
+  assert(world.getPartialBlock(2, 3, 5), "the seam neighbor should get a sparse micro-damage lattice");
+  assertDeepEqual(
+    result.primaryResult?.position,
+    { x: 2, y: 3, z: 4 },
+    "the brush should remember which damaged block owns piercing and projectile continuation"
+  );
+});
+
+test("damage brushes stay sparse when an impact is centered away from seams", () => {
+  const world = new VoxelWorld({ seed: "damage-brush-sparse-center-test" });
+  for (let z = 4; z <= 5; z += 1) {
+    for (let x = 1; x <= 3; x += 1) {
+      world.setBlock(x, 3, z, BLOCK.air);
+    }
+  }
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(2, 3, 5, BLOCK.stone);
+
+  const result = world.carveBlockBrush({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(result, "a centered brush should still damage the target block");
+  assertEqual(result.results.length, 1, "centered hits should not allocate neighboring micro lattices");
+  assertEqual(world.getBlockDamage(2, 3, 4), 1, "the centered target should be chipped");
+  assertEqual(world.getBlockDamage(2, 3, 5), 0, "the untouched neighbor should stay fully asleep");
+  assertEqual(world.getPartialBlock(2, 3, 5), null, "the untouched neighbor should not get sparse partial state");
+});
+
 test("partial block field renders faceted custom terrain cells", () => {
   const scene = new THREE.Scene();
   const field = new PartialBlockMeshField(scene);

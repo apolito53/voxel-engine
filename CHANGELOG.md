@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.5 - 2026-05-16
+
+### Added
+
+- Added a sparse multi-block damage brush for core terrain impacts: hits near block seams can now promote only the overlapped macro blocks into partial 3x3x3 bite lattices, creating more continuous damage across terrain without activating tiny voxels globally.
+
 ## 0.6.4 - 2026-05-16
 
 ### Fixed

@@ -48,6 +48,9 @@ const PARTIAL_BLOCK_SURFACE_PATCH_FORWARD_BONUS = 0.18;
 const PARTIAL_BLOCK_SURFACE_PATCH_BACK_PENALTY = 0.12;
 const PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL = 8;
 const PARTIAL_BLOCK_PIERCE_MAX_CORE_RADIUS = 1 / (BLOCK_FRAGMENT_GRID_SIZE * 2);
+const PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_RADIUS = 1 / BLOCK_FRAGMENT_GRID_SIZE;
+const PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_RADIUS = 0.58;
+const PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_TARGETS = 12;
 const PROJECTILE_SWEEP_EPSILON = 0.000001;
 const PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED = 14;
 const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
@@ -97,6 +100,12 @@ export type BlockDamageResult = {
   readonly pierceContinuation?: BlockPierceContinuation;
 };
 
+export type BlockDamageBrushResult = {
+  readonly results: readonly BlockDamageResult[];
+  readonly primaryResult?: BlockDamageResult;
+  readonly pierceContinuation?: BlockPierceContinuation;
+};
+
 export type BlockPierceContinuation = {
   readonly position: VoxelVector;
   readonly velocity: VoxelVector;
@@ -113,6 +122,10 @@ export type BlockCarveInput = {
   readonly coreRadius?: number;
   readonly speed: number;
   readonly amount?: number;
+};
+
+export type BlockDamageBrushOptions = {
+  readonly blockedDamageKeys?: ReadonlySet<string>;
 };
 
 export type VoxelBlockPosition = {
@@ -132,6 +145,14 @@ type PartialBlockCutResult = {
   readonly newlyRemovedVisualCellIndexes: readonly number[];
 };
 
+type BlockDamageBrushTarget = {
+  readonly position: VoxelBlockPosition;
+  readonly point: VoxelVector;
+  readonly normal: VoxelVector;
+  readonly distanceSq: number;
+  readonly primary: boolean;
+};
+
 function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
   if (samples.length <= PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL) return [...samples];
   return samples.slice(samples.length - PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL);
@@ -139,6 +160,69 @@ function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]
 
 function clamp01ForWorld(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function getBlockDamageBrushRadius(input: BlockCarveInput): number {
+  const coreRadius = typeof input.coreRadius === "number" && Number.isFinite(input.coreRadius)
+    ? Math.max(0, input.coreRadius)
+    : 0;
+  return Math.min(
+    PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_RADIUS,
+    Math.max(PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_RADIUS, coreRadius)
+  );
+}
+
+function getPointToBlockAabbDistanceSq(
+  point: Pick<THREE.Vector3, "x" | "y" | "z">,
+  position: VoxelBlockPosition
+): number {
+  const dx = point.x < position.x
+    ? position.x - point.x
+    : point.x > position.x + 1
+      ? point.x - (position.x + 1)
+      : 0;
+  const dy = point.y < position.y
+    ? position.y - point.y
+    : point.y > position.y + 1
+      ? point.y - (position.y + 1)
+      : 0;
+  const dz = point.z < position.z
+    ? position.z - point.z
+    : point.z > position.z + 1
+      ? point.z - (position.z + 1)
+      : 0;
+  return dx * dx + dy * dy + dz * dz;
+}
+
+function clampPointToBlock(
+  point: Pick<THREE.Vector3, "x" | "y" | "z">,
+  position: VoxelBlockPosition
+): VoxelVector {
+  return {
+    x: Math.max(position.x, Math.min(position.x + 1, point.x)),
+    y: Math.max(position.y, Math.min(position.y + 1, point.y)),
+    z: Math.max(position.z, Math.min(position.z + 1, point.z))
+  };
+}
+
+function createBlockDamageBrushNormal(
+  position: VoxelBlockPosition,
+  point: Pick<THREE.Vector3, "x" | "y" | "z">,
+  fallbackNormal: Pick<THREE.Vector3, "x" | "y" | "z">,
+  primary: boolean
+): VoxelVector {
+  if (primary) return normalizeVoxelVector(fallbackNormal) ?? { x: 0, y: 1, z: 0 };
+
+  const faces = [
+    { distance: Math.abs(point.x - position.x), normal: { x: -1, y: 0, z: 0 } },
+    { distance: Math.abs(point.x - (position.x + 1)), normal: { x: 1, y: 0, z: 0 } },
+    { distance: Math.abs(point.y - position.y), normal: { x: 0, y: -1, z: 0 } },
+    { distance: Math.abs(point.y - (position.y + 1)), normal: { x: 0, y: 1, z: 0 } },
+    { distance: Math.abs(point.z - position.z), normal: { x: 0, y: 0, z: -1 } },
+    { distance: Math.abs(point.z - (position.z + 1)), normal: { x: 0, y: 0, z: 1 } }
+  ];
+  faces.sort((left, right) => left.distance - right.distance);
+  return faces[0]?.normal ?? (normalizeVoxelVector(fallbackNormal) ?? { x: 0, y: 1, z: 0 });
 }
 
 function getProjectileSweepHitAgainstAabb(
@@ -1067,6 +1151,40 @@ export class VoxelWorld implements CollisionWorld {
     return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
   }
 
+  carveBlockBrush(
+    input: BlockCarveInput,
+    options: BlockDamageBrushOptions = {}
+  ): BlockDamageBrushResult | null {
+    const targets = this.createBlockDamageBrushTargets(input);
+    const results: BlockDamageResult[] = [];
+    let primaryResult: BlockDamageResult | undefined;
+
+    for (const target of targets) {
+      const key = this.damageKey(target.position.x, target.position.y, target.position.z);
+      if (options.blockedDamageKeys?.has(key)) continue;
+
+      const result = this.carveBlock({
+        ...input,
+        x: target.position.x,
+        y: target.position.y,
+        z: target.position.z,
+        point: target.point,
+        normal: target.normal
+      });
+      if (!result) continue;
+
+      results.push(result);
+      if (target.primary) primaryResult = result;
+    }
+
+    if (results.length === 0) return null;
+    return {
+      results,
+      primaryResult,
+      pierceContinuation: primaryResult?.pierceContinuation
+    };
+  }
+
   carveBlock(input: BlockCarveInput): BlockDamageResult | null {
     const position = {
       x: Math.floor(input.x),
@@ -1192,6 +1310,66 @@ export class VoxelWorld implements CollisionWorld {
         this.blockDamage.delete(key);
       }
     }
+  }
+
+  private createBlockDamageBrushTargets(input: BlockCarveInput): BlockDamageBrushTarget[] {
+    const primaryPosition = {
+      x: Math.floor(input.x),
+      y: Math.floor(input.y),
+      z: Math.floor(input.z)
+    };
+    const brushRadius = getBlockDamageBrushRadius(input);
+    const brushRadiusSq = brushRadius * brushRadius;
+    const minX = Math.floor(input.point.x - brushRadius);
+    const maxX = Math.floor(input.point.x + brushRadius);
+    const minY = Math.max(0, Math.floor(input.point.y - brushRadius));
+    const maxY = Math.min(WORLD_HEIGHT - 1, Math.floor(input.point.y + brushRadius));
+    const minZ = Math.floor(input.point.z - brushRadius);
+    const maxZ = Math.floor(input.point.z + brushRadius);
+    const targets = new Map<string, BlockDamageBrushTarget>();
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const position = { x, y, z };
+          const primary = x === primaryPosition.x && y === primaryPosition.y && z === primaryPosition.z;
+          const distanceSq = primary ? 0 : getPointToBlockAabbDistanceSq(input.point, position);
+          if (!primary && distanceSq > brushRadiusSq + PROJECTILE_SWEEP_EPSILON) continue;
+          if (this.getBlock(x, y, z) === BLOCK.air) continue;
+
+          targets.set(this.damageKey(x, y, z), {
+            position,
+            point: clampPointToBlock(input.point, position),
+            normal: createBlockDamageBrushNormal(position, input.point, input.normal, primary),
+            distanceSq,
+            primary
+          });
+        }
+      }
+    }
+
+    if (!targets.has(this.damageKey(primaryPosition.x, primaryPosition.y, primaryPosition.z))) {
+      const block = this.getBlock(primaryPosition.x, primaryPosition.y, primaryPosition.z);
+      if (block !== BLOCK.air) {
+        targets.set(this.damageKey(primaryPosition.x, primaryPosition.y, primaryPosition.z), {
+          position: primaryPosition,
+          point: clampPointToBlock(input.point, primaryPosition),
+          normal: createBlockDamageBrushNormal(primaryPosition, input.point, input.normal, true),
+          distanceSq: 0,
+          primary: true
+        });
+      }
+    }
+
+    return Array.from(targets.values())
+      .sort((left, right) =>
+        Number(right.primary) - Number(left.primary) ||
+        left.distanceSq - right.distanceSq ||
+        left.position.y - right.position.y ||
+        left.position.z - right.position.z ||
+        left.position.x - right.position.x
+      )
+      .slice(0, PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_TARGETS);
   }
 
   private addPartialBlockCut(

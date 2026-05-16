@@ -443,6 +443,11 @@ type CoreTerrainImpact = {
   readonly incomingVelocity: THREE.Vector3;
   readonly radius: number;
 };
+type CoreTerrainImpactApplyResult = {
+  readonly results: readonly BlockDamageResult[];
+  readonly primaryResult?: BlockDamageResult;
+  readonly pierceContinuation?: BlockPierceContinuation;
+};
 type PlayerCoreFiringSolution = {
   readonly origin: THREE.Vector3;
   readonly direction: THREE.Vector3;
@@ -1602,14 +1607,10 @@ function applyCoreTerrainImpact(
   activeWorld: VoxelWorld,
   impact: CoreTerrainImpact,
   damagedBlocksThisFrame: Set<string>
-): BlockDamageResult | null {
+): CoreTerrainImpactApplyResult | null {
   if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return null;
 
-  const damageKey = activeWorld.damageKey(impact.block.x, impact.block.y, impact.block.z);
-  if (damagedBlocksThisFrame.has(damageKey)) return null;
-  damagedBlocksThisFrame.add(damageKey);
-
-  const result = activeWorld.carveBlock({
+  const brushResult = activeWorld.carveBlockBrush({
     x: impact.block.x,
     y: impact.block.y,
     z: impact.block.z,
@@ -1619,43 +1620,50 @@ function applyCoreTerrainImpact(
     coreRadius: impact.radius,
     speed: impact.speed,
     amount: PARTIAL_BLOCK_CORE_DAMAGE
+  }, {
+    blockedDamageKeys: damagedBlocksThisFrame
   });
-  if (!result) return null;
+  if (!brushResult) return null;
 
-  engineEvents.emit("block:damaged", {
-    position: result.position,
-    block: result.block,
-    impactSpeed: impact.speed,
-    remainingHealth: result.remainingHealth,
-    maxHealth: result.maxHealth
-  });
-  spawnPartialBlockBitePoofs(result);
-  showBlockDamageIndicator(result);
+  for (const result of brushResult.results) {
+    damagedBlocksThisFrame.add(activeWorld.damageKey(result.position.x, result.position.y, result.position.z));
 
-  const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
-  const fragmentCount = getTerrainImpactFragmentCount(
-    qualityController.preset.blockFragmentCount,
-    ejectedMaterialUnits,
-    result.destroyed
-  );
-  let spawnedFragmentCount = 0;
-  if (fragmentCount > 0) {
-    spawnedFragmentCount = spawnBlockFragments(result.block, result.position, impact, {
-      fragmentCount,
-      materialUnits: ejectedMaterialUnits,
-      chipOnly: !result.destroyed
+    engineEvents.emit("block:damaged", {
+      position: result.position,
+      block: result.block,
+      impactSpeed: impact.speed,
+      remainingHealth: result.remainingHealth,
+      maxHealth: result.maxHealth
     });
+    spawnPartialBlockBitePoofs(result);
+    showBlockDamageIndicator(result);
+
+    const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
+    const fragmentCount = getTerrainImpactFragmentCount(
+      qualityController.preset.blockFragmentCount,
+      ejectedMaterialUnits,
+      result.destroyed
+    );
+    let spawnedFragmentCount = 0;
+    if (fragmentCount > 0) {
+      spawnedFragmentCount = spawnBlockFragments(result.block, result.position, impact, {
+        fragmentCount,
+        materialUnits: ejectedMaterialUnits,
+        chipOnly: !result.destroyed
+      });
+    }
+
+    if (result.destroyed) {
+      engineEvents.emit("block:destroyed", {
+        position: result.position,
+        block: result.block,
+        impactSpeed: impact.speed,
+        fragmentCount: spawnedFragmentCount
+      });
+    }
   }
 
-  if (!result.destroyed) return result;
-
-  engineEvents.emit("block:destroyed", {
-    position: result.position,
-    block: result.block,
-    impactSpeed: impact.speed,
-    fragmentCount: spawnedFragmentCount
-  });
-  return result;
+  return brushResult;
 }
 
 function spawnPartialBlockBitePoofs(result: BlockDamageResult): void {
