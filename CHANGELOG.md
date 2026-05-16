@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.9 - 2026-05-16
+
+### Fixed
+
+- Fixed the deployed Vercel hitch-log function by using a Node-resolvable ESM import for the shared remote log helpers.
+
 ## 0.6.8 - 2026-05-16
 
 ### Added

@@ -166,6 +166,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 
 - Prefer `rg` for repo search. If Windows ever resolves to the protected Codex-bundled copy under `C:\Program Files\WindowsApps`, use the working user-local copy at `C:\Users\apoli\AppData\Local\OpenAI\Codex\bin\rg.exe` or `C:\Users\apoli\codex\tools\ripgrep\rg.exe`.
 - `.env.local` and `.vercel/` are local Vercel/Blob linkage artifacts and must stay untracked. The Blob token lets the CLI inspect private production hitches; do not echo it in chat or commit it.
+- Vercel serverless functions run as Node ESM after deployment; imports from `api/` into shared TypeScript modules need Node-resolvable `.js` specifiers even when the source file is `.ts`.
 - `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
 - Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
 - Player resume location is saved as feet position plus yaw/pitch in saved-world metadata; avoid storing raw camera height or crouch view offsets, or crouched exits can reload into terrain.

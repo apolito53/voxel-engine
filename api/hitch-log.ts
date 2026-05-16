@@ -4,7 +4,7 @@ import {
   isRemoteHitchLogAllowedOrigin,
   normalizeRemoteHitchLogPayload,
   type RemoteHitchLogDeploymentMetadata
-} from "../src/remoteHitchLog";
+} from "../src/remoteHitchLog.js";
 
 type HeaderValue = string | string[] | undefined;
 
