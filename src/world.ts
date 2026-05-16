@@ -8,7 +8,12 @@ import type {
   ChunkWorkerRequest,
   ChunkWorkerResult
 } from "./chunkProtocol";
-import type { CollisionBounds, CollisionVector, CollisionWorld } from "./collision";
+import type {
+  CollisionBounds,
+  CollisionVector,
+  CollisionWorld,
+  ProjectileBlockSweepHit
+} from "./collision";
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
@@ -43,6 +48,7 @@ const PARTIAL_BLOCK_SURFACE_PATCH_FORWARD_BONUS = 0.18;
 const PARTIAL_BLOCK_SURFACE_PATCH_BACK_PENALTY = 0.12;
 const PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL = 8;
 const PARTIAL_BLOCK_PIERCE_MAX_CORE_RADIUS = 1 / (BLOCK_FRAGMENT_GRID_SIZE * 2);
+const PROJECTILE_SWEEP_EPSILON = 0.000001;
 const PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED = 14;
 const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
 const PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST = 2.8;
@@ -135,7 +141,7 @@ function clamp01ForWorld(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function segmentIntersectsAabb(
+function getProjectileSweepHitAgainstAabb(
   start: CollisionVector,
   movement: CollisionVector,
   minX: number,
@@ -143,50 +149,103 @@ function segmentIntersectsAabb(
   minY: number,
   maxY: number,
   minZ: number,
-  maxZ: number
-): boolean {
+  maxZ: number,
+  allowInitialOverlapHit: boolean
+): ProjectileBlockSweepHit | null {
+  if (
+    Math.abs(movement.x) <= PROJECTILE_SWEEP_EPSILON &&
+    Math.abs(movement.y) <= PROJECTILE_SWEEP_EPSILON &&
+    Math.abs(movement.z) <= PROJECTILE_SWEEP_EPSILON
+  ) {
+    return null;
+  }
+
   let entryTime = 0;
   let exitTime = 1;
-  const xHit = getAxisSegmentTimes(start.x, movement.x, minX, maxX);
-  if (!xHit) return false;
-  entryTime = Math.max(entryTime, xHit.entryTime);
+  let normal: CollisionVector = { x: 0, y: 0, z: 0 };
+
+  const xHit = getAxisProjectileSweepTimes(start.x, movement.x, minX, maxX, { x: -1, y: 0, z: 0 });
+  if (!xHit) return null;
+  if (xHit.entryTime > entryTime) {
+    entryTime = xHit.entryTime;
+    normal = xHit.normal;
+  }
   exitTime = Math.min(exitTime, xHit.exitTime);
-  if (entryTime > exitTime) return false;
+  if (entryTime > exitTime) return null;
 
-  const yHit = getAxisSegmentTimes(start.y, movement.y, minY, maxY);
-  if (!yHit) return false;
-  entryTime = Math.max(entryTime, yHit.entryTime);
+  const yHit = getAxisProjectileSweepTimes(start.y, movement.y, minY, maxY, { x: 0, y: -1, z: 0 });
+  if (!yHit) return null;
+  if (yHit.entryTime > entryTime) {
+    entryTime = yHit.entryTime;
+    normal = yHit.normal;
+  }
   exitTime = Math.min(exitTime, yHit.exitTime);
-  if (entryTime > exitTime) return false;
+  if (entryTime > exitTime) return null;
 
-  const zHit = getAxisSegmentTimes(start.z, movement.z, minZ, maxZ);
-  if (!zHit) return false;
-  entryTime = Math.max(entryTime, zHit.entryTime);
+  const zHit = getAxisProjectileSweepTimes(start.z, movement.z, minZ, maxZ, { x: 0, y: 0, z: -1 });
+  if (!zHit) return null;
+  if (zHit.entryTime > entryTime) {
+    entryTime = zHit.entryTime;
+    normal = zHit.normal;
+  }
   exitTime = Math.min(exitTime, zHit.exitTime);
-  return entryTime <= exitTime;
+  if (entryTime > exitTime) return null;
+
+  if (entryTime <= PROJECTILE_SWEEP_EPSILON) {
+    if (!allowInitialOverlapHit) return null;
+    return { t: 0, normal: createInitialProjectileOverlapNormal(movement) };
+  }
+
+  return entryTime <= 1 ? { t: entryTime, normal } : null;
 }
 
-function getAxisSegmentTimes(
+function getAxisProjectileSweepTimes(
   start: number,
   movement: number,
   min: number,
-  max: number
-): { readonly entryTime: number; readonly exitTime: number } | null {
-  if (Math.abs(movement) <= 0.000001) {
+  max: number,
+  entryNormal: CollisionVector
+): {
+  readonly entryTime: number;
+  readonly exitTime: number;
+  readonly normal: CollisionVector;
+} | null {
+  if (Math.abs(movement) <= PROJECTILE_SWEEP_EPSILON) {
     return start >= min && start <= max
-      ? { entryTime: 0, exitTime: 1 }
+      ? { entryTime: 0, exitTime: 1, normal: { x: 0, y: 0, z: 0 } }
       : null;
   }
 
   const inverseMovement = 1 / movement;
   let entryTime = (min - start) * inverseMovement;
   let exitTime = (max - start) * inverseMovement;
+  let normal = entryNormal;
+
   if (entryTime > exitTime) {
     const previousEntryTime = entryTime;
     entryTime = exitTime;
     exitTime = previousEntryTime;
+    normal = {
+      x: -entryNormal.x,
+      y: -entryNormal.y,
+      z: -entryNormal.z
+    };
   }
-  return { entryTime, exitTime };
+
+  return { entryTime, exitTime, normal };
+}
+
+function createInitialProjectileOverlapNormal(movement: CollisionVector): CollisionVector {
+  const absX = Math.abs(movement.x);
+  const absY = Math.abs(movement.y);
+  const absZ = Math.abs(movement.z);
+  if (absX >= absY && absX >= absZ && absX > PROJECTILE_SWEEP_EPSILON) {
+    return { x: movement.x >= 0 ? -1 : 1, y: 0, z: 0 };
+  }
+  if (absY >= absX && absY >= absZ && absY > PROJECTILE_SWEEP_EPSILON) {
+    return { x: 0, y: movement.y >= 0 ? -1 : 1, z: 0 };
+  }
+  return { x: 0, y: 0, z: movement.z >= 0 ? -1 : 1 };
 }
 
 function decodePartialBlockVisualCell(index: number): { readonly x: number; readonly y: number; readonly z: number } {
@@ -1550,25 +1609,38 @@ export class VoxelWorld implements CollisionWorld {
     return block !== BLOCK.air;
   }
 
-  canProjectileHitBlock(
+  getProjectileBlockSweepHit(
     x: number,
     y: number,
     z: number,
     start: CollisionVector,
     movement: CollisionVector,
     radius: number
-  ): boolean {
+  ): ProjectileBlockSweepHit | null {
     const blockX = Math.floor(x);
     const blockY = Math.floor(y);
     const blockZ = Math.floor(z);
+    const safeRadius = Number.isFinite(radius) ? Math.max(0, radius) : 0;
     const cell = this.getPartialBlock(blockX, blockY, blockZ);
-    if (!cell) return true;
+    if (!cell) {
+      return getProjectileSweepHitAgainstAabb(
+        start,
+        movement,
+        blockX - safeRadius,
+        blockX + 1 + safeRadius,
+        blockY - safeRadius,
+        blockY + 1 + safeRadius,
+        blockZ - safeRadius,
+        blockZ + 1 + safeRadius,
+        false
+      );
+    }
 
     const removedCells = new Set(
       cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
     );
-    const safeRadius = Number.isFinite(radius) ? Math.max(0, radius) : 0;
     const cellSize = 1 / BLOCK_FRAGMENT_GRID_SIZE;
+    let bestHit: ProjectileBlockSweepHit | null = null;
 
     for (let index = 0; index < BLOCK_FRAGMENT_GRID_SIZE ** 3; index += 1) {
       if (removedCells.has(index)) continue;
@@ -1579,12 +1651,34 @@ export class VoxelWorld implements CollisionWorld {
       const maxY = blockY + (visualCell.y + 1) * cellSize + safeRadius;
       const minZ = blockZ + visualCell.z * cellSize - safeRadius;
       const maxZ = blockZ + (visualCell.z + 1) * cellSize + safeRadius;
-      if (segmentIntersectsAabb(start, movement, minX, maxX, minY, maxY, minZ, maxZ)) {
-        return true;
-      }
+      const hit = getProjectileSweepHitAgainstAabb(
+        start,
+        movement,
+        minX,
+        maxX,
+        minY,
+        maxY,
+        minZ,
+        maxZ,
+        true
+      );
+      if (!hit || (bestHit && hit.t >= bestHit.t)) continue;
+      bestHit = hit;
     }
 
-    return false;
+    return bestHit;
+  }
+
+  canProjectileHitBlock(
+    x: number,
+    y: number,
+    z: number,
+    start: CollisionVector,
+    movement: CollisionVector,
+    radius: number
+  ): boolean {
+    if (!this.getPartialBlock(Math.floor(x), Math.floor(y), Math.floor(z))) return true;
+    return this.getProjectileBlockSweepHit(x, y, z, start, movement, radius) !== null;
   }
 
   rebuildDirty(

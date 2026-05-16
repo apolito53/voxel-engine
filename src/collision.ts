@@ -13,6 +13,11 @@ export type CollisionVector = {
   readonly z: number;
 };
 
+export type ProjectileBlockSweepHit = {
+  readonly t: number;
+  readonly normal: CollisionVector;
+};
+
 export type CollisionWorld = {
   isSolid(x: number, y: number, z: number): boolean;
   canProjectileHitBlock?(
@@ -23,5 +28,13 @@ export type CollisionWorld = {
     movement: CollisionVector,
     radius: number
   ): boolean;
+  getProjectileBlockSweepHit?(
+    x: number,
+    y: number,
+    z: number,
+    start: CollisionVector,
+    movement: CollisionVector,
+    radius: number
+  ): ProjectileBlockSweepHit | null;
   getSupportHeight?(bounds: CollisionBounds): number | null;
 };

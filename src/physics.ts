@@ -499,15 +499,14 @@ export class PhysicsToy {
       for (let z = minZ; z <= maxZ; z += 1) {
         for (let x = minX; x <= maxX; x += 1) {
           if (!world.isSolid(x, y, z)) continue;
-          if (!canProjectileHitBlock(world, x, y, z, start, movement, this.radius)) continue;
-
-          const hitT = intersectMovingPointWithExpandedBlock(
-            start,
-            movement,
-            this.radius,
+          const hitT = getProjectileBlockSweepHit(
+            world,
             x,
             y,
             z,
+            start,
+            movement,
+            this.radius,
             this.sweepCandidateNormal
           );
           if (hitT === null || hitT >= bestT) continue;
@@ -955,6 +954,30 @@ function canProjectileHitBlock(
   radius: number
 ): boolean {
   return world.canProjectileHitBlock?.(x, y, z, start, movement, radius) ?? true;
+}
+
+function getProjectileBlockSweepHit(
+  world: CollisionWorld,
+  x: number,
+  y: number,
+  z: number,
+  start: THREE.Vector3,
+  movement: THREE.Vector3,
+  radius: number,
+  normalOut: THREE.Vector3
+): number | null {
+  const worldHit = world.getProjectileBlockSweepHit?.(x, y, z, start, movement, radius);
+  if (worldHit) {
+    normalOut.set(worldHit.normal.x, worldHit.normal.y, worldHit.normal.z);
+    return worldHit.t;
+  }
+
+  // Worlds that expose the precise sweep query own the answer for both full
+  // blocks and partial bite cells. Older test doubles only expose `isSolid`,
+  // so keep the legacy full-cube sweep as their fallback path.
+  if (world.getProjectileBlockSweepHit) return null;
+  if (!canProjectileHitBlock(world, x, y, z, start, movement, radius)) return null;
+  return intersectMovingPointWithExpandedBlock(start, movement, radius, x, y, z, normalOut);
 }
 
 function intersectMovingPointWithExpandedBlock(

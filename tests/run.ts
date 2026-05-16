@@ -4861,6 +4861,45 @@ test("small fast physics cores still hit remaining partial-block material", () =
   );
 });
 
+test("small fast physics cores hit visible partial-block material from inside the old cube shell", () => {
+  const world = new VoxelWorld({ seed: "small-core-partial-shell-start-test" });
+  const tinyFastSettings = {
+    sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
+    velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
+  };
+  const coreRadius = getPhysicsCoreRadius(tinyFastSettings);
+  const coreSpeed = PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius,
+    speed: coreSpeed,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const core = new PhysicsToy(
+    // This starts inside the damaged voxel's old expanded whole-cube shell,
+    // but it is visibly aligned with a remaining upper-corner bite cell.
+    new THREE.Vector3(2 - coreRadius * 0.5, 3.84, 4.84),
+    new THREE.Vector3(coreSpeed, 0, 0),
+    { radius: coreRadius }
+  );
+  const impacts = core.update(1 / 20, world);
+
+  assertEqual(impacts.length, 1, "visible partial-block material should still consume the core impact");
+  assertDeepEqual(
+    impacts[0].block,
+    { x: 2, y: 3, z: 4 },
+    "starting inside the old full-cube shell should not skip the visible bite piece and hit the block behind it"
+  );
+});
+
 test("hitscan cores pass through existing visual holes in partial blocks", () => {
   const world = new VoxelWorld({ seed: "hitscan-existing-hole-test" });
   world.setBlock(1, 3, 4, BLOCK.air);

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.4 - 2026-05-16
+
+### Fixed
+
+- Fixed thrown Physics Core sweeps against damaged partial blocks so visible remaining bite-lattice pieces are hit first, even when the core starts inside the old full-cube collision shell, instead of clipping through to the block behind.
+
 ## 0.6.3 - 2026-05-16
 
 ### Added

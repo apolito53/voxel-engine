@@ -465,6 +465,8 @@ const terrainAndRubbleCollisionWorld: CollisionWorld = {
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
   canProjectileHitBlock: (x, y, z, start, movement, radius) =>
     requireWorld().canProjectileHitBlock(x, y, z, start, movement, radius),
+  getProjectileBlockSweepHit: (x, y, z, start, movement, radius) =>
+    requireWorld().getProjectileBlockSweepHit(x, y, z, start, movement, radius),
   getSupportHeight: (bounds) => {
     const terrainSupportY = requireWorld().getSupportHeight(bounds);
     const rubbleSupportY = rubbleField.getSupportHeight(bounds);
