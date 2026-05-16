@@ -29,7 +29,7 @@ import {
   type CodexPilotApi,
   type CodexPilotWeapon
 } from "./codexPilot";
-import type { CollisionWorld } from "./collision";
+import type { CollisionBounds, CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { createDebrisShapeForBlock } from "./debrisShapes";
@@ -160,11 +160,20 @@ import {
   MIN_GROUND_DEBRIS_BUDGET,
   formatGroundDebrisBudget,
   getEffectiveRigidDebrisBodyBudget,
-  getGroundDebrisSpawnAllowance,
   normalizeGroundDebrisBudget,
   readGroundDebrisBudgetPreference,
   writeGroundDebrisBudgetPreference
 } from "./rigidDebrisBudget";
+import {
+  GROUND_DEBRIS_LIFETIME_STEP_SECONDS,
+  MAX_GROUND_DEBRIS_LIFETIME_SECONDS,
+  MIN_GROUND_DEBRIS_LIFETIME_SECONDS,
+  formatGroundDebrisLifetime,
+  getEffectiveGroundDebrisLifetimeSeconds,
+  normalizeGroundDebrisLifetime,
+  readGroundDebrisLifetimePreference,
+  writeGroundDebrisLifetimePreference
+} from "./debrisLifetime";
 import {
   RigidDebrisSimulation,
   createEmptyRigidDebrisStats,
@@ -299,6 +308,8 @@ const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slid
 const coreVelocityValue = requireElement<HTMLElement>("#core-velocity-value");
 const groundDebrisBudgetSlider = requireElement<HTMLInputElement>("#ground-debris-budget-slider");
 const groundDebrisBudgetValue = requireElement<HTMLElement>("#ground-debris-budget-value");
+const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-debris-lifetime-slider");
+const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
@@ -379,6 +390,7 @@ let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
+let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
 let renderedPartialBlockRevision = -1;
 let rightMouseButtonDown = false;
 
@@ -684,6 +696,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   groundDebrisBudgetSlider.addEventListener("input", () => {
     setGroundDebrisBudget(groundDebrisBudgetSlider.value);
+  }, eventListenerOptions);
+  groundDebrisLifetimeSlider.addEventListener("input", () => {
+    setGroundDebrisLifetime(groundDebrisLifetimeSlider.value);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -1208,6 +1223,7 @@ function animate(): void {
     absorbSettledFragmentsIntoRubble();
     enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
+    updateGroundDebrisCleanup(delta);
     debrisSettlerStats = debrisSettler.getStats();
     emitRubbleBatchEvents();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
@@ -1666,11 +1682,7 @@ function spawnBlockFragments(
     ? impact.position.clone().addScaledVector(impact.normal, 0.08)
     : new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
   const requestedFragmentCount = options.fragmentCount;
-  const fragmentCount = getGroundDebrisSpawnAllowance(
-    getLiveGroundDebrisCount(),
-    requestedFragmentCount,
-    getCurrentRigidDebrisBodyBudget()
-  );
+  const fragmentCount = requestedFragmentCount;
   if (fragmentCount <= 0) return 0;
 
   const fragments: PhysicsToy[] = [];
@@ -1717,14 +1729,6 @@ function spawnBlockFragments(
   rigidDebris.invalidateStaticColliders();
   debrisSettler.registerFracture(block, blockCenter, fragments);
   return fragments.length;
-}
-
-function getLiveGroundDebrisCount(): number {
-  let liveFragments = 0;
-  for (const toy of toys) {
-    if (toy.isInstancedFragment && !toy.isExpired) liveFragments += 1;
-  }
-  return liveFragments;
 }
 
 function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
@@ -2015,6 +2019,20 @@ function updateGroundDebrisBudgetControls(): void {
   groundDebrisBudgetValue.textContent = formatGroundDebrisBudget(groundDebrisBudget);
 }
 
+function setGroundDebrisLifetime(nextLifetimeSeconds: unknown): void {
+  groundDebrisLifetimeSeconds = normalizeGroundDebrisLifetime(nextLifetimeSeconds, groundDebrisLifetimeSeconds);
+  writeGroundDebrisLifetimePreference(groundDebrisLifetimeSeconds);
+  updateGroundDebrisLifetimeControls();
+}
+
+function updateGroundDebrisLifetimeControls(): void {
+  groundDebrisLifetimeSlider.min = String(MIN_GROUND_DEBRIS_LIFETIME_SECONDS);
+  groundDebrisLifetimeSlider.max = String(MAX_GROUND_DEBRIS_LIFETIME_SECONDS);
+  groundDebrisLifetimeSlider.step = String(GROUND_DEBRIS_LIFETIME_STEP_SECONDS);
+  groundDebrisLifetimeSlider.value = String(groundDebrisLifetimeSeconds);
+  groundDebrisLifetimeValue.textContent = formatGroundDebrisLifetime(groundDebrisLifetimeSeconds);
+}
+
 function emitQualityChanged(source: QualityChangeSource): void {
   const preset = qualityController.preset;
   engineEvents.emit("quality:changed", {
@@ -2051,6 +2069,7 @@ function updateSettingsControls(): void {
   debrisCountValue.textContent = formatBlockFragmentCount(preset.blockFragmentCount);
 
   updateGroundDebrisBudgetControls();
+  updateGroundDebrisLifetimeControls();
 }
 
 function enforcePhysicsToyBudget(): void {
@@ -2070,19 +2089,80 @@ function enforcePhysicsToyBudget(): void {
 
 function enforceRigidDebrisBudget(): void {
   const rigidDebrisBodyBudget = getCurrentRigidDebrisBodyBudget();
-  const overBudgetCount = rigidDebrisStats.bodies - rigidDebrisBodyBudget;
+  const groundedCandidates = getGroundedDebrisCleanupCandidates();
+  const overBudgetCount = groundedCandidates.length - rigidDebrisBodyBudget;
   if (overBudgetCount <= 0) return;
 
   // The ground-debris slider is a visual/CPU pressure valve, not a gameplay
-  // material signal. Drop the oldest/farthest physical shard regions instead
-  // of baking them into instant rubble lumps or freezing airborne pieces.
-  debrisSettler.discardRegionsForPressure(camera.position, overBudgetCount);
+  // material signal. Let the explosion happen, then drop ground clutter after
+  // first terrain/rubble contact instead of suppressing the burst.
+  const pressureCandidates = groundedCandidates
+    .sort((left, right) => {
+      if (left.isSleeping !== right.isSleeping) return left.isSleeping ? -1 : 1;
+      return right.mesh.position.distanceToSquared(camera.position) -
+        left.mesh.position.distanceToSquared(camera.position);
+    });
+  for (let index = 0; index < overBudgetCount; index += 1) {
+    pressureCandidates[index]?.expire();
+  }
   pruneExpiredToys();
   rigidDebrisStats = rigidDebris.getStats();
 }
 
 function getCurrentRigidDebrisBodyBudget(): number {
   return getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget);
+}
+
+function updateGroundDebrisCleanup(delta: number): void {
+  const lifetimeSeconds = getEffectiveGroundDebrisLifetimeSeconds(groundDebrisLifetimeSeconds);
+
+  for (const toy of toys) {
+    if (!toy?.isInstancedFragment || toy.isExpired) continue;
+    toy.updateGroundDebrisCleanup(delta, lifetimeSeconds, isGroundDebrisCleanupGrounded(toy));
+  }
+}
+
+function getGroundedDebrisCleanupCandidates(): PhysicsToy[] {
+  return toys.filter((toy) => (
+    toy.isInstancedFragment &&
+    !toy.isExpired &&
+    isGroundDebrisCleanupGrounded(toy)
+  ));
+}
+
+function isGroundDebrisCleanupGrounded(toy: PhysicsToy): boolean {
+  if (toy.isSleeping || toy.hadSupportContactLastUpdate) return true;
+
+  const supportBounds = getGroundDebrisCleanupSupportBounds(toy);
+  const supportHeight = terrainAndRubbleCollisionWorld.getSupportHeight?.(supportBounds);
+  if (supportHeight !== null && supportHeight !== undefined) {
+    const bottomY = toy.mesh.position.y - toy.radius;
+    if (Math.abs(bottomY - supportHeight) <= 0.09) return true;
+  }
+
+  const bottomProbeY = Math.floor(toy.mesh.position.y - toy.radius - 0.04);
+  const minX = Math.floor(toy.mesh.position.x - toy.radius);
+  const maxX = Math.floor(toy.mesh.position.x + toy.radius);
+  const minZ = Math.floor(toy.mesh.position.z - toy.radius);
+  const maxZ = Math.floor(toy.mesh.position.z + toy.radius);
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let z = minZ; z <= maxZ; z += 1) {
+      if (terrainAndRubbleCollisionWorld.isSolid(x, bottomProbeY, z)) return true;
+    }
+  }
+  return false;
+}
+
+function getGroundDebrisCleanupSupportBounds(toy: PhysicsToy): CollisionBounds {
+  const position = toy.mesh.position;
+  return {
+    minX: position.x - toy.radius,
+    maxX: position.x + toy.radius,
+    minY: position.y - toy.radius,
+    maxY: position.y + toy.radius,
+    minZ: position.z - toy.radius,
+    maxZ: position.z + toy.radius
+  };
 }
 
 function absorbSettledFragmentsIntoRubble(): void {

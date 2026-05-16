@@ -161,7 +161,13 @@ export class PhysicsFragmentInstancer {
 function isRenderableFragment(
   toy: PhysicsToy
 ): toy is PhysicsToy & { readonly fragmentBlock: number; readonly debrisShape: NonNullable<PhysicsToy["debrisShape"]> } {
-  return toy.isInstancedFragment && !toy.isExpired && toy.fragmentBlock !== null && toy.debrisShape !== null;
+  return (
+    toy.isInstancedFragment &&
+    toy.isFragmentRenderVisible &&
+    !toy.isExpired &&
+    toy.fragmentBlock !== null &&
+    toy.debrisShape !== null
+  );
 }
 
 function createFragmentRenderBatchKey(block: number, shapeId: DebrisShapeId): string {

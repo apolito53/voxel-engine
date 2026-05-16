@@ -1,5 +1,4 @@
 import { PHYSICS_OBJECT_BUDGET_STEP } from "./physicsBudget";
-import { normalizeBlockFragmentCount } from "./blockFragments";
 
 export const MIN_RIGID_DEBRIS_BODY_BUDGET = 32;
 export const MAX_RIGID_DEBRIS_BODY_BUDGET = 768;
@@ -34,20 +33,6 @@ export function getEffectiveRigidDebrisBodyBudget(
     getRigidDebrisBodyBudget(physicsObjectBudget),
     normalizeGroundDebrisBudget(groundDebrisBudget)
   );
-}
-
-export function getGroundDebrisSpawnAllowance(
-  liveGroundDebrisCount: number,
-  requestedFragmentCount: number,
-  effectiveBodyBudget: number
-): number {
-  const liveCount = Number.isFinite(liveGroundDebrisCount)
-    ? Math.max(0, Math.floor(liveGroundDebrisCount))
-    : 0;
-  const requestedCount = normalizeBlockFragmentCount(requestedFragmentCount);
-  const budget = normalizeGroundDebrisBudget(effectiveBodyBudget, MIN_GROUND_DEBRIS_BUDGET);
-  const availableSlots = Math.max(0, budget - liveCount);
-  return Math.min(requestedCount, availableSlots);
 }
 
 export function normalizeGroundDebrisBudget(

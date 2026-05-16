@@ -26,6 +26,8 @@ const FRAGMENT_GROUND_VERTICAL_DAMPING = 0.36;
 const FRAGMENT_WALL_DAMPING = 0.74;
 const FRAGMENT_PARTIAL_SUPPORT_EPSILON = 0.025;
 const FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION = BLOCK_FRAGMENT_VISUAL_SIZE * 2.25;
+const GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER = 2;
+const GROUND_DEBRIS_AIRBORNE_MIN_SECONDS = 6;
 const CORE_COLLISION_RESTITUTION = 1.55;
 const CORE_COLLISION_DAMPING = 0.985;
 const PHYSICS_TOY_COLLISION_CELL_SIZE = 1;
@@ -119,6 +121,8 @@ export class PhysicsToy {
   private supportAnchoredSleep = false;
   private sleeping = false;
   private expired = false;
+  private fragmentRenderVisible = true;
+  private groundDebrisCleanupSeconds: number | null = null;
   private rigidDebrisBodyAttached = false;
   private rigidDebrisExternalRevision = 0;
 
@@ -199,6 +203,10 @@ export class PhysicsToy {
     return this.fragmentBlock !== null;
   }
 
+  get isFragmentRenderVisible(): boolean {
+    return this.fragmentRenderVisible;
+  }
+
   get isRigidDebrisDriven(): boolean {
     return this.rigidDebrisBodyAttached;
   }
@@ -221,6 +229,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetGroundDebrisCleanupClock();
     this.markRigidDebrisExternalMutation();
   }
 
@@ -231,6 +240,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetGroundDebrisCleanupClock();
   }
 
   expire(): void {
@@ -240,6 +250,7 @@ export class PhysicsToy {
     this.expired = true;
     this.sleeping = false;
     this.supportAnchoredSleep = false;
+    this.fragmentRenderVisible = false;
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
   }
@@ -253,6 +264,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetGroundDebrisCleanupClock();
     this.mesh.position.copy(position);
     this.velocity.copy(velocity);
   }
@@ -278,6 +290,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetGroundDebrisCleanupClock();
     this.rigidDebrisExternalRevision = 0;
   }
 
@@ -296,6 +309,49 @@ export class PhysicsToy {
     this.supportAnchoredSleep = state.sleeping;
     this.supportContactLastUpdate = state.sleeping;
     this.settledSeconds = state.sleeping ? this.sleepAfterSeconds : 0;
+    if (!state.sleeping) this.resetGroundDebrisCleanupClock();
+  }
+
+  resetGroundDebrisCleanupClock(): void {
+    if (!this.isInstancedFragment) return;
+
+    this.groundDebrisCleanupSeconds = null;
+    this.fragmentRenderVisible = true;
+  }
+
+  updateGroundDebrisCleanup(delta: number, lifetimeSeconds: number | null, isGroundedForCleanup = this.sleeping): void {
+    if (!this.isInstancedFragment || this.expired) return;
+
+    if (lifetimeSeconds === null) {
+      this.resetGroundDebrisCleanupClock();
+      return;
+    }
+
+    if (
+      !isGroundedForCleanup &&
+      this.groundDebrisCleanupSeconds === null &&
+      this.ageSeconds < getGroundDebrisAirborneFallbackSeconds(lifetimeSeconds)
+    ) {
+      this.fragmentRenderVisible = true;
+      return;
+    }
+
+    const safeLifetimeSeconds = Math.max(0, lifetimeSeconds);
+    if (safeLifetimeSeconds <= 0) {
+      this.expire();
+      return;
+    }
+
+    this.groundDebrisCleanupSeconds = (this.groundDebrisCleanupSeconds ?? 0) + Math.max(0, delta);
+    if (this.groundDebrisCleanupSeconds >= safeLifetimeSeconds) {
+      this.expire();
+      return;
+    }
+
+    this.fragmentRenderVisible = shouldRenderFragmentDuringCleanup(
+      this.groundDebrisCleanupSeconds,
+      safeLifetimeSeconds
+    );
   }
 
   addTumbleImpulse(normal: THREE.Vector3, speed: number): void {
@@ -320,7 +376,7 @@ export class PhysicsToy {
     this.supportContactLastUpdate = false;
     this.ageSeconds += delta;
     if (this.maxAgeSeconds !== null && this.ageSeconds >= this.maxAgeSeconds) {
-      this.expired = true;
+      this.expire();
       return impacts;
     }
 
@@ -1015,6 +1071,23 @@ function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boo
   const numericValue = value ?? 1;
   if (!Number.isFinite(numericValue)) return 1;
   return Math.max(0.0001, numericValue);
+}
+
+function shouldRenderFragmentDuringCleanup(elapsedSeconds: number, lifetimeSeconds: number): boolean {
+  const remainingSeconds = lifetimeSeconds - elapsedSeconds;
+  const blinkWindowSeconds = Math.min(3, lifetimeSeconds * 0.5);
+  if (remainingSeconds >= blinkWindowSeconds) return true;
+
+  const blinkProgress = 1 - Math.max(0, remainingSeconds) / Math.max(0.001, blinkWindowSeconds);
+  const flashesPerSecond = 4 + blinkProgress * 18;
+  return Math.floor(elapsedSeconds * flashesPerSecond) % 2 === 0;
+}
+
+function getGroundDebrisAirborneFallbackSeconds(lifetimeSeconds: number): number {
+  return Math.max(
+    GROUND_DEBRIS_AIRBORNE_MIN_SECONDS,
+    lifetimeSeconds * GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER
+  );
 }
 
 function createFragmentAngularVelocity(velocity: THREE.Vector3): THREE.Vector3 {

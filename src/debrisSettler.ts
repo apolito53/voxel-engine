@@ -210,6 +210,26 @@ export class DebrisSettler {
     return discardedFragments;
   }
 
+  discardSettledRegionsForPressure(
+    activeCenter: THREE.Vector3,
+    targetBodyReduction: number
+  ): number {
+    if (targetBodyReduction <= 0) return 0;
+
+    let discardedFragments = 0;
+    for (const region of this.getPressureOrderedRegions(activeCenter)) {
+      if (!this.regionsById.has(region.id) || !this.isRegionSleeping(region)) continue;
+
+      const fragmentCount = region.fragments.size;
+      this.discardRegion(region);
+      discardedFragments += fragmentCount;
+      if (discardedFragments >= targetBodyReduction) break;
+    }
+
+    this.refreshLiveStats();
+    return discardedFragments;
+  }
+
   forget(toy: PhysicsToy): void {
     const regionId = this.fragmentRegionIds.get(toy);
     if (regionId === undefined) return;

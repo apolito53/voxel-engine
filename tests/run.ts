@@ -169,10 +169,17 @@ import {
   MIN_RIGID_DEBRIS_BODY_BUDGET,
   formatGroundDebrisBudget,
   getEffectiveRigidDebrisBodyBudget,
-  getGroundDebrisSpawnAllowance,
   normalizeGroundDebrisBudget,
   getRigidDebrisBodyBudget
 } from "../src/rigidDebrisBudget";
+import {
+  DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS,
+  FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS,
+  MAX_GROUND_DEBRIS_LIFETIME_SECONDS,
+  formatGroundDebrisLifetime,
+  getEffectiveGroundDebrisLifetimeSeconds,
+  normalizeGroundDebrisLifetime
+} from "../src/debrisLifetime";
 import { RigidDebrisSimulation } from "../src/rigidDebris";
 import {
   createDirectionalShadowBasis,
@@ -2933,6 +2940,63 @@ test("block fragments visually tumble while flying", () => {
   );
 });
 
+test("settled debris cleanup blinks before expiring", () => {
+  const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  sleepTestFragment(fragment);
+
+  fragment.updateGroundDebrisCleanup(0.2, 1);
+  assert(!fragment.isExpired, "freshly settled cleanup debris should remain visible at first");
+  assert(fragment.isFragmentRenderVisible, "cleanup debris should not blink until the final lifetime window");
+
+  fragment.updateGroundDebrisCleanup(0.55, 1);
+  assert(!fragment.isExpired, "cleanup debris should blink before it disappears");
+  assert(!fragment.isFragmentRenderVisible, "cleanup debris should hide on one of the accelerating blink beats");
+
+  fragment.updateGroundDebrisCleanup(0.3, 1);
+  assert(fragment.isExpired, "cleanup debris should expire once its grounded lifetime elapses");
+});
+
+test("forever debris lifetime keeps settled fragments renderable", () => {
+  const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  sleepTestFragment(fragment);
+
+  fragment.updateGroundDebrisCleanup(120, null);
+
+  assert(!fragment.isExpired, "forever cleanup should not expire settled debris");
+  assert(fragment.isFragmentRenderVisible, "forever cleanup should keep debris visible");
+});
+
+test("debris cleanup starts after first grounded contact", () => {
+  const fragment = createTestFragment(BLOCK.dirt, 0.5, 3.1, 0.5);
+
+  fragment.updateGroundDebrisCleanup(10, 1, false);
+  assert(!fragment.isExpired, "airborne debris should not consume its cleanup lifetime");
+  assert(fragment.isFragmentRenderVisible, "airborne debris should stay renderable before first ground contact");
+
+  fragment.updateGroundDebrisCleanup(0.5, 1, true);
+  assert(!fragment.isExpired, "grounded debris should start its cleanup clock");
+
+  fragment.updateGroundDebrisCleanup(0.6, 1, false);
+  assert(fragment.isExpired, "cleanup should continue after debris has first touched the ground");
+});
+
+test("stale airborne debris eventually uses cleanup as a floater fallback", () => {
+  const airWorld = {
+    isSolid(_x: number, _y: number, _z: number): boolean {
+      return false;
+    }
+  };
+  const fragment = createTestFragment(BLOCK.dirt, 0.5, 8.1, 0.5);
+
+  fragment.update(5.9, airWorld);
+  fragment.updateGroundDebrisCleanup(1, 3, false);
+  assert(!fragment.isExpired, "fresh airborne debris should survive the fallback grace window");
+
+  fragment.update(0.2, airWorld);
+  fragment.updateGroundDebrisCleanup(3.1, 3, false);
+  assert(fragment.isExpired, "stale never-grounded debris should not float forever");
+});
+
 test("block fragments lose ground speed and sleep near the fracture site", () => {
   const floorWorld = {
     isSolid(_x: number, y: number, _z: number): boolean {
@@ -3832,16 +3896,17 @@ test("debris settler pressure relief prefers sleeping regions before awake debri
   );
 });
 
-test("debris settler pressure discard removes debris without making instant rubble", () => {
+test("debris settler settled discard removes ground debris without making instant rubble", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
   const nearFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
   const farFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
+  sleepTestFragment(farFragment);
 
   settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [nearFragment]);
   settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 1.1, 0.5), [farFragment]);
 
-  const removed = settler.discardRegionsForPressure(new THREE.Vector3(0.5, 1.1, 0.5), 1);
+  const removed = settler.discardSettledRegionsForPressure(new THREE.Vector3(0.5, 1.1, 0.5), 1);
   const stats = settler.getStats();
 
   assertEqual(removed, 1, "visual debris budget relief should report the discarded body count");
@@ -3851,6 +3916,19 @@ test("debris settler pressure discard removes debris without making instant rubb
   assert(farFragment.isExpired, "the farthest debris region should be expired for pruning");
   assertEqual(rubble.getStats().pieces, 0, "debris budget discard should not create ground lumps");
   assertEqual(rubble.getStats().visualChunks, 0, "debris budget discard should not freeze airborne visual chunks");
+});
+
+test("debris settler settled discard ignores airborne debris", () => {
+  const settler = new DebrisSettler();
+  const fragment = createTestFragment(BLOCK.stone, 30.5, 3.1, 0.5);
+  fragment.velocity.set(0, 2, 0);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 3.1, 0.5), [fragment]);
+
+  const removed = settler.discardSettledRegionsForPressure(new THREE.Vector3(0.5, 1.1, 0.5), 1);
+
+  assertEqual(removed, 0, "ground-debris pressure should not erase shards while they are still flying");
+  assert(settler.owns(fragment), "airborne debris should remain in its active settling region");
+  assert(!fragment.isExpired, "airborne debris should not be expired by the settled-only cap");
 });
 
 test("debris settler waits for quiet fragments before soft finalization", () => {
@@ -5167,16 +5245,6 @@ test("physics object budget clamps and steps predictably", () => {
     "ground debris slider should cap even a high physics object budget"
   );
   assertEqual(
-    getGroundDebrisSpawnAllowance(12, 27, 16),
-    4,
-    "new debris spawns should consume only the remaining active ground-debris slots"
-  );
-  assertEqual(
-    getGroundDebrisSpawnAllowance(16, 27, 16),
-    0,
-    "a full ground-debris budget should skip new visual fragments instead of forcing rubble"
-  );
-  assertEqual(
     formatGroundDebrisBudget(0),
     "0 shards",
     "ground debris label should keep the disabled state readable"
@@ -5185,6 +5253,36 @@ test("physics object budget clamps and steps predictably", () => {
     formatGroundDebrisBudget(16),
     "16 shards",
     "ground debris label should stay terse for normal slider values"
+  );
+  assertEqual(
+    normalizeGroundDebrisLifetime(null),
+    DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS,
+    "missing ground debris lifetime should use the readable default"
+  );
+  assertEqual(
+    normalizeGroundDebrisLifetime(MAX_GROUND_DEBRIS_LIFETIME_SECONDS + 10),
+    MAX_GROUND_DEBRIS_LIFETIME_SECONDS,
+    "ground debris lifetime should clamp to the safety upper bound"
+  );
+  assertEqual(
+    normalizeGroundDebrisLifetime(FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS),
+    FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS,
+    "ground debris lifetime should keep zero as the forever setting"
+  );
+  assertEqual(
+    getEffectiveGroundDebrisLifetimeSeconds(FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS),
+    null,
+    "forever lifetime should disable timer cleanup"
+  );
+  assertEqual(
+    formatGroundDebrisLifetime(0),
+    "Forever",
+    "ground debris lifetime label should make the zero setting obvious"
+  );
+  assertEqual(
+    formatGroundDebrisLifetime(12),
+    "12s",
+    "ground debris lifetime label should stay compact for timed cleanup"
   );
 });
 
