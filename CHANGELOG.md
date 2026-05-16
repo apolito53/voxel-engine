@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-05-16
+
 ### Changed
 
 - Changed the in-world crosshair to a circular reticle with separated ticks and an open center for clearer aiming.
