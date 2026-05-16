@@ -8,13 +8,14 @@
 - Changed core ADS to apply a slight 15% camera zoom while right click is held on Physics Core or Hitscan Core.
 - Changed loose debris shards to render and collide at roughly half their previous size so piles snag less aggressively.
 - Changed sleeping rigid debris inside the active player bubble to remain wakeable physics instead of baking into destructible rubble immediately.
+- Changed `Max Ground Debris` pressure relief to skip/cull excess visual debris instead of baking instant rubble lumps or freezing airborne shards.
 
 ### Added
 
 - Added dev-server start/stop markers under `logs/server-starts-YYYY-MM-DD.jsonl`, including port, package version, branch, commit, dirty files, short diff stats, and runtime metadata.
 - Added pass-versioned hitch logs plus browser hooks (`__VOXEL_HITCH_PASS__`, `__VOXEL_HITCH_START_PASS__`) so focused performance repros do not get mixed with stale logs.
 - Added a `globalThis.__VOXEL_CODEX_PILOT__` play bridge for browser automation that can create Superflat labs, spawn scenarios, move/look/fire through real player systems, and start focused hitch-log passes.
-- Added a gameplay `Max Ground Debris` slider that caps active rigid debris bodies and forces material-preserving pressure bake-out sooner.
+- Added a gameplay `Max Ground Debris` slider that caps active rigid debris bodies.
 
 ### Fixed
 

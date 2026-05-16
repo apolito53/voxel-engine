@@ -18,6 +18,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Start on Windows: `.\start.ps1`
 - Start on Linux/Ubuntu: `chmod +x ./start.sh && ./start.sh`
 - Dev server: `npm.cmd run dev -- --port 5173`; `scripts/dev-server.mjs` writes a `logs/server-starts-YYYY-MM-DD.jsonl` repo-state marker before launching Vite.
+- Hitch-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5174`.
 - Strict type check: `npm.cmd run typecheck`
 - Engine robustness tests: `npm.cmd run test`
 - Production build: `npm.cmd run build`
@@ -80,7 +81,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Rapier WASM initialization, dynamic cuboid debris bodies with per-fragment half extents, path-lookahead temporary terrain/rubble support colliders, transform sync back to fragment render proxies, sleeping stats, and cleanup: `src/rigidDebris.ts`
 - Persistent destructible rubble cover patches, sparse hidden support footprints, parked faceted heightfield rendering, batched absorption, bounded surface samples, baked static shard-pile visuals, scaled durability separate from material volume, raycast target-cell reporting, direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support-height queries, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
-- CPU-facing Rapier debris body cap, active ground-debris slider clamp, and label/persistence helpers: `src/rigidDebrisBudget.ts`
+- CPU-facing Rapier debris body cap, active ground-debris slider clamp/spawn allowance, and label/persistence helpers: `src/rigidDebrisBudget.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
 - Render quality controller, Custom preset for slider edits, persistence, and renderer/light/camera application: `src/qualityController.ts`

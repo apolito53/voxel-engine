@@ -24,7 +24,15 @@ chmod +x ./start.sh
 
 Open `http://127.0.0.1:5173`.
 
-Pass a different port as the first argument, for example `.\start.ps1 5174` or `./start.sh 5174`.
+The dedicated local ports for this Vite project are:
+
+- Base Vite server: `5173`
+- Hitch-log receiver: `5174`
+- Preview server: `4173`
+
+Run `npm.cmd run debug:logs` in a second terminal when you want the local hitch-log receiver on `127.0.0.1:5174`.
+
+Pass a different base-server port as the first argument only for temporary one-off runs, for example `.\start.ps1 5193` or `./start.sh 5193`. Do not use `5174`; it is reserved for the hitch-log receiver.
 
 ## Controls
 
@@ -59,7 +67,7 @@ Pass a different port as the first argument, for example `.\start.ps1 5174` or `
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Settings` splits tuning into `Graphics` and `Gameplay` tabs: graphics owns quality, render distance, physics body budget, shadows, debris count, and Super Ultra; gameplay owns projectile core size/velocity, health bars, and cleanup. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
-- Gameplay `Max Ground Debris` caps active rigid debris bodies and pushes extra shards through the material-preserving rubble bake-out path
+- Gameplay `Max Ground Debris` caps active rigid debris bodies; overflow visual shards are skipped or culled instead of being baked into instant rubble lumps
 - Gameplay `Health Bars` toggles block/rubble damage bars and clears any visible bars when turned off
 - Gameplay `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris, and rubble cover
 - Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
