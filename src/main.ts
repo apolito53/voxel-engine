@@ -154,7 +154,16 @@ import {
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
-import { getRigidDebrisBodyBudget } from "./rigidDebrisBudget";
+import {
+  GROUND_DEBRIS_BUDGET_STEP,
+  MAX_GROUND_DEBRIS_BUDGET,
+  MIN_GROUND_DEBRIS_BUDGET,
+  formatGroundDebrisBudget,
+  getEffectiveRigidDebrisBodyBudget,
+  normalizeGroundDebrisBudget,
+  readGroundDebrisBudgetPreference,
+  writeGroundDebrisBudgetPreference
+} from "./rigidDebrisBudget";
 import {
   RigidDebrisSimulation,
   createEmptyRigidDebrisStats,
@@ -287,6 +296,8 @@ const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
 const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
 const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
 const coreVelocityValue = requireElement<HTMLElement>("#core-velocity-value");
+const groundDebrisBudgetSlider = requireElement<HTMLInputElement>("#ground-debris-budget-slider");
+const groundDebrisBudgetValue = requireElement<HTMLElement>("#ground-debris-budget-value");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
@@ -366,6 +377,7 @@ let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
+let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let renderedPartialBlockRevision = -1;
 let rightMouseButtonDown = false;
 
@@ -564,6 +576,7 @@ qualityController.initialize();
 updateSettingsControls();
 updatePhysicsBudgetControls();
 updatePhysicsCoreControls();
+updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
 
 function requireWorldRegistry(): WorldRegistry {
@@ -667,6 +680,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   coreVelocitySlider.addEventListener("input", () => {
     setPhysicsCoreVelocityPercent(coreVelocitySlider.value);
+  }, eventListenerOptions);
+  groundDebrisBudgetSlider.addEventListener("input", () => {
+    setGroundDebrisBudget(groundDebrisBudgetSlider.value);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -1900,6 +1916,7 @@ function setPhysicsObjectBudget(nextBudget: number, persist = true): void {
 
   updatePhysicsBudgetControls();
   enforcePhysicsToyBudget();
+  enforceRigidDebrisBudget();
   if (persist) {
     engineEvents.emit("settings:physics-budget-changed", {
       physicsObjectBudget
@@ -1965,6 +1982,21 @@ function updatePhysicsCoreControls(): void {
   coreVelocityValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.velocityPercent);
 }
 
+function setGroundDebrisBudget(nextBudget: unknown): void {
+  groundDebrisBudget = normalizeGroundDebrisBudget(nextBudget, groundDebrisBudget);
+  writeGroundDebrisBudgetPreference(groundDebrisBudget);
+  updateGroundDebrisBudgetControls();
+  enforceRigidDebrisBudget();
+}
+
+function updateGroundDebrisBudgetControls(): void {
+  groundDebrisBudgetSlider.min = String(MIN_GROUND_DEBRIS_BUDGET);
+  groundDebrisBudgetSlider.max = String(MAX_GROUND_DEBRIS_BUDGET);
+  groundDebrisBudgetSlider.step = String(GROUND_DEBRIS_BUDGET_STEP);
+  groundDebrisBudgetSlider.value = String(groundDebrisBudget);
+  groundDebrisBudgetValue.textContent = formatGroundDebrisBudget(groundDebrisBudget);
+}
+
 function emitQualityChanged(source: QualityChangeSource): void {
   const preset = qualityController.preset;
   engineEvents.emit("quality:changed", {
@@ -1999,6 +2031,8 @@ function updateSettingsControls(): void {
   debrisCountSlider.step = "1";
   debrisCountSlider.value = String(preset.blockFragmentCount);
   debrisCountValue.textContent = formatBlockFragmentCount(preset.blockFragmentCount);
+
+  updateGroundDebrisBudgetControls();
 }
 
 function enforcePhysicsToyBudget(): void {
@@ -2030,7 +2064,7 @@ function enforceRigidDebrisBudget(): void {
 }
 
 function getCurrentRigidDebrisBodyBudget(): number {
-  return getRigidDebrisBodyBudget(physicsObjectBudget);
+  return getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget);
 }
 
 function absorbSettledFragmentsIntoRubble(): void {

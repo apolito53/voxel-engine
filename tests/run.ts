@@ -161,8 +161,15 @@ import {
 } from "../src/qualitySettings";
 import { voxelRaycast } from "../src/raycast";
 import {
+  DEFAULT_GROUND_DEBRIS_BUDGET,
+  GROUND_DEBRIS_BUDGET_STEP,
+  MAX_GROUND_DEBRIS_BUDGET,
   MAX_RIGID_DEBRIS_BODY_BUDGET,
+  MIN_GROUND_DEBRIS_BUDGET,
   MIN_RIGID_DEBRIS_BODY_BUDGET,
+  formatGroundDebrisBudget,
+  getEffectiveRigidDebrisBodyBudget,
+  normalizeGroundDebrisBudget,
   getRigidDebrisBodyBudget
 } from "../src/rigidDebrisBudget";
 import { RigidDebrisSimulation } from "../src/rigidDebris";
@@ -5116,6 +5123,36 @@ test("physics object budget clamps and steps predictably", () => {
     getRigidDebrisBodyBudget(Number.NaN),
     MIN_RIGID_DEBRIS_BODY_BUDGET,
     "invalid rigid debris budgets should fall back to the minimum safety rail"
+  );
+  assertEqual(
+    normalizeGroundDebrisBudget(null),
+    DEFAULT_GROUND_DEBRIS_BUDGET,
+    "missing ground debris setting should use the practical default cap"
+  );
+  assertEqual(
+    normalizeGroundDebrisBudget(MIN_GROUND_DEBRIS_BUDGET - GROUND_DEBRIS_BUDGET_STEP),
+    MIN_GROUND_DEBRIS_BUDGET,
+    "ground debris setting should allow fully disabling persistent active debris"
+  );
+  assertEqual(
+    normalizeGroundDebrisBudget(MAX_GROUND_DEBRIS_BUDGET + GROUND_DEBRIS_BUDGET_STEP),
+    MAX_GROUND_DEBRIS_BUDGET,
+    "ground debris setting should clamp to the rigid-body safety cap"
+  );
+  assertEqual(
+    getEffectiveRigidDebrisBodyBudget(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget, 96),
+    96,
+    "ground debris slider should cap even a high physics object budget"
+  );
+  assertEqual(
+    formatGroundDebrisBudget(0),
+    "0 shards",
+    "ground debris label should keep the disabled state readable"
+  );
+  assertEqual(
+    formatGroundDebrisBudget(16),
+    "16 shards",
+    "ground debris label should stay terse for normal slider values"
   );
 });
 

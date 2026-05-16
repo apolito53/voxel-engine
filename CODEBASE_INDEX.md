@@ -80,7 +80,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Rapier WASM initialization, dynamic cuboid debris bodies with per-fragment half extents, path-lookahead temporary terrain/rubble support colliders, transform sync back to fragment render proxies, sleeping stats, and cleanup: `src/rigidDebris.ts`
 - Persistent destructible rubble cover patches, sparse hidden support footprints, parked faceted heightfield rendering, batched absorption, bounded surface samples, baked static shard-pile visuals, scaled durability separate from material volume, raycast target-cell reporting, direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support-height queries, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
-- CPU-facing Rapier debris body cap derived from the broader physics object budget: `src/rigidDebrisBudget.ts`
+- CPU-facing Rapier debris body cap, active ground-debris slider clamp, and label/persistence helpers: `src/rigidDebrisBudget.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
 - Render quality controller, Custom preset for slider edits, persistence, and renderer/light/camera application: `src/qualityController.ts`
