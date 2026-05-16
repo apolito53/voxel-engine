@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.6.3 - 2026-05-16
+
+### Added
+
+- Added material-tinted poofs when partial-block bite cells are destroyed, plus debris cleanup poofs so expired shards leave a short dust burst instead of simply vanishing.
+
+### Changed
+
+- Shortened the debris flashing window by half and made the blink cadence ramp up more sharply until expiration.
+
 ## 0.6.2 - 2026-05-16
 
 ### Changed
