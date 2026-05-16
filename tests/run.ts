@@ -3973,6 +3973,34 @@ test("debris settler converts far bubble debris into rubble", () => {
   assertEqual(scene.children.length, 1, "far debris should become one persistent rubble mesh");
 });
 
+test("debris settler VFX mode expires far debris without rubble conversion", () => {
+  const scene = new THREE.Scene();
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(scene);
+  const fragment = createTestFragment(BLOCK.stone, 0.5, 1.1, 0.5, 3);
+  sleepTestFragment(fragment);
+
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(0.5, 1.1, 0.5), [fragment]);
+  const beforeGrace = settler.update(DEBRIS_REGION_FINALIZE_SECONDS - 0.01, rubble, {
+    activeCenter: new THREE.Vector3(20, 1.1, 0.5),
+    activeRadius: 4,
+    finalizationMode: "vfx"
+  });
+  assertEqual(beforeGrace.finalizedBatches, 0, "VFX debris should keep the normal visible grace before cleanup");
+  assert(!fragment.isExpired, "far VFX debris should not expire before the settle grace");
+
+  const stats = settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS + 0.02, rubble, {
+    activeCenter: new THREE.Vector3(20, 1.1, 0.5),
+    activeRadius: 4,
+    finalizationMode: "vfx"
+  });
+
+  assertEqual(stats.finalizedBatches, 0, "VFX cleanup should not report rubble finalization batches");
+  assertEqual(rubble.getStats().pieces, 0, "VFX cleanup should not create gameplay rubble material");
+  assertEqual(scene.children.length, 0, "VFX cleanup should not leave a persistent rubble mesh");
+  assert(fragment.isExpired, "far VFX debris should be marked for normal pruning");
+});
+
 test("debris settler bakes far sleeping rigid debris without losing material", async () => {
   const scene = new THREE.Scene();
   const settler = new DebrisSettler();
@@ -4091,6 +4119,25 @@ test("debris settler pressure relief finalizes farthest regions first", () => {
     "pressure relief should preserve the far region's material"
   );
   assertEqual(rubble.getStats().visualChunks, 1, "pressure relief should keep a static shard pose instead of making invisible support-only rubble");
+});
+
+test("debris settler pressure discard expires farthest regions without rubble", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const nearFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  const farFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [nearFragment]);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 1.1, 0.5), [farFragment]);
+
+  const removed = settler.discardRegionsForPressure(new THREE.Vector3(0.5, 1.1, 0.5), 1);
+  const stats = settler.getStats();
+
+  assertEqual(removed, 1, "VFX pressure relief should report the debris bodies it expired");
+  assertEqual(stats.finalizedBatches, 0, "VFX pressure relief should not emit rubble batches");
+  assertEqual(rubble.getStats().pieces, 0, "VFX pressure relief should not deposit material into rubble");
+  assert(settler.owns(nearFragment), "near debris should be preserved when a farther region can relieve pressure");
+  assert(farFragment.isExpired, "the farthest debris region should be expired for pruning");
 });
 
 test("debris settler pressure relief prefers sleeping regions before awake debris", () => {

@@ -2,6 +2,14 @@
 
 Shortlist of ideas worth keeping visible without pretending they are committed scope yet.
 
+## Rigid Sub-Voxel Damage Objects
+
+- Current direction: loose block debris is VFX, while block HP and the sparse 3x3x3 partial-block bite lattice own durable terrain damage.
+- Future experiment: let selected damaged sub-voxels promote into real rigid objects when that is the actual mechanic, instead of using generic debris bake-out as an accidental gameplay proxy.
+- Keep this opt-in and local to impacted macro blocks. Do not activate the whole world as tiny rigid voxels.
+- Useful first target: a heavily damaged bite cell or severed exposed chunk can detach as a rigid cuboid/shard, collide briefly, then either expire as VFX or intentionally become a placed terrain/cover object through a dedicated rule.
+- Preserve material/HP accounting separately from visible shard count so graphics quality never changes gameplay value.
+
 ## Future Nova Chat Hook
 
 - First local slice is in place: `Enter` opens Nova Chat, `NovaContextJournal` collects recent engine context, and `novaChat.ts` produces local context-aware replies without network calls.

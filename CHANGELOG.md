@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.6.7 - 2026-05-16
+
+### Changed
+
+- Changed loose block debris into pure VFX in the runtime loop: settled, far, expired, or over-budget shards now blink/poof or get culled instead of baking into persistent rubble cover.
+- Kept the old rubble conversion helpers parked for tests/future experiments, while the durable terrain-damage truth now lives in block HP and the partial-block bite lattice.
+- Added a TODO note for a future rigid sub-voxel pass where promoted damaged cells could become real rigid objects deliberately instead of piggybacking on debris bake-out.
+
 ## 0.6.6 - 2026-05-16
 
 ### Added

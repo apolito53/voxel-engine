@@ -181,10 +181,9 @@ export class PhysicsToy {
       damagesBlocks: false,
       inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
-      // Fragments now live inside the player-centered active-debris bubble.
-      // Distance and budget pressure decide when they become cheap rubble, so
-      // a nearby sleeping pile should not silently expire while the player is
-      // still standing there looking at it.
+      // Fragments are short-lived VFX. Grounded lifetime and budget pressure
+      // decide when they blink/poof away; durable damage belongs to the
+      // partial-block terrain lattice, not to debris bake-out.
       maxAgeSeconds: null,
       sleepSpeed: FRAGMENT_SLEEP_SPEED,
       sleepAfterSeconds: FRAGMENT_SLEEP_AFTER_SECONDS,

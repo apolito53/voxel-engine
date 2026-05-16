@@ -9,6 +9,9 @@ export type FragmentRubbleAbsorptionOptions = {
   readonly activeRadiusBuffer?: number;
 };
 
+// Legacy rubble-conversion policy retained for isolated rubble/cover tests and
+// future experiments. The normal runtime now treats loose debris as VFX and
+// lets grounded lifetime/budget cleanup expire shards instead of calling this.
 export function shouldAbsorbFragmentIntoRubble(
   toy: PhysicsToy,
   options: FragmentRubbleAbsorptionOptions = {}

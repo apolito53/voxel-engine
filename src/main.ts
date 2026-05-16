@@ -44,7 +44,6 @@ import {
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEngineEventBus } from "./engineEvents";
-import { shouldAbsorbFragmentIntoRubble } from "./fragmentRubble";
 import {
   IDLE_HEARTBEAT_MS,
   clampSimulationDelta,
@@ -184,8 +183,7 @@ import {
 import {
   RubbleField,
   type RubbleDamageEvent,
-  type RubbleFieldStats,
-  type RubbleFragmentAbsorptionOptions
+  type RubbleFieldStats
 } from "./rubble";
 import {
   createDirectionalShadowBasis,
@@ -1271,9 +1269,9 @@ function animate(): void {
     rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld);
     debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
       activeCenter: camera.position,
-      activeRadius: qualityController.preset.debrisActiveRadiusMeters
+      activeRadius: qualityController.preset.debrisActiveRadiusMeters,
+      finalizationMode: "vfx"
     });
-    absorbSettledFragmentsIntoRubble();
     enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
     updateGroundDebrisCleanup(delta);
@@ -2191,14 +2189,13 @@ function enforcePhysicsToyBudget(): void {
   const overBudgetCount = toys.length - physicsObjectBudget;
   if (overBudgetCount <= 0) return;
 
-  // Budget relief must preserve material. Finalize far debris into rubble
-  // before pruning bodies, so a stress test cannot quietly delete the future
-  // cover just because the physics array crossed its cap.
-  debrisSettler.finalizeRegionsForPressure(rubbleField, camera.position, overBudgetCount);
-  absorbExpiredOrphanFragmentsIntoRubble();
+  // Debris is VFX now. Durable damage lives in terrain HP and the partial
+  // bite lattice, so pressure relief should drop shard theater instead of
+  // baking surprise cover piles into the world.
+  debrisSettler.discardRegionsForPressure(camera.position, overBudgetCount);
   pruneExpiredToys();
-  absorbOrphanFragmentsForBudget(true);
-  absorbOrphanFragmentsForBudget(false);
+  expireOrphanFragmentsForBudget(true);
+  expireOrphanFragmentsForBudget(false);
   pruneOldestPhysicsCoresForBudget();
 }
 
@@ -2291,46 +2288,15 @@ function getGroundDebrisCleanupSupportBounds(toy: PhysicsToy): CollisionBounds {
   };
 }
 
-function absorbSettledFragmentsIntoRubble(): void {
-  for (let index = toys.length - 1; index >= 0; index -= 1) {
-    const toy = toys[index];
-    if (toy && debrisSettler.owns(toy)) continue;
-    if (!toy || !shouldAbsorbFragmentIntoRubble(toy, getFragmentRubbleAbsorptionOptions())) continue;
-
-    // Once debris has settled or aged out, it graduates from "expensive little
-    // physics shard" into cheap cover material. A low visual debris count can
-    // still carry a large share of the block volume, so graphics settings do
-    // not alter gameplay even when a tiny Potato shard expires before sleeping.
-    absorbFragmentToyIntoRubble(toy);
-    removePhysicsToyAt(index);
-  }
-}
-
-function getFragmentRubbleAbsorptionOptions(): {
-  readonly activeCenter: THREE.Vector3;
-  readonly activeRadius: number;
-  readonly activeRadiusBuffer: number;
-} {
-  return {
-    activeCenter: camera.position,
-    activeRadius: qualityController.preset.debrisActiveRadiusMeters,
-    activeRadiusBuffer: DEBRIS_ACTIVE_RADIUS_BUFFER_METERS
-  };
-}
-
-function absorbOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
+function expireOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
   if (toys.length <= physicsObjectBudget) return;
 
-  const absorptionOptions = getFragmentRubbleAbsorptionOptions();
   const candidates = toys
     .filter((toy) => (
       toy.isInstancedFragment &&
       !debrisSettler.owns(toy) &&
-      (
-        outsideBubbleOnly
-          ? shouldAbsorbFragmentIntoRubble(toy, absorptionOptions)
-          : !toy.isExpired
-      )
+      !toy.isExpired &&
+      (!outsideBubbleOnly || isFragmentOutsideActiveDebrisBubble(toy))
     ))
     .sort((left, right) => (
       right.mesh.position.distanceToSquared(camera.position) -
@@ -2342,17 +2308,7 @@ function absorbOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
 
     const index = toys.indexOf(toy);
     if (index === -1) continue;
-    absorbFragmentToyIntoRubble(toy, { forceVisualChunk: !outsideBubbleOnly });
-    removePhysicsToyAt(index);
-  }
-}
-
-function absorbExpiredOrphanFragmentsIntoRubble(): void {
-  for (let index = toys.length - 1; index >= 0; index -= 1) {
-    const toy = toys[index];
-    if (!toy || !toy.isInstancedFragment || debrisSettler.owns(toy) || !toy.isExpired) continue;
-
-    absorbFragmentToyIntoRubble(toy);
+    expireGroundDebrisWithPoof(toy);
     removePhysicsToyAt(index);
   }
 }
@@ -2365,22 +2321,10 @@ function pruneOldestPhysicsCoresForBudget(): void {
   }
 }
 
-function absorbFragmentToyIntoRubble(
-  toy: PhysicsToy,
-  options: RubbleFragmentAbsorptionOptions = {}
-): void {
-  if (!rubbleField.absorbFragment(toy, options)) return;
-
-  rigidDebris.invalidateStaticColliders();
-  engineEvents.emit("rubble:formed", {
-    position: {
-      x: toy.mesh.position.x,
-      y: toy.mesh.position.y,
-      z: toy.mesh.position.z
-    },
-    block: toy.fragmentBlock ?? 0,
-    pieces: toy.rubbleMaterialUnits
-  });
+function isFragmentOutsideActiveDebrisBubble(toy: PhysicsToy): boolean {
+  const activeRadius = Math.max(0, qualityController.preset.debrisActiveRadiusMeters) +
+    DEBRIS_ACTIVE_RADIUS_BUFFER_METERS;
+  return toy.mesh.position.distanceToSquared(camera.position) > activeRadius * activeRadius;
 }
 
 function emitRubbleBatchEvents(): void {

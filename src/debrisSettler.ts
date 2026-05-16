@@ -84,6 +84,7 @@ export type DebrisSettlerUpdateOptions = {
   readonly activeCenter?: THREE.Vector3;
   readonly activeRadius?: number;
   readonly activeRadiusBuffer?: number;
+  readonly finalizationMode?: "rubble" | "vfx";
 };
 
 type MutableDebrisSettlerStats = {
@@ -377,27 +378,32 @@ export class DebrisSettler {
   }
 
   private finalizeDueRegions(rubbleField: RubbleField, options: DebrisSettlerUpdateOptions): void {
+    const convertToRubble = options.finalizationMode !== "vfx";
+
     for (const region of this.getRegionsOldestFirst()) {
       if (!this.regionsById.has(region.id)) continue;
       this.updateRegionFinalizationDeadline(region);
 
       // With an active player bubble configured, distance replaces the old
-      // "hard max lifetime" as the normal conversion signal. A nearby sleeping
-      // heap can keep being shoved by cores instead of secretly becoming a
-      // baked pile while the player is studying it.
+      // "hard max lifetime" as the normal cleanup signal. The runtime expires
+      // far debris as VFX; parked cover tests can still opt into rubble mode.
       if (this.isActiveBubbleConfigured(options)) {
         if (this.isRegionInsideActiveBubble(region, options)) {
           // Sleeping rigid debris inside the player bubble is still live
           // physics state, just parked cheaply. Rapier can wake it when active
           // debris hits it, and the core broadphase can wake it when a player
-          // shot shoves it, so do not bake it into destructible rubble here.
+          // shot shoves it, so do not expire or convert it while nearby.
           this.sleepQuietRegionFragments(region);
           continue;
         }
 
         if (this.shouldFinalizeOutsideActiveBubble(region)) {
           this.sleepQuietRegionFragments(region);
-          this.finalizeRegion(region, rubbleField, false);
+          if (convertToRubble) {
+            this.finalizeRegion(region, rubbleField, false);
+          } else {
+            this.discardRegion(region);
+          }
         }
         continue;
       }
@@ -406,7 +412,11 @@ export class DebrisSettler {
       const reachedSettledDeadline = region.settledAt !== null && this.elapsedSeconds >= region.finalizeAt;
       if (!reachedHardCap && !reachedSettledDeadline) continue;
 
-      this.finalizeRegion(region, rubbleField, reachedHardCap);
+      if (convertToRubble) {
+        this.finalizeRegion(region, rubbleField, reachedHardCap);
+      } else {
+        this.discardRegion(region);
+      }
     }
   }
 
@@ -424,8 +434,8 @@ export class DebrisSettler {
 
     // The original fracture timer is still the "show the little shards for a
     // beat" floor, but late-bouncing debris now waits until it actually sleeps.
-    // This keeps us from freezing a chaotic mid-bounce pose into permanent
-    // rubble while the hard cap still prevents immortal region bookkeeping.
+    // This keeps us from freezing or expiring a chaotic mid-bounce pose while
+    // the hard cap still prevents immortal region bookkeeping.
     region.finalizeAt = Math.min(
       Math.max(region.finalizeAt, region.settledAt + DEBRIS_REGION_SETTLED_FINALIZE_SECONDS),
       region.maxFinalizeAt
@@ -730,7 +740,7 @@ export class DebrisSettler {
 
     // Contact glue is the visible lie the player asked for: once two chunks
     // touch during the short settling window, they stop spinning independently
-    // and behave like a tiny joined clump until the region becomes cheap rubble.
+    // and behave like a tiny joined clump until VFX cleanup runs.
     region.glueLinks.set(linkKey, { left, right, restOffset });
     left.angularVelocity.set(0, 0, 0);
     right.angularVelocity.set(0, 0, 0);
@@ -873,8 +883,8 @@ export class DebrisSettler {
 
     // This is the small cheat that makes the visible fragments read as shards
     // settling on a temporary pile instead of marbles phasing through each
-    // other. The persistent gameplay truth is still the rubble surface mesh,
-    // so this support only lives inside the short settling region window.
+    // other. Durable gameplay truth is terrain damage, so this support only
+    // lives inside the short settling region window.
     const correction = targetUpperY - upper.mesh.position.y;
     upper.mesh.position.y += correction * 0.8;
     lower.mesh.position.y -= correction * 0.2;
@@ -913,7 +923,7 @@ export class DebrisSettler {
     if (this.elapsedSeconds < region.glueAfter + DEBRIS_REGION_QUIET_SLEEP_SECONDS) return;
 
     // Inside the active debris bubble, a quiet glued clump should remain as
-    // shoveable debris rather than immediately finalizing into rubble. Put the
+    // shoveable debris rather than immediately expiring or converting. Put the
     // fragments into the same sleeping state terrain-supported shards use so
     // they stop spinning in place while the broadphase can still wake them when
     // a physics core hits. Do this per glue-connected component: one grounded
@@ -1105,9 +1115,9 @@ export class DebrisSettler {
   private getRegionDistanceSqToPoint(region: SettlingRegion, point: THREE.Vector3): number {
     let distanceSq = region.center.distanceToSquared(point);
 
-    // Keep a broad crater alive if any owned shard is still near the player.
-    // Region centers are fracture averages, so using only the center can bake a
-    // pile even though the player is standing beside one of its edge chunks.
+    // Keep a broad blast active if any owned shard is still near the player.
+    // Region centers are fracture averages, so using only the center can clean
+    // up a region even though the player is standing beside one edge chunk.
     for (const fragment of region.fragments) {
       if (fragment.isExpired) continue;
       distanceSq = Math.min(distanceSq, fragment.mesh.position.distanceToSquared(point));
