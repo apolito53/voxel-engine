@@ -177,19 +177,7 @@ export class DebrisSettler {
     if (targetBodyReduction <= 0) return 0;
 
     let finalizedFragments = 0;
-    const farthestRegions = [...this.regionsById.values()]
-      .sort((left, right) => {
-        const leftSleeping = this.isRegionSleeping(left);
-        const rightSleeping = this.isRegionSleeping(right);
-        if (leftSleeping !== rightSleeping) return leftSleeping ? -1 : 1;
-
-        return (
-          this.getRegionDistanceSqToPoint(right, activeCenter) -
-          this.getRegionDistanceSqToPoint(left, activeCenter)
-        );
-      });
-
-    for (const region of farthestRegions) {
+    for (const region of this.getPressureOrderedRegions(activeCenter)) {
       if (!this.regionsById.has(region.id)) continue;
 
       const fragmentCount = region.fragments.size;
@@ -200,6 +188,26 @@ export class DebrisSettler {
 
     this.refreshLiveStats();
     return finalizedFragments;
+  }
+
+  discardRegionsForPressure(
+    activeCenter: THREE.Vector3,
+    targetBodyReduction: number
+  ): number {
+    if (targetBodyReduction <= 0) return 0;
+
+    let discardedFragments = 0;
+    for (const region of this.getPressureOrderedRegions(activeCenter)) {
+      if (!this.regionsById.has(region.id)) continue;
+
+      const fragmentCount = region.fragments.size;
+      this.discardRegion(region);
+      discardedFragments += fragmentCount;
+      if (discardedFragments >= targetBodyReduction) break;
+    }
+
+    this.refreshLiveStats();
+    return discardedFragments;
   }
 
   forget(toy: PhysicsToy): void {
@@ -927,6 +935,29 @@ export class DebrisSettler {
     this.stats.finalizedFragments += region.fragments.size;
     this.stats.finalizedPieces += pieces;
     if (forced) this.stats.forcedFinalizations += 1;
+  }
+
+  private discardRegion(region: SettlingRegion): void {
+    for (const fragment of region.fragments) {
+      // Keep the stale ownership map until normal pruning removes the toy.
+      // Otherwise the orphan absorption pass would see an expired fragment and
+      // turn this visual-only budget cut straight back into static rubble.
+      fragment.expire();
+    }
+    this.regionsById.delete(region.id);
+  }
+
+  private getPressureOrderedRegions(activeCenter: THREE.Vector3): SettlingRegion[] {
+    return [...this.regionsById.values()].sort((left, right) => {
+      const leftSleeping = this.isRegionSleeping(left);
+      const rightSleeping = this.isRegionSleeping(right);
+      if (leftSleeping !== rightSleeping) return leftSleeping ? -1 : 1;
+
+      return (
+        this.getRegionDistanceSqToPoint(right, activeCenter) -
+        this.getRegionDistanceSqToPoint(left, activeCenter)
+      );
+    });
   }
 
   private createRubbleSamples(region: SettlingRegion, includeAwakeVisualChunks: boolean): RubbleAbsorptionSample[] {

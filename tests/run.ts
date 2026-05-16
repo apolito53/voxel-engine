@@ -169,6 +169,7 @@ import {
   MIN_RIGID_DEBRIS_BODY_BUDGET,
   formatGroundDebrisBudget,
   getEffectiveRigidDebrisBodyBudget,
+  getGroundDebrisSpawnAllowance,
   normalizeGroundDebrisBudget,
   getRigidDebrisBodyBudget
 } from "../src/rigidDebrisBudget";
@@ -3831,6 +3832,27 @@ test("debris settler pressure relief prefers sleeping regions before awake debri
   );
 });
 
+test("debris settler pressure discard removes debris without making instant rubble", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const nearFragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+  const farFragment = createTestFragment(BLOCK.stone, 30.5, 1.1, 0.5);
+
+  settler.registerFracture(BLOCK.dirt, new THREE.Vector3(0.5, 1.1, 0.5), [nearFragment]);
+  settler.registerFracture(BLOCK.stone, new THREE.Vector3(30.5, 1.1, 0.5), [farFragment]);
+
+  const removed = settler.discardRegionsForPressure(new THREE.Vector3(0.5, 1.1, 0.5), 1);
+  const stats = settler.getStats();
+
+  assertEqual(removed, 1, "visual debris budget relief should report the discarded body count");
+  assertEqual(stats.regions, 1, "discarding for debris budget should preserve the nearby region");
+  assert(settler.owns(nearFragment), "near debris should remain active when farther debris can be discarded");
+  assert(settler.owns(farFragment), "discarded fragments should stay owned until normal pruning avoids orphan absorption");
+  assert(farFragment.isExpired, "the farthest debris region should be expired for pruning");
+  assertEqual(rubble.getStats().pieces, 0, "debris budget discard should not create ground lumps");
+  assertEqual(rubble.getStats().visualChunks, 0, "debris budget discard should not freeze airborne visual chunks");
+});
+
 test("debris settler waits for quiet fragments before soft finalization", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());
@@ -5143,6 +5165,16 @@ test("physics object budget clamps and steps predictably", () => {
     getEffectiveRigidDebrisBodyBudget(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget, 96),
     96,
     "ground debris slider should cap even a high physics object budget"
+  );
+  assertEqual(
+    getGroundDebrisSpawnAllowance(12, 27, 16),
+    4,
+    "new debris spawns should consume only the remaining active ground-debris slots"
+  );
+  assertEqual(
+    getGroundDebrisSpawnAllowance(16, 27, 16),
+    0,
+    "a full ground-debris budget should skip new visual fragments instead of forcing rubble"
   );
   assertEqual(
     formatGroundDebrisBudget(0),

@@ -160,6 +160,7 @@ import {
   MIN_GROUND_DEBRIS_BUDGET,
   formatGroundDebrisBudget,
   getEffectiveRigidDebrisBodyBudget,
+  getGroundDebrisSpawnAllowance,
   normalizeGroundDebrisBudget,
   readGroundDebrisBudgetPreference,
   writeGroundDebrisBudgetPreference
@@ -1615,8 +1616,9 @@ function applyCoreTerrainImpact(
     ejectedMaterialUnits,
     result.destroyed
   );
+  let spawnedFragmentCount = 0;
   if (fragmentCount > 0) {
-    spawnBlockFragments(result.block, result.position, impact, {
+    spawnedFragmentCount = spawnBlockFragments(result.block, result.position, impact, {
       fragmentCount,
       materialUnits: ejectedMaterialUnits,
       chipOnly: !result.destroyed
@@ -1629,7 +1631,7 @@ function applyCoreTerrainImpact(
     position: result.position,
     block: result.block,
     impactSpeed: impact.speed,
-    fragmentCount
+    fragmentCount: spawnedFragmentCount
   });
   return result;
 }
@@ -1658,12 +1660,19 @@ function spawnBlockFragments(
     readonly materialUnits: number;
     readonly chipOnly?: boolean;
   }
-): void {
+): number {
   const fragmentBaseSpeed = Math.min(FRAGMENT_IMPACT_SPEED_CAP, impact.speed * FRAGMENT_IMPACT_SPEED_SCALE);
   const blockCenter = options.chipOnly
     ? impact.position.clone().addScaledVector(impact.normal, 0.08)
     : new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
-  const fragmentCount = options.fragmentCount;
+  const requestedFragmentCount = options.fragmentCount;
+  const fragmentCount = getGroundDebrisSpawnAllowance(
+    getLiveGroundDebrisCount(),
+    requestedFragmentCount,
+    getCurrentRigidDebrisBodyBudget()
+  );
+  if (fragmentCount <= 0) return 0;
+
   const fragments: PhysicsToy[] = [];
 
   for (let index = 0; index < fragmentCount; index += 1) {
@@ -1686,7 +1695,7 @@ function spawnBlockFragments(
       .add(scatter)
       .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
       .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
-    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount, options.materialUnits);
+    const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, requestedFragmentCount, options.materialUnits);
     const debrisShape = createDebrisShapeForBlock(block, {
       fragmentIndex: index,
       distributedFragmentIndex: fragmentGridIndex,
@@ -1707,6 +1716,15 @@ function spawnBlockFragments(
 
   rigidDebris.invalidateStaticColliders();
   debrisSettler.registerFracture(block, blockCenter, fragments);
+  return fragments.length;
+}
+
+function getLiveGroundDebrisCount(): number {
+  let liveFragments = 0;
+  for (const toy of toys) {
+    if (toy.isInstancedFragment && !toy.isExpired) liveFragments += 1;
+  }
+  return liveFragments;
 }
 
 function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
@@ -2055,10 +2073,10 @@ function enforceRigidDebrisBudget(): void {
   const overBudgetCount = rigidDebrisStats.bodies - rigidDebrisBodyBudget;
   if (overBudgetCount <= 0) return;
 
-  // Rapier bodies are CPU-heavy. Convert sleeping/far debris regions back into
-  // cheap rubble before the main thread has to solve thousands of tiny cuboids.
-  debrisSettler.finalizeRegionsForPressure(rubbleField, camera.position, overBudgetCount);
-  absorbExpiredOrphanFragmentsIntoRubble();
+  // The ground-debris slider is a visual/CPU pressure valve, not a gameplay
+  // material signal. Drop the oldest/farthest physical shard regions instead
+  // of baking them into instant rubble lumps or freezing airborne pieces.
+  debrisSettler.discardRegionsForPressure(camera.position, overBudgetCount);
   pruneExpiredToys();
   rigidDebrisStats = rigidDebris.getStats();
 }
