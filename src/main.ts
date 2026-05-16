@@ -32,6 +32,7 @@ import {
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
+import { DebrisPoofRenderer } from "./debrisPoof";
 import { createDebrisShapeForBlock } from "./debrisShapes";
 import {
   DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
@@ -450,6 +451,7 @@ type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const hitscanBoltTracer = new HitscanBoltTracer(scene);
+const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const partialBlockMeshField = new PartialBlockMeshField(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
@@ -1232,6 +1234,7 @@ function animate(): void {
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
     hitscanBoltTracer.update(delta);
+    debrisPoofRenderer.update(delta);
     recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
@@ -1624,6 +1627,7 @@ function applyCoreTerrainImpact(
     remainingHealth: result.remainingHealth,
     maxHealth: result.maxHealth
   });
+  spawnPartialBlockBitePoofs(result);
   showBlockDamageIndicator(result);
 
   const ejectedMaterialUnits = result.ejectedRubbleMaterialUnits ?? 0;
@@ -1650,6 +1654,15 @@ function applyCoreTerrainImpact(
     fragmentCount: spawnedFragmentCount
   });
   return result;
+}
+
+function spawnPartialBlockBitePoofs(result: BlockDamageResult): void {
+  for (const position of result.bitePoofPositions ?? []) {
+    debrisPoofRenderer.spawn(
+      new THREE.Vector3(position.x, position.y, position.z),
+      result.block
+    );
+  }
 }
 
 function continuePhysicsCoreAfterPierce(source: PhysicsToy, pierceContinuation: BlockPierceContinuation): void {
@@ -2103,7 +2116,8 @@ function enforceRigidDebrisBudget(): void {
         left.mesh.position.distanceToSquared(camera.position);
     });
   for (let index = 0; index < overBudgetCount; index += 1) {
-    pressureCandidates[index]?.expire();
+    const candidate = pressureCandidates[index];
+    if (candidate) expireGroundDebrisWithPoof(candidate);
   }
   pruneExpiredToys();
   rigidDebrisStats = rigidDebris.getStats();
@@ -2118,8 +2132,18 @@ function updateGroundDebrisCleanup(delta: number): void {
 
   for (const toy of toys) {
     if (!toy?.isInstancedFragment || toy.isExpired) continue;
-    toy.updateGroundDebrisCleanup(delta, lifetimeSeconds, isGroundDebrisCleanupGrounded(toy));
+    const expiredByCleanup = toy.updateGroundDebrisCleanup(delta, lifetimeSeconds, isGroundDebrisCleanupGrounded(toy));
+    if (expiredByCleanup) {
+      debrisPoofRenderer.spawn(toy.mesh.position, toy.fragmentBlock);
+    }
   }
+}
+
+function expireGroundDebrisWithPoof(toy: PhysicsToy): void {
+  if (toy.isExpired) return;
+
+  debrisPoofRenderer.spawn(toy.mesh.position, toy.fragmentBlock);
+  toy.expire();
 }
 
 function getGroundedDebrisCleanupCandidates(): PhysicsToy[] {
@@ -2666,6 +2690,7 @@ function clearToys(): void {
   damageIndicators.clear();
   debrisSettler.clear();
   rigidDebris.clear();
+  debrisPoofRenderer.clear();
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
@@ -2733,6 +2758,7 @@ function disposeRuntime(): void {
   player?.dispose();
   clearToys();
   hitscanBoltTracer.dispose();
+  debrisPoofRenderer.dispose();
   rigidDebris.dispose();
   activeWorld?.dispose(scene);
   inWorld = false;

@@ -32,6 +32,7 @@ import {
   createDebrisShapeForBlock,
   getDebrisShapeGeometry
 } from "../src/debrisShapes";
+import { DebrisPoofRenderer, getDebrisPoofLifetimeSeconds } from "../src/debrisPoof";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
@@ -2041,6 +2042,11 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   assert(world.isSolid(2, 3, 4), "partial terrain should keep full collision for the first pass");
   assert(!world.isRenderableSolid(2, 3, 4), "normal terrain meshing should hand carved cells to custom geometry");
   assertEqual(world.getPartialBlock(2, 3, 4)?.cuts.length, 1, "the carved block should remember its visual cut");
+  assertEqual(
+    firstHit.bitePoofPositions?.length,
+    world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length,
+    "the first carve should report one bite poof position for each newly destroyed presentation cell"
+  );
   world.clearDamageForChunk(0, 0);
   assertEqual(world.getBlockDamage(2, 3, 4), 1, "partial terrain should keep its damage while chunks stream out");
 
@@ -2080,6 +2086,64 @@ test("physics core carving chips ordinary terrain before fracture", () => {
     maxZ: 4.85
   });
   assertEqual(supportHeight, null, "destroyed carved terrain should leave air instead of break-time support");
+});
+
+test("partial block carve results expose material poof positions for newly destroyed bite cells", () => {
+  const world = new VoxelWorld({ seed: "partial-bite-poof-position-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const firstHit = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const firstRemovedCells = [...(world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])];
+
+  assert(firstHit && !firstHit.destroyed, "first hit should keep the block alive for partial bite feedback");
+  assertEqual(
+    firstHit.bitePoofPositions?.length,
+    firstRemovedCells.length,
+    "the first bite should spawn poofs for every newly removed lattice cell"
+  );
+  assert(
+    (firstHit.bitePoofPositions ?? []).every((position) =>
+      position.x >= 2 &&
+      position.x <= 3 &&
+      position.y >= 3 &&
+      position.y <= 4 &&
+      position.z >= 4 &&
+      position.z <= 5
+    ),
+    "bite poof positions should stay inside the damaged voxel envelope"
+  );
+
+  const secondHit = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const firstRemovedSet = new Set(firstRemovedCells);
+  const newlyRemovedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .filter((index) => !firstRemovedSet.has(index));
+
+  assert(secondHit && !secondHit.destroyed, "second hit should still be a partial bite for this sturdy block");
+  assertEqual(
+    secondHit.bitePoofPositions?.length,
+    newlyRemovedCells.length,
+    "later bites should only report poofs for cells that disappeared on that hit"
+  );
 });
 
 test("partial block field renders faceted custom terrain cells", () => {
@@ -2948,11 +3012,15 @@ test("settled debris cleanup blinks before expiring", () => {
   assert(!fragment.isExpired, "freshly settled cleanup debris should remain visible at first");
   assert(fragment.isFragmentRenderVisible, "cleanup debris should not blink until the final lifetime window");
 
-  fragment.updateGroundDebrisCleanup(0.55, 1);
+  fragment.updateGroundDebrisCleanup(0.5, 1);
+  assert(!fragment.isExpired, "cleanup debris should still wait for the shorter final blink window");
+  assert(fragment.isFragmentRenderVisible, "cleanup debris should stay steady before the shortened blink window");
+
+  fragment.updateGroundDebrisCleanup(0.2, 1);
   assert(!fragment.isExpired, "cleanup debris should blink before it disappears");
   assert(!fragment.isFragmentRenderVisible, "cleanup debris should hide on one of the accelerating blink beats");
 
-  fragment.updateGroundDebrisCleanup(0.3, 1);
+  fragment.updateGroundDebrisCleanup(0.15, 1);
   assert(fragment.isExpired, "cleanup debris should expire once its grounded lifetime elapses");
 });
 
@@ -2995,6 +3063,27 @@ test("stale airborne debris eventually uses cleanup as a floater fallback", () =
   fragment.update(0.2, airWorld);
   fragment.updateGroundDebrisCleanup(3.1, 3, false);
   assert(fragment.isExpired, "stale never-grounded debris should not float forever");
+});
+
+test("debris cleanup poof renders as a short-lived material-tinted burst", () => {
+  const scene = new THREE.Scene();
+  const poofs = new DebrisPoofRenderer(scene);
+
+  poofs.spawn(new THREE.Vector3(1, 2, 3), BLOCK.grass);
+  assertEqual(poofs.getStats().activePoofs, 1, "cleanup should spawn one short-lived poof");
+  assert(
+    poofs.getStats().activeParticles > 0,
+    "cleanup poof should contain multiple visible dust particles"
+  );
+  assertEqual(scene.children.length, 1, "cleanup poof should attach one render group to the scene");
+
+  poofs.update(getDebrisPoofLifetimeSeconds() * 0.5);
+  assertEqual(poofs.getStats().activePoofs, 1, "cleanup poof should survive the first half of its lifetime");
+
+  poofs.update(getDebrisPoofLifetimeSeconds());
+  assertEqual(poofs.getStats().activePoofs, 0, "cleanup poof should remove itself after its lifetime");
+  assertEqual(scene.children.length, 0, "expired cleanup poof should leave no scene children behind");
+  poofs.dispose();
 });
 
 test("block fragments lose ground speed and sleep near the fracture site", () => {

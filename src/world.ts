@@ -86,6 +86,7 @@ export type BlockDamageResult = {
   readonly remainingHealth: number;
   readonly maxHealth: number;
   readonly destroyed: boolean;
+  readonly bitePoofPositions?: readonly VoxelVector[];
   readonly ejectedRubbleMaterialUnits?: number;
   readonly pierceContinuation?: BlockPierceContinuation;
 };
@@ -118,6 +119,11 @@ export type VoxelVector = {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+};
+
+type PartialBlockCutResult = {
+  readonly cell: PartialBlockCell;
+  readonly newlyRemovedVisualCellIndexes: readonly number[];
 };
 
 function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
@@ -189,6 +195,22 @@ function decodePartialBlockVisualCell(index: number): { readonly x: number; read
     y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
     z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
   };
+}
+
+function createPartialBlockBitePoofPositions(
+  position: VoxelBlockPosition,
+  removedVisualCellIndexes: readonly number[],
+  outwardNormal: Pick<THREE.Vector3, "x" | "y" | "z">
+): readonly VoxelVector[] {
+  const normal = normalizeVoxelVector(outwardNormal) ?? { x: 0, y: 0, z: 0 };
+  return removedVisualCellIndexes.map((index) => {
+    const visualCell = decodePartialBlockVisualCell(index);
+    return {
+      x: position.x + (visualCell.x + 0.5) / BLOCK_FRAGMENT_GRID_SIZE + normal.x * 0.04,
+      y: position.y + (visualCell.y + 0.5) / BLOCK_FRAGMENT_GRID_SIZE + normal.y * 0.04,
+      z: position.z + (visualCell.z + 0.5) / BLOCK_FRAGMENT_GRID_SIZE + normal.z * 0.04
+    };
+  });
 }
 
 function normalizeVoxelVector(vector: Pick<THREE.Vector3, "x" | "y" | "z"> | undefined): VoxelVector | null {
@@ -1009,13 +1031,14 @@ export class VoxelWorld implements CollisionWorld {
 
     if (remainingHealth > 0) {
       this.blockDamage.set(key, nextDamage);
-      const partialCell = this.addPartialBlockCut(block, position, definition.health, nextDamage, {
+      const partialCutResult = this.addPartialBlockCut(block, position, definition.health, nextDamage, {
         point: input.point,
         normal: input.normal,
         incomingDirection: input.incomingDirection,
         coreRadius: input.coreRadius,
         speed: input.speed
       });
+      const partialCell = partialCutResult.cell;
       const latestCut = partialCell.cuts[partialCell.cuts.length - 1] ?? null;
       return {
         block,
@@ -1023,6 +1046,11 @@ export class VoxelWorld implements CollisionWorld {
         remainingHealth,
         maxHealth: definition.health,
         destroyed: false,
+        bitePoofPositions: createPartialBlockBitePoofPositions(
+          position,
+          partialCutResult.newlyRemovedVisualCellIndexes,
+          input.normal
+        ),
         ejectedRubbleMaterialUnits,
         pierceContinuation: latestCut
           ? this.createPartialBlockPierceContinuation(partialCell, latestCut, definition.health, input)
@@ -1119,7 +1147,7 @@ export class VoxelWorld implements CollisionWorld {
       readonly coreRadius?: number;
       readonly speed: number;
     }
-  ): PartialBlockCell {
+  ): PartialBlockCutResult {
     const key = createPartialBlockKey(position);
     const existing = this.partialBlocks.get(key);
     const cuts: PartialBlockCut[] = existing ? [...existing.cuts] : [];
@@ -1140,6 +1168,10 @@ export class VoxelWorld implements CollisionWorld {
       { cuts, damage, maxHealth },
       existing?.removedVisualCellIndexes
     );
+    const previousRemovedVisualCells = new Set(existing?.removedVisualCellIndexes ?? []);
+    const newlyRemovedVisualCellIndexes = removedVisualCellIndexes.filter((index) =>
+      !previousRemovedVisualCells.has(index)
+    );
 
     const cell: PartialBlockCell = {
       block,
@@ -1151,7 +1183,10 @@ export class VoxelWorld implements CollisionWorld {
     };
     this.partialBlocks.set(key, cell);
     this.markPartialBlockDirty(position);
-    return cell;
+    return {
+      cell,
+      newlyRemovedVisualCellIndexes
+    };
   }
 
   private createPartialBlockPierceContinuation(
