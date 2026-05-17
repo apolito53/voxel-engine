@@ -141,7 +141,6 @@ import {
   PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
   PARTIAL_BLOCK_CORE_DAMAGE,
   PartialBlockMeshField,
-  arePartialBlockVisualCellIndexesConnected,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
@@ -2483,14 +2482,10 @@ test("partial block bite footprint follows tiny core trajectory through the latt
     amount: PARTIAL_BLOCK_CORE_DAMAGE
   });
 
-  const removedCellIndexes = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [];
-  const removedCells = removedCellIndexes.map(decodeTestLatticeIndex);
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
 
   assertEqual(removedCells.length, 3, "one 10-HP carve step should remove three presentation cells");
-  assert(
-    arePartialBlockVisualCellIndexesConnected(removedCellIndexes),
-    "tiny core tunnel bites should be face-connected instead of isolated missing cells"
-  );
   assert(
     removedCells.every((cell) => cell.y === 1 && cell.z === 1),
     "tiny cores should remove a narrow same-column tunnel through the lattice"
@@ -2518,16 +2513,12 @@ test("partial block bite footprint widens for large cores before drilling deep",
     amount: PARTIAL_BLOCK_CORE_DAMAGE
   });
 
-  const removedCellIndexes = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [];
-  const removedCells = removedCellIndexes.map(decodeTestLatticeIndex);
+  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
+    .map(decodeTestLatticeIndex);
   const entryPlaneCells = removedCells.filter((cell) => cell.x === 0);
   const lateralSlots = new Set(entryPlaneCells.map((cell) => `${cell.y},${cell.z}`));
 
   assertEqual(removedCells.length, 3, "one 10-HP carve step should still remove three presentation cells");
-  assert(
-    arePartialBlockVisualCellIndexesConnected(removedCellIndexes),
-    "large core bites should still remove one connected chunk with no gaps"
-  );
   assert(
     entryPlaneCells.length >= 2 && lateralSlots.size >= 2,
     "large cores should spend early damage on a wider entry-face footprint"
@@ -2565,10 +2556,6 @@ test("partial block bite lattice keeps older damage from visually refilling", ()
   assert(
     firstBites.every((index) => secondBites.has(index)),
     "a later hit from a different side should not make earlier removed bite cells reappear"
-  );
-  assert(
-    arePartialBlockVisualCellIndexesConnected([...secondBites]),
-    "later hits should grow the old wound through adjacent cells instead of opening disconnected gaps"
   );
 });
 

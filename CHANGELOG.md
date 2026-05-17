@@ -2,12 +2,6 @@
 
 ## Unreleased
 
-## 0.6.12 - 2026-05-17
-
-### Fixed
-
-- Fixed partial-block bite selection so removed sub-voxels grow as one face-connected wound instead of leaving isolated gaps in the 3x3x3 damage lattice.
-
 ## 0.6.11 - 2026-05-17
 
 ### Fixed
