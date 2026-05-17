@@ -227,6 +227,24 @@ function getBlockDamageBrushTargetWeight(target: BlockDamageBrushTarget, brushRa
   return Math.max(0, 1 - distance / brushRadius);
 }
 
+function getBlockDamageBrushTargetIncomingDirection(
+  input: BlockCarveInput,
+  target: BlockDamageBrushTarget
+): Pick<THREE.Vector3, "x" | "y" | "z"> | undefined {
+  if (target.primary) return input.incomingDirection;
+
+  // Brush spillover is not the projectile drilling through a second block from
+  // the original travel vector. It is the same impact footprint crossing a seam,
+  // so each secondary target should chew inward from the face the footprint
+  // touched. Otherwise edge/corner hits can pick cells on the neighbor's far
+  // side and the preview looks like separated islands.
+  return {
+    x: -target.normal.x,
+    y: -target.normal.y,
+    z: -target.normal.z
+  };
+}
+
 function clampPointToBlock(
   point: Pick<THREE.Vector3, "x" | "y" | "z">,
   position: VoxelBlockPosition
@@ -371,6 +389,32 @@ function decodePartialBlockVisualCell(index: number): { readonly x: number; read
     y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
     z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
   };
+}
+
+function createGlobalPartialBlockVisualCellKey(position: VoxelBlockPosition, cellIndex: number): string {
+  const cell = decodePartialBlockVisualCell(cellIndex);
+  return createGlobalMicroCellKey(
+    position.x * BLOCK_FRAGMENT_GRID_SIZE + cell.x,
+    position.y * BLOCK_FRAGMENT_GRID_SIZE + cell.y,
+    position.z * BLOCK_FRAGMENT_GRID_SIZE + cell.z
+  );
+}
+
+function createGlobalMicroCellKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
+}
+
+function getAdjacentGlobalMicroCellKeys(key: string): readonly string[] {
+  const [x, y, z] = key.split(",").map(Number);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return [];
+  return [
+    createGlobalMicroCellKey(x + 1, y, z),
+    createGlobalMicroCellKey(x - 1, y, z),
+    createGlobalMicroCellKey(x, y + 1, z),
+    createGlobalMicroCellKey(x, y - 1, z),
+    createGlobalMicroCellKey(x, y, z + 1),
+    createGlobalMicroCellKey(x, y, z - 1)
+  ];
 }
 
 function createPartialBlockBitePoofPositions(
@@ -1200,6 +1244,7 @@ export class VoxelWorld implements CollisionWorld {
         z: target.position.z,
         point: target.point,
         normal: target.normal,
+        incomingDirection: getBlockDamageBrushTargetIncomingDirection(input, target),
         amount: target.damageAmount
       });
       if (!result) continue;
@@ -1228,6 +1273,7 @@ export class VoxelWorld implements CollisionWorld {
         z: target.position.z,
         point: target.point,
         normal: target.normal,
+        incomingDirection: getBlockDamageBrushTargetIncomingDirection(input, target),
         amount: target.damageAmount
       }, target))
       .filter((target): target is BlockDamageBrushPreviewTarget => Boolean(target));
@@ -1436,19 +1482,103 @@ export class VoxelWorld implements CollisionWorld {
       ));
     if (targets.length === 0) return [];
 
-    const weightedTargets = targets
+    let weightedTargets = targets
       .map((target) => ({
         target,
         weight: getBlockDamageBrushTargetWeight(target, brushRadius)
       }))
       .filter((target) => target.weight > PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_WEIGHT);
+
+    for (let iteration = 0; iteration < 3; iteration += 1) {
+      const totalWeight = weightedTargets.reduce((sum, target) => sum + target.weight, 0);
+      if (totalWeight <= PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_WEIGHT) return [];
+
+      const distributedTargets = weightedTargets.map(({ target, weight }) => ({
+        ...target,
+        damageAmount: damageAmount * (weight / totalWeight)
+      }));
+      const connectedKeys = this.getConnectedDamageBrushTargetKeys(input, distributedTargets);
+      const connectedTargets = weightedTargets.filter(({ target }) =>
+        connectedKeys.has(this.damageKey(target.position.x, target.position.y, target.position.z))
+      );
+      if (connectedTargets.length === weightedTargets.length) return distributedTargets;
+      if (connectedTargets.length === 0) return distributedTargets.filter((target) => target.primary);
+      weightedTargets = connectedTargets;
+    }
+
     const totalWeight = weightedTargets.reduce((sum, target) => sum + target.weight, 0);
     if (totalWeight <= PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_WEIGHT) return [];
-
     return weightedTargets.map(({ target, weight }) => ({
       ...target,
       damageAmount: damageAmount * (weight / totalWeight)
     }));
+  }
+
+  private getConnectedDamageBrushTargetKeys(
+    input: BlockCarveInput,
+    targets: readonly WeightedBlockDamageBrushTarget[]
+  ): ReadonlySet<string> {
+    if (targets.length <= 1) {
+      return new Set(targets.map((target) =>
+        this.damageKey(target.position.x, target.position.y, target.position.z)
+      ));
+    }
+
+    const cellKeys = new Set<string>();
+    const cellTargetKeys = new Map<string, string>();
+    let seedCellKey: string | undefined;
+
+    for (const target of targets) {
+      const targetKey = this.damageKey(target.position.x, target.position.y, target.position.z);
+      const preview = this.previewBlockCarve({
+        ...input,
+        x: target.position.x,
+        y: target.position.y,
+        z: target.position.z,
+        point: target.point,
+        normal: target.normal,
+        incomingDirection: getBlockDamageBrushTargetIncomingDirection(input, target),
+        amount: target.damageAmount
+      }, target);
+      if (!preview) continue;
+
+      for (const cellIndex of preview.affectedVisualCellIndexes) {
+        const cellKey = createGlobalPartialBlockVisualCellKey(target.position, cellIndex);
+        cellKeys.add(cellKey);
+        cellTargetKeys.set(cellKey, targetKey);
+        if (target.primary && seedCellKey === undefined) seedCellKey = cellKey;
+      }
+    }
+
+    if (!seedCellKey) {
+      const primary = targets.find((target) => target.primary);
+      return new Set(primary
+        ? [this.damageKey(primary.position.x, primary.position.y, primary.position.z)]
+        : []);
+    }
+
+    const visited = new Set<string>([seedCellKey]);
+    const queue = [seedCellKey];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) break;
+      for (const neighbor of getAdjacentGlobalMicroCellKeys(current)) {
+        if (!cellKeys.has(neighbor) || visited.has(neighbor)) continue;
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+
+    const connectedTargetKeys = new Set<string>();
+    const primary = targets.find((target) => target.primary);
+    if (primary) {
+      connectedTargetKeys.add(this.damageKey(primary.position.x, primary.position.y, primary.position.z));
+    }
+    for (const cellKey of visited) {
+      const targetKey = cellTargetKeys.get(cellKey);
+      if (targetKey) connectedTargetKeys.add(targetKey);
+    }
+    return connectedTargetKeys;
   }
 
   private previewBlockCarve(

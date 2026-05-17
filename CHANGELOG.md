@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.12 - 2026-05-17
+
+### Fixed
+
+- Fixed sparse brush bite selection so previewed and carved sub-voxel damage stays face-adjacent in world space instead of creating disjoint seam/corner islands.
+
 ## 0.6.11 - 2026-05-17
 
 ### Fixed

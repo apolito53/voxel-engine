@@ -141,6 +141,7 @@ import {
   PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
   PARTIAL_BLOCK_CORE_DAMAGE,
   PartialBlockMeshField,
+  arePartialBlockVisualCellIndexesConnected,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
@@ -312,7 +313,7 @@ import {
 import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar";
 import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
-import { VoxelWorld } from "../src/world";
+import { VoxelWorld, type BlockDamageBrushPreview } from "../src/world";
 import { getSkyboxAlignedSunDirection } from "../src/skybox";
 
 type TestCase = {
@@ -371,6 +372,73 @@ function decodeTestLatticeIndex(index: number): { readonly x: number; readonly y
 
 function encodeTestLatticeIndex(x: number, y: number, z: number): number {
   return x + y * BLOCK_FRAGMENT_GRID_SIZE + z * BLOCK_FRAGMENT_GRID_SIZE ** 2;
+}
+
+function createTestGlobalMicroCellKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
+}
+
+function getPreviewGlobalBiteCellKeys(preview: BlockDamageBrushPreview | null): readonly string[] {
+  const keys: string[] = [];
+  for (const target of preview?.targets ?? []) {
+    for (const cellIndex of target.affectedVisualCellIndexes) {
+      const cell = decodeTestLatticeIndex(cellIndex);
+      keys.push(createTestGlobalMicroCellKey(
+        target.position.x * BLOCK_FRAGMENT_GRID_SIZE + cell.x,
+        target.position.y * BLOCK_FRAGMENT_GRID_SIZE + cell.y,
+        target.position.z * BLOCK_FRAGMENT_GRID_SIZE + cell.z
+      ));
+    }
+  }
+  return keys;
+}
+
+function getWorldPartialBlockGlobalBiteCellKeys(
+  world: VoxelWorld,
+  positions: readonly { readonly x: number; readonly y: number; readonly z: number }[]
+): readonly string[] {
+  const keys: string[] = [];
+  for (const position of positions) {
+    for (const cellIndex of world.getPartialBlock(position.x, position.y, position.z)?.removedVisualCellIndexes ?? []) {
+      const cell = decodeTestLatticeIndex(cellIndex);
+      keys.push(createTestGlobalMicroCellKey(
+        position.x * BLOCK_FRAGMENT_GRID_SIZE + cell.x,
+        position.y * BLOCK_FRAGMENT_GRID_SIZE + cell.y,
+        position.z * BLOCK_FRAGMENT_GRID_SIZE + cell.z
+      ));
+    }
+  }
+  return keys;
+}
+
+function areTestGlobalMicroCellsConnected(keys: readonly string[]): boolean {
+  const cellKeys = new Set(keys);
+  if (cellKeys.size <= 1) return true;
+
+  const firstKey = cellKeys.values().next().value as string | undefined;
+  if (!firstKey) return true;
+
+  const visited = new Set<string>([firstKey]);
+  const queue = [firstKey];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    const [x, y, z] = current.split(",").map(Number);
+    for (const neighbor of [
+      createTestGlobalMicroCellKey(x + 1, y, z),
+      createTestGlobalMicroCellKey(x - 1, y, z),
+      createTestGlobalMicroCellKey(x, y + 1, z),
+      createTestGlobalMicroCellKey(x, y - 1, z),
+      createTestGlobalMicroCellKey(x, y, z + 1),
+      createTestGlobalMicroCellKey(x, y, z - 1)
+    ]) {
+      if (!cellKeys.has(neighbor) || visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      queue.push(neighbor);
+    }
+  }
+
+  return visited.size === cellKeys.size;
 }
 
 function expectedRubbleHealthForPieces(pieces: number): number {
@@ -2407,6 +2475,71 @@ test("damage brush previews include sparse seam neighbors", () => {
   assertEqual(world.getBlockDamage(2, 3, 5), 0, "previewing seam damage should not mutate neighbor health");
 });
 
+test("damage brush previews keep affected micro-cells adjacent across seams", () => {
+  const world = new VoxelWorld({ seed: "damage-brush-preview-connected-test" });
+  for (let y = 2; y <= 3; y += 1) {
+    for (let z = 1; z <= 2; z += 1) {
+      for (let x = 0; x <= 1; x += 1) {
+        world.setBlock(x, y, z, BLOCK.stone);
+      }
+    }
+  }
+
+  const preview = world.previewBlockDamageBrush({
+    x: 1,
+    y: 3,
+    z: 1,
+    point: new THREE.Vector3(1, 3.02, 1.66),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, -0.02, 0.01),
+    coreRadius: 0.42,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const cellKeys = getPreviewGlobalBiteCellKeys(preview);
+
+  assert(preview, "an edge/corner brush should still produce a preview");
+  assert(preview.targets.length > 1, "the connected-footprint preview should still span seam neighbors");
+  assert(cellKeys.length > 1, "the preview should expose multiple affected micro-cells");
+  assert(
+    areTestGlobalMicroCellsConnected(cellKeys),
+    "previewed affected micro-cells should form one face-connected footprint in world space"
+  );
+});
+
+test("damage brush carving keeps affected micro-cells adjacent across seams", () => {
+  const world = new VoxelWorld({ seed: "damage-brush-carve-connected-test" });
+  for (let y = 2; y <= 3; y += 1) {
+    for (let z = 1; z <= 2; z += 1) {
+      for (let x = 0; x <= 1; x += 1) {
+        world.setBlock(x, y, z, BLOCK.stone);
+      }
+    }
+  }
+
+  const result = world.carveBlockBrush({
+    x: 1,
+    y: 3,
+    z: 1,
+    point: new THREE.Vector3(1, 3.02, 1.66),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, -0.02, 0.01),
+    coreRadius: 0.42,
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const positions = result?.results.map((hit) => hit.position) ?? [];
+  const cellKeys = getWorldPartialBlockGlobalBiteCellKeys(world, positions);
+
+  assert(result, "an edge/corner brush should carve terrain");
+  assert(result.results.length > 1, "the connected-footprint carve should still span seam neighbors");
+  assert(cellKeys.length > 1, "the carve should remove multiple micro-cells");
+  assert(
+    areTestGlobalMicroCellsConnected(cellKeys),
+    "actual removed micro-cells should form one face-connected footprint in world space"
+  );
+});
+
 test("partial block field renders faceted custom terrain cells", () => {
   const scene = new THREE.Scene();
   const field = new PartialBlockMeshField(scene);
@@ -2482,10 +2615,14 @@ test("partial block bite footprint follows tiny core trajectory through the latt
     amount: PARTIAL_BLOCK_CORE_DAMAGE
   });
 
-  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
-    .map(decodeTestLatticeIndex);
+  const removedCellIndexes = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [];
+  const removedCells = removedCellIndexes.map(decodeTestLatticeIndex);
 
   assertEqual(removedCells.length, 3, "one 10-HP carve step should remove three presentation cells");
+  assert(
+    arePartialBlockVisualCellIndexesConnected(removedCellIndexes),
+    "tiny core tunnel bites should be face-connected instead of isolated missing cells"
+  );
   assert(
     removedCells.every((cell) => cell.y === 1 && cell.z === 1),
     "tiny cores should remove a narrow same-column tunnel through the lattice"
@@ -2513,12 +2650,16 @@ test("partial block bite footprint widens for large cores before drilling deep",
     amount: PARTIAL_BLOCK_CORE_DAMAGE
   });
 
-  const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
-    .map(decodeTestLatticeIndex);
+  const removedCellIndexes = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [];
+  const removedCells = removedCellIndexes.map(decodeTestLatticeIndex);
   const entryPlaneCells = removedCells.filter((cell) => cell.x === 0);
   const lateralSlots = new Set(entryPlaneCells.map((cell) => `${cell.y},${cell.z}`));
 
   assertEqual(removedCells.length, 3, "one 10-HP carve step should still remove three presentation cells");
+  assert(
+    arePartialBlockVisualCellIndexesConnected(removedCellIndexes),
+    "large core bites should still remove one connected chunk with no gaps"
+  );
   assert(
     entryPlaneCells.length >= 2 && lateralSlots.size >= 2,
     "large cores should spend early damage on a wider entry-face footprint"
@@ -2556,6 +2697,10 @@ test("partial block bite lattice keeps older damage from visually refilling", ()
   assert(
     firstBites.every((index) => secondBites.has(index)),
     "a later hit from a different side should not make earlier removed bite cells reappear"
+  );
+  assert(
+    arePartialBlockVisualCellIndexesConnected([...secondBites]),
+    "later hits should grow the old wound through adjacent cells instead of opening disconnected gaps"
   );
 });
 
