@@ -56,7 +56,12 @@ import { DebrisStuckCleanupTracker } from "./debrisCleanup";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebrisPoofRenderer } from "./debrisPoof";
 import { createDebrisShapeForBlock, fitDebrisShapeToVolumeBudget } from "./debrisShapes";
-import { PhysicsCoreAimPreview, predictPhysicsCoreTrajectory } from "./coreAimPreview";
+import {
+  PhysicsCoreAimPreview,
+  predictHitscanCoreTrajectory,
+  predictPhysicsCoreTrajectory,
+  type PhysicsCoreTrajectoryPrediction
+} from "./coreAimPreview";
 import {
   DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
   DebrisSettler,
@@ -2037,15 +2042,25 @@ function updateBuilderBrushPreview(activePlayer: PlayerController): void {
 
 function updateCoreAimPreview(activeWorld: VoxelWorld, activePlayer: PlayerController): void {
   const selectedItem = getSelectedHotbarItem();
-  if (
-    !coreAimPreviewEnabled ||
-    !activePlayer.isLooking() ||
-    !canThrowCoreWithHotbarItem(selectedItem, itemRegistry)
-  ) {
+  if (!coreAimPreviewEnabled || !activePlayer.isLooking()) {
     coreAimPreview.hide();
     return;
   }
 
+  if (canThrowCoreWithHotbarItem(selectedItem, itemRegistry)) {
+    updateProjectileCoreAimPreview(activeWorld, activePlayer);
+    return;
+  }
+
+  if (canFireHitscanCoreWithHotbarItem(selectedItem, itemRegistry)) {
+    updateHitscanCoreAimPreview(activeWorld);
+    return;
+  }
+
+  coreAimPreview.hide();
+}
+
+function updateProjectileCoreAimPreview(activeWorld: VoxelWorld, activePlayer: PlayerController): void {
   const radius = getPhysicsCoreRadius(physicsCoreSettings);
   const firingSolution = createPlayerCoreFiringSolution(radius);
   if (firingSolution.direction.lengthSq() <= TARGET_HIT_EPSILON) {
@@ -2079,6 +2094,74 @@ function updateCoreAimPreview(activeWorld: VoxelWorld, activePlayer: PlayerContr
     : null;
 
   coreAimPreview.update(prediction, brushPreview, camera.position);
+}
+
+function updateHitscanCoreAimPreview(activeWorld: VoxelWorld): void {
+  const firingSolution = createPlayerCoreFiringSolution(HITSCAN_CORE_RADIUS);
+  if (firingSolution.direction.lengthSq() <= TARGET_HIT_EPSILON) {
+    coreAimPreview.hide();
+    return;
+  }
+
+  const shotDirection = firingSolution.direction.clone().normalize();
+  const terrainPrediction = predictHitscanCoreTrajectory(activeWorld, {
+    origin: firingSolution.origin,
+    direction: shotDirection,
+    radius: HITSCAN_CORE_RADIUS,
+    maxDistance: HITSCAN_CORE_RANGE,
+    impactSpeed: HITSCAN_CORE_IMPACT_SPEED
+  });
+  const terrainImpact = terrainPrediction.impact;
+  const rubbleHit = rubbleField.raycast(firingSolution.origin, shotDirection, HITSCAN_CORE_RANGE);
+
+  if (rubbleHit && (!terrainImpact ||
+    rubbleHit.distance < firingSolution.origin.distanceTo(terrainImpact.position) - TARGET_HIT_EPSILON)) {
+    const prediction = createHitscanRubbleAimPreviewPrediction(
+      firingSolution.origin,
+      shotDirection,
+      rubbleHit.cell,
+      rubbleHit.point
+    );
+    coreAimPreview.update(prediction, null, camera.position);
+    return;
+  }
+
+  const brushPreview = terrainImpact && terrainImpact.speed > BLOCK_DAMAGE_IMPACT_SPEED
+    ? activeWorld.previewBlockDamageBrush({
+      x: terrainImpact.block.x,
+      y: terrainImpact.block.y,
+      z: terrainImpact.block.z,
+      point: terrainImpact.position,
+      normal: terrainImpact.normal,
+      incomingDirection: terrainImpact.incomingVelocity,
+      coreRadius: HITSCAN_CORE_RADIUS,
+      speed: terrainImpact.speed,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    })
+    : null;
+
+  coreAimPreview.update(terrainPrediction, brushPreview, camera.position);
+}
+
+function createHitscanRubbleAimPreviewPrediction(
+  origin: THREE.Vector3,
+  direction: THREE.Vector3,
+  cell: { readonly x: number; readonly y: number; readonly z: number },
+  point: THREE.Vector3
+): PhysicsCoreTrajectoryPrediction {
+  return {
+    points: [
+      origin.clone(),
+      point.clone()
+    ],
+    impact: {
+      block: { ...cell },
+      normal: direction.clone().multiplyScalar(-1),
+      position: point.clone(),
+      incomingVelocity: direction.clone().multiplyScalar(HITSCAN_CORE_IMPACT_SPEED),
+      speed: HITSCAN_CORE_IMPACT_SPEED
+    }
+  };
 }
 
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {

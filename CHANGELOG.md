@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.24 - 2026-05-17
+
+### Added
+
+- Extended Core Aim Preview to Hitscan Core with a straight dotted beam, predicted impact ring, and non-mutating bite-cell preview for the next terrain impact.
+
 ## 0.6.23.1 - 2026-05-17
 
 ### Changed

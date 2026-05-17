@@ -42,6 +42,7 @@ import type { CollisionBounds, CollisionWorld } from "../src/collision";
 import {
   PhysicsCoreAimPreview,
   isAimPreviewLatticeCellVisibleFromPoint,
+  predictHitscanCoreTrajectory,
   predictPhysicsCoreTrajectory,
   splitAimPreviewLatticeCellsByVisibility
 } from "../src/coreAimPreview";
@@ -6473,6 +6474,71 @@ test("hitscan cores still hit remaining partial-block material", () => {
     hit.block,
     { x: 2, y: 3, z: 4 },
     "hitscan cores should only pass through removed bite cells, not every chipped voxel"
+  );
+});
+
+test("hitscan aim preview traces the instant impact and bite cells without mutation", () => {
+  const world = new VoxelWorld({ seed: "hitscan-preview-test" });
+  world.setBlock(0, 20, 4, BLOCK.air);
+  world.setBlock(1, 20, 4, BLOCK.air);
+  world.setBlock(2, 20, 4, BLOCK.stone);
+
+  const prediction = predictHitscanCoreTrajectory(world, {
+    origin: new THREE.Vector3(0.5, 20.5, 4.5),
+    direction: new THREE.Vector3(1, 0, 0),
+    radius: HITSCAN_CORE_RADIUS,
+    maxDistance: 10,
+    impactSpeed: HITSCAN_CORE_IMPACT_SPEED
+  });
+
+  assertEqual(prediction.points.length, 2, "hitscan preview should draw one straight segment");
+  assertDeepEqual(
+    prediction.impact?.block,
+    { x: 2, y: 20, z: 4 },
+    "hitscan preview should target the same terrain block as the instant trace"
+  );
+  assertClose(
+    prediction.impact?.position.x ?? Number.NaN,
+    2,
+    0.000001,
+    "hitscan preview should place the impact ring on the entry face"
+  );
+
+  const impact = prediction.impact;
+  assert(impact, "the preview setup should produce an impact");
+  const brushPreview = world.previewBlockDamageBrush({
+    x: impact.block.x,
+    y: impact.block.y,
+    z: impact.block.z,
+    point: impact.position,
+    normal: impact.normal,
+    incomingDirection: impact.incomingVelocity,
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: impact.speed,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(
+    (brushPreview?.targets[0]?.affectedVisualCellIndexes.length ?? 0) > 0,
+    "hitscan preview should expose the bite cells the shot would remove"
+  );
+  assertEqual(world.getBlockDamage(2, 20, 4), 0, "hitscan preview should not mutate block health");
+
+  const missPrediction = predictHitscanCoreTrajectory({ isSolid: () => false }, {
+    origin: new THREE.Vector3(0.5, 20.5, 4.5),
+    direction: new THREE.Vector3(0, 1, 0),
+    radius: HITSCAN_CORE_RADIUS,
+    maxDistance: 10,
+    impactSpeed: HITSCAN_CORE_IMPACT_SPEED,
+    noHitPreviewDistance: 4
+  });
+
+  assertEqual(missPrediction.impact, undefined, "no-hit hitscan preview should not invent an impact");
+  assertClose(
+    missPrediction.points[1]?.y ?? Number.NaN,
+    24.5,
+    0.000001,
+    "no-hit hitscan preview should stay at the readable preview distance"
   );
 });
 

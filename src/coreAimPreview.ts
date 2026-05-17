@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments";
 import type { CollisionVector, CollisionWorld, ProjectileBlockSweepHit } from "./collision";
+import { raycastHitscanCore } from "./hitscanCore";
 import type { BlockDamageBrushPreview } from "./world";
 
 export const PHYSICS_CORE_AIM_PREVIEW_GRAVITY = 18;
@@ -9,6 +10,7 @@ export const PHYSICS_CORE_AIM_PREVIEW_MAX_SECONDS = 4;
 export const PHYSICS_CORE_AIM_PREVIEW_MAX_POINTS = Math.ceil(
   PHYSICS_CORE_AIM_PREVIEW_MAX_SECONDS / PHYSICS_CORE_AIM_PREVIEW_STEP_SECONDS
 ) + 1;
+export const HITSCAN_CORE_AIM_PREVIEW_NO_HIT_DISTANCE = 32;
 
 const SWEEP_EPSILON = 0.000001;
 const LATTICE_CELL_SIZE = 1 / BLOCK_FRAGMENT_GRID_SIZE;
@@ -33,6 +35,15 @@ export type PhysicsCoreTrajectoryPredictionInput = {
   readonly radius: number;
   readonly stepSeconds?: number;
   readonly maxSeconds?: number;
+};
+
+export type HitscanCoreTrajectoryPredictionInput = {
+  readonly origin: THREE.Vector3;
+  readonly direction: THREE.Vector3;
+  readonly radius: number;
+  readonly maxDistance: number;
+  readonly impactSpeed: number;
+  readonly noHitPreviewDistance?: number;
 };
 
 export type AimPreviewLatticeVisibility = {
@@ -281,6 +292,50 @@ export function predictPhysicsCoreTrajectory(
   return { points };
 }
 
+export function predictHitscanCoreTrajectory(
+  world: CollisionWorld,
+  input: HitscanCoreTrajectoryPredictionInput
+): PhysicsCoreTrajectoryPrediction {
+  const direction = normalizeDirection(input.direction);
+  if (!direction) return { points: [] };
+
+  const maxDistance = normalizePositive(input.maxDistance, 0);
+  if (maxDistance <= SWEEP_EPSILON) return { points: [] };
+
+  const previewDistance = Math.min(
+    maxDistance,
+    normalizePositive(input.noHitPreviewDistance, HITSCAN_CORE_AIM_PREVIEW_NO_HIT_DISTANCE)
+  );
+  const origin = input.origin.clone();
+  const hit = raycastHitscanCore(world, origin, direction, maxDistance, input.radius);
+
+  if (!hit) {
+    return {
+      points: [
+        origin,
+        origin.clone().addScaledVector(direction, previewDistance)
+      ]
+    };
+  }
+
+  const normal = hit.normal.lengthSq() > SWEEP_EPSILON
+    ? hit.normal.clone()
+    : direction.clone().multiplyScalar(-1);
+  return {
+    points: [
+      origin,
+      hit.position.clone()
+    ],
+    impact: {
+      block: hit.block,
+      normal,
+      position: hit.position.clone(),
+      incomingVelocity: direction.clone().multiplyScalar(Math.max(0, input.impactSpeed)),
+      speed: Math.max(0, input.impactSpeed)
+    }
+  };
+}
+
 function findSweptTerrainHit(
   world: CollisionWorld,
   start: THREE.Vector3,
@@ -486,4 +541,10 @@ function normalizePositive(value: number | undefined, fallback: number): number 
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : fallback;
+}
+
+function normalizeDirection(direction: THREE.Vector3): THREE.Vector3 | null {
+  return direction.lengthSq() > SWEEP_EPSILON
+    ? direction.clone().normalize()
+    : null;
 }
