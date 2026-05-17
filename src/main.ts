@@ -23,12 +23,15 @@ import {
   BUILDER_BRUSH_STEP,
   BUILDER_MODE_TOGGLE_KEY,
   applyBuilderBrush,
+  collectBuilderBrushCells,
   eraseBuilderBrush,
   formatBuilderBrushSize,
+  getBuilderBrushCenterForTarget,
   normalizeBuilderBrushSize,
   type BuilderBrushCell,
   type BuilderLane
 } from "./builderTools";
+import { BuilderBrushPreview } from "./builderPreview";
 import {
   createChunkStorage,
   createWorldRegistry,
@@ -505,6 +508,7 @@ type SettingsCategory = "graphics" | "gameplay";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
+const builderBrushPreview = new BuilderBrushPreview(scene);
 const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
@@ -1308,17 +1312,7 @@ function applyBuilderBrushAtTarget(operation: "place" | "erase"): void {
 
   const activeWorld = requireWorld();
   const activePlayer = requirePlayer();
-  const center = operation === "place"
-    ? {
-        x: hit.block.x + hit.normal.x,
-        y: hit.block.y + hit.normal.y,
-        z: hit.block.z + hit.normal.z
-      }
-    : {
-        x: hit.block.x,
-        y: hit.block.y,
-        z: hit.block.z
-      };
+  const center = getBuilderBrushCenterForTarget(hit.block, hit.normal, operation);
   const changedCells = operation === "place"
     ? applyBuilderBrush({
         world: activeWorld,
@@ -1457,6 +1451,7 @@ function animate(): void {
     updateHud();
     updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
+    updateBuilderBrushPreview(activePlayer);
     updateCoreAimPreview(activeWorld, activePlayer);
     updateSprintFeedback(activePlayer.isSprintFeedbackActive(), isPlayerCoreAdsActive(), delta);
     damageIndicators.update(camera, window.innerWidth, window.innerHeight);
@@ -1467,6 +1462,7 @@ function animate(): void {
     recordTimingSection("minimapMs");
   } else {
     targetBlockHighlighter.hide();
+    builderBrushPreview.hide();
     coreAimPreview.hide();
     damageIndicators.clear();
     updateSprintFeedback(false, false, delta);
@@ -1727,6 +1723,7 @@ function setBuilderLane(lane: BuilderLane): void {
   }
 
   activeBuilderLane = lane;
+  if (lane !== "blocks") builderBrushPreview.hide();
   selectHotbarIndex(getActiveHotbarIndex());
 }
 
@@ -1891,6 +1888,30 @@ function updateTargetBlockHighlighter(): void {
   }
 
   targetBlockHighlighter.showBlock(hit.block, hit.kind);
+}
+
+function updateBuilderBrushPreview(activePlayer: PlayerController): void {
+  if (activeBuilderLane !== "blocks" || !activePlayer.isLooking()) {
+    builderBrushPreview.hide();
+    return;
+  }
+
+  const hit = getTargetHit();
+  if (!hit || hit.source !== "voxel") {
+    builderBrushPreview.hide();
+    return;
+  }
+
+  const selectedBlock = getSelectedBuilderBlock();
+  const center = getBuilderBrushCenterForTarget(hit.block, hit.normal, "place");
+  const cells = collectBuilderBrushCells(center, builderBrushSize)
+    .filter((cell) => !activePlayer.overlapsBlock(cell.x, cell.y, cell.z));
+  const [red, green, blue] = BLOCKS[selectedBlock].color;
+
+  builderBrushPreview.update({
+    cells,
+    color: new THREE.Color(red, green, blue)
+  });
 }
 
 function updateCoreAimPreview(activeWorld: VoxelWorld, activePlayer: PlayerController): void {
@@ -3221,6 +3242,7 @@ function disposeRuntime(): void {
   player?.dispose();
   clearToys();
   coreAimPreview.dispose();
+  builderBrushPreview.dispose();
   hitscanBoltTracer.dispose();
   debrisPoofRenderer.dispose();
   rigidDebris.dispose();

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.6.19 - 2026-05-17
+
+### Added
+
+- Added a translucent block-color Builder brush preview that shows the right-click placement volume while the Blocks lane is active.
+
+### Changed
+
+- Redesigned the in-world HUD so status stays in a compact top-left card and controls move into bottom-left hint chips.
+- Redesigned the F3 debug panel into grouped Perf/World/Physics/Debris/Render sections instead of a raw line dump.
+
 ## 0.6.18 - 2026-05-17
 
 ### Added

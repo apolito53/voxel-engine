@@ -13,6 +13,12 @@ export type BuilderBrushCell = {
   readonly z: number;
 };
 
+export type BuilderBrushFaceNormal = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
 export type BuilderBrushWorld = {
   getBlock(x: number, y: number, z: number): number;
   setBlock(x: number, y: number, z: number, block: number): void;
@@ -64,6 +70,26 @@ export function collectBuilderBrushCells(center: BuilderBrushCell, size: number)
   }
 
   return cells;
+}
+
+export function getBuilderBrushCenterForTarget(
+  target: BuilderBrushCell,
+  normal: BuilderBrushFaceNormal,
+  operation: "place" | "erase"
+): BuilderBrushCell {
+  if (operation === "erase") {
+    return {
+      x: Math.floor(target.x),
+      y: Math.floor(target.y),
+      z: Math.floor(target.z)
+    };
+  }
+
+  return {
+    x: Math.floor(target.x + normal.x),
+    y: Math.floor(target.y + normal.y),
+    z: Math.floor(target.z + normal.z)
+  };
 }
 
 export function applyBuilderBrush(options: BuilderBrushOptions): number {

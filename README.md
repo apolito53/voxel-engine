@@ -45,7 +45,7 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
-- HUD shows the selected held item, movement mode, and current player speed in m/s
+- HUD shows the selected lane/item, movement mode, Nova state, and current player speed in a compact status card; quick controls sit in low-profile hint chips away from the reticle
 - Pause menu `Settings` opens the tunable engine controls; `Exit to Home` sits at the bottom as the red world-leave action
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
@@ -54,7 +54,7 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `Mouse wheel` selects within the active lane: gameplay items or build blocks
 - `G` toggles the active lane between `Items` and `Blocks`
 - `Unarmed` does nothing on either click for now
-- In `Blocks` lane, selected blocks use `Left click` to erase the targeted brush volume and `Right click` to place the selected block brush into the adjacent space
+- In `Blocks` lane, selected blocks use `Left click` to erase the targeted brush volume and `Right click` to place the selected block brush into the adjacent space; a translucent block-color ghost previews the placement volume before committing it
 - Selected Physics Core uses `Left click` to throw a core from the lowered right-side muzzle; hold `Right click` while firing to use centered reticle ADS with a slight 15% zoom
 - Selected Hitscan Core uses `Left click` to fire an instant 10%-radius, 500%-speed core trace from the lowered right-side muzzle through the same partial-block bite and piercing rules, poof loose debris along the beam path, and draw a short additive energy-beam flash along the shot line; hold `Right click` while firing to use centered reticle ADS with a slight 15% zoom
 - `F` toggle flight mode
@@ -62,7 +62,7 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `N` toggle the Nova Pilot companion; `B` asks Nova to throw a physics core from her own position
 - `Enter` or `F9` opens Nova Terminal, a local companion terminal that accepts normal chat plus commands like `/spawn target`, `/superflat`, or bare known commands such as `help`
 - `X` despawn active physics cores while keeping loose debris and any existing rubble cover experiments
-- `F3` toggle debug overlay, including smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, adaptive debris pressure, instanced debris render counts, partial-block damage lattice/subvoxel counts, partial-mesh triangle pressure, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting. 45ms+ frame spikes write a compact `[Voxel Hitch]` diagnosis, and sustained frame cadence below 60 FPS adds at most one low-FPS sample per second with the same counter snapshot, including the effective debris pressure cap when it is active. Recent records stay available at `globalThis.__VOXEL_HITCHES__()` and append pass-versioned JSONL records under `logs/` while `npm.cmd run debug:logs` is listening on `127.0.0.1:5174`. On the deployed Vercel build, the same records are batched to private Blob JSONL files through `/api/hitch-log` with app-version and deployment metadata. Use `globalThis.__VOXEL_HITCH_START_PASS__("label")` before a focused repro to split fresh logs from stale ones.
+- `F3` toggle debug overlay, grouped into Perf, World, Physics, Debris, and Render panels with smoothed FPS, raw/peak frame time, CPU timing buckets, active/sleeping physics broadphase counts, rigid debris body/collider counts, adaptive debris pressure, instanced debris render counts, partial-block damage lattice/subvoxel counts, partial-mesh triangle pressure, active debris bubble metrics, settling-region metrics, baked rubble chunk counts, and rubble cover stats for hitch hunting. 45ms+ frame spikes write a compact `[Voxel Hitch]` diagnosis, and sustained frame cadence below 60 FPS adds at most one low-FPS sample per second with the same counter snapshot, including the effective debris pressure cap when it is active. Recent records stay available at `globalThis.__VOXEL_HITCHES__()` and append pass-versioned JSONL records under `logs/` while `npm.cmd run debug:logs` is listening on `127.0.0.1:5174`. On the deployed Vercel build, the same records are batched to private Blob JSONL files through `/api/hitch-log` with app-version and deployment metadata. Use `globalThis.__VOXEL_HITCH_START_PASS__("label")` before a focused repro to split fresh logs from stale ones.
 - `npm.cmd run dev -- --port 5173` appends a `logs/server-starts-YYYY-MM-DD.jsonl` marker with branch, commit, dirty state, package version, port, and runtime metadata before Vite starts, so performance logs can be tied to the exact code pass that produced them.
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F6` toggles the Physics Core aim preview, drawing a dotted throw arc, predicted landing ring, and the 3x3x3 bite-lattice cells the next projectile impact would affect. Camera-facing sub-cells draw bright white, while hidden/far-side cells still draw as a much softer red ghost so the full damage footprint remains visible without lying about what is exposed
@@ -98,6 +98,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
 - `src/adminCommands.ts`: admin command parsing/routing, Superflat Lab shortcut, and spawnable terrain test fixtures used by Nova Terminal
 - `src/builderTools.ts`: centered odd-size builder brush utilities shared by the in-game Builder panel and block lane
+- `src/builderPreview.ts`: translucent block-color placement ghost for the active build brush
 - `src/testAvatar.ts`: F8 scripted runtime avatar for repeatable in-browser gameplay smoke checks
 - `src/codexPilot.ts`: high-level browser play bridge for automation-assisted roaming, aiming, movement, weapon fire, scenario setup, and focused hitch-log passes through real player/hotbar systems
 - `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets

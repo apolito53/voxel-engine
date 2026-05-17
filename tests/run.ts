@@ -33,6 +33,7 @@ import {
   collectBuilderBrushCells,
   eraseBuilderBrush,
   formatBuilderBrushSize,
+  getBuilderBrushCenterForTarget,
   normalizeBuilderBrushSize
 } from "../src/builderTools";
 import { Chunk } from "../src/chunk";
@@ -909,6 +910,22 @@ test("builder brush sizing stays odd and centered", () => {
   assert(
     cells.some((cell) => cell.x === 10 && cell.y === 5 && cell.z === -3),
     "builder brushes should stay centered on the floored target cell"
+  );
+});
+
+test("builder brush target centers match place and erase previews", () => {
+  const target = { x: 4.9, y: 8.1, z: -2.4 };
+  const normal = { x: 0, y: 1, z: 0 };
+
+  assertDeepEqual(
+    getBuilderBrushCenterForTarget(target, normal, "erase"),
+    { x: 4, y: 8, z: -3 },
+    "erase previews should stay centered on the hit block"
+  );
+  assertDeepEqual(
+    getBuilderBrushCenterForTarget(target, normal, "place"),
+    { x: 4, y: 9, z: -3 },
+    "place previews should move to the adjacent block space"
   );
 });
 

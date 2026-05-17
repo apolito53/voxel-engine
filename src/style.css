@@ -927,22 +927,68 @@ body:not(.in-world) #crosshair {
   left: 18px;
   top: 16px;
   z-index: 10;
+  display: grid;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 36px));
   color: #edf4f8;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
   pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.62);
   user-select: none;
+}
+
+.hud-status {
+  display: inline-grid;
+  gap: 2px;
+  justify-self: start;
+  padding: 9px 11px;
+  border: 1px solid rgba(237, 244, 248, 0.12);
+  border-radius: 8px;
+  background: rgba(9, 15, 21, 0.36);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(4px);
 }
 
 #hud .title {
   font-weight: 800;
   font-size: 18px;
-  margin-bottom: 6px;
+  line-height: 1.05;
 }
 
-#hud .row {
-  font-size: 13px;
-  line-height: 1.55;
-  opacity: 0.86;
+.hud-speed {
+  color: rgba(237, 244, 248, 0.74);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.hud-hints {
+  position: fixed;
+  left: 18px;
+  right: 200px;
+  bottom: 18px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 720px;
+}
+
+.hud-pill {
+  padding: 5px 8px;
+  border: 1px solid rgba(237, 244, 248, 0.13);
+  border-radius: 999px;
+  background: rgba(9, 15, 21, 0.34);
+  color: rgba(237, 244, 248, 0.7);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+  backdrop-filter: blur(3px);
+}
+
+.hud-pill b {
+  color: rgba(255, 226, 139, 0.9);
+  font-weight: 950;
 }
 
 #nova-message {
@@ -1108,23 +1154,112 @@ body:not(.in-world) #crosshair {
   right: 14px;
   top: 14px;
   z-index: 12;
-  min-width: 150px;
-  padding: 10px 11px;
+  box-sizing: border-box;
+  width: min(500px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  max-height: calc(100dvh - 28px);
+  overflow: hidden;
+  padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 6px;
-  background: rgba(12, 17, 23, 0.72);
+  border-radius: 8px;
+  background: rgba(9, 14, 20, 0.76);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
   color: #dff2ed;
   font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 10.5px;
+  line-height: 1.25;
   pointer-events: none;
   text-align: left;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
-  white-space: pre;
+  backdrop-filter: blur(5px);
 }
 
 #debug-panel.is-hidden {
   display: none;
+}
+
+.debug-hud-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(237, 244, 248, 0.12);
+}
+
+.debug-hud-kicker {
+  color: rgba(255, 226, 139, 0.9);
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.debug-hud-summary {
+  overflow: hidden;
+  color: rgba(223, 242, 237, 0.7);
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-hud-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.debug-hud-section {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(237, 244, 248, 0.09);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.045);
+}
+
+.debug-hud-section-title {
+  color: rgba(143, 216, 255, 0.82);
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.debug-hud-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.debug-hud-label {
+  overflow: hidden;
+  color: rgba(223, 242, 237, 0.48);
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-hud-value {
+  min-width: 0;
+  color: rgba(223, 242, 237, 0.86);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) {
+  .hud-hints {
+    right: 18px;
+    bottom: 188px;
+  }
+
+  #debug-panel {
+    width: min(360px, calc(100vw - 28px));
+  }
+
+  .debug-hud-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 #minimap {
