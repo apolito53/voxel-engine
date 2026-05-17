@@ -45,7 +45,7 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `Resume` captures mouse after pausing
 - `Exit to Home` returns to the world list; switch worlds from there
 - `Mouse` look while playing
-- HUD shows the selected lane/item, movement mode, Nova state, and current player speed in a compact status card; quick controls sit in low-profile hint chips away from the reticle
+- HUD shows the selected lane/item, movement mode, and Nova state in a compact status card; quick controls sit in low-profile hint chips away from the reticle, while F3 debug shows total player speed plus signed X/Y/Z velocity components
 - Pause menu `Settings` opens the tunable engine controls; `Exit to Home` sits at the bottom as the red world-leave action
 - `Space` jump, or fly upward while flight mode is active
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
@@ -150,7 +150,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/novaChat.ts`: local context-aware Nova reply generation, terminal command routing, and bounded log helpers
 - `src/novaChatPanel.ts`: in-game Nova Terminal pane, message rendering, and submit/close behavior
 - `src/novaPilotReactions.ts`: event-driven Nova chatter, pulse reactions, and message throttling
-- `src/debugHud.ts`: debug overlay stats formatting, CPU timing buckets, and update throttling
+- `src/debugHud.ts`: grouped debug overlay stats formatting, player speed/velocity components, CPU timing buckets, and update throttling
 - `src/frameLoop.ts`: frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
 - `src/performanceHitchLog.ts`: bounded frame-spike black-box log, dominant-subsystem diagnosis, local debug-log POSTs, and console/Nova Terminal summaries

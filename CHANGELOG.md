@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.20 - 2026-05-17
+
+### Changed
+
+- Moved the player speed readout out of the main HUD and into the F3 debug panel.
+- Added signed player velocity components to the F3 debug panel so movement tuning can see X/Y/Z motion separately.
+
 ## 0.6.19 - 2026-05-17
 
 ### Added

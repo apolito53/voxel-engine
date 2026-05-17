@@ -6,6 +6,11 @@ import { compactText, type GpuInfo } from "./gpu";
 import type { PartialBlockMeshStats } from "./partialBlocks";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
+import {
+  formatPlayerSpeedMetersPerSecond,
+  formatPlayerVelocityComponentsMetersPerSecond,
+  type PlayerVelocitySample
+} from "./playerSpeed";
 import type { QualityPreset } from "./qualityPresets";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
@@ -57,6 +62,7 @@ export class DebugHud {
 
   update(
     rawDelta: number,
+    playerVelocity: PlayerVelocitySample,
     playerChunk: ChunkCoords,
     stats: WorldStats,
     lastMinimapMs: number,
@@ -86,6 +92,7 @@ export class DebugHud {
 
     this.renderPanel({
       rawDelta,
+      playerVelocity,
       playerChunk,
       stats,
       lastMinimapMs,
@@ -120,6 +127,7 @@ export class DebugHud {
 
   private renderPanel(snapshot: {
     readonly rawDelta: number;
+    readonly playerVelocity: PlayerVelocitySample;
     readonly playerChunk: ChunkCoords;
     readonly stats: WorldStats;
     readonly lastMinimapMs: number;
@@ -150,6 +158,13 @@ export class DebugHud {
           { label: "cpu", value: `${snapshot.timings.frameMs.toFixed(1)}ms total` },
           { label: "work", value: `p ${snapshot.timings.playerMs.toFixed(1)} c ${snapshot.timings.chunkMs.toFixed(1)} ph ${snapshot.timings.physicsMs.toFixed(1)}` },
           { label: "draw", value: `r ${snapshot.timings.renderMs.toFixed(1)} m ${snapshot.timings.meshMs.toFixed(1)} map ${snapshot.timings.minimapMs.toFixed(1)}` }
+        ]
+      },
+      {
+        title: "Player",
+        rows: [
+          { label: "speed", value: formatPlayerSpeedMetersPerSecond(snapshot.playerVelocity) },
+          { label: "vel", value: formatPlayerVelocityComponentsMetersPerSecond(snapshot.playerVelocity) }
         ]
       },
       {

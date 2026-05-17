@@ -12,3 +12,11 @@ export function getPlayerSpeedMetersPerSecond(velocity: PlayerVelocitySample): n
 export function formatPlayerSpeedMetersPerSecond(velocity: PlayerVelocitySample): string {
   return `${getPlayerSpeedMetersPerSecond(velocity).toFixed(1)} m/s`;
 }
+
+export function formatPlayerVelocityComponentsMetersPerSecond(velocity: PlayerVelocitySample): string {
+  return `x ${formatFiniteVelocityAxis(velocity.x)} | y ${formatFiniteVelocityAxis(velocity.y)} | z ${formatFiniteVelocityAxis(velocity.z)} m/s`;
+}
+
+function formatFiniteVelocityAxis(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : "0.0";
+}

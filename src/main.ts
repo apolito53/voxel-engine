@@ -124,7 +124,7 @@ import {
 } from "./performanceHitchLog";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
-import { formatPlayerSpeedMetersPerSecond, getPlayerSpeedMetersPerSecond } from "./playerSpeed";
+import { getPlayerSpeedMetersPerSecond } from "./playerSpeed";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
@@ -361,7 +361,6 @@ const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle")
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
 const minimap = requireElement<HTMLCanvasElement>("#minimap");
 const hudTitle = requireElement<HTMLElement>("#hud .title");
-const playerSpeedReadout = requireElement<HTMLElement>("#player-speed-readout");
 const novaMessage = requireElement<HTMLElement>("#nova-message");
 const novaChatRoot = requireElement<HTMLElement>("#nova-chat");
 const novaChatLog = requireElement<HTMLElement>("#nova-chat-log");
@@ -1369,6 +1368,7 @@ function animate(): void {
   const frameTimingSample = createEmptyFrameTimings();
   let timingSectionStartedAt = frameStartedAt;
   let debugPlayerChunk: ChunkCoords | null = null;
+  let debugPlayerVelocity: THREE.Vector3 | null = null;
   let debugWorldStats: WorldStats | null = null;
   let debugRubbleStats: RubbleFieldStats | null = null;
   let debugPartialMeshStats = partialBlockMeshField.getStats();
@@ -1383,6 +1383,7 @@ function animate(): void {
   if (inWorld) {
     const activeWorld = requireWorld();
     const activePlayer = requirePlayer();
+    debugPlayerVelocity = activePlayer.velocity;
 
     activePlayer.update(delta);
     testAvatar.update(delta);
@@ -1526,9 +1527,10 @@ function animate(): void {
   );
   frameTimingsInitialized = true;
 
-  if (inWorld && debugPlayerChunk && debugWorldStats && debugRubbleStats) {
+  if (inWorld && debugPlayerChunk && debugPlayerVelocity && debugWorldStats && debugRubbleStats) {
     debugHud.update(
       rawDelta,
+      debugPlayerVelocity,
       debugPlayerChunk,
       debugWorldStats,
       debugMinimapMs,
@@ -1660,7 +1662,6 @@ function updateHud(): void {
   const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry);
   const laneLabel = activeBuilderLane === "blocks" ? "Builder" : "Items";
   hudTitle.textContent = `Voxel Sandbox Engine | ${laneLabel}: ${selectedLabel}${modeSuffix}${novaSuffix}`;
-  playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
 }
 
 function processPhysicsImpacts(

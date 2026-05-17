@@ -231,6 +231,7 @@ import {
 } from "../src/sprintFeedback";
 import {
   formatPlayerSpeedMetersPerSecond,
+  formatPlayerVelocityComponentsMetersPerSecond,
   getPlayerSpeedMetersPerSecond
 } from "../src/playerSpeed";
 import {
@@ -1500,7 +1501,7 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
   );
 });
 
-test("player speed readout reports velocity in meters per second", () => {
+test("player debug readout reports velocity in meters per second", () => {
   const diagonalVelocity = { x: 3, y: 4, z: 12 };
 
   assertEqual(
@@ -1511,12 +1512,17 @@ test("player speed readout reports velocity in meters per second", () => {
   assertEqual(
     formatPlayerSpeedMetersPerSecond({ x: 1, y: 0, z: 0 }),
     "1.0 m/s",
-    "HUD speed readout should show one decimal place and metric units"
+    "debug speed readout should show one decimal place and metric units"
   );
   assertEqual(
     formatPlayerSpeedMetersPerSecond({ x: Number.POSITIVE_INFINITY, y: 0, z: 0 }),
     "0.0 m/s",
     "non-finite velocity samples should fail closed instead of putting nonsense in the HUD"
+  );
+  assertEqual(
+    formatPlayerVelocityComponentsMetersPerSecond({ x: 1.25, y: -2.5, z: 0 }),
+    "x 1.3 | y -2.5 | z 0.0 m/s",
+    "debug velocity components should show signed axis values with the same metric precision"
   );
 });
 

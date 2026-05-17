@@ -42,7 +42,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
-- Debug HUD throttling, grouped Perf/World/Physics/Debris/Render panel rendering, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, rubble cover stats, and renderer stats: `src/debugHud.ts`
+- Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render panel rendering, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, rubble cover stats, and renderer stats: `src/debugHud.ts`
 - Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`
 - Frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation: `src/frameLoop.ts`
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
@@ -69,7 +69,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Shared collision-world shape, collision bounds, and optional partial-height support contract used by player movement and loose debris physics: `src/collision.ts`
 - First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, input-listener disposal, voxel collision, and partial-height rubble stepping: `src/player.ts`
 - Player movement constants and committed slide/landing-slide/air-control/flight/crouch-view tuning helpers: `src/playerMovement.ts`
-- Player velocity magnitude and metric speed readout formatting: `src/playerSpeed.ts`
+- Player velocity magnitude, signed axis component, and metric speed readout formatting: `src/playerSpeed.ts`
 - Sprint/flight-boost feedback FOV target and smoothing helpers: `src/sprintFeedback.ts`
 - Nova Pilot companion mesh, follow/orbit behavior, and Nova-thrown core launch helpers: `src/novaPilot.ts`
 - Event-backed Nova context journal, local reply generation, terminal command routing, and in-game terminal panel: `src/novaContext.ts`, `src/novaChat.ts`, `src/novaChatPanel.ts`
