@@ -1,4 +1,5 @@
 import type { PerformanceHitchLogPass } from "./performanceHitchLog";
+import type { VisualTestScenarioSummary } from "./visualTestScenarios";
 import packageManifest from "../package.json";
 
 export const VISUAL_TEST_RECORDER_GLOBAL_NAME = "__VOXEL_VISUAL_TEST__";
@@ -100,6 +101,8 @@ export type VisualTestRecorderApi = {
   snapshot(): VisualTestRecorderSnapshot;
   start(options?: VisualTestRecorderOptions): Promise<VisualTestRecorderSnapshot>;
   stop(options?: VisualTestRecorderStopOptions): Promise<VisualTestUploadResult>;
+  listScenarios(): readonly VisualTestScenarioSummary[];
+  recordScenario(id?: string, options?: VisualPilotRecordOptions): Promise<unknown>;
   recordPilotPlay(script?: string, options?: VisualPilotRecordOptions): Promise<unknown>;
 };
 

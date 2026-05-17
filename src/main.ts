@@ -241,6 +241,11 @@ import {
   type VisualTestRecorderApi
 } from "./visualTestRecorder";
 import {
+  getVisualTestScenario,
+  listVisualTestScenarios,
+  type VisualTestScenario
+} from "./visualTestScenarios";
+import {
   VoxelWorld,
   type BlockDamageResult,
   type BlockPierceContinuation,
@@ -626,6 +631,8 @@ voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = {
     logPass: options?.logPass ?? performanceHitchLog.getPass()
   }),
   stop: (options) => visualTestRecorder.stop(options),
+  listScenarios: () => listVisualTestScenarios(),
+  recordScenario,
   recordPilotPlay
 };
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
@@ -1718,10 +1725,31 @@ function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats:
   });
 }
 
+async function recordScenario(id = "debris-grounding", options: VisualPilotRecordOptions = {}): Promise<unknown> {
+  const scenario = getVisualTestScenario(id);
+  return recordVisualScenario(scenario, options, "scenario");
+}
+
 async function recordPilotPlay(script = "wall-range", options: VisualPilotRecordOptions = {}): Promise<unknown> {
-  const normalizedOptions = normalizeVisualPilotRecordOptions({
+  const scenario = getVisualTestScenario(script);
+  return recordVisualScenario(scenario, {
     ...options,
-    label: options.label ?? `pilot-${script}`
+    label: options.label ?? `pilot-${scenario.pilotScript}`
+  }, "pilot-play");
+}
+
+async function recordVisualScenario(
+  scenario: VisualTestScenario,
+  options: VisualPilotRecordOptions,
+  recorderKind: "pilot-play" | "scenario"
+): Promise<unknown> {
+  const normalizedOptions = normalizeVisualPilotRecordOptions({
+    ...scenario.defaultOptions,
+    ...options,
+    metadata: {
+      ...(scenario.defaultOptions.metadata ?? {}),
+      ...(options.metadata ?? {})
+    }
   });
   performanceHitchLog.startPass(`visual-${normalizedOptions.label}`);
   await visualTestRecorder.start({
@@ -1729,19 +1757,22 @@ async function recordPilotPlay(script = "wall-range", options: VisualPilotRecord
     logPass: performanceHitchLog.getPass(),
     metadata: {
       ...(normalizedOptions.metadata ?? {}),
-      script,
-      recorderKind: "pilot-play"
+      scenarioId: scenario.id,
+      scenarioTitle: scenario.title,
+      scenarioTags: scenario.tags,
+      pilotScript: scenario.pilotScript,
+      recorderKind
     }
   });
 
   try {
-    const pilotResult = await codexPilot.play(script === "free-roam" ? "free-roam" : "wall-range");
+    const pilotResult = await codexPilot.play(scenario.pilotScript);
     if (normalizedOptions.settleMs > 0) await waitForMilliseconds(normalizedOptions.settleMs);
     const recording = await visualTestRecorder.stop({
       status: "passed",
       metadata: { pilotResult }
     });
-    return { script, pilotResult, recording };
+    return { scenario, pilotResult, recording };
   } catch (error) {
     const recording = visualTestRecorder.snapshot().status === "recording"
       ? await visualTestRecorder.stop({
@@ -1750,7 +1781,7 @@ async function recordPilotPlay(script = "wall-range", options: VisualPilotRecord
         })
       : null;
     return {
-      script,
+      scenario,
       recording,
       error: error instanceof Error ? error.message : String(error)
     };

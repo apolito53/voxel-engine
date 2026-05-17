@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.20.2 - 2026-05-17
+
+### Added
+
+- Added a named visual-test scenario catalog at `globalThis.__VOXEL_VISUAL_TEST__.listScenarios()` with scripted runs for debris grounding, hitscan tunnel drilling, builder/admin fixture staging, the baseline wall range, and free-roam smoke checks.
+- Added `globalThis.__VOXEL_VISUAL_TEST__.recordScenario(id, options)` so visual recordings can reuse scenario-specific default timing, labels, and metadata instead of one-off console snippets.
+
 ## 0.6.20.1 - 2026-05-17
 
 ### Added

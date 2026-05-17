@@ -67,8 +67,8 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `F4` cycle built-in quality: Potato, Low, Normal, High, Ultra
 - `F6` toggles the Physics Core aim preview, drawing a dotted throw arc, predicted landing ring, and the 3x3x3 bite-lattice cells the next projectile impact would affect. Camera-facing sub-cells draw bright white, while hidden/far-side cells still draw as a much softer red ghost so the full damage footprint remains visible without lying about what is exposed
 - `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
-- Browser automation can use `globalThis.__VOXEL_CODEX_PILOT__` as a high-level play bridge for real in-world inputs: `superflat()`, `scenario("wall-range")`, `move(...)`, `lookAt(...)`, `fire(...)`, `play("wall-range")`, `snapshot()`, and `startPass("label")`
-- Local browser test runs can use `globalThis.__VOXEL_VISUAL_TEST__.recordPilotPlay("wall-range")` while `npm.cmd run debug:logs` is listening; the browser records the game canvas as WebM, samples review frames, and posts the run to `logs/visual-runs/YYYY-MM-DD/...` with `recording.webm`, extracted video frames when local `ffmpeg` is available, `manifest.json`, and `review.html`
+- Browser automation can use `globalThis.__VOXEL_CODEX_PILOT__` as a high-level play bridge for real in-world inputs: `superflat()`, `scenario("wall-range")`, `move(...)`, `lookAt(...)`, `fire(...)`, `play("wall-range")`, `play("debris-grounding")`, `play("hitscan-tunnel")`, `snapshot()`, and `startPass("label")`
+- Local browser test runs can use `globalThis.__VOXEL_VISUAL_TEST__.listScenarios()` and `globalThis.__VOXEL_VISUAL_TEST__.recordScenario("debris-grounding")` while `npm.cmd run debug:logs` is listening; the browser records the game canvas as WebM, samples review frames, and posts the run to `logs/visual-runs/YYYY-MM-DD/...` with `recording.webm`, extracted video frames when local `ffmpeg` is available, `manifest.json`, and `review.html`. Current scripted shots include `debris-grounding`, `hitscan-tunnel`, `builder-fixture`, `wall-range`, and `free-roam`; `recordPilotPlay("wall-range")` remains as a compatibility shortcut.
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Builder` opens an admin build panel with a block palette, odd-sized place/erase brush, and quick target/wall/platform/pillar fixture spawns using the selected block
 - Pause menu `Settings` splits tuning into `Graphics` and `Gameplay` tabs: graphics owns quality, render distance, physics body budget, shadows, max break debris, and Super Ultra; gameplay owns projectile core size/velocity, the Core Aim Preview toggle, grounded debris cleanup, health bars, and cleanup. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
@@ -102,6 +102,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/builderPreview.ts`: translucent block-color placement ghost for the active build brush
 - `src/testAvatar.ts`: F8 scripted runtime avatar for repeatable in-browser gameplay smoke checks
 - `src/codexPilot.ts`: high-level browser play bridge for automation-assisted roaming, aiming, movement, weapon fire, scenario setup, and focused hitch-log passes through real player/hotbar systems
+- `src/visualTestScenarios.ts`: named visual review catalog that maps repeatable shots like debris grounding and hitscan tunnel drilling to pilot scripts and recorder defaults
 - `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets
 - `src/eventBus.ts`: tiny typed in-memory pub/sub used for local engine/gameplay events
 - `src/engineEvents.ts`: shared engine event contracts for world, physics, damage, rubble, quality, palette, and performance signals
@@ -155,7 +156,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/frameLoop.ts`: frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation
 - `src/frameTimings.ts`: smoothed per-frame subsystem timing helpers for the debug overlay
 - `src/performanceHitchLog.ts`: bounded frame-spike black-box log, dominant-subsystem diagnosis, local debug-log POSTs, and console/Nova Terminal summaries
-- `src/visualTestRecorder.ts`: local-only canvas/WebM visual recorder for automated pilot runs, including frame samples, metadata, and upload to the `5174` debug server
+- `src/visualTestRecorder.ts`: local-only canvas/WebM visual recorder for automated visual scenarios, including frame samples, metadata, and upload to the `5174` debug server
 - `src/remoteHitchLog.ts`: shared production hitch-log payload normalization, origin checks, app-version metadata, JSONL formatting, and Blob path grouping
 - `api/hitch-log.ts`: Vercel serverless receiver that writes deployed hitch batches into the private `voxel-engine-logs` Blob store
 - `scripts/dev-server.mjs`: dev-only Vite launcher that writes server-start/stop JSONL markers with repo metadata before handing off to Vite

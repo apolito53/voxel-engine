@@ -338,8 +338,10 @@ import {
   spawnWallFixture
 } from "../src/adminCommands";
 import {
+  CODEX_PILOT_PLAY_SCRIPTS,
   createCodexPilotLookAtAngles,
   createCodexPilotMoveKeys,
+  normalizeCodexPilotPlayScriptId,
   normalizeCodexPilotFireInput,
   normalizeCodexPilotMove,
   normalizeCodexPilotWeapon
@@ -348,6 +350,11 @@ import {
   normalizeVisualPilotRecordOptions,
   normalizeVisualTestRecorderOptions
 } from "../src/visualTestRecorder";
+import {
+  getVisualTestScenario,
+  listVisualTestScenarios,
+  normalizeVisualTestScenarioId
+} from "../src/visualTestScenarios";
 import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar";
 import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
@@ -1149,6 +1156,49 @@ test("codex pilot normalizes high-level play commands into safe controller input
   const aim = createCodexPilotLookAtAngles(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5));
   assertNearlyEqual(aim.yaw, 0, 0.000001, "pilot zero-yaw aim should face negative z");
   assertNearlyEqual(aim.pitch, 0, 0.000001, "pilot flat aim should keep pitch level");
+  assert(CODEX_PILOT_PLAY_SCRIPTS.includes("debris-grounding"), "pilot script list should include the debris visual repro");
+  assertEqual(
+    normalizeCodexPilotPlayScriptId("hitscan-tunnel"),
+    "hitscan-tunnel",
+    "pilot script normalizer should accept scripted visual review runs"
+  );
+  assertEqual(
+    normalizeCodexPilotPlayScriptId("bad idea"),
+    "wall-range",
+    "unknown pilot scripts should fall back to the baseline range"
+  );
+});
+
+test("visual test scenarios expose stable scripted review catalog", () => {
+  const scenarios = listVisualTestScenarios();
+  const ids = scenarios.map((scenario) => scenario.id);
+  assert(ids.includes("debris-grounding"), "visual scenario catalog should include the debris grounding repro");
+  assert(ids.includes("hitscan-tunnel"), "visual scenario catalog should include the hitscan tunnel repro");
+  assert(ids.includes("builder-fixture"), "visual scenario catalog should include a builder/admin fixture shot");
+
+  const debrisScenario = getVisualTestScenario("debris");
+  assertEqual(debrisScenario.id, "debris-grounding", "scenario aliases should resolve to the canonical id");
+  assertEqual(debrisScenario.pilotScript, "debris-grounding", "scenario should route to its matching pilot script");
+  assertEqual(
+    debrisScenario.defaultOptions.label,
+    "scenario-debris-grounding",
+    "scenario defaults should carry a review-friendly label"
+  );
+  assert(
+    (debrisScenario.defaultOptions.maxSeconds ?? 0) >= 20,
+    "debris review should reserve enough recording time for impacts and settling"
+  );
+
+  assertEqual(
+    normalizeVisualTestScenarioId("drill"),
+    "hitscan-tunnel",
+    "tunnel aliases should normalize for quick console calls"
+  );
+  assertEqual(
+    normalizeVisualTestScenarioId("mystery-run"),
+    "debris-grounding",
+    "unknown scenarios should default to the debris review instead of silently doing nothing"
+  );
 });
 
 test("visual test recorder normalizes capture options safely", () => {

@@ -20,7 +20,14 @@ const DEFAULT_PLAY_STEP_MS = 180;
 const TARGET_EYE_OFFSET = 0.45;
 
 export type CodexPilotWeapon = "selected" | "physics-core" | "hitscan-core";
-export type CodexPilotPlayScriptId = "wall-range" | "free-roam";
+export const CODEX_PILOT_PLAY_SCRIPTS = [
+  "wall-range",
+  "debris-grounding",
+  "hitscan-tunnel",
+  "builder-fixture",
+  "free-roam"
+] as const;
+export type CodexPilotPlayScriptId = typeof CODEX_PILOT_PLAY_SCRIPTS[number];
 
 export type CodexPilotPosition = {
   readonly x: number;
@@ -193,9 +200,11 @@ export class CodexPilot {
     this.ensureWorldActive();
     this.status = `Preparing ${name}`;
     this.hooks.noteActivity();
-    if (name === "wall-range") {
-      this.run("spawn wall stone 8 4");
-    } else {
+    if (name === "wall-range" || name === "debris-grounding" || name === "hitscan-tunnel") {
+      this.run(name === "hitscan-tunnel" ? "spawn wall stone 9 4" : "spawn wall stone 8 4");
+    } else if (name === "builder-fixture") {
+      this.run("spawn platform grass 9");
+    } else if (name === "free-roam") {
       this.run("spawn platform grass 9");
     }
     await wait(DEFAULT_ARENA_SETTLE_MS);
@@ -305,7 +314,49 @@ export class CodexPilot {
       await this.move({ right: 1, seconds: 0.35, flight: true });
       await this.move({ right: -1, seconds: 0.35, flight: true });
       steps.push("strafe check");
+    } else if (script === "debris-grounding") {
+      await this.scenario({ name: "debris-grounding", freshSuperflat: true });
+      startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
+      steps.push("superflat debris wall");
+      await this.move({ forward: -1, seconds: 0.55, flight: true });
+      steps.push("backed up for debris view");
+      await this.fire({ weapon: "physics-core", count: 7, intervalMs: 220 });
+      steps.push("physics debris burst");
+      await wait(1250);
+      steps.push("settle watch");
+      await this.move({ right: 1, seconds: 0.45, flight: true });
+      await this.move({ right: -1, seconds: 0.45, flight: true });
+      steps.push("grounding parallax sweep");
+    } else if (script === "hitscan-tunnel") {
+      await this.scenario({ name: "hitscan-tunnel", freshSuperflat: true });
+      startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
+      steps.push("superflat tunnel wall");
+      await this.move({ forward: -1, seconds: 0.45, flight: true });
+      steps.push("backed up for beam view");
+      await this.fire({ weapon: "hitscan-core", count: 16, intervalMs: 75, ads: true });
+      steps.push("ads hitscan drilling burst");
+      await wait(700);
+      await this.move({ right: 1, seconds: 0.35, flight: true });
+      await this.move({ right: -1, seconds: 0.35, flight: true });
+      steps.push("tunnel/debris visibility sweep");
+    } else if (script === "builder-fixture") {
+      await this.scenario({ name: "builder-fixture", freshSuperflat: true });
+      startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
+      steps.push("superflat builder platform");
+      this.run("spawn wall stone 6 3");
+      steps.push("spawned builder wall fixture");
+      await wait(450);
+      await this.move({ right: 1, seconds: 0.55, flight: true });
+      this.run("spawn pillar dirt 5");
+      steps.push("spawned offset pillar fixture");
+      await wait(450);
+      await this.move({ right: -1, seconds: 0.55, flight: true });
+      steps.push("builder fixture sweep");
     } else {
+      if (!this.hooks.isWorldActive()) {
+        await this.superflat();
+        steps.push("superflat free-roam fallback");
+      }
       await this.move({ forward: 1, seconds: 1.2, sprint: true, flight: true });
       await this.fire({ weapon: "hitscan-core", count: 3, intervalMs: 160 });
       steps.push("free roam burst");
@@ -374,6 +425,14 @@ export function normalizeCodexPilotMove(input: CodexPilotMoveInput = {}): Normal
     sprint: input.sprint === true,
     flight: input.flight === true
   };
+}
+
+export function normalizeCodexPilotPlayScriptId(value: unknown): CodexPilotPlayScriptId {
+  if (typeof value !== "string") return "wall-range";
+  const normalized = value.trim().toLowerCase();
+  return CODEX_PILOT_PLAY_SCRIPTS.includes(normalized as CodexPilotPlayScriptId)
+    ? normalized as CodexPilotPlayScriptId
+    : "wall-range";
 }
 
 export function createCodexPilotMoveKeys(move: NormalizedCodexPilotMove): readonly string[] {

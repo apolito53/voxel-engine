@@ -36,7 +36,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Admin command parsing/routing, Superflat Lab launcher hook, and spawnable terrain fixtures used by Nova Terminal and the Builder panel for repeatable testing: `src/adminCommands.ts`
 - F8 scripted runtime avatar for in-browser gameplay smoke checks, including health-aware repeated core shots for sturdy terrain: `src/testAvatar.ts`
 - Browser automation play bridge exposed as `globalThis.__VOXEL_CODEX_PILOT__`, with high-level Superflat/scenario/move/look/fire/play commands that still drive real player and hotbar systems: `src/codexPilot.ts`
-- Local visual test recorder exposed as `globalThis.__VOXEL_VISUAL_TEST__`, with WebM canvas capture, sampled review frames, pilot-play recording, and upload to `logs/visual-runs/` through the `5174` debug receiver: `src/visualTestRecorder.ts`
+- Local visual test recorder exposed as `globalThis.__VOXEL_VISUAL_TEST__`, with named scenario listing, WebM canvas capture, sampled review frames, pilot-play/scenario recording, and upload to `logs/visual-runs/` through the `5174` debug receiver: `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`
 - Floating health-bar projection for damaged terrain/rubble targets; visibility is gated by the pause-menu `Health Bars` toggle in `src/main.ts`: `src/damageIndicators.ts`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`
@@ -154,7 +154,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 - Add, recolor, or retune block health: update `src/blocks.ts`; inspect deterministic tinting in `src/blockColors.ts`, mesh color use in `src/chunk.ts`, rubble promotion in `src/rubble.ts`, and debris color use in `src/physics.ts`.
 - Tune chunk dimensions: update `src/voxelConstants.ts`, then verify worker and main-thread paths still agree.
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
-- Add or adjust repeatable runtime test/play/build tools: `src/adminCommands.ts`, `src/builderTools.ts`, `src/testAvatar.ts`, `src/codexPilot.ts`, `src/visualTestRecorder.ts`, Nova Terminal routing in `src/novaChat.ts`/`src/novaChatPanel.ts`, local visual recording upload in `scripts/hitch-log-server.mjs`, home/HUD/pause-menu markup in `index.html`, overlay styling in `src/style.css`, and the lifecycle hooks in `src/main.ts`.
+- Add or adjust repeatable runtime test/play/build tools: `src/adminCommands.ts`, `src/builderTools.ts`, `src/testAvatar.ts`, `src/codexPilot.ts`, `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`, Nova Terminal routing in `src/novaChat.ts`/`src/novaChatPanel.ts`, local visual recording upload in `scripts/hitch-log-server.mjs`, home/HUD/pause-menu markup in `index.html`, overlay styling in `src/style.css`, and the lifecycle hooks in `src/main.ts`.
 - Tune saved worlds, player resume location, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming or worker budgets: update scheduling in `src/world.ts` and the debug display in `src/main.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
