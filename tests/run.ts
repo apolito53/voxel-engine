@@ -3105,6 +3105,53 @@ test("partial block collision boxes represent remaining lattice cells", () => {
   assertClose(boxes[0].maxZ, 7, 0.000001, "remaining lattice box should end at the voxel z edge");
 });
 
+test("partial block collision boxes merge contiguous cells without covering removed bites", () => {
+  const removedCenterIndex = 13;
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 0, y: 0, z: 0 },
+    damage: 1,
+    maxHealth: 10,
+    cuts: [],
+    removedVisualCellIndexes: [removedCenterIndex]
+  };
+
+  const boxes = createPartialBlockCollisionBoxes(cell);
+  const latticeSize = 3;
+  const cellSize = 1 / latticeSize;
+
+  assert(
+    boxes.length < PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT - 1,
+    "adjacent surviving lattice cells should be merged into fewer Rapier support boxes"
+  );
+
+  for (let z = 0; z < latticeSize; z += 1) {
+    for (let y = 0; y < latticeSize; y += 1) {
+      for (let x = 0; x < latticeSize; x += 1) {
+        const index = x + y * latticeSize + z * latticeSize ** 2;
+        const center = {
+          x: (x + 0.5) * cellSize,
+          y: (y + 0.5) * cellSize,
+          z: (z + 0.5) * cellSize
+        };
+        const containingBoxes = boxes.filter((box) =>
+          center.x > box.minX &&
+          center.x < box.maxX &&
+          center.y > box.minY &&
+          center.y < box.maxY &&
+          center.z > box.minZ &&
+          center.z < box.maxZ
+        );
+        assertEqual(
+          containingBoxes.length,
+          index === removedCenterIndex ? 0 : 1,
+          "merged collision boxes should exactly cover surviving lattice cells once"
+        );
+      }
+    }
+  }
+});
+
 test("partial block damage lattice approximates remaining material fraction", () => {
   const sevenTenthsRemaining = { damage: 3, maxHealth: 10 };
   const threeTenthsRemaining = { damage: 7, maxHealth: 10 };

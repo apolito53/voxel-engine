@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.23 - 2026-05-17
+
+### Fixed
+
+- Merged adjacent surviving partial-block lattice cells into larger exact debris support cuboids so damaged surfaces still collide correctly without flooding Rapier with one temporary collider per sub-voxel.
+
 ## 0.6.22 - 2026-05-17
 
 ### Fixed

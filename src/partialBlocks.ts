@@ -101,6 +101,14 @@ type PartialBlockLatticeCell = {
   readonly index: number;
   readonly center: PartialBlockPosition;
 };
+type PartialBlockLatticeBox = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+};
 type PartialBlockAxis = "x" | "y" | "z";
 
 const PARTIAL_BLOCK_LATTICE_NEIGHBOR_OFFSETS: readonly PartialBlockPosition[] = [
@@ -218,22 +226,21 @@ export function isPartialBlockSurfaceCell(cell: PartialBlockCell): boolean {
 
 export function createPartialBlockCollisionBoxes(cell: PartialBlockCell): readonly CollisionBounds[] {
   const removedCells = createPartialBlockRemovedLatticeCellSet(cell);
+  const occupiedCells = new Set<number>();
+  const consumedCells = new Set<number>();
   const boxes: CollisionBounds[] = [];
 
   for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
     if (removedCells.has(latticeCell.index)) continue;
+    occupiedCells.add(latticeCell.index);
+  }
 
-    const minX = cell.position.x + latticeCell.x * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
-    const minY = cell.position.y + latticeCell.y * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
-    const minZ = cell.position.z + latticeCell.z * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
-    boxes.push({
-      minX,
-      maxX: minX + PARTIAL_BLOCK_LATTICE_CELL_SIZE,
-      minY,
-      maxY: minY + PARTIAL_BLOCK_LATTICE_CELL_SIZE,
-      minZ,
-      maxZ: minZ + PARTIAL_BLOCK_LATTICE_CELL_SIZE
-    });
+  for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
+    if (!occupiedCells.has(latticeCell.index) || consumedCells.has(latticeCell.index)) continue;
+
+    const latticeBox = createMergedPartialBlockLatticeBox(latticeCell, occupiedCells, consumedCells);
+    markPartialBlockCollisionBoxConsumed(latticeBox, consumedCells);
+    boxes.push(createPartialBlockCollisionBounds(cell.position, latticeBox));
   }
 
   return boxes;
@@ -515,6 +522,110 @@ function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<nu
   return new Set(
     cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
   );
+}
+
+function createMergedPartialBlockLatticeBox(
+  seed: PartialBlockLatticeCell,
+  occupiedCells: ReadonlySet<number>,
+  consumedCells: ReadonlySet<number>
+): PartialBlockLatticeBox {
+  const box = {
+    minX: seed.x,
+    maxX: seed.x,
+    minY: seed.y,
+    maxY: seed.y,
+    minZ: seed.z,
+    maxZ: seed.z
+  };
+
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+
+    if (canUsePartialBlockLatticeBoxRange(
+      occupiedCells,
+      consumedCells,
+      { ...box, maxX: box.maxX + 1 }
+    )) {
+      box.maxX += 1;
+      expanded = true;
+    }
+
+    if (canUsePartialBlockLatticeBoxRange(
+      occupiedCells,
+      consumedCells,
+      { ...box, maxZ: box.maxZ + 1 }
+    )) {
+      box.maxZ += 1;
+      expanded = true;
+    }
+
+    if (canUsePartialBlockLatticeBoxRange(
+      occupiedCells,
+      consumedCells,
+      { ...box, maxY: box.maxY + 1 }
+    )) {
+      box.maxY += 1;
+      expanded = true;
+    }
+  }
+
+  return box;
+}
+
+function canUsePartialBlockLatticeBoxRange(
+  occupiedCells: ReadonlySet<number>,
+  consumedCells: ReadonlySet<number>,
+  box: PartialBlockLatticeBox
+): boolean {
+  if (
+    box.maxX >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ||
+    box.maxY >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ||
+    box.maxZ >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE
+  ) {
+    return false;
+  }
+
+  for (let z = box.minZ; z <= box.maxZ; z += 1) {
+    for (let y = box.minY; y <= box.maxY; y += 1) {
+      for (let x = box.minX; x <= box.maxX; x += 1) {
+        const index = getPartialBlockLatticeCellIndex(x, y, z);
+        if (index === null || !occupiedCells.has(index) || consumedCells.has(index)) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+function markPartialBlockCollisionBoxConsumed(
+  box: PartialBlockLatticeBox,
+  consumedCells: Set<number>
+): void {
+  for (let z = box.minZ; z <= box.maxZ; z += 1) {
+    for (let y = box.minY; y <= box.maxY; y += 1) {
+      for (let x = box.minX; x <= box.maxX; x += 1) {
+        const index = getPartialBlockLatticeCellIndex(x, y, z);
+        if (index !== null) consumedCells.add(index);
+      }
+    }
+  }
+}
+
+function createPartialBlockCollisionBounds(
+  position: PartialBlockPosition,
+  box: PartialBlockLatticeBox
+): CollisionBounds {
+  return {
+    minX: position.x + box.minX * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+    maxX: position.x + (box.maxX + 1) * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+    minY: position.y + box.minY * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+    maxY: position.y + (box.maxY + 1) * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+    minZ: position.z + box.minZ * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+    maxZ: position.z + (box.maxZ + 1) * PARTIAL_BLOCK_LATTICE_CELL_SIZE
+  };
 }
 
 function createPartialBlockRemovalRanking(
