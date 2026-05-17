@@ -1224,6 +1224,7 @@ function animate(): void {
   let debugPlayerChunk: ChunkCoords | null = null;
   let debugWorldStats: WorldStats | null = null;
   let debugRubbleStats: RubbleFieldStats | null = null;
+  let debugPartialMeshStats = partialBlockMeshField.getStats();
   let debugMinimapMs = minimapRenderer.lastUpdateMs;
 
   const recordTimingSection = (section: FrameTimingSection): void => {
@@ -1297,6 +1298,7 @@ function animate(): void {
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
     updatePartialBlockMesh(activeWorld);
+    debugPartialMeshStats = partialBlockMeshField.getStats();
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
     updateHud();
@@ -1339,6 +1341,7 @@ function animate(): void {
         physics: physicsCollisionStats,
         rigidDebris: rigidDebrisStats,
         fragmentRender: physicsFragmentInstancer.getStats(),
+        partialMesh: debugPartialMeshStats,
         debrisSettler: debrisSettlerStats,
         rubble: debugRubbleStats ?? rubbleField.getStats()
       }
@@ -1368,6 +1371,7 @@ function animate(): void {
       rigidDebrisStats,
       getCurrentRigidDebrisBodyBudget(),
       physicsFragmentInstancer.getStats(),
+      debugPartialMeshStats,
       debrisSettlerStats,
       debugRubbleStats,
       smoothedFrameTimings

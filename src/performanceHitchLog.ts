@@ -1,5 +1,6 @@
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameTimings } from "./frameTimings";
+import type { PartialBlockMeshStats } from "./partialBlocks";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { RigidDebrisStats } from "./rigidDebris";
@@ -29,6 +30,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly physics: PhysicsToyCollisionStats;
   readonly rigidDebris: RigidDebrisStats;
   readonly fragmentRender: PhysicsFragmentRenderStats;
+  readonly partialMesh: PartialBlockMeshStats;
   readonly debrisSettler: DebrisSettlerStats;
   readonly rubble: RubbleFieldStats;
 };
@@ -361,8 +363,16 @@ function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapsh
 }
 
 function addMeshDetails(details: string[], stats: PerformanceHitchStatsSnapshot): void {
-  if (stats.world.damagedBlocks > 0) {
-    details.push(`${stats.world.damagedBlocks} damaged partial blocks can force custom mesh rebuilds`);
+  if (stats.world.partialDamageBlocks > 0) {
+    details.push(
+      `${stats.world.partialDamageBlocks}/${stats.world.partialBlocks} partial blocks keep ` +
+      `${stats.world.partialRemainingSubvoxels}/${stats.world.partialTotalSubvoxels} subvoxels visible`
+    );
+  } else if (stats.world.damagedBlocks > 0) {
+    details.push(`${stats.world.damagedBlocks} damaged blocks tracked without custom partial meshes`);
+  }
+  if (stats.partialMesh.triangles > 0) {
+    details.push(`${stats.partialMesh.triangles} partial-mesh tris across ${stats.partialMesh.cells} cells`);
   }
   if (stats.world.visibleDirtyChunks > 0 || stats.world.dirtyChunks > 0) {
     details.push(`${stats.world.visibleDirtyChunks}/${stats.world.dirtyChunks} dirty chunks visible/total`);
@@ -409,6 +419,11 @@ function addCrossCuttingPressureDetails(
   if (stats.physicsObjectCount >= stats.physicsObjectBudget) {
     details.push(`physics objects at budget ${stats.physicsObjectCount}/${stats.physicsObjectBudget}`);
   }
+  if (stats.world.partialDamageBlocks > 0) {
+    details.push(
+      `${stats.world.partialRemainingSubvoxels}/${stats.world.partialTotalSubvoxels} partial subvoxels visible`
+    );
+  }
   if (stats.fragmentRender.instances >= 100) {
     details.push(`${stats.fragmentRender.instances} live fragment render instances`);
   }
@@ -437,6 +452,7 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     physics: { ...stats.physics },
     rigidDebris: { ...stats.rigidDebris },
     fragmentRender: { ...stats.fragmentRender },
+    partialMesh: { ...stats.partialMesh },
     debrisSettler: { ...stats.debrisSettler },
     rubble: { ...stats.rubble }
   };

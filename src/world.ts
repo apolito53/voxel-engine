@@ -23,6 +23,7 @@ import {
   createPartialBlockSurfaceSamples,
   createPartialBlockTrajectoryTunnelCellIndexes,
   getPartialBlockSupportHeight,
+  isPartialBlockSurfaceCell,
   type PartialBlockCell,
   type PartialBlockCut,
   type PartialBlockPosition,
@@ -75,6 +76,12 @@ export type WorldStats = {
   readonly culledDirtyChunks: number;
   readonly modifiedChunks: number;
   readonly damagedBlocks: number;
+  readonly partialBlocks: number;
+  readonly partialDamageBlocks: number;
+  readonly partialSurfaceBlocks: number;
+  readonly partialRemovedSubvoxels: number;
+  readonly partialRemainingSubvoxels: number;
+  readonly partialTotalSubvoxels: number;
   readonly pendingChunkSaves: number;
 };
 
@@ -2677,6 +2684,26 @@ export class VoxelWorld implements CollisionWorld {
       if (this.chunkIntersectsFrustum(chunk.cx, chunk.cz)) visibleDirtyChunks += 1;
     }
 
+    let partialDamageBlocks = 0;
+    let partialSurfaceBlocks = 0;
+    let partialRemovedSubvoxels = 0;
+    let partialTotalSubvoxels = 0;
+    const subvoxelsPerPartialBlock = BLOCK_FRAGMENT_GRID_SIZE ** 3;
+    for (const cell of this.partialBlocks.values()) {
+      if (isPartialBlockSurfaceCell(cell)) {
+        partialSurfaceBlocks += 1;
+        continue;
+      }
+
+      partialDamageBlocks += 1;
+      partialTotalSubvoxels += subvoxelsPerPartialBlock;
+      const removedSubvoxels = Math.min(
+        subvoxelsPerPartialBlock,
+        cell.removedVisualCellIndexes?.length ?? createPartialBlockRemovedVisualCellIndexes(cell).length
+      );
+      partialRemovedSubvoxels += removedSubvoxels;
+    }
+
     return {
       loadedChunks: this.chunks.size,
       visibleChunks,
@@ -2694,6 +2721,12 @@ export class VoxelWorld implements CollisionWorld {
       culledDirtyChunks: this.dirtyChunkKeys.size - visibleDirtyChunks,
       modifiedChunks: this.modifiedChunkKeys.size,
       damagedBlocks: this.blockDamage.size,
+      partialBlocks: this.partialBlocks.size,
+      partialDamageBlocks,
+      partialSurfaceBlocks,
+      partialRemovedSubvoxels,
+      partialRemainingSubvoxels: Math.max(0, partialTotalSubvoxels - partialRemovedSubvoxels),
+      partialTotalSubvoxels,
       pendingChunkSaves: this.pendingSavedChunkWrites.size + this.chunkStorageChains.size
     };
   }

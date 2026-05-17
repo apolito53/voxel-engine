@@ -1502,6 +1502,46 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
     "formatted hitch summaries should be readable from Nova Terminal"
   );
 
+  const baseMeshStats = createTestHitchStats();
+  const meshRecord = createPerformanceHitchRecord(2, 300, {
+    frameMs: 48,
+    timings: {
+      playerMs: 1,
+      chunkMs: 2,
+      physicsMs: 5,
+      meshMs: 34,
+      minimapMs: 0.5,
+      renderMs: 4,
+      otherMs: 1.5,
+      frameMs: 48
+    },
+    stats: {
+      ...baseMeshStats,
+      world: {
+        ...baseMeshStats.world,
+        damagedBlocks: 4,
+        partialBlocks: 4,
+        partialDamageBlocks: 3,
+        partialRemovedSubvoxels: 21,
+        partialRemainingSubvoxels: 60,
+        partialTotalSubvoxels: 81
+      },
+      partialMesh: {
+        cells: 4,
+        vertices: 360,
+        triangles: 180
+      }
+    }
+  });
+  assert(
+    meshRecord.details.some((detail) => detail.includes("60/81 subvoxels")),
+    "mesh hitches should include visible partial-lattice pressure"
+  );
+  assert(
+    meshRecord.details.some((detail) => detail.includes("partial-mesh tris")),
+    "mesh hitches should include custom partial mesh triangle pressure"
+  );
+
   const warnedMessages: string[] = [];
   const originalWarn = console.warn;
   console.warn = (...data: unknown[]) => {
@@ -2235,9 +2275,29 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   assert(world.isSolid(2, 3, 4), "partial terrain should keep full collision for the first pass");
   assert(!world.isRenderableSolid(2, 3, 4), "normal terrain meshing should hand carved cells to custom geometry");
   assertEqual(world.getPartialBlock(2, 3, 4)?.cuts.length, 1, "the carved block should remember its visual cut");
+  const firstRemovedVisualCellCount = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length ?? 0;
+  const firstStats = world.getStats();
+  assertEqual(firstStats.partialBlocks, 1, "debug stats should count active custom partial cells");
+  assertEqual(firstStats.partialDamageBlocks, 1, "debug stats should separate damage-lattice cells from surface cells");
+  assertEqual(firstStats.partialSurfaceBlocks, 0, "ordinary core damage should not count as a surface partial cell");
+  assertEqual(
+    firstStats.partialTotalSubvoxels,
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+    "one damaged block should expose one 3x3x3 lattice worth of debug capacity"
+  );
+  assertEqual(
+    firstStats.partialRemovedSubvoxels,
+    firstRemovedVisualCellCount,
+    "debug stats should report how many presentation subvoxels have been cut away"
+  );
+  assertEqual(
+    firstStats.partialRemainingSubvoxels,
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT - firstRemovedVisualCellCount,
+    "debug stats should report how many presentation subvoxels are still visible"
+  );
   assertEqual(
     firstHit.bitePoofPositions?.length,
-    world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length,
+    firstRemovedVisualCellCount,
     "the first carve should report one bite poof position for each newly destroyed presentation cell"
   );
   world.clearDamageForChunk(0, 0);
@@ -2279,6 +2339,9 @@ test("physics core carving chips ordinary terrain before fracture", () => {
     maxZ: 4.85
   });
   assertEqual(supportHeight, null, "destroyed carved terrain should leave air instead of break-time support");
+  const finalStats = world.getStats();
+  assertEqual(finalStats.partialBlocks, 0, "final fracture should clear partial-cell debug pressure");
+  assertEqual(finalStats.partialRemainingSubvoxels, 0, "final fracture should clear remaining subvoxel pressure");
 });
 
 test("partial block carve results expose material poof positions for newly destroyed bite cells", () => {
@@ -6626,6 +6689,12 @@ function createTestHitchStats(
       culledDirtyChunks: 0,
       modifiedChunks: 0,
       damagedBlocks: 0,
+      partialBlocks: 0,
+      partialDamageBlocks: 0,
+      partialSurfaceBlocks: 0,
+      partialRemovedSubvoxels: 0,
+      partialRemainingSubvoxels: 0,
+      partialTotalSubvoxels: 0,
       pendingChunkSaves: 0
     },
     physics: {
@@ -6648,6 +6717,11 @@ function createTestHitchStats(
       batches: 0,
       instances: 0,
       capacity: 0
+    },
+    partialMesh: {
+      cells: 0,
+      vertices: 0,
+      triangles: 0
     },
     debrisSettler: {
       regions: 0,

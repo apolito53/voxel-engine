@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
+import type { PartialBlockMeshStats } from "./partialBlocks";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { QualityPreset } from "./qualityPresets";
@@ -54,6 +55,7 @@ export class DebugHud {
     rigidDebrisStats: RigidDebrisStats,
     rigidDebrisBodyBudget: number,
     fragmentRenderStats: PhysicsFragmentRenderStats,
+    partialMeshStats: PartialBlockMeshStats,
     debrisSettlerStats: DebrisSettlerStats,
     rubbleStats: RubbleFieldStats,
     timings: FrameTimings
@@ -83,6 +85,7 @@ export class DebugHud {
       `view ${stats.visibleChunks}/${stats.loadedChunks} culled ${stats.culledChunks}`,
       `mesh q ${stats.dirtyChunks} view ${stats.visibleDirtyChunks} done ${stats.meshedThisFrame}/${stats.pendingMeshBuilds}`,
       `saved ${stats.savedChunks} edited ${stats.modifiedChunks} saveq ${stats.pendingChunkSaves} dmg ${stats.damagedBlocks}`,
+      `partial ${stats.partialDamageBlocks}/${stats.partialBlocks} blk rem ${stats.partialRemainingSubvoxels}/${stats.partialTotalSubvoxels} cut ${stats.partialRemovedSubvoxels} tri ${partialMeshStats.triangles}`,
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
       `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
       `rigid debris ${rigidDebrisStats.bodies}/${rigidDebrisBodyBudget} body sleep ${rigidDebrisStats.sleepingBodies} col ${rigidDebrisStats.terrainColliders}/${rigidDebrisStats.rubbleSupportColliders}`,

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.15.1 - 2026-05-17
+
+### Added
+
+- Added partial-block debug counters for active damage lattices, remaining/cut 3x3x3 subvoxels, and partial-mesh triangle pressure in the F3 HUD and hitch logs.
+
 ## 0.6.15 - 2026-05-17
 
 ### Changed
