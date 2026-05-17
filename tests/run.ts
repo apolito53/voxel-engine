@@ -165,6 +165,7 @@ import {
   PARTIAL_BLOCK_CORE_DAMAGE,
   PartialBlockMeshField,
   arePartialBlockVisualCellIndexesConnected,
+  createPartialBlockCollisionBoxes,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
@@ -3081,6 +3082,29 @@ test("partial block field renders faceted custom terrain cells", () => {
   assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
 });
 
+test("partial block collision boxes represent remaining lattice cells", () => {
+  const removedCells = Array.from({ length: PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT }, (_value, index) => index)
+    .filter((index) => index !== PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT - 1);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 4, y: 5, z: 6 },
+    damage: 9,
+    maxHealth: 10,
+    cuts: [],
+    removedVisualCellIndexes: removedCells
+  };
+
+  const boxes = createPartialBlockCollisionBoxes(cell);
+
+  assertEqual(boxes.length, 1, "only remaining partial-block lattice cells should produce debris collision boxes");
+  assertClose(boxes[0].minX, 4 + 2 / 3, 0.000001, "remaining lattice box should keep its local x offset");
+  assertClose(boxes[0].minY, 5 + 2 / 3, 0.000001, "remaining lattice box should keep its local y offset");
+  assertClose(boxes[0].minZ, 6 + 2 / 3, 0.000001, "remaining lattice box should keep its local z offset");
+  assertClose(boxes[0].maxX, 5, 0.000001, "remaining lattice box should end at the voxel x edge");
+  assertClose(boxes[0].maxY, 6, 0.000001, "remaining lattice box should end at the voxel y edge");
+  assertClose(boxes[0].maxZ, 7, 0.000001, "remaining lattice box should end at the voxel z edge");
+});
+
 test("partial block damage lattice approximates remaining material fraction", () => {
   const sevenTenthsRemaining = { damage: 3, maxHealth: 10 };
   const threeTenthsRemaining = { damage: 7, maxHealth: 10 };
@@ -4354,6 +4378,182 @@ test("rigid debris adapter keeps fast falling shards from outrunning terrain col
   assert(
     rigidDebris.getStats().terrainColliders > 0,
     "fast falling rigid debris should build temporary terrain colliders along its predicted path"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter preserves ground colliders when many shards are high in the air", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  for (let index = 0; index < 80; index += 1) {
+    rigidDebris.registerFragment(PhysicsToy.createBlockFragment(
+      BLOCK.stone,
+      new THREE.Vector3(index * 2 + 0.5, 24.5, 0.5),
+      new THREE.Vector3(0, 0, 0),
+      1
+    ));
+  }
+
+  const nearGroundFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 0.28, 0.5),
+    new THREE.Vector3(0, -1, 0),
+    1
+  );
+  rigidDebris.registerFragment(nearGroundFragment);
+
+  for (let frame = 0; frame < 90 && !nearGroundFragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+
+  assert(
+    rigidDebris.getStats().terrainColliders > 0,
+    "airborne shards should not spend the whole temporary collider budget on empty cells before ground debris gets support"
+  );
+  assert(
+    nearGroundFragment.mesh.position.y > -0.05,
+    "near-ground debris should keep a floor collider even when many earlier shards are airborne"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter nudges shallow terrain penetrations back onto support", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shape = createDebrisShape("squat-block");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, shape.colliderHalfExtents.y - 0.04, 0.5),
+    new THREE.Vector3(0, -0.25, 0),
+    1,
+    shape
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  rigidDebris.update(1 / 60, floorWorld);
+
+  assert(
+    fragment.mesh.position.y - shape.colliderHalfExtents.y >= -0.01,
+    "a small Rapier/support penetration should be lifted before stuck cleanup can classify the shard as trapped"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter uses partial-block lattice boxes instead of ghost full cubes", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shape = createDebrisShape("squat-block");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 1.4, 0.5),
+    new THREE.Vector3(0, -0.25, 0),
+    1,
+    shape
+  );
+  const lowPartialBox = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const partialSurfaceWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    isPartialBlock(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [lowPartialBox] : null;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 240 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, partialSurfaceWorld);
+  }
+
+  const settledBottom = fragment.mesh.position.y - shape.colliderHalfExtents.y;
+  assert(
+    settledBottom >= lowPartialBox.maxY - 0.02,
+    "partial-block debris should rest on the explicit surviving lattice surface"
+  );
+  assert(
+    settledBottom < 0.55,
+    "partial-block debris should not float on the old invisible one-meter macro-block top"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter wakes shards sleeping on stale partial-block macro support", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shape = createDebrisShape("squat-block");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 1.35, 0.5),
+    new THREE.Vector3(0, -0.1, 0),
+    1,
+    shape
+  );
+  const fullCubeWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    }
+  };
+  const lowPartialBox = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const partialSurfaceWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    isPartialBlock(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [lowPartialBox] : null;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  for (let frame = 0; frame < 240 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, fullCubeWorld);
+  }
+  assert(fragment.isSleeping, "test setup should first park the shard on the old macro-block top");
+  assert(
+    fragment.mesh.position.y - shape.colliderHalfExtents.y > 0.8,
+    "test setup should begin with a shard visibly above the later partial surface"
+  );
+
+  for (let frame = 0; frame < 360; frame += 1) {
+    rigidDebris.update(1 / 60, partialSurfaceWorld);
+    const settledBottom = fragment.mesh.position.y - shape.colliderHalfExtents.y;
+    if (fragment.isSleeping && settledBottom < 0.55) break;
+  }
+
+  const finalBottom = fragment.mesh.position.y - shape.colliderHalfExtents.y;
+  assert(
+    finalBottom < 0.55,
+    "a sleeping shard should wake and fall when a damaged partial block replaces its stale full-cube support"
   );
   rigidDebris.clear();
 });

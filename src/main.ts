@@ -530,11 +530,14 @@ const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
-  // Full terrain blocks still come from VoxelWorld. Partial-height terrain
-  // scars and rubble are layered in through the optional support-height query
-  // so feet, loose debris, and rigid debris can treat them as walkable/contact
-  // surfaces without promoting every patch to a solid voxel.
+  // Full terrain blocks still come from VoxelWorld. Damaged terrain also exposes
+  // explicit sub-voxel collision boxes so loose debris can collide with the
+  // remaining visible lattice instead of the obsolete full macro-block shell.
+  // Partial-height scars and rubble keep using the support-height query for
+  // walkable/contact surfaces that do not need full Rapier boxes.
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
+  isPartialBlock: (x, y, z) => Boolean(requireWorld().getPartialBlock(x, y, z)),
+  getCellCollisionBoxes: (x, y, z) => requireWorld().getCellCollisionBoxes(x, y, z),
   canProjectileHitBlock: (x, y, z, start, movement, radius) =>
     requireWorld().canProjectileHitBlock(x, y, z, start, movement, radius),
   getProjectileBlockSweepHit: (x, y, z, start, movement, radius) =>

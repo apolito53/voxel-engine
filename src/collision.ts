@@ -20,6 +20,8 @@ export type ProjectileBlockSweepHit = {
 
 export type CollisionWorld = {
   isSolid(x: number, y: number, z: number): boolean;
+  isPartialBlock?(x: number, y: number, z: number): boolean;
+  getCellCollisionBoxes?(x: number, y: number, z: number): readonly CollisionBounds[] | null;
   canProjectileHitBlock?(
     x: number,
     y: number,

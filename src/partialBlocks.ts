@@ -216,6 +216,29 @@ export function isPartialBlockSurfaceCell(cell: PartialBlockCell): boolean {
   return Boolean(cell.surfaceSamples && cell.surfaceSamples.length > 0);
 }
 
+export function createPartialBlockCollisionBoxes(cell: PartialBlockCell): readonly CollisionBounds[] {
+  const removedCells = createPartialBlockRemovedLatticeCellSet(cell);
+  const boxes: CollisionBounds[] = [];
+
+  for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
+    if (removedCells.has(latticeCell.index)) continue;
+
+    const minX = cell.position.x + latticeCell.x * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+    const minY = cell.position.y + latticeCell.y * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+    const minZ = cell.position.z + latticeCell.z * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+    boxes.push({
+      minX,
+      maxX: minX + PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+      minY,
+      maxY: minY + PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+      minZ,
+      maxZ: minZ + PARTIAL_BLOCK_LATTICE_CELL_SIZE
+    });
+  }
+
+  return boxes;
+}
+
 export function createPartialBlockCut({
   block,
   position,

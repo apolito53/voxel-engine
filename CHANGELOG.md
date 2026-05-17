@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.6.22 - 2026-05-17
+
+### Fixed
+
+- Kept temporary rigid-debris terrain colliders focused on actual surface/support cells so airborne shard storms cannot exhaust the collider budget before near-ground debris gets a floor.
+- Added a shallow support-penetration correction for rigid debris so a slightly sunken shard is lifted back onto terrain before trapped-debris cleanup can poof it.
+- Added partial-block lattice collision boxes for rigid debris so shards collide with surviving 3x3x3 sub-voxels instead of floating on damaged blocks' old invisible full-cube shell.
+
 ## 0.6.21 - 2026-05-17
 
 ### Changed

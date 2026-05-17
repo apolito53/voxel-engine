@@ -17,6 +17,7 @@ import type {
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
+  createPartialBlockCollisionBoxes,
   createPartialBlockCut,
   createPartialBlockKey,
   createPartialBlockRemovedVisualCellIndexes,
@@ -1453,6 +1454,11 @@ export class VoxelWorld implements CollisionWorld {
 
   getSupportHeight(bounds: CollisionBounds): number | null {
     return getPartialBlockSupportHeight(this.partialBlocks.values(), bounds);
+  }
+
+  getCellCollisionBoxes(x: number, y: number, z: number): readonly CollisionBounds[] | null {
+    const cell = this.getPartialBlock(x, y, z);
+    return cell ? createPartialBlockCollisionBoxes(cell) : null;
   }
 
   isRenderableSolid(x: number, y: number, z: number): boolean {

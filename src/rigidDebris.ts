@@ -30,6 +30,8 @@ const RIGID_DEBRIS_FORCE_SLEEP_LINEAR_SPEED = 0.85;
 const RIGID_DEBRIS_FORCE_SLEEP_ANGULAR_SPEED = 3.5;
 const RIGID_DEBRIS_FORCE_SLEEP_SECONDS = 0.18;
 const RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE = 0.08;
+const RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN = 0.004;
+const RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
 const RIGID_DEBRIS_SUPPORT_MIN_HEIGHT = 0.04;
 const RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION = 1000;
 const RAPIER_COMPAT_INIT_WARNING = "using deprecated parameters for the initialization function";
@@ -50,6 +52,11 @@ type StaticColliderCell = {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+};
+
+type RigidDebrisSupport = {
+  readonly height: number;
+  readonly penetrationDepth: number;
 };
 
 export type RigidDebrisStats = {
@@ -74,9 +81,11 @@ export class RigidDebrisSimulation {
   private readonly pendingFragments = new Set<PhysicsToy>();
   private readonly bodiesByToy = new Map<PhysicsToy, RigidDebrisBody>();
   private readonly terrainColliders = new Map<string, StaticColliderRecord>();
+  private readonly surfaceBoxColliders = new Map<string, StaticColliderRecord>();
   private readonly rubbleSupportColliders = new Map<string, StaticColliderRecord>();
   private readonly activeColliderCells = new Set<string>();
   private readonly desiredTerrainColliderKeys = new Set<string>();
+  private readonly desiredSurfaceBoxColliderKeys = new Set<string>();
   private readonly desiredRubbleSupportColliderKeys = new Set<string>();
   private readonly syncPosition = new THREE.Vector3();
   private readonly syncQuaternion = new THREE.Quaternion();
@@ -316,6 +325,8 @@ export class RigidDebrisSimulation {
   private syncBodiesToToys(delta: number, collisionWorld: CollisionWorld): void {
     for (const record of this.bodiesByToy.values()) {
       const toyWasSleeping = record.toy.isSleeping;
+      this.wakeSleepingBodyIfPartialSupportChanged(record, collisionWorld);
+      this.correctSupportPenetration(record, collisionWorld);
       this.applyAggressiveSleep(record, delta, collisionWorld);
       const translation = record.body.translation();
       const rotation = record.body.rotation();
@@ -339,6 +350,21 @@ export class RigidDebrisSimulation {
         this.staticCollidersDirty = true;
       }
     }
+  }
+
+  private wakeSleepingBodyIfPartialSupportChanged(
+    record: RigidDebrisBody,
+    collisionWorld: CollisionWorld
+  ): void {
+    if (!record.body.isSleeping() || record.toy.isExpired) return;
+    if (!isRecordNearExplicitCollisionCell(record, collisionWorld)) return;
+    if (isRecordNearSupport(record, collisionWorld)) return;
+
+    const linvel = record.body.linvel();
+    record.body.setLinvel({ x: linvel.x, y: Math.min(linvel.y, -0.05), z: linvel.z }, true);
+    record.body.wakeUp();
+    record.quietSeconds = 0;
+    this.staticCollidersDirty = true;
   }
 
   private applyAggressiveSleep(
@@ -378,6 +404,32 @@ export class RigidDebrisSimulation {
     this.staticCollidersDirty = true;
   }
 
+  private correctSupportPenetration(record: RigidDebrisBody, collisionWorld: CollisionWorld): void {
+    if (record.toy.isExpired) return;
+
+    const support = getRigidDebrisSupport(record, collisionWorld);
+    if (!support || support.penetrationDepth <= RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN) return;
+
+    const translation = record.body.translation();
+    const correctedY = support.height +
+      record.colliderHalfExtents.y +
+      RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN;
+    if (translation.y >= correctedY) return;
+
+    const wakeBody = !record.body.isSleeping();
+    record.body.setTranslation({
+      x: translation.x,
+      y: correctedY,
+      z: translation.z
+    }, wakeBody);
+
+    const linvel = record.body.linvel();
+    if (linvel.y < 0) {
+      record.body.setLinvel({ x: linvel.x, y: 0, z: linvel.z }, wakeBody);
+    }
+    this.staticCollidersDirty = true;
+  }
+
   private refreshStaticCollidersIfNeeded(delta: number, collisionWorld: CollisionWorld): void {
     this.staticRefreshSeconds += delta;
     if (
@@ -389,23 +441,24 @@ export class RigidDebrisSimulation {
 
     this.staticRefreshSeconds = 0;
     this.staticCollidersDirty = false;
-    this.collectActiveColliderCells();
+    this.collectActiveColliderCells(collisionWorld);
     this.syncTerrainColliders(collisionWorld);
+    this.syncSurfaceBoxColliders(collisionWorld);
     this.syncRubbleSupportColliders(collisionWorld);
   }
 
-  private collectActiveColliderCells(): void {
+  private collectActiveColliderCells(collisionWorld: CollisionWorld): void {
     this.activeColliderCells.clear();
     for (const record of this.bodiesByToy.values()) {
       if (record.toy.isExpired) continue;
 
       if (record.toy.isSleeping) {
-        this.addSleepingSupportColliderCells(record);
+        this.addSleepingSupportColliderCells(record, collisionWorld);
         if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
         continue;
       }
 
-      const position = record.toy.mesh.position;
+      const position = record.body.translation();
       const velocity = record.body.linvel();
 
       // Static terrain/rubble colliders are intentionally temporary. Sampling
@@ -421,13 +474,16 @@ export class RigidDebrisSimulation {
           position.y + velocity.y * lookaheadSeconds,
           position.z + velocity.z * lookaheadSeconds
         );
-        this.addColliderCellsAround(this.colliderScanCenter);
+        this.addColliderCellsAround(this.colliderScanCenter, collisionWorld);
         if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
       }
     }
   }
 
-  private addSleepingSupportColliderCells(record: RigidDebrisBody): void {
+  private addSleepingSupportColliderCells(
+    record: RigidDebrisBody,
+    collisionWorld: CollisionWorld
+  ): void {
     const position = record.body.translation();
     const halfExtents = record.colliderHalfExtents;
     const bottomY = position.y - halfExtents.y;
@@ -440,14 +496,14 @@ export class RigidDebrisSimulation {
 
     for (let x = minX; x <= maxX; x += 1) {
       for (let z = minZ; z <= maxZ; z += 1) {
-        this.activeColliderCells.add(getStaticColliderCellKey(x, supportProbeY, z));
-        this.activeColliderCells.add(getStaticColliderCellKey(x, rubbleProbeY, z));
+        this.addStaticColliderCandidateCell(x, supportProbeY, z, collisionWorld);
+        this.addStaticColliderCandidateCell(x, rubbleProbeY, z, collisionWorld);
         if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
       }
     }
   }
 
-  private addColliderCellsAround(center: THREE.Vector3): void {
+  private addColliderCellsAround(center: THREE.Vector3, collisionWorld: CollisionWorld): void {
     const centerX = Math.floor(center.x);
     const centerY = Math.floor(center.y);
     const centerZ = Math.floor(center.z);
@@ -467,11 +523,26 @@ export class RigidDebrisSimulation {
           x <= centerX + RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS;
           x += 1
         ) {
-          this.activeColliderCells.add(getStaticColliderCellKey(x, y, z));
+          this.addStaticColliderCandidateCell(x, y, z, collisionWorld);
           if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
         }
       }
     }
+  }
+
+  private addStaticColliderCandidateCell(
+    x: number,
+    y: number,
+    z: number,
+    collisionWorld: CollisionWorld
+  ): void {
+    const cell = { x, y, z };
+    // The collider budget is tiny compared with a loud debris burst. Spend it
+    // only where Rapier can actually receive a terrain or partial-height floor,
+    // otherwise high airborne shards can starve ground-adjacent shards of support.
+    if (!isStaticColliderCandidateCell(collisionWorld, cell)) return;
+
+    this.activeColliderCells.add(getStaticColliderCellKey(x, y, z));
   }
 
   private syncTerrainColliders(collisionWorld: CollisionWorld): void {
@@ -486,6 +557,41 @@ export class RigidDebrisSimulation {
       this.terrainColliders,
       this.desiredTerrainColliderKeys,
       (key) => this.createTerrainCollider(key)
+    );
+  }
+
+  private syncSurfaceBoxColliders(collisionWorld: CollisionWorld): void {
+    this.desiredSurfaceBoxColliderKeys.clear();
+    if (!collisionWorld.getCellCollisionBoxes) {
+      this.syncStaticColliderMap(
+        this.surfaceBoxColliders,
+        this.desiredSurfaceBoxColliderKeys,
+        (key) => this.createSurfaceBoxCollider(key)
+      );
+      return;
+    }
+
+    for (const key of this.activeColliderCells) {
+      const cell = parseStaticColliderCellKey(key);
+      if (!cell) continue;
+
+      const boxes = getExplicitCellCollisionBoxes(collisionWorld, cell);
+      if (!boxes) continue;
+
+      for (let index = 0; index < boxes.length; index += 1) {
+        const boxKey = getSurfaceBoxColliderKey(boxes[index]);
+        if (!boxKey) continue;
+
+        this.desiredSurfaceBoxColliderKeys.add(boxKey);
+        if (this.desiredSurfaceBoxColliderKeys.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) break;
+      }
+      if (this.desiredSurfaceBoxColliderKeys.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) break;
+    }
+
+    this.syncStaticColliderMap(
+      this.surfaceBoxColliders,
+      this.desiredSurfaceBoxColliderKeys,
+      (key) => this.createSurfaceBoxCollider(key)
     );
   }
 
@@ -560,6 +666,30 @@ export class RigidDebrisSimulation {
     );
   }
 
+  private createSurfaceBoxCollider(key: string): Collider | null {
+    if (!this.world) return null;
+
+    const box = parseSurfaceBoxColliderKey(key);
+    if (!box) return null;
+
+    const halfX = (box.maxX - box.minX) * 0.5;
+    const halfY = (box.maxY - box.minY) * 0.5;
+    const halfZ = (box.maxZ - box.minZ) * 0.5;
+    if (halfX <= 0 || halfY <= 0 || halfZ <= 0) return null;
+
+    return this.world.createCollider(
+      ColliderDesc
+        .cuboid(halfX, halfY, halfZ)
+        .setTranslation(
+          box.minX + halfX,
+          box.minY + halfY,
+          box.minZ + halfZ
+        )
+        .setFriction(RIGID_DEBRIS_TERRAIN_FRICTION)
+        .setRestitution(0)
+    );
+  }
+
   private createRubbleSupportCollider(key: string): Collider | null {
     if (!this.world) return null;
 
@@ -580,14 +710,19 @@ export class RigidDebrisSimulation {
       for (const record of this.terrainColliders.values()) {
         this.world.removeCollider(record.collider, true);
       }
+      for (const record of this.surfaceBoxColliders.values()) {
+        this.world.removeCollider(record.collider, true);
+      }
       for (const record of this.rubbleSupportColliders.values()) {
         this.world.removeCollider(record.collider, true);
       }
     }
     this.terrainColliders.clear();
+    this.surfaceBoxColliders.clear();
     this.rubbleSupportColliders.clear();
     this.activeColliderCells.clear();
     this.desiredTerrainColliderKeys.clear();
+    this.desiredSurfaceBoxColliderKeys.clear();
     this.desiredRubbleSupportColliderKeys.clear();
     this.staticCollidersDirty = true;
     this.staticRefreshSeconds = Infinity;
@@ -603,7 +738,7 @@ export class RigidDebrisSimulation {
       initialized: this.world !== null,
       bodies: this.bodiesByToy.size,
       sleepingBodies,
-      terrainColliders: this.terrainColliders.size,
+      terrainColliders: this.terrainColliders.size + this.surfaceBoxColliders.size,
       rubbleSupportColliders: this.rubbleSupportColliders.size
     };
   }
@@ -615,41 +750,167 @@ function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
 }
 
 function isRecordNearSupport(record: RigidDebrisBody, collisionWorld: CollisionWorld): boolean {
+  return getRigidDebrisSupport(record, collisionWorld) !== null;
+}
+
+function isRecordNearExplicitCollisionCell(
+  record: RigidDebrisBody,
+  collisionWorld: CollisionWorld
+): boolean {
+  if (!collisionWorld.getCellCollisionBoxes && !collisionWorld.isPartialBlock) return false;
+
   const position = record.body.translation();
   const halfExtents = record.colliderHalfExtents;
-  const bottomY = position.y - halfExtents.y;
-  const supportProbeY = Math.floor(bottomY - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
   const minX = Math.floor(position.x - halfExtents.x);
   const maxX = Math.floor(position.x + halfExtents.x);
+  const minY = Math.floor(position.y - halfExtents.y - RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH);
+  const maxY = Math.floor(position.y + halfExtents.y + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
   const minZ = Math.floor(position.z - halfExtents.z);
   const maxZ = Math.floor(position.z + halfExtents.z);
 
-  for (let x = minX; x <= maxX; x += 1) {
+  for (let y = minY; y <= maxY; y += 1) {
     for (let z = minZ; z <= maxZ; z += 1) {
-      if (
-        collisionWorld.isSolid(x, supportProbeY, z) &&
-        bottomY <= supportProbeY + 1 + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE
-      ) {
-        return true;
+      for (let x = minX; x <= maxX; x += 1) {
+        if (collisionWorld.isPartialBlock?.(x, y, z)) return true;
+        if (hasExplicitCellCollisionBoxes(collisionWorld, { x, y, z })) return true;
       }
     }
   }
 
-  if (!collisionWorld.getSupportHeight) return false;
-  const supportHeight = collisionWorld.getSupportHeight({
-    minX: position.x - halfExtents.x,
-    maxX: position.x + halfExtents.x,
-    minY: bottomY - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE,
-    maxY: position.y + halfExtents.y,
-    minZ: position.z - halfExtents.z,
-    maxZ: position.z + halfExtents.z
-  });
-  return supportHeight !== null &&
-    bottomY <= supportHeight + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE;
+  return false;
+}
+
+function getRigidDebrisSupport(
+  record: RigidDebrisBody,
+  collisionWorld: CollisionWorld
+): RigidDebrisSupport | null {
+  const position = record.body.translation();
+  const halfExtents = record.colliderHalfExtents;
+  const bottomY = position.y - halfExtents.y;
+  const topY = position.y + halfExtents.y;
+  let supportHeight = getVoxelSupportHeight(collisionWorld, position, halfExtents, bottomY, topY);
+
+  if (collisionWorld.getSupportHeight) {
+    const partialSupportHeight = collisionWorld.getSupportHeight({
+      minX: position.x - halfExtents.x,
+      maxX: position.x + halfExtents.x,
+      minY: bottomY - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE,
+      maxY: topY + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE,
+      minZ: position.z - halfExtents.z,
+      maxZ: position.z + halfExtents.z
+    });
+    if (partialSupportHeight !== null && isUsableDebrisSupportHeight(partialSupportHeight, bottomY, topY)) {
+      supportHeight = Math.max(supportHeight ?? -Infinity, partialSupportHeight);
+    }
+  }
+
+  if (supportHeight === null) return null;
+  return {
+    height: supportHeight,
+    penetrationDepth: Math.max(0, supportHeight - bottomY)
+  };
+}
+
+function getVoxelSupportHeight(
+  collisionWorld: CollisionWorld,
+  position: { readonly x: number; readonly y: number; readonly z: number },
+  halfExtents: THREE.Vector3,
+  bottomY: number,
+  topY: number
+): number | null {
+  const minX = Math.floor(position.x - halfExtents.x);
+  const maxX = Math.floor(position.x + halfExtents.x);
+  const minZ = Math.floor(position.z - halfExtents.z);
+  const maxZ = Math.floor(position.z + halfExtents.z);
+  const minProbeY = Math.floor(bottomY - RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH);
+  const maxProbeY = Math.floor(bottomY + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
+  let supportHeight: number | null = null;
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let z = minZ; z <= maxZ; z += 1) {
+      for (let y = maxProbeY; y >= minProbeY; y -= 1) {
+        const explicitBoxSupportHeight = getExplicitCellBoxSupportHeight(
+          collisionWorld,
+          { x, y, z },
+          position,
+          halfExtents,
+          bottomY,
+          topY
+        );
+        if (explicitBoxSupportHeight !== null) {
+          supportHeight = Math.max(supportHeight ?? -Infinity, explicitBoxSupportHeight);
+          break;
+        }
+
+        if (collisionWorld.isPartialBlock?.(x, y, z)) continue;
+        if (!collisionWorld.isSolid(x, y, z)) continue;
+
+        const candidateHeight = y + 1;
+        if (!isUsableDebrisSupportHeight(candidateHeight, bottomY, topY)) continue;
+
+        supportHeight = Math.max(supportHeight ?? -Infinity, candidateHeight);
+        break;
+      }
+    }
+  }
+
+  return supportHeight;
+}
+
+function getExplicitCellBoxSupportHeight(
+  collisionWorld: CollisionWorld,
+  cell: StaticColliderCell,
+  position: { readonly x: number; readonly y: number; readonly z: number },
+  halfExtents: THREE.Vector3,
+  bottomY: number,
+  topY: number
+): number | null {
+  const boxes = getExplicitCellCollisionBoxes(collisionWorld, cell);
+  if (!boxes) return null;
+
+  let supportHeight: number | null = null;
+  const minX = position.x - halfExtents.x;
+  const maxX = position.x + halfExtents.x;
+  const minZ = position.z - halfExtents.z;
+  const maxZ = position.z + halfExtents.z;
+
+  for (const box of boxes) {
+    if (!boundsOverlap(minX, maxX, box.minX, box.maxX)) continue;
+    if (!boundsOverlap(minZ, maxZ, box.minZ, box.maxZ)) continue;
+    if (!isUsableDebrisSupportHeight(box.maxY, bottomY, topY)) continue;
+
+    supportHeight = Math.max(supportHeight ?? -Infinity, box.maxY);
+  }
+
+  return supportHeight;
+}
+
+function isUsableDebrisSupportHeight(supportHeight: number, bottomY: number, topY: number): boolean {
+  if (!Number.isFinite(supportHeight)) return false;
+  if (bottomY > supportHeight + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE) return false;
+  if (supportHeight - bottomY > RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH) return false;
+  if (supportHeight > topY + RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH) return false;
+  return true;
+}
+
+function isStaticColliderCandidateCell(collisionWorld: CollisionWorld, cell: StaticColliderCell): boolean {
+  return hasExplicitCellCollisionBoxes(collisionWorld, cell) ||
+    isTerrainSurfaceColliderCell(collisionWorld, cell) ||
+    isSupportColliderCandidateCell(collisionWorld, cell);
+}
+
+function isSupportColliderCandidateCell(collisionWorld: CollisionWorld, cell: StaticColliderCell): boolean {
+  if (!collisionWorld.getSupportHeight || collisionWorld.isSolid(cell.x, cell.y, cell.z)) return false;
+
+  const supportHeight = collisionWorld.getSupportHeight(createCellSupportBounds(cell));
+  if (supportHeight === null) return false;
+
+  const localHeight = supportHeight - cell.y;
+  return localHeight >= RIGID_DEBRIS_SUPPORT_MIN_HEIGHT && localHeight <= 1;
 }
 
 function isTerrainSurfaceColliderCell(collisionWorld: CollisionWorld, cell: StaticColliderCell): boolean {
-  if (!collisionWorld.isSolid(cell.x, cell.y, cell.z)) return false;
+  if (!isFullTerrainColliderCell(collisionWorld, cell.x, cell.y, cell.z)) return false;
 
   // Rapier only needs a static cuboid where a shard can actually touch the
   // outside of terrain. Buried interior voxels were quietly becoming thousands
@@ -657,13 +918,38 @@ function isTerrainSurfaceColliderCell(collisionWorld: CollisionWorld, cell: Stat
   // stone nobody could collide with. Keep exposed surfaces and discard the
   // sealed interior.
   return (
-    !collisionWorld.isSolid(cell.x + 1, cell.y, cell.z) ||
-    !collisionWorld.isSolid(cell.x - 1, cell.y, cell.z) ||
-    !collisionWorld.isSolid(cell.x, cell.y + 1, cell.z) ||
-    !collisionWorld.isSolid(cell.x, cell.y - 1, cell.z) ||
-    !collisionWorld.isSolid(cell.x, cell.y, cell.z + 1) ||
-    !collisionWorld.isSolid(cell.x, cell.y, cell.z - 1)
+    !isFullTerrainColliderCell(collisionWorld, cell.x + 1, cell.y, cell.z) ||
+    !isFullTerrainColliderCell(collisionWorld, cell.x - 1, cell.y, cell.z) ||
+    !isFullTerrainColliderCell(collisionWorld, cell.x, cell.y + 1, cell.z) ||
+    !isFullTerrainColliderCell(collisionWorld, cell.x, cell.y - 1, cell.z) ||
+    !isFullTerrainColliderCell(collisionWorld, cell.x, cell.y, cell.z + 1) ||
+    !isFullTerrainColliderCell(collisionWorld, cell.x, cell.y, cell.z - 1)
   );
+}
+
+function isFullTerrainColliderCell(collisionWorld: CollisionWorld, x: number, y: number, z: number): boolean {
+  if (collisionWorld.isPartialBlock?.(x, y, z)) return false;
+  if (hasExplicitCellCollisionBoxes(collisionWorld, { x, y, z })) return false;
+  return collisionWorld.isSolid(x, y, z);
+}
+
+function hasExplicitCellCollisionBoxes(collisionWorld: CollisionWorld, cell: StaticColliderCell): boolean {
+  return Boolean(getExplicitCellCollisionBoxes(collisionWorld, cell)?.length);
+}
+
+function getExplicitCellCollisionBoxes(
+  collisionWorld: CollisionWorld,
+  cell: StaticColliderCell
+): readonly CollisionBounds[] | null {
+  if (!collisionWorld.getCellCollisionBoxes) return null;
+  if (collisionWorld.isPartialBlock && !collisionWorld.isPartialBlock(cell.x, cell.y, cell.z)) return null;
+
+  const boxes = collisionWorld.getCellCollisionBoxes?.(cell.x, cell.y, cell.z);
+  return boxes && boxes.length > 0 ? boxes : null;
+}
+
+function boundsOverlap(leftMin: number, leftMax: number, rightMin: number, rightMax: number): boolean {
+  return leftMax > rightMin && rightMax > leftMin;
 }
 
 function getVectorLengthSq(vector: { readonly x: number; readonly y: number; readonly z: number }): number {
@@ -694,6 +980,51 @@ function parseStaticColliderCellKey(key: string): StaticColliderCell | null {
   const z = Number(parts[2]);
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
   return { x, y, z };
+}
+
+function getSurfaceBoxColliderKey(bounds: CollisionBounds): string | null {
+  if (!isValidSurfaceBoxBounds(bounds)) return null;
+
+  return [
+    quantizeSurfaceBoxCoordinate(bounds.minX),
+    quantizeSurfaceBoxCoordinate(bounds.maxX),
+    quantizeSurfaceBoxCoordinate(bounds.minY),
+    quantizeSurfaceBoxCoordinate(bounds.maxY),
+    quantizeSurfaceBoxCoordinate(bounds.minZ),
+    quantizeSurfaceBoxCoordinate(bounds.maxZ)
+  ].join(",");
+}
+
+function parseSurfaceBoxColliderKey(key: string): CollisionBounds | null {
+  const parts = key.split(",");
+  if (parts.length !== 6) return null;
+
+  const bounds = {
+    minX: Number(parts[0]),
+    maxX: Number(parts[1]),
+    minY: Number(parts[2]),
+    maxY: Number(parts[3]),
+    minZ: Number(parts[4]),
+    maxZ: Number(parts[5])
+  };
+  return isValidSurfaceBoxBounds(bounds) ? bounds : null;
+}
+
+function isValidSurfaceBoxBounds(bounds: CollisionBounds): boolean {
+  return Number.isFinite(bounds.minX) &&
+    Number.isFinite(bounds.maxX) &&
+    Number.isFinite(bounds.minY) &&
+    Number.isFinite(bounds.maxY) &&
+    Number.isFinite(bounds.minZ) &&
+    Number.isFinite(bounds.maxZ) &&
+    bounds.maxX > bounds.minX &&
+    bounds.maxY > bounds.minY &&
+    bounds.maxZ > bounds.minZ;
+}
+
+function quantizeSurfaceBoxCoordinate(value: number): number {
+  return Math.round(value * RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION) /
+    RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION;
 }
 
 function getRubbleSupportColliderKey(x: number, y: number, z: number, height: number): string {
