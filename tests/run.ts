@@ -47,6 +47,12 @@ import {
   DebrisStuckCleanupTracker,
   isDebrisTrappedForCleanup
 } from "../src/debrisCleanup";
+import {
+  DEBRIS_PRESSURE_MIN_BUDGET_RATIO,
+  createDebrisPerformancePressureState,
+  getDebrisPressureEffectiveRigidDebrisBodyBudget,
+  updateDebrisPerformancePressureState
+} from "../src/debrisPerformanceGovernor";
 import { DebrisPoofRenderer, getDebrisPoofLifetimeSeconds } from "../src/debrisPoof";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
@@ -1680,6 +1686,99 @@ test("performance hitch log samples sub-60 FPS at most once per second", () => {
   } finally {
     console.warn = originalWarn;
   }
+});
+
+test("debris pressure governor lowers the rigid-body cap under loaded low FPS", () => {
+  let state = createDebrisPerformancePressureState(768);
+
+  for (let frame = 0; frame < 30; frame += 1) {
+    state = updateDebrisPerformancePressureState(state, {
+      deltaSeconds: 1 / 30,
+      observedFps: 42,
+      nominalRigidDebrisBodyBudget: 768,
+      activeRigidDebrisBodies: 768,
+      fragmentInstances: 768,
+      partialMeshTriangles: 15000
+    });
+  }
+
+  assert(state.stress > 0.5, "sustained overloaded low FPS should build meaningful debris pressure");
+  assert(
+    state.effectiveRigidDebrisBodyBudget < state.nominalRigidDebrisBodyBudget,
+    "debris pressure should temporarily lower the effective rigid-body cap"
+  );
+  assert(
+    state.effectiveRigidDebrisBodyBudget >= MIN_RIGID_DEBRIS_BODY_BUDGET,
+    "pressure relief should never drop below the rigid-debris minimum"
+  );
+});
+
+test("debris pressure governor recovers when frames are healthy again", () => {
+  let state = createDebrisPerformancePressureState(512);
+
+  for (let frame = 0; frame < 20; frame += 1) {
+    state = updateDebrisPerformancePressureState(state, {
+      deltaSeconds: 1 / 20,
+      observedFps: 40,
+      nominalRigidDebrisBodyBudget: 512,
+      activeRigidDebrisBodies: 512,
+      fragmentInstances: 512,
+      partialMeshTriangles: 12000
+    });
+  }
+  const stressedBudget = state.effectiveRigidDebrisBodyBudget;
+
+  for (let frame = 0; frame < 160; frame += 1) {
+    state = updateDebrisPerformancePressureState(state, {
+      deltaSeconds: 1 / 60,
+      observedFps: 75,
+      nominalRigidDebrisBodyBudget: 512,
+      activeRigidDebrisBodies: 80,
+      fragmentInstances: 80,
+      partialMeshTriangles: 2000
+    });
+  }
+
+  assert(stressedBudget < 512, "the setup should enter pressure relief before recovery is tested");
+  assertEqual(state.stress, 0, "healthy frames with light debris should fully recover pressure");
+  assertEqual(
+    state.effectiveRigidDebrisBodyBudget,
+    512,
+    "the healthy-frame ceiling should return to the nominal budget after recovery"
+  );
+});
+
+test("debris pressure governor ignores low FPS when loose debris is not loaded", () => {
+  let state = createDebrisPerformancePressureState(512);
+
+  for (let frame = 0; frame < 90; frame += 1) {
+    state = updateDebrisPerformancePressureState(state, {
+      deltaSeconds: 1 / 30,
+      observedFps: 30,
+      nominalRigidDebrisBodyBudget: 512,
+      activeRigidDebrisBodies: 0,
+      fragmentInstances: 0,
+      partialMeshTriangles: 20000
+    });
+  }
+
+  assertEqual(state.stress, 0, "debris pressure should not blame empty debris systems for unrelated low FPS");
+  assertEqual(state.effectiveRigidDebrisBodyBudget, 512, "the debris cap should stay untouched without debris load");
+});
+
+test("debris pressure effective cap bottoms out at the conservative budget ratio", () => {
+  const nominalBudget = 768;
+  const effectiveBudget = getDebrisPressureEffectiveRigidDebrisBodyBudget(nominalBudget, 1);
+  const expectedMaximum = Math.floor(
+    (nominalBudget * DEBRIS_PRESSURE_MIN_BUDGET_RATIO) / PHYSICS_OBJECT_BUDGET_STEP
+  ) * PHYSICS_OBJECT_BUDGET_STEP;
+
+  assertEqual(effectiveBudget, expectedMaximum, "full pressure should clamp to the conservative stepped ratio");
+  assertEqual(
+    getDebrisPressureEffectiveRigidDebrisBodyBudget(nominalBudget, 0),
+    nominalBudget,
+    "zero pressure should leave the user's configured debris cap alone"
+  );
 });
 
 test("remote hitch log payloads preserve version and deployment metadata", () => {
@@ -6787,6 +6886,7 @@ function createTestHitchStats(
     physicsObjectCount: 0,
     physicsObjectBudget: 192,
     rigidDebrisBodyBudget: 128,
+    debrisPressure: createDebrisPerformancePressureState(128),
     world: {
       loadedChunks: 0,
       visibleChunks: 0,

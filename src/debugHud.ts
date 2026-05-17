@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
@@ -54,6 +55,7 @@ export class DebugHud {
     physicsCollisions: PhysicsToyCollisionStats,
     rigidDebrisStats: RigidDebrisStats,
     rigidDebrisBodyBudget: number,
+    debrisPressure: DebrisPerformancePressureState,
     fragmentRenderStats: PhysicsFragmentRenderStats,
     partialMeshStats: PartialBlockMeshStats,
     debrisSettlerStats: DebrisSettlerStats,
@@ -75,6 +77,9 @@ export class DebugHud {
     const render = this.renderer.info.render;
     const memory = this.renderer.info.memory;
     const qualityPreset = this.getQualityPreset();
+    const debrisPressureLabel = debrisPressure.stress > 0.01
+      ? ` press ${Math.round(debrisPressure.stress * 100)}% base ${debrisPressure.nominalRigidDebrisBodyBudget}`
+      : "";
     this.panel.textContent = [
       `fps ${Math.round(this.smoothedFps)}`,
       `frame ${(rawDelta * 1000).toFixed(1)}ms peak ${this.peakFrameMs.toFixed(1)}ms`,
@@ -88,7 +93,7 @@ export class DebugHud {
       `partial ${stats.partialDamageBlocks}/${stats.partialBlocks} blk rem ${stats.partialRemainingSubvoxels}/${stats.partialTotalSubvoxels} cut ${stats.partialRemovedSubvoxels} tri ${partialMeshStats.triangles}`,
       `physics ${physicsBodyCount}/${physicsBodyBudget} pairs ${physicsCollisions.candidatePairs} hit ${physicsCollisions.resolvedContacts}`,
       `phys cells ${physicsCollisions.broadphaseCells}/${physicsCollisions.sleepingBroadphaseCells} active ${physicsCollisions.activeBodies} sleep ${physicsCollisions.sleepingBodies} skip ${physicsCollisions.skippedDebrisPairs}`,
-      `rigid debris ${rigidDebrisStats.bodies}/${rigidDebrisBodyBudget} body sleep ${rigidDebrisStats.sleepingBodies} col ${rigidDebrisStats.terrainColliders}/${rigidDebrisStats.rubbleSupportColliders}`,
+      `rigid debris ${rigidDebrisStats.bodies}/${rigidDebrisBodyBudget} body sleep ${rigidDebrisStats.sleepingBodies} col ${rigidDebrisStats.terrainColliders}/${rigidDebrisStats.rubbleSupportColliders}${debrisPressureLabel}`,
       `frag inst ${fragmentRenderStats.instances} batches ${fragmentRenderStats.batches} cap ${fragmentRenderStats.capacity}`,
       `settle ${debrisSettlerStats.regions} rg ${debrisSettlerStats.fragments} frag active ${debrisSettlerStats.activeFragments} pairs ${debrisSettlerStats.pairChecks} hit ${debrisSettlerStats.resolvedPairs} done ${debrisSettlerStats.finalizedBatches}/${debrisSettlerStats.forcedFinalizations}`,
       `rubble ${rubbleStats.clusters} patches ${rubbleStats.pieces.toFixed(2)} mat chunks ${rubbleStats.visualChunks} cover ${rubbleStats.maxCoverHeight.toFixed(2)}m`,

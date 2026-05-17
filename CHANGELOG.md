@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.17 - 2026-05-17
+
+### Added
+
+- Added an adaptive debris pressure governor that temporarily lowers the effective rigid-debris cap when sub-60 FPS samples coincide with heavy live debris pressure, then recovers toward the user's configured cap once frames stabilize.
+- Added F3 HUD and hitch-log pressure details showing when the adaptive debris cap is active and what nominal cap it is protecting.
+
 ## 0.6.16 - 2026-05-17
 
 ### Changed

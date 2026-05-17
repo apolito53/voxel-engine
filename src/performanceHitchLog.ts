@@ -1,3 +1,4 @@
+import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameTimings } from "./frameTimings";
 import type { PartialBlockMeshStats } from "./partialBlocks";
@@ -28,6 +29,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly physicsObjectCount: number;
   readonly physicsObjectBudget: number;
   readonly rigidDebrisBodyBudget: number;
+  readonly debrisPressure: DebrisPerformancePressureState;
   readonly world: WorldStats;
   readonly physics: PhysicsToyCollisionStats;
   readonly rigidDebris: RigidDebrisStats;
@@ -458,6 +460,11 @@ function addCrossCuttingPressureDetails(
   if (stats.rigidDebris.bodies >= stats.rigidDebrisBodyBudget) {
     details.push(`rigid debris at budget ${stats.rigidDebris.bodies}/${stats.rigidDebrisBodyBudget}`);
   }
+  if (stats.debrisPressure.stress > 0.01) {
+    details.push(
+      `debris pressure ${Math.round(stats.debrisPressure.stress * 100)}%, cap ${stats.rigidDebrisBodyBudget}/${stats.debrisPressure.nominalRigidDebrisBodyBudget}`
+    );
+  }
   if (stats.physicsObjectCount >= stats.physicsObjectBudget) {
     details.push(`physics objects at budget ${stats.physicsObjectCount}/${stats.physicsObjectBudget}`);
   }
@@ -490,6 +497,7 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     physicsObjectCount: stats.physicsObjectCount,
     physicsObjectBudget: stats.physicsObjectBudget,
     rigidDebrisBodyBudget: stats.rigidDebrisBodyBudget,
+    debrisPressure: { ...stats.debrisPressure },
     world: { ...stats.world },
     physics: { ...stats.physics },
     rigidDebris: { ...stats.rigidDebris },

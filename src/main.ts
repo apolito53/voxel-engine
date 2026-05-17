@@ -32,6 +32,11 @@ import {
 } from "./codexPilot";
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
+import {
+  createDebrisPerformancePressureState,
+  getDebrisPressureEffectiveRigidDebrisBodyBudget,
+  updateDebrisPerformancePressureState
+} from "./debrisPerformanceGovernor";
 import { DebrisStuckCleanupTracker } from "./debrisCleanup";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebrisPoofRenderer } from "./debrisPoof";
@@ -401,6 +406,9 @@ let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
+let debrisPerformancePressure = createDebrisPerformancePressureState(
+  getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget)
+);
 let renderedPartialBlockRevision = -1;
 let rightMouseButtonDown = false;
 let coreAimPreviewEnabled = false;
@@ -1331,11 +1339,15 @@ function animate(): void {
   frameTimingSample.frameMs = performance.now() - frameStartedAt;
 
   if (inWorld) {
+    const observedFps = 1 / Math.max(rawDelta, 1 / 240);
+    updateDebrisPressureGovernor(rawDelta, observedFps, debugPartialMeshStats.triangles);
+
     const performanceStats = {
       qualityLabel: qualityController.preset.label,
       physicsObjectCount: toys.length,
       physicsObjectBudget,
       rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
+      debrisPressure: debrisPerformancePressure,
       world: debugWorldStats ?? requireWorld().getStats(),
       physics: physicsCollisionStats,
       rigidDebris: rigidDebrisStats,
@@ -1358,7 +1370,6 @@ function animate(): void {
       });
     }
 
-    const observedFps = 1 / Math.max(rawDelta, 1 / 240);
     if (observedFps < LOW_FPS_LOG_THRESHOLD) {
       performanceHitchLog.recordLowFpsSample({
         frameMs: Math.max(frameTimingSample.frameMs, rawDelta * 1000),
@@ -1386,6 +1397,7 @@ function animate(): void {
       physicsCollisionStats,
       rigidDebrisStats,
       getCurrentRigidDebrisBodyBudget(),
+      debrisPerformancePressure,
       physicsFragmentInstancer.getStats(),
       debugPartialMeshStats,
       debrisSettlerStats,
@@ -2353,7 +2365,30 @@ function getRigidDebrisBudgetCandidates(): Array<{
 }
 
 function getCurrentRigidDebrisBodyBudget(): number {
+  const nominalBudget = getNominalRigidDebrisBodyBudget();
+  if (debrisPerformancePressure.nominalRigidDebrisBodyBudget !== nominalBudget) {
+    return getDebrisPressureEffectiveRigidDebrisBodyBudget(nominalBudget, debrisPerformancePressure.stress);
+  }
+  return debrisPerformancePressure.effectiveRigidDebrisBodyBudget;
+}
+
+function getNominalRigidDebrisBodyBudget(): number {
   return getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget);
+}
+
+function updateDebrisPressureGovernor(
+  rawDelta: number,
+  observedFps: number,
+  partialMeshTriangles: number
+): void {
+  debrisPerformancePressure = updateDebrisPerformancePressureState(debrisPerformancePressure, {
+    deltaSeconds: rawDelta,
+    observedFps,
+    nominalRigidDebrisBodyBudget: getNominalRigidDebrisBodyBudget(),
+    activeRigidDebrisBodies: rigidDebrisStats.bodies,
+    fragmentInstances: physicsFragmentInstancer.getStats().instances,
+    partialMeshTriangles
+  });
 }
 
 function updateGroundDebrisCleanup(delta: number): void {
