@@ -2287,8 +2287,26 @@ test("damage brushes carve neighboring macro blocks across seams", () => {
   assertEqual(result.results.length, 2, "a seam hit should wake only the two overlapped macro blocks");
   assert(damagedPositions.has("2,3,4"), "the directly hit macro block should be damaged");
   assert(damagedPositions.has("2,3,5"), "the neighboring macro block across the seam should be damaged");
-  assertEqual(world.getBlockDamage(2, 3, 4), 1, "the primary block should take one carve step");
-  assertEqual(world.getBlockDamage(2, 3, 5), 1, "the seam neighbor should take one carve step");
+  const primaryDamage = world.getBlockDamage(2, 3, 4);
+  const neighborDamage = world.getBlockDamage(2, 3, 5);
+  assert(
+    primaryDamage > 0 && primaryDamage < PARTIAL_BLOCK_CORE_DAMAGE,
+    "the primary block should receive a share of the one impact damage budget"
+  );
+  assert(
+    neighborDamage > 0 && neighborDamage < PARTIAL_BLOCK_CORE_DAMAGE,
+    "the seam neighbor should receive a share of the one impact damage budget"
+  );
+  assert(
+    primaryDamage > neighborDamage,
+    "an off-seam hit should still favor the directly struck macro block"
+  );
+  assertClose(
+    primaryDamage + neighborDamage,
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    0.000001,
+    "seam fan-out should distribute one carve step instead of multiplying damage"
+  );
   assert(world.getPartialBlock(2, 3, 4), "the primary block should get a sparse micro-damage lattice");
   assert(world.getPartialBlock(2, 3, 5), "the seam neighbor should get a sparse micro-damage lattice");
   assertDeepEqual(

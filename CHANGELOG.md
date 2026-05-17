@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.11 - 2026-05-17
+
+### Fixed
+
+- Fixed sparse multi-block core damage so seam/corner brush fan-out distributes one shared impact damage budget instead of applying a full carve step to every touched macro block.
+
 ## 0.6.10 - 2026-05-17
 
 ### Changed

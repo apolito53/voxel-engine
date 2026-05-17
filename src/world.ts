@@ -51,6 +51,7 @@ const PARTIAL_BLOCK_PIERCE_MAX_CORE_RADIUS = 1 / (BLOCK_FRAGMENT_GRID_SIZE * 2);
 const PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_RADIUS = 1 / BLOCK_FRAGMENT_GRID_SIZE;
 const PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_RADIUS = 0.58;
 const PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_TARGETS = 12;
+const PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_WEIGHT = 0.001;
 const PROJECTILE_SWEEP_EPSILON = 0.000001;
 const PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED = 14;
 const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
@@ -169,6 +170,10 @@ type BlockDamageBrushTarget = {
   readonly primary: boolean;
 };
 
+type WeightedBlockDamageBrushTarget = BlockDamageBrushTarget & {
+  readonly damageAmount: number;
+};
+
 function trimPartialSurfaceSamples(samples: readonly PartialBlockSurfaceSample[]): PartialBlockSurfaceSample[] {
   if (samples.length <= PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL) return [...samples];
   return samples.slice(samples.length - PARTIAL_BLOCK_MAX_SURFACE_SAMPLES_PER_CELL);
@@ -208,6 +213,18 @@ function getPointToBlockAabbDistanceSq(
       ? point.z - (position.z + 1)
       : 0;
   return dx * dx + dy * dy + dz * dz;
+}
+
+function getBlockDamageBrushTargetWeight(target: BlockDamageBrushTarget, brushRadius: number): number {
+  if (target.primary) return 1;
+  if (brushRadius <= PROJECTILE_SWEEP_EPSILON) return 0;
+
+  // Neighbor blocks are not extra damage; they are where one shared impact
+  // footprint spills across a seam. A target right on the impact boundary gets
+  // close to the primary share, while a target barely clipped by the brush gets
+  // only a tiny slice of the same one-hit damage budget.
+  const distance = Math.sqrt(Math.max(0, target.distanceSq));
+  return Math.max(0, 1 - distance / brushRadius);
 }
 
 function clampPointToBlock(
@@ -1171,21 +1188,19 @@ export class VoxelWorld implements CollisionWorld {
     input: BlockCarveInput,
     options: BlockDamageBrushOptions = {}
   ): BlockDamageBrushResult | null {
-    const targets = this.createBlockDamageBrushTargets(input);
+    const targets = this.createWeightedBlockDamageBrushTargets(input, options);
     const results: BlockDamageResult[] = [];
     let primaryResult: BlockDamageResult | undefined;
 
     for (const target of targets) {
-      const key = this.damageKey(target.position.x, target.position.y, target.position.z);
-      if (options.blockedDamageKeys?.has(key)) continue;
-
       const result = this.carveBlock({
         ...input,
         x: target.position.x,
         y: target.position.y,
         z: target.position.z,
         point: target.point,
-        normal: target.normal
+        normal: target.normal,
+        amount: target.damageAmount
       });
       if (!result) continue;
 
@@ -1205,17 +1220,15 @@ export class VoxelWorld implements CollisionWorld {
     input: BlockCarveInput,
     options: BlockDamageBrushOptions = {}
   ): BlockDamageBrushPreview | null {
-    const previewTargets = this.createBlockDamageBrushTargets(input)
-      .filter((target) => !options.blockedDamageKeys?.has(
-        this.damageKey(target.position.x, target.position.y, target.position.z)
-      ))
+    const previewTargets = this.createWeightedBlockDamageBrushTargets(input, options)
       .map((target) => this.previewBlockCarve({
         ...input,
         x: target.position.x,
         y: target.position.y,
         z: target.position.z,
         point: target.point,
-        normal: target.normal
+        normal: target.normal,
+        amount: target.damageAmount
       }, target))
       .filter((target): target is BlockDamageBrushPreviewTarget => Boolean(target));
 
@@ -1407,6 +1420,35 @@ export class VoxelWorld implements CollisionWorld {
         left.position.x - right.position.x
       )
       .slice(0, PARTIAL_BLOCK_DAMAGE_BRUSH_MAX_TARGETS);
+  }
+
+  private createWeightedBlockDamageBrushTargets(
+    input: BlockCarveInput,
+    options: BlockDamageBrushOptions
+  ): WeightedBlockDamageBrushTarget[] {
+    const damageAmount = Math.max(0, input.amount ?? 1);
+    if (damageAmount <= 0) return [];
+
+    const brushRadius = getBlockDamageBrushRadius(input);
+    const targets = this.createBlockDamageBrushTargets(input)
+      .filter((target) => !options.blockedDamageKeys?.has(
+        this.damageKey(target.position.x, target.position.y, target.position.z)
+      ));
+    if (targets.length === 0) return [];
+
+    const weightedTargets = targets
+      .map((target) => ({
+        target,
+        weight: getBlockDamageBrushTargetWeight(target, brushRadius)
+      }))
+      .filter((target) => target.weight > PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_WEIGHT);
+    const totalWeight = weightedTargets.reduce((sum, target) => sum + target.weight, 0);
+    if (totalWeight <= PARTIAL_BLOCK_DAMAGE_BRUSH_MIN_WEIGHT) return [];
+
+    return weightedTargets.map(({ target, weight }) => ({
+      ...target,
+      damageAmount: damageAmount * (weight / totalWeight)
+    }));
   }
 
   private previewBlockCarve(
