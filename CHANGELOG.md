@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.21 - 2026-05-17
+
+### Changed
+
+- Removed the countdown flashing from timed debris cleanup; grounded shards now stay visually stable until their material-tinted poof removes them.
+
 ## 0.6.20.2 - 2026-05-17
 
 ### Added

@@ -4016,21 +4016,21 @@ test("block fragments visually tumble while flying", () => {
   );
 });
 
-test("settled debris cleanup blinks before expiring", () => {
+test("settled debris cleanup stays visible until the poof expiry", () => {
   const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
   sleepTestFragment(fragment);
 
   fragment.updateGroundDebrisCleanup(0.2, 1);
   assert(!fragment.isExpired, "freshly settled cleanup debris should remain visible at first");
-  assert(fragment.isFragmentRenderVisible, "cleanup debris should not blink until the final lifetime window");
+  assert(fragment.isFragmentRenderVisible, "cleanup debris should stay visible at first");
 
   fragment.updateGroundDebrisCleanup(0.5, 1);
-  assert(!fragment.isExpired, "cleanup debris should still wait for the shorter final blink window");
-  assert(fragment.isFragmentRenderVisible, "cleanup debris should stay steady before the shortened blink window");
+  assert(!fragment.isExpired, "cleanup debris should still wait for the configured lifetime");
+  assert(fragment.isFragmentRenderVisible, "cleanup debris should stay steady before expiration");
 
   fragment.updateGroundDebrisCleanup(0.2, 1);
-  assert(!fragment.isExpired, "cleanup debris should blink before it disappears");
-  assert(!fragment.isFragmentRenderVisible, "cleanup debris should hide on one of the accelerating blink beats");
+  assert(!fragment.isExpired, "cleanup debris should stay present until the final poof");
+  assert(fragment.isFragmentRenderVisible, "cleanup debris should not hide for a countdown flash");
 
   fragment.updateGroundDebrisCleanup(0.15, 1);
   assert(fragment.isExpired, "cleanup debris should expire once its grounded lifetime elapses");

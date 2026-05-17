@@ -28,8 +28,6 @@ const FRAGMENT_PARTIAL_SUPPORT_EPSILON = 0.025;
 const FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION = BLOCK_FRAGMENT_VISUAL_SIZE * 2.25;
 const GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER = 2;
 const GROUND_DEBRIS_AIRBORNE_MIN_SECONDS = 6;
-const GROUND_DEBRIS_BLINK_WINDOW_MULTIPLIER = 0.25;
-const GROUND_DEBRIS_MAX_BLINK_WINDOW_SECONDS = 1.5;
 const CORE_COLLISION_RESTITUTION = 1.55;
 const CORE_COLLISION_DAMPING = 0.985;
 const PHYSICS_TOY_COLLISION_CELL_SIZE = 1;
@@ -182,7 +180,7 @@ export class PhysicsToy {
       inverseMass: FRAGMENT_INVERSE_MASS,
       castShadow: false,
       // Fragments are short-lived VFX. Grounded lifetime and budget pressure
-      // decide when they blink/poof away; durable damage belongs to the
+      // decide when they poof away; durable damage belongs to the
       // partial-block terrain lattice, not to debris bake-out.
       maxAgeSeconds: null,
       sleepSpeed: FRAGMENT_SLEEP_SPEED,
@@ -353,10 +351,9 @@ export class PhysicsToy {
       return true;
     }
 
-    this.fragmentRenderVisible = shouldRenderFragmentDuringCleanup(
-      this.groundDebrisCleanupSeconds,
-      safeLifetimeSeconds
-    );
+    // The countdown blink read noisy in play. Keep shards stable until the
+    // existing poof removes them so cleanup feels intentional instead of fussy.
+    this.fragmentRenderVisible = true;
     return false;
   }
 
@@ -1102,30 +1099,11 @@ function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boo
   return Math.max(0.0001, numericValue);
 }
 
-function shouldRenderFragmentDuringCleanup(elapsedSeconds: number, lifetimeSeconds: number): boolean {
-  const remainingSeconds = lifetimeSeconds - elapsedSeconds;
-  const blinkWindowSeconds = Math.min(
-    GROUND_DEBRIS_MAX_BLINK_WINDOW_SECONDS,
-    lifetimeSeconds * GROUND_DEBRIS_BLINK_WINDOW_MULTIPLIER
-  );
-  if (remainingSeconds >= blinkWindowSeconds) return true;
-
-  const blinkProgress = 1 - Math.max(0, remainingSeconds) / Math.max(0.001, blinkWindowSeconds);
-  const flashesPerSecond = 3 + easeInQuad(blinkProgress) * 22;
-  const visibleDutyCycle = 0.72 - blinkProgress * 0.34;
-  return (elapsedSeconds * flashesPerSecond) % 1 < visibleDutyCycle;
-}
-
 function getGroundDebrisAirborneFallbackSeconds(lifetimeSeconds: number): number {
   return Math.max(
     GROUND_DEBRIS_AIRBORNE_MIN_SECONDS,
     lifetimeSeconds * GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER
   );
-}
-
-function easeInQuad(value: number): number {
-  const clamped = Math.min(1, Math.max(0, value));
-  return clamped * clamped;
 }
 
 function createFragmentAngularVelocity(velocity: THREE.Vector3): THREE.Vector3 {
