@@ -28,6 +28,13 @@ import {
   getBlockFromMeshKey,
   getTintedBlockColor
 } from "../src/blockColors";
+import {
+  applyBuilderBrush,
+  collectBuilderBrushCells,
+  eraseBuilderBrush,
+  formatBuilderBrushSize,
+  normalizeBuilderBrushSize
+} from "../src/builderTools";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import type { CollisionBounds, CollisionWorld } from "../src/collision";
@@ -272,7 +279,9 @@ import {
   canDestroyBlockWithHotbarItem,
   canPlaceBlockWithHotbarItem,
   canThrowCoreWithHotbarItem,
+  createBlockHotbarItems,
   createHotbarItems,
+  createToolHotbarItems,
   getHotbarIndexFromDigitCode,
   getHotbarItemLabel,
   getHotbarPrimaryAction,
@@ -775,29 +784,43 @@ test("item registry describes reusable held-item actions", () => {
   );
 });
 
-test("hotbar scroll lane includes unarmed, placeable blocks, projectile core, and hitscan core", () => {
+test("hotbar lanes separate gameplay tools from build blocks", () => {
   const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
-  const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
-  const firstItem = hotbarItems[0];
-  const projectileCoreItem = hotbarItems[hotbarItems.length - 2];
-  const hitscanCoreItem = hotbarItems[hotbarItems.length - 1];
+  const toolHotbarItems = createToolHotbarItems();
+  const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
+  const combinedHotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
+  const firstItem = toolHotbarItems[0];
+  const projectileCoreItem = toolHotbarItems[1];
+  const hitscanCoreItem = toolHotbarItems[2];
+  const firstBlockItem = blockHotbarItems[0];
   const grassItem = createItemStack(createBlockItemId(BLOCK.grass));
 
-  assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "hotbar should start in the explicit unarmed state");
+  assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "tool lane should start in the explicit unarmed state");
   assertEqual(
     projectileCoreItem?.itemId,
     PHYSICS_CORE_ITEM_ID,
-    "hotbar should keep the projectile physics core before the hitscan core"
+    "tool lane should keep the projectile physics core before the hitscan core"
   );
   assertEqual(
     hitscanCoreItem?.itemId,
     HITSCAN_CORE_ITEM_ID,
-    "hotbar should end with the hitscan core item"
+    "tool lane should end with the hitscan core item"
+  );
+  assertEqual(toolHotbarItems.length, 3, "tool lane should contain only unarmed and core tools");
+  assertEqual(
+    blockHotbarItems.length,
+    PLACEABLE_BLOCKS.length,
+    "block lane should contain every placeable block without core weapons mixed in"
   );
   assertEqual(
-    hotbarItems.length,
-    PLACEABLE_BLOCKS.length + 3,
-    "hotbar should contain unarmed, every placeable block, and both core weapons"
+    firstBlockItem?.itemId,
+    createBlockItemId(BLOCK.grass),
+    "block lane should start with the first placeable block"
+  );
+  assertEqual(
+    combinedHotbarItems.length,
+    toolHotbarItems.length + blockHotbarItems.length,
+    "legacy combined hotbar helper should still expose every selectable stack"
   );
   assertEqual(
     getHotbarItemLabel(firstItem ?? createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
@@ -873,6 +896,50 @@ test("hotbar scrolling wraps predictably", () => {
     0,
     "scrolling forward from last slot should wrap to the first slot"
   );
+});
+
+test("builder brush sizing stays odd and centered", () => {
+  assertEqual(normalizeBuilderBrushSize(0), 1, "builder brush should clamp tiny values to one block");
+  assertEqual(normalizeBuilderBrushSize(2), 3, "builder brush should round to odd centered dimensions");
+  assertEqual(normalizeBuilderBrushSize(99), 7, "builder brush should cap large admin edits");
+  assertEqual(formatBuilderBrushSize(5), "5x5x5", "builder brush labels should show cube dimensions");
+
+  const cells = collectBuilderBrushCells({ x: 10.8, y: 5.2, z: -2.1 }, 3);
+  assertEqual(cells.length, 27, "3x3x3 builder brushes should touch 27 cells");
+  assert(
+    cells.some((cell) => cell.x === 10 && cell.y === 5 && cell.z === -3),
+    "builder brushes should stay centered on the floored target cell"
+  );
+});
+
+test("builder brush applies and erases blocks while respecting skipped player cells", () => {
+  const blocks = new Map<string, number>();
+  const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
+  const world = {
+    getBlock: (x: number, y: number, z: number) => blocks.get(key(x, y, z)) ?? BLOCK.air,
+    setBlock: (x: number, y: number, z: number, block: number) => {
+      blocks.set(key(x, y, z), block);
+    }
+  };
+
+  const placed = applyBuilderBrush({
+    world,
+    center: { x: 0, y: 0, z: 0 },
+    size: 3,
+    block: BLOCK.stone,
+    shouldSkipCell: (cell) => cell.x === 0 && cell.y === 0 && cell.z === 0
+  });
+  assertEqual(placed, 26, "builder place brush should skip protected occupied cells");
+  assertEqual(world.getBlock(0, 0, 0), BLOCK.air, "skipped cells should remain unchanged");
+  assertEqual(world.getBlock(1, 0, 0), BLOCK.stone, "unskipped cells should receive the selected block");
+
+  const erased = eraseBuilderBrush({
+    world,
+    center: { x: 0, y: 0, z: 0 },
+    size: 3
+  });
+  assertEqual(erased, 26, "builder erase brush should remove the placed cells");
+  assertEqual(world.getBlock(1, 0, 0), BLOCK.air, "erased cells should become air");
 });
 
 test("world chunk coordinates wrap cleanly across zero", () => {

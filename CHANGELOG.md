@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.18 - 2026-05-17
+
+### Added
+
+- Added a pause-menu Builder panel with a block palette, odd-sized place/erase brushes, and quick target/wall/platform/pillar fixture spawns.
+- Added an Items/Blocks selection split so the mouse wheel cycles gameplay tools separately from buildable terrain blocks; `G` toggles between those lanes during play.
+
 ## 0.6.17 - 2026-05-17
 
 ### Added

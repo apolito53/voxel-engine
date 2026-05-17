@@ -18,6 +18,18 @@ import {
 } from "./blockFragments";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
+  BUILDER_BRUSH_MAX_SIZE,
+  BUILDER_BRUSH_MIN_SIZE,
+  BUILDER_BRUSH_STEP,
+  BUILDER_MODE_TOGGLE_KEY,
+  applyBuilderBrush,
+  eraseBuilderBrush,
+  formatBuilderBrushSize,
+  normalizeBuilderBrushSize,
+  type BuilderBrushCell,
+  type BuilderLane
+} from "./builderTools";
+import {
   createChunkStorage,
   createWorldRegistry,
   type SavedPlayerStateSnapshot,
@@ -71,6 +83,8 @@ import {
   getHotbarSecondaryAction,
   normalizeHotbarIndex,
   stepHotbarIndex,
+  createBlockHotbarItems,
+  createToolHotbarItems,
   type HotbarItem
 } from "./hotbar";
 import {
@@ -298,8 +312,10 @@ const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
 const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
+const builderButton = requireElement<HTMLButtonElement>("#builder-button");
 const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
 const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
+const pauseBuilderPanel = requireElement<HTMLElement>("#pause-builder-panel");
 const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
 const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
 const settingsGraphicsPanel = requireElement<HTMLElement>("#settings-graphics-panel");
@@ -326,6 +342,17 @@ const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-deb
 const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
+const builderModeToggleButton = requireElement<HTMLButtonElement>("#builder-mode-toggle-button");
+const builderBlockPalette = requireElement<HTMLElement>("#builder-block-palette");
+const builderSelectedBlockValue = requireElement<HTMLElement>("#builder-selected-block-value");
+const builderBrushSizeSlider = requireElement<HTMLInputElement>("#builder-brush-size-slider");
+const builderBrushSizeValue = requireElement<HTMLElement>("#builder-brush-size-value");
+const builderPlaceBrushButton = requireElement<HTMLButtonElement>("#builder-place-brush-button");
+const builderEraseBrushButton = requireElement<HTMLButtonElement>("#builder-erase-brush-button");
+const builderSpawnTargetButton = requireElement<HTMLButtonElement>("#builder-spawn-target-button");
+const builderSpawnWallButton = requireElement<HTMLButtonElement>("#builder-spawn-wall-button");
+const builderSpawnPlatformButton = requireElement<HTMLButtonElement>("#builder-spawn-platform-button");
+const builderSpawnPillarButton = requireElement<HTMLButtonElement>("#builder-spawn-pillar-button");
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
@@ -392,7 +419,10 @@ let player: PlayerController | null = null;
 let inWorld = false;
 let worldTransitioning = false;
 let homeWorldListRefreshGeneration = 0;
-let selectedHotbarIndex = 0;
+let activeBuilderLane: BuilderLane = "items";
+let selectedToolHotbarIndex = 0;
+let selectedBlockHotbarIndex = 0;
+let builderBrushSize = BUILDER_BRUSH_MIN_SIZE;
 let qualityController: QualityController;
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
 let pendingWorldDeletion: SavedWorld | null = null;
@@ -415,7 +445,8 @@ let coreAimPreviewEnabled = false;
 
 const engineEvents = createEngineEventBus();
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
-const hotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
+const toolHotbarItems = createToolHotbarItems();
+const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
 const fallbackHotbarItem = createItemStack(EMPTY_HANDS_ITEM_ID);
 const novaContext = new NovaContextJournal(engineEvents);
 const performanceHitchLog = new PerformanceHitchLog();
@@ -623,6 +654,8 @@ updatePhysicsCoreControls();
 updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
 syncCoreAimPreviewToggle();
+renderBuilderPalette();
+syncBuilderControls();
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {
@@ -676,18 +709,21 @@ function wireMenuControls(): void {
       rightMouseButtonDown = false;
       void queueActivePlayerLocationSave(true);
     }
-    if (!paused) setSettingsPanelOpen(false);
+    if (!paused) closePauseSubmenus();
   };
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel")) return;
+    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel, .builder-panel")) return;
     event.preventDefault();
     resumeFromPause();
   }, eventListenerOptions);
   resumeButton.addEventListener("click", resumeFromPause, eventListenerOptions);
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
+  }, eventListenerOptions);
+  builderButton.addEventListener("click", () => {
+    setBuilderPanelOpen(pauseBuilderPanel.hidden);
   }, eventListenerOptions);
   settingsGraphicsTab.addEventListener("click", () => {
     setSettingsCategory("graphics");
@@ -738,6 +774,18 @@ function wireMenuControls(): void {
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
   }, eventListenerOptions);
+  builderModeToggleButton.addEventListener("click", () => {
+    setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items");
+  }, eventListenerOptions);
+  builderBrushSizeSlider.addEventListener("input", () => {
+    setBuilderBrushSize(builderBrushSizeSlider.value);
+  }, eventListenerOptions);
+  builderPlaceBrushButton.addEventListener("click", () => applyBuilderBrushAtTarget("place"), eventListenerOptions);
+  builderEraseBrushButton.addEventListener("click", () => applyBuilderBrushAtTarget("erase"), eventListenerOptions);
+  builderSpawnTargetButton.addEventListener("click", () => runBuilderSpawnCommand("target"), eventListenerOptions);
+  builderSpawnWallButton.addEventListener("click", () => runBuilderSpawnCommand("wall"), eventListenerOptions);
+  builderSpawnPlatformButton.addEventListener("click", () => runBuilderSpawnCommand("platform"), eventListenerOptions);
+  builderSpawnPillarButton.addEventListener("click", () => runBuilderSpawnCommand("pillar"), eventListenerOptions);
   superUltraToggle.addEventListener("change", () => {
     qualityController.setSuperUltraEnabled(superUltraToggle.checked);
   }, eventListenerOptions);
@@ -873,7 +921,7 @@ function resumeFromPause(): void {
   if (novaChatPanel.isOpen) {
     novaChatPanel.close();
   }
-  setSettingsPanelOpen(false);
+  closePauseSubmenus();
   requirePlayer().resume();
 }
 
@@ -885,7 +933,7 @@ function openNovaChat(): void {
 function openNovaChatInputMode(): void {
   // Chat is an in-world overlay rather than a pause-menu panel. Suspend only
   // movement/look so the player can type, then restore pointer lock on close.
-  setSettingsPanelOpen(false);
+  closePauseSubmenus();
   pauseMenu.classList.add("is-hidden");
   requirePlayer().suspendForTextInput();
 }
@@ -897,13 +945,34 @@ function closeNovaChatInputMode(): void {
 }
 
 function setSettingsPanelOpen(open: boolean): void {
-  pauseSettingsPanel.hidden = !open;
-  settingsButton.setAttribute("aria-expanded", String(open));
-  settingsButton.classList.toggle("is-active", open);
-  settingsButton.textContent = open ? "Back" : "Settings";
+  setPauseSubmenu(open ? "settings" : null);
+}
 
-  // Treat settings like a sub-menu: while tuning, hide the main pause actions
-  // so "Exit to Home" is not sitting next to throwaway slider experiments.
+function setBuilderPanelOpen(open: boolean): void {
+  setPauseSubmenu(open ? "builder" : null);
+}
+
+function closePauseSubmenus(): void {
+  setPauseSubmenu(null);
+}
+
+function setPauseSubmenu(submenu: "settings" | "builder" | null): void {
+  const settingsOpen = submenu === "settings";
+  const builderOpen = submenu === "builder";
+  pauseSettingsPanel.hidden = !settingsOpen;
+  pauseBuilderPanel.hidden = !builderOpen;
+  settingsButton.setAttribute("aria-expanded", String(settingsOpen));
+  builderButton.setAttribute("aria-expanded", String(builderOpen));
+  settingsButton.classList.toggle("is-active", settingsOpen);
+  builderButton.classList.toggle("is-active", builderOpen);
+  settingsButton.classList.toggle("is-hidden", builderOpen);
+  builderButton.classList.toggle("is-hidden", settingsOpen);
+  settingsButton.textContent = settingsOpen ? "Back" : "Settings";
+  builderButton.textContent = builderOpen ? "Back" : "Builder";
+
+  // Treat pause submenus as focused modes: hide the main actions so destructive
+  // world exits are not sitting next to throwaway tuning or builder clicks.
+  const open = submenu !== null;
   for (const action of document.querySelectorAll<HTMLElement>(".menu-main-action")) {
     action.classList.toggle("is-hidden", open);
   }
@@ -1052,6 +1121,12 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.code === BUILDER_MODE_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items");
+    return;
+  }
+
   if (event.code === NOVA_PILOT_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
     camera.getWorldDirection(direction);
@@ -1062,7 +1137,8 @@ document.addEventListener("keydown", (event) => {
   }
 
   const requestedHotbarIndex = getHotbarIndexFromDigitCode(event.code);
-  if (requestedHotbarIndex !== null && requestedHotbarIndex < hotbarItems.length) {
+  const activeHotbarItems = getActiveHotbarItems();
+  if (requestedHotbarIndex !== null && requestedHotbarIndex < activeHotbarItems.length) {
     event.preventDefault();
     selectHotbarIndex(requestedHotbarIndex);
   }
@@ -1147,7 +1223,8 @@ renderer.domElement.addEventListener("wheel", (event) => {
   if (direction === null) return;
 
   event.preventDefault();
-  selectHotbarIndex(stepHotbarIndex(selectedHotbarIndex, direction, hotbarItems.length));
+  const activeHotbarItems = getActiveHotbarItems();
+  selectHotbarIndex(stepHotbarIndex(getActiveHotbarIndex(), direction, activeHotbarItems.length));
 }, wheelListenerOptions);
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
@@ -1165,10 +1242,18 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
     case "none":
       return;
     case "terrain:destroy-block":
-      destroyTargetBlock();
+      if (activeBuilderLane === "blocks") {
+        applyBuilderBrushAtTarget("erase");
+      } else {
+        destroyTargetBlock();
+      }
       return;
     case "terrain:place-block":
-      placeSelectedBlock(activePlayer, action.block);
+      if (activeBuilderLane === "blocks") {
+        applyBuilderBrushAtTarget("place");
+      } else {
+        placeSelectedBlock(activePlayer, action.block);
+      }
       return;
     case "physics:throw-core":
       if (activePlayer.isLooking()) throwPlayerCore(activePlayer);
@@ -1203,6 +1288,65 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
   };
   if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
   requireWorld().setBlock(target.x, target.y, target.z, block);
+}
+
+function applyBuilderBrushAtTarget(operation: "place" | "erase"): void {
+  if (!inWorld) return;
+  const hit = getTargetHit({ requireLook: false });
+  if (!hit) {
+    showBuilderStatus("Builder: no target.");
+    return;
+  }
+
+  if (hit.source !== "voxel") {
+    if (operation === "erase" && hit.source === "rubble") {
+      damageTargetedRubbleCell(hit.block);
+      showBuilderStatus("Builder: cleared rubble target.");
+    }
+    return;
+  }
+
+  const activeWorld = requireWorld();
+  const activePlayer = requirePlayer();
+  const center = operation === "place"
+    ? {
+        x: hit.block.x + hit.normal.x,
+        y: hit.block.y + hit.normal.y,
+        z: hit.block.z + hit.normal.z
+      }
+    : {
+        x: hit.block.x,
+        y: hit.block.y,
+        z: hit.block.z
+      };
+  const changedCells = operation === "place"
+    ? applyBuilderBrush({
+        world: activeWorld,
+        center,
+        size: builderBrushSize,
+        block: getSelectedBuilderBlock(),
+        shouldSkipCell: (cell) => activePlayer.overlapsBlock(cell.x, cell.y, cell.z)
+      })
+    : eraseBuilderBrush({
+        world: activeWorld,
+        center,
+        size: builderBrushSize
+      });
+
+  if (changedCells > 0) {
+    rigidDebris.invalidateStaticColliders();
+  }
+  showBuilderStatus(`Builder: ${operation === "place" ? "placed" : "erased"} ${changedCells} block${changedCells === 1 ? "" : "s"}.`);
+}
+
+function runBuilderSpawnCommand(feature: "target" | "wall" | "platform" | "pillar"): void {
+  const result = runAdminCommand(adminCommandHooks, `spawn ${feature} ${getSelectedBuilderBlockName().toLowerCase()}`);
+  showBuilderStatus(result.message);
+  if (result.ok) rigidDebris.invalidateStaticColliders();
+}
+
+function showBuilderStatus(message: string): void {
+  novaMessage.textContent = message;
 }
 
 function damageTargetedRubbleCell(cell: VoxelRaycastHit["block"]): void {
@@ -1518,7 +1662,8 @@ function updateHud(): void {
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
   const novaSuffix = novaPilot.active ? " | Nova" : "";
   const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry);
-  hudTitle.textContent = `Voxel Sandbox Engine | ${selectedLabel}${modeSuffix}${novaSuffix}`;
+  const laneLabel = activeBuilderLane === "blocks" ? "Builder" : "Items";
+  hudTitle.textContent = `Voxel Sandbox Engine | ${laneLabel}: ${selectedLabel}${modeSuffix}${novaSuffix}`;
   playerSpeedReadout.textContent = `Speed ${formatPlayerSpeedMetersPerSecond(activePlayer.velocity)}`;
 }
 
@@ -1551,12 +1696,103 @@ function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats:
   });
 }
 
+function getActiveHotbarItems(): readonly HotbarItem[] {
+  return activeBuilderLane === "blocks" ? blockHotbarItems : toolHotbarItems;
+}
+
+function getActiveHotbarIndex(): number {
+  return activeBuilderLane === "blocks" ? selectedBlockHotbarIndex : selectedToolHotbarIndex;
+}
+
 function getSelectedHotbarItem(): HotbarItem {
-  return hotbarItems[normalizeHotbarIndex(selectedHotbarIndex, hotbarItems.length)] ?? fallbackHotbarItem;
+  const activeHotbarItems = getActiveHotbarItems();
+  return activeHotbarItems[normalizeHotbarIndex(getActiveHotbarIndex(), activeHotbarItems.length)] ?? fallbackHotbarItem;
+}
+
+function getSelectedBuilderBlock(): BlockId {
+  const blockItem = blockHotbarItems[normalizeHotbarIndex(selectedBlockHotbarIndex, blockHotbarItems.length)];
+  const action = blockItem ? getHotbarSecondaryAction(blockItem, itemRegistry) : null;
+  return action?.kind === "terrain:place-block" ? action.block : BLOCK.grass;
+}
+
+function getSelectedBuilderBlockName(): string {
+  return BLOCKS[getSelectedBuilderBlock()].name;
+}
+
+function setBuilderLane(lane: BuilderLane): void {
+  if (activeBuilderLane === lane) {
+    syncBuilderControls();
+    updateHud();
+    return;
+  }
+
+  activeBuilderLane = lane;
+  selectHotbarIndex(getActiveHotbarIndex());
+}
+
+function setBuilderBrushSize(value: unknown): void {
+  builderBrushSize = normalizeBuilderBrushSize(value, builderBrushSize);
+  syncBuilderControls();
+}
+
+function renderBuilderPalette(): void {
+  const buttons = PLACEABLE_BLOCKS.map((block, index) => {
+    const button = document.createElement("button");
+    button.className = "builder-block-button";
+    button.type = "button";
+    button.title = BLOCKS[block].name;
+    button.setAttribute("aria-label", BLOCKS[block].name);
+    button.dataset.blockId = String(block);
+
+    const swatch = document.createElement("span");
+    swatch.className = "builder-block-swatch";
+    swatch.style.background = getBlockCssColor(block);
+    button.appendChild(swatch);
+
+    button.addEventListener("click", () => {
+      selectedBlockHotbarIndex = normalizeHotbarIndex(index, blockHotbarItems.length);
+      if (activeBuilderLane === "blocks") {
+        selectHotbarIndex(selectedBlockHotbarIndex);
+      } else {
+        setBuilderLane("blocks");
+      }
+    }, eventListenerOptions);
+    return button;
+  });
+
+  builderBlockPalette.replaceChildren(...buttons);
+}
+
+function syncBuilderControls(): void {
+  builderModeToggleButton.textContent = activeBuilderLane === "blocks" ? "Blocks" : "Items";
+  builderModeToggleButton.setAttribute("aria-pressed", String(activeBuilderLane === "blocks"));
+  builderSelectedBlockValue.textContent = getSelectedBuilderBlockName();
+  builderBrushSizeSlider.min = String(BUILDER_BRUSH_MIN_SIZE);
+  builderBrushSizeSlider.max = String(BUILDER_BRUSH_MAX_SIZE);
+  builderBrushSizeSlider.step = String(BUILDER_BRUSH_STEP);
+  builderBrushSizeSlider.value = String(builderBrushSize);
+  builderBrushSizeValue.textContent = formatBuilderBrushSize(builderBrushSize);
+
+  const selectedBlock = getSelectedBuilderBlock();
+  for (const button of builderBlockPalette.querySelectorAll<HTMLButtonElement>(".builder-block-button")) {
+    const active = Number(button.dataset.blockId) === selectedBlock;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
+function getBlockCssColor(block: BlockId): string {
+  const [r, g, b] = BLOCKS[block].color;
+  return `rgb(${Math.round(r * 255)} ${Math.round(g * 255)} ${Math.round(b * 255)})`;
 }
 
 function selectHotbarIndex(index: number): void {
-  selectedHotbarIndex = normalizeHotbarIndex(index, hotbarItems.length);
+  const activeHotbarItems = getActiveHotbarItems();
+  if (activeBuilderLane === "blocks") {
+    selectedBlockHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);
+  } else {
+    selectedToolHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);
+  }
   const selectedItem = getSelectedHotbarItem();
   const selectedLabel = getHotbarItemLabel(selectedItem, itemRegistry);
 
@@ -1564,7 +1800,7 @@ function selectHotbarIndex(index: number): void {
     itemId: selectedItem.itemId,
     name: selectedLabel,
     category: getHotbarItemCategory(selectedItem, itemRegistry),
-    slotIndex: selectedHotbarIndex
+    slotIndex: getActiveHotbarIndex()
   });
 
   const secondaryAction = getHotbarSecondaryAction(selectedItem, itemRegistry);
@@ -1575,13 +1811,14 @@ function selectHotbarIndex(index: number): void {
     });
   }
 
+  syncBuilderControls();
   updateHud();
 }
 
 function selectCodexPilotWeapon(weapon: CodexPilotWeapon): boolean {
   if (weapon === "selected") return true;
 
-  const targetIndex = hotbarItems.findIndex((item) => {
+  const targetIndex = toolHotbarItems.findIndex((item) => {
     const primaryAction = getHotbarPrimaryAction(item, itemRegistry);
     if (weapon === "physics-core") return primaryAction.kind === "physics:throw-core";
     if (weapon === "hitscan-core") return primaryAction.kind === "physics:fire-hitscan-core";
@@ -1589,6 +1826,7 @@ function selectCodexPilotWeapon(weapon: CodexPilotWeapon): boolean {
   });
 
   if (targetIndex < 0) return false;
+  setBuilderLane("items");
   selectHotbarIndex(targetIndex);
   return true;
 }
@@ -1612,9 +1850,9 @@ function isPlayerCoreAdsActive(): boolean {
     || canFireHitscanCoreWithHotbarItem(selectedItem, itemRegistry);
 }
 
-function getTargetHit(): TargetHit | null {
+function getTargetHit(options: { readonly requireLook?: boolean } = {}): TargetHit | null {
   if (!inWorld) return null;
-  if (!requirePlayer().isLooking()) return null;
+  if (options.requireLook !== false && !requirePlayer().isLooking()) return null;
 
   camera.getWorldDirection(direction);
 

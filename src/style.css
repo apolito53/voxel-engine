@@ -264,12 +264,14 @@ body.playing canvas {
   gap: 10px;
 }
 
-.settings-panel {
+.settings-panel,
+.builder-panel {
   display: grid;
   gap: 10px;
 }
 
-.settings-panel[hidden] {
+.settings-panel[hidden],
+.builder-panel[hidden] {
   display: none;
 }
 
@@ -443,6 +445,88 @@ body.playing canvas {
 
 .settings-utility-button {
   margin-top: 4px;
+}
+
+.builder-status-row {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.78fr) minmax(0, 1.22fr);
+  gap: 8px;
+}
+
+.builder-selected-block {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.07);
+  padding: 6px 10px;
+}
+
+.builder-selected-label {
+  color: rgba(237, 244, 248, 0.58);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.builder-selected-value {
+  overflow: hidden;
+  color: #edf4f8;
+  font-size: 14px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.builder-block-palette {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.builder-block-button {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.07);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.builder-block-button.is-active {
+  border-color: rgba(241, 196, 83, 0.96);
+  background: rgba(241, 196, 83, 0.16);
+  box-shadow: inset 0 0 0 2px rgba(241, 196, 83, 0.34);
+}
+
+.builder-block-swatch {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    inset 0 -12px 18px rgba(0, 0, 0, 0.22);
+}
+
+.builder-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.builder-action-grid .menu-button,
+.builder-status-row .menu-button {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .budget-control {

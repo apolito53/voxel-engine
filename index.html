@@ -11,7 +11,7 @@
       <div class="title">Voxel Sandbox Engine</div>
       <div id="player-speed-readout" class="row">Speed 0.0 m/s</div>
       <div class="row">WASD move | Space jump/up | C crouch/slide/down | Shift sprint/boost</div>
-      <div class="row">Mouse wheel select | Unarmed no-op | Block L/R break/place | Cores L fire / hold R ADS</div>
+      <div class="row">Mouse wheel select | G items/blocks | Blocks L/R erase/place | Cores L fire / hold R ADS</div>
       <div class="row">F flight | Enter/F9 terminal | N pilot | B core | X cores | F3/F4/F6 | F8 test | Esc pause</div>
     </div>
     <div id="nova-message" aria-live="polite"></div>
@@ -153,6 +153,15 @@
             aria-controls="pause-settings-panel"
           >
             Settings
+          </button>
+          <button
+            id="builder-button"
+            class="menu-button secondary"
+            type="button"
+            aria-expanded="false"
+            aria-controls="pause-builder-panel"
+          >
+            Builder
           </button>
           <button id="nova-chat-button" class="menu-button secondary menu-main-action" type="button">
             Nova Terminal
@@ -389,6 +398,41 @@
               >
                 Despawn All Objects
               </button>
+            </div>
+          </div>
+          <div id="pause-builder-panel" class="builder-panel" aria-label="Builder tools" hidden>
+            <div class="builder-status-row">
+              <button id="builder-mode-toggle-button" class="menu-button secondary" type="button">
+                Blocks
+              </button>
+              <div class="builder-selected-block">
+                <span class="builder-selected-label">Block</span>
+                <span id="builder-selected-block-value" class="builder-selected-value">Grass</span>
+              </div>
+            </div>
+            <div id="builder-block-palette" class="builder-block-palette" aria-label="Block palette"></div>
+            <label class="settings-field" for="builder-brush-size-slider">
+              <span class="settings-label-row">
+                <span class="settings-label">Brush Size</span>
+                <span id="builder-brush-size-value" class="settings-value">1x1x1</span>
+              </span>
+              <input
+                id="builder-brush-size-slider"
+                class="range-input"
+                type="range"
+                min="1"
+                max="7"
+                step="2"
+                value="1"
+              />
+            </label>
+            <div class="builder-action-grid">
+              <button id="builder-place-brush-button" class="menu-button secondary" type="button">Place Brush</button>
+              <button id="builder-erase-brush-button" class="menu-button secondary" type="button">Erase Brush</button>
+              <button id="builder-spawn-target-button" class="menu-button secondary" type="button">Spawn Target</button>
+              <button id="builder-spawn-wall-button" class="menu-button secondary" type="button">Spawn Wall</button>
+              <button id="builder-spawn-platform-button" class="menu-button secondary" type="button">Spawn Platform</button>
+              <button id="builder-spawn-pillar-button" class="menu-button secondary" type="button">Spawn Pillar</button>
             </div>
           </div>
           <button id="home-button" class="menu-button danger menu-exit-button menu-main-action" type="button">

@@ -18,15 +18,25 @@ export type HotbarItem = ItemStack;
 
 export type HotbarScrollDirection = -1 | 1;
 
+export function createToolHotbarItems(): readonly HotbarItem[] {
+  return [
+    createItemStack(EMPTY_HANDS_ITEM_ID),
+    createItemStack(PHYSICS_CORE_ITEM_ID),
+    createItemStack(HITSCAN_CORE_ITEM_ID)
+  ];
+}
+
+export function createBlockHotbarItems(placeableBlocks: readonly BlockId[]): readonly HotbarItem[] {
+  return placeableBlocks.map((block) => createItemStack(createBlockItemId(block)));
+}
+
 export function createHotbarItems(placeableBlocks: readonly BlockId[]): readonly HotbarItem[] {
   // The hotbar stores stacks, not behavior. Item definitions decide what a
   // primary or secondary click means, which keeps this selection lane reusable
   // when the engine grows actual tools, weapons, or game-specific commands.
   return [
-    createItemStack(EMPTY_HANDS_ITEM_ID),
-    ...placeableBlocks.map((block) => createItemStack(createBlockItemId(block))),
-    createItemStack(PHYSICS_CORE_ITEM_ID),
-    createItemStack(HITSCAN_CORE_ITEM_ID)
+    ...createToolHotbarItems(),
+    ...createBlockHotbarItems(placeableBlocks)
   ];
 }
 

@@ -51,9 +51,10 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `C` crouch smoothly on foot, or fly downward while flight mode is active
 - `C` while sprinting forward, or landing crouched with enough speed, starts a committed slide with an 80% entry-speed pop; hold `W` to glide longer, `Space` to spring-jump out of the slide
 - `Shift` sprint on ground, or use the stronger flight speed boost; active sprint/boost widens FOV and adds peripheral speed lines
-- `Mouse wheel` selects held items: Unarmed, placeable blocks, Physics Core, or Hitscan Core
+- `Mouse wheel` selects within the active lane: gameplay items or build blocks
+- `G` toggles the active lane between `Items` and `Blocks`
 - `Unarmed` does nothing on either click for now
-- Selected blocks use `Left click` to break the targeted block and `Right click` to place into the adjacent space
+- In `Blocks` lane, selected blocks use `Left click` to erase the targeted brush volume and `Right click` to place the selected block brush into the adjacent space
 - Selected Physics Core uses `Left click` to throw a core from the lowered right-side muzzle; hold `Right click` while firing to use centered reticle ADS with a slight 15% zoom
 - Selected Hitscan Core uses `Left click` to fire an instant 10%-radius, 500%-speed core trace from the lowered right-side muzzle through the same partial-block bite and piercing rules, poof loose debris along the beam path, and draw a short additive energy-beam flash along the shot line; hold `Right click` while firing to use centered reticle ADS with a slight 15% zoom
 - `F` toggle flight mode
@@ -68,6 +69,7 @@ Pass a different base-server port as the first argument only for temporary one-o
 - `F8` toggles the scripted test avatar, currently a small core-break integration run that stages a target voxel and fires the real player Physics Core path
 - Browser automation can use `globalThis.__VOXEL_CODEX_PILOT__` as a high-level play bridge for real in-world inputs: `superflat()`, `scenario("wall-range")`, `move(...)`, `lookAt(...)`, `fire(...)`, `play("wall-range")`, `snapshot()`, and `startPass("label")`
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
+- Pause menu `Builder` opens an admin build panel with a block palette, odd-sized place/erase brush, and quick target/wall/platform/pillar fixture spawns using the selected block
 - Pause menu `Settings` splits tuning into `Graphics` and `Gameplay` tabs: graphics owns quality, render distance, physics body budget, shadows, max break debris, and Super Ultra; gameplay owns projectile core size/velocity, the Core Aim Preview toggle, grounded debris cleanup, health bars, and cleanup. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
 - Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
 - Gameplay `Max Ground Debris` caps grounded shard clutter after the explosion; airborne bursts still spawn normally, then excess ground debris is culled instead of being baked into instant rubble lumps
@@ -95,6 +97,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 
 - `src/main.ts`: app bootstrap, render loop, input glue, world lifecycle orchestration, and WebGL runtime teardown
 - `src/adminCommands.ts`: admin command parsing/routing, Superflat Lab shortcut, and spawnable terrain test fixtures used by Nova Terminal
+- `src/builderTools.ts`: centered odd-size builder brush utilities shared by the in-game Builder panel and block lane
 - `src/testAvatar.ts`: F8 scripted runtime avatar for repeatable in-browser gameplay smoke checks
 - `src/codexPilot.ts`: high-level browser play bridge for automation-assisted roaming, aiming, movement, weapon fire, scenario setup, and focused hitch-log passes through real player/hotbar systems
 - `src/damageIndicators.ts`: DOM-projected floating health bars for damaged terrain and rubble targets
@@ -120,7 +123,7 @@ Long-running idle sessions are guarded too: once chunk, mesh, save, debris, and 
 - `src/debrisPoof.ts`: short-lived material-tinted dust poofs for partial-block bite feedback and visual debris cleanup
 - `src/fragmentRubble.ts`: parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments; the normal runtime no longer calls this for loose debris cleanup
 - `src/items.ts`: reusable item registry, stack metadata, categories, tags, and primary/secondary action descriptors
-- `src/hotbar.ts`: scroll-selected held-item lane, selection wrapping, number-key mapping, and action resolution helpers
+- `src/hotbar.ts`: separate tool/block selection lanes, selection wrapping, number-key mapping, and action resolution helpers
 - `src/physics.ts`: simple swept sphere-vs-voxel physics cores, fragment render/material/shape state, rigid-debris sync hooks, sleep-aware core/debris broadphase collision, and velocity/radius impact reporting for terrain carving and piercing
 - `src/coreAimPreview.ts`: toggleable Physics Core trajectory preview, first terrain-hit prediction, landing ring rendering, and predicted bite-lattice cell outlines
 - `src/hitscanCore.ts`: instant core ray traversal that reuses the partial-block bite lattice, open-tunnel projectile query, and fixed smallest/fastest core envelope
