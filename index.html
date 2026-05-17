@@ -196,6 +196,16 @@
               >
                 Gameplay
               </button>
+              <button
+                id="settings-tab-experimental"
+                class="settings-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="settings-experimental-panel"
+              >
+                Experimental
+              </button>
             </div>
             <div
               id="settings-graphics-panel"
@@ -224,40 +234,6 @@
                   value="6"
                 />
               </label>
-              <div class="budget-control" aria-labelledby="physics-budget-label">
-                <div class="budget-copy">
-                  <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
-                  <span id="physics-budget-value" class="budget-value">192 bodies</span>
-                </div>
-                <div class="stepper-controls" aria-label="Physics object budget controls">
-                  <button
-                    id="physics-budget-decrease"
-                    class="stepper-button"
-                    type="button"
-                    aria-label="Decrease physics object budget"
-                  >
-                    -
-                  </button>
-                  <button
-                    id="physics-budget-increase"
-                    class="stepper-button"
-                    type="button"
-                    aria-label="Increase physics object budget"
-                  >
-                    +
-                  </button>
-                </div>
-                <input
-                  id="physics-budget-slider"
-                  class="range-input budget-slider"
-                  type="range"
-                  min="32"
-                  max="4096"
-                  step="16"
-                  value="192"
-                  aria-label="Physics object budget"
-                />
-              </div>
               <label class="settings-field" for="shadow-quality-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Shadow Quality</span>
@@ -271,41 +247,6 @@
                   max="4"
                   step="1"
                   value="2"
-                />
-              </label>
-              <label class="settings-field" for="debris-count-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Max Break Debris</span>
-                  <span id="debris-count-value" class="settings-value">108 max shards/block</span>
-                </span>
-                <input
-                  id="debris-count-slider"
-                  class="range-input"
-                  type="range"
-                  min="1"
-                  max="27"
-                  step="1"
-                  value="7"
-                />
-              </label>
-              <label
-                id="super-ultra-toggle-row"
-                class="danger-toggle"
-                for="super-ultra-toggle"
-                aria-hidden="true"
-                hidden
-              >
-                <span class="danger-copy">
-                  <span class="danger-title">Allow Super Ultra Mode</span>
-                  <span id="super-ultra-warning" class="danger-warning">
-                    Unlocks the 12x distance preset. Might turn your computer into a toaster.
-                  </span>
-                </span>
-                <input
-                  id="super-ultra-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  aria-describedby="super-ultra-warning"
                 />
               </label>
             </div>
@@ -357,6 +298,88 @@
                   type="checkbox"
                 />
               </label>
+              <label class="settings-toggle" for="health-bars-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Health Bars</span>
+                  <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
+                </span>
+                <input
+                  id="health-bars-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                  checked
+                />
+              </label>
+              <button
+                id="despawn-objects-button"
+                class="menu-button secondary settings-utility-button"
+                type="button"
+              >
+                Despawn All Objects
+              </button>
+            </div>
+            <div
+              id="settings-experimental-panel"
+              class="settings-tab-panel"
+              role="tabpanel"
+              aria-labelledby="settings-tab-experimental"
+              hidden
+            >
+              <div class="experimental-warning" role="note">
+                <span class="experimental-warning-title">Experimental Settings</span>
+                <span class="experimental-warning-copy">
+                  These controls can absolutely body your framerate. If your computer spontaneously combusts, that's on you.
+                </span>
+              </div>
+              <div class="budget-control" aria-labelledby="physics-budget-label">
+                <div class="budget-copy">
+                  <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
+                  <span id="physics-budget-value" class="budget-value">192 bodies</span>
+                </div>
+                <div class="stepper-controls" aria-label="Physics object budget controls">
+                  <button
+                    id="physics-budget-decrease"
+                    class="stepper-button"
+                    type="button"
+                    aria-label="Decrease physics object budget"
+                  >
+                    -
+                  </button>
+                  <button
+                    id="physics-budget-increase"
+                    class="stepper-button"
+                    type="button"
+                    aria-label="Increase physics object budget"
+                  >
+                    +
+                  </button>
+                </div>
+                <input
+                  id="physics-budget-slider"
+                  class="range-input budget-slider"
+                  type="range"
+                  min="32"
+                  max="4096"
+                  step="16"
+                  value="192"
+                  aria-label="Physics object budget"
+                />
+              </div>
+              <label class="settings-field" for="debris-count-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Max Break Debris</span>
+                  <span id="debris-count-value" class="settings-value">108 max shards/block</span>
+                </span>
+                <input
+                  id="debris-count-slider"
+                  class="range-input"
+                  type="range"
+                  min="1"
+                  max="27"
+                  step="1"
+                  value="7"
+                />
+              </label>
               <label class="settings-field" for="ground-debris-budget-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Max Ground Debris</span>
@@ -387,25 +410,26 @@
                   value="12"
                 />
               </label>
-              <label class="settings-toggle" for="health-bars-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Health Bars</span>
-                  <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
+              <label
+                id="super-ultra-toggle-row"
+                class="danger-toggle"
+                for="super-ultra-toggle"
+                aria-hidden="true"
+                hidden
+              >
+                <span class="danger-copy">
+                  <span class="danger-title">Allow Super Ultra Mode</span>
+                  <span id="super-ultra-warning" class="danger-warning">
+                    Unlocks the 12x distance preset. Might turn your computer into a toaster.
+                  </span>
                 </span>
                 <input
-                  id="health-bars-toggle"
+                  id="super-ultra-toggle"
                   class="toggle-input"
                   type="checkbox"
-                  checked
+                  aria-describedby="super-ultra-warning"
                 />
               </label>
-              <button
-                id="despawn-objects-button"
-                class="menu-button secondary settings-utility-button"
-                type="button"
-              >
-                Despawn All Objects
-              </button>
             </div>
           </div>
           <div id="pause-builder-panel" class="builder-panel" aria-label="Builder tools" hidden>

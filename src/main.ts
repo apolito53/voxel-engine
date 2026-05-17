@@ -333,8 +333,10 @@ const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
 const pauseBuilderPanel = requireElement<HTMLElement>("#pause-builder-panel");
 const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
 const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
+const settingsExperimentalTab = requireElement<HTMLButtonElement>("#settings-tab-experimental");
 const settingsGraphicsPanel = requireElement<HTMLElement>("#settings-graphics-panel");
 const settingsGameplayPanel = requireElement<HTMLElement>("#settings-gameplay-panel");
+const settingsExperimentalPanel = requireElement<HTMLElement>("#settings-experimental-panel");
 const qualitySelect = requireElement<HTMLSelectElement>("#quality-select");
 const renderDistanceSlider = requireElement<HTMLInputElement>("#render-distance-slider");
 const renderDistanceValue = requireElement<HTMLElement>("#render-distance-value");
@@ -515,7 +517,7 @@ type PlayerCoreFiringSolution = {
   readonly origin: THREE.Vector3;
   readonly direction: THREE.Vector3;
 };
-type SettingsCategory = "graphics" | "gameplay";
+type SettingsCategory = "graphics" | "gameplay" | "experimental";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
@@ -769,6 +771,9 @@ function wireMenuControls(): void {
   settingsGameplayTab.addEventListener("click", () => {
     setSettingsCategory("gameplay");
   }, eventListenerOptions);
+  settingsExperimentalTab.addEventListener("click", () => {
+    setSettingsCategory("experimental");
+  }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
   }, eventListenerOptions);
@@ -1018,12 +1023,17 @@ function setPauseSubmenu(submenu: "settings" | "builder" | null): void {
 
 function setSettingsCategory(category: SettingsCategory): void {
   const showGraphics = category === "graphics";
+  const showGameplay = category === "gameplay";
+  const showExperimental = category === "experimental";
   settingsGraphicsPanel.hidden = !showGraphics;
-  settingsGameplayPanel.hidden = showGraphics;
+  settingsGameplayPanel.hidden = !showGameplay;
+  settingsExperimentalPanel.hidden = !showExperimental;
   settingsGraphicsTab.classList.toggle("is-active", showGraphics);
-  settingsGameplayTab.classList.toggle("is-active", !showGraphics);
+  settingsGameplayTab.classList.toggle("is-active", showGameplay);
+  settingsExperimentalTab.classList.toggle("is-active", showExperimental);
   settingsGraphicsTab.setAttribute("aria-selected", String(showGraphics));
-  settingsGameplayTab.setAttribute("aria-selected", String(!showGraphics));
+  settingsGameplayTab.setAttribute("aria-selected", String(showGameplay));
+  settingsExperimentalTab.setAttribute("aria-selected", String(showExperimental));
 }
 
 function setHealthBarsEnabled(enabled: boolean): void {

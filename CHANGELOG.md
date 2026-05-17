@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.23.1 - 2026-05-17
+
+### Changed
+
+- Moved the risky performance/destruction tuning controls into a new Experimental settings tab with a warning that they can tank framerate if abused.
+- Updated the release-notes parser so four-part settings-only versions sort correctly in the in-game version modal.
+
 ## 0.6.23 - 2026-05-17
 
 ### Fixed

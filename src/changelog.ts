@@ -9,10 +9,11 @@ type ParsedVersion = {
   readonly major: number;
   readonly minor: number;
   readonly patch: number;
+  readonly revision: number;
 };
 
 const CHANGELOG_ENTRY_HEADING = /^##\s+(.+?)\s*$/;
-const RELEASE_HEADING = /^v?(\d+)\.(\d+)\.(\d+)(?:\s+-\s+(\d{4}-\d{2}-\d{2}))?$/;
+const RELEASE_HEADING = /^v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:\s+-\s+(\d{4}-\d{2}-\d{2}))?$/;
 
 export function parseChangelogEntries(markdown: string): ChangelogEntry[] {
   const normalizedMarkdown = markdown.replace(/\r\n/g, "\n");
@@ -63,12 +64,17 @@ function pushActiveEntry(entries: ChangelogEntry[], heading: string | null, body
 
   const releaseMatch = heading.match(RELEASE_HEADING);
   const version = releaseMatch
-    ? `${releaseMatch[1]}.${releaseMatch[2]}.${releaseMatch[3]}`
+    ? [
+      releaseMatch[1],
+      releaseMatch[2],
+      releaseMatch[3],
+      releaseMatch[4]
+    ].filter(Boolean).join(".")
     : null;
   entries.push({
     title: releaseMatch ? version ?? heading : heading,
     version,
-    date: releaseMatch?.[4] ?? null,
+    date: releaseMatch?.[5] ?? null,
     body: trimmedBody
   });
 }
@@ -92,16 +98,18 @@ function isUnreleasedTitle(title: string): boolean {
 function parseVersion(version: string | null): ParsedVersion | null {
   if (!version) return null;
   const parts = version.split(".").map((part) => Number(part));
-  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) return null;
+  if ((parts.length !== 3 && parts.length !== 4) || parts.some((part) => !Number.isInteger(part))) return null;
   return {
     major: parts[0] ?? 0,
     minor: parts[1] ?? 0,
-    patch: parts[2] ?? 0
+    patch: parts[2] ?? 0,
+    revision: parts[3] ?? 0
   };
 }
 
 function compareVersionPartsNewestFirst(left: ParsedVersion, right: ParsedVersion): number {
   if (left.major !== right.major) return right.major - left.major;
   if (left.minor !== right.minor) return right.minor - left.minor;
-  return right.patch - left.patch;
+  if (left.patch !== right.patch) return right.patch - left.patch;
+  return right.revision - left.revision;
 }

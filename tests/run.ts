@@ -2516,6 +2516,12 @@ test("changelog entries sort newest first for the version modal", () => {
 
 - newest numbered release
 
+## 0.10.0.1 - 2026-05-09
+
+### Fixed
+
+- newest settings-only release
+
 ## 0.5.0 - 2026-05-07
 
 ### Added
@@ -2525,12 +2531,12 @@ test("changelog entries sort newest first for the version modal", () => {
 
   assertDeepEqual(
     entries.map((entry) => entry.title),
-    ["Unreleased", "0.10.0", "0.5.0", "0.4.9"],
-    "release notes should sort Unreleased first, then semantic versions descending"
+    ["Unreleased", "0.10.0.1", "0.10.0", "0.5.0", "0.4.9"],
+    "release notes should sort Unreleased first, then semantic and revision versions descending"
   );
-  assertEqual(entries[2]?.date, "2026-05-07", "release dates should be parsed from headings");
+  assertEqual(entries[3]?.date, "2026-05-07", "release dates should be parsed from headings");
   assert(
-    entries[2]?.body.includes("current stable release"),
+    entries[3]?.body.includes("current stable release"),
     "entry bodies should preserve their markdown content for rendering"
   );
 });

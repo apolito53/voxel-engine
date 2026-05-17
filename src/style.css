@@ -277,7 +277,7 @@ body.playing canvas {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 6px;
@@ -310,6 +310,27 @@ body.playing canvas {
 
 .settings-tab-panel[hidden] {
   display: none;
+}
+
+.experimental-warning {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255, 201, 89, 0.42);
+  border-radius: 6px;
+  background: rgba(241, 196, 83, 0.12);
+  padding: 10px 12px;
+}
+
+.experimental-warning-title {
+  color: #ffd66b;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.experimental-warning-copy {
+  color: rgba(255, 237, 181, 0.78);
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .settings-field {

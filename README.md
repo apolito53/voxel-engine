@@ -71,13 +71,13 @@ Pass a different base-server port as the first argument only for temporary one-o
 - Local browser test runs can use `globalThis.__VOXEL_VISUAL_TEST__.listScenarios()` and `globalThis.__VOXEL_VISUAL_TEST__.recordScenario("debris-grounding")` while `npm.cmd run debug:logs` is listening; the browser records the game canvas as WebM, samples review frames, and posts the run to `logs/visual-runs/YYYY-MM-DD/...` with `recording.webm`, extracted video frames when local `ffmpeg` is available, `manifest.json`, and `review.html`. Current scripted shots include `debris-grounding`, `hitscan-tunnel`, `builder-fixture`, `wall-range`, and `free-roam`; `recordPilotPlay("wall-range")` remains as a compatibility shortcut.
 - Nova Terminal commands include `superflat`, `spawn target [block]`, `spawn wall [block] [width] [height]`, `spawn pillar [block] [height]`, and `spawn platform [block] [size]`
 - Pause menu `Builder` opens an admin build panel with a block palette, odd-sized place/erase brush, and quick target/wall/platform/pillar fixture spawns using the selected block
-- Pause menu `Settings` splits tuning into `Graphics` and `Gameplay` tabs: graphics owns quality, render distance, physics body budget, shadows, max break debris, and Super Ultra; gameplay owns projectile core size/velocity, the Core Aim Preview toggle, grounded debris cleanup, health bars, and cleanup. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
-- Settings `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
-- Gameplay `Max Ground Debris` caps grounded shard clutter after the explosion; airborne bursts still spawn normally, then excess ground debris is culled instead of being baked into instant rubble lumps
-- Gameplay `Ground Debris Lifetime` controls how long grounded shards remain before they pop a small material-tinted dust poof and disappear; `Forever` keeps them visible until distance, pressure, or manual cleanup removes them
+- Pause menu `Settings` splits tuning into `Graphics`, `Gameplay`, and `Experimental` tabs: graphics owns quality, render distance, and shadows; gameplay owns projectile core size/velocity, the Core Aim Preview toggle, health bars, and cleanup; experimental owns the controls most likely to create CPU/GPU stress. Quality slider edits switch the dropdown to `Custom` so built-in presets stay clean
+- Experimental `Physics Object Budget` stepper and slider change the current quality preset's physics-body budget
+- Experimental `Max Ground Debris` caps grounded shard clutter after the explosion; airborne bursts still spawn normally, then excess ground debris is culled instead of being baked into instant rubble lumps
+- Experimental `Ground Debris Lifetime` controls how long grounded shards remain before they pop a small material-tinted dust poof and disappear; `Forever` keeps them visible until distance, pressure, or manual cleanup removes them
 - Gameplay `Health Bars` toggles block/rubble damage bars and clears any visible bars when turned off
 - Gameplay `Despawn All Objects` performs the drastic full cleanup: physics cores, loose debris VFX, and any existing rubble cover
-- Pause menu `Allow Super Ultra Mode` toggle appears at `Ultra` and unlocks the 12x stress-test preset
+- Experimental `Max Break Debris` controls the per-block visible shard ceiling, and `Allow Super Ultra Mode` appears at `Ultra` to unlock the 12x stress-test preset
 - `Esc` pause and release mouse
 
 ## Quality Presets
