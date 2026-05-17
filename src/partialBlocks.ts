@@ -103,6 +103,15 @@ type PartialBlockLatticeCell = {
 };
 type PartialBlockAxis = "x" | "y" | "z";
 
+const PARTIAL_BLOCK_LATTICE_NEIGHBOR_OFFSETS: readonly PartialBlockPosition[] = [
+  { x: 1, y: 0, z: 0 },
+  { x: -1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 },
+  { x: 0, y: -1, z: 0 },
+  { x: 0, y: 0, z: 1 },
+  { x: 0, y: 0, z: -1 }
+];
+
 export class PartialBlockMeshField {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   private readonly scene: THREE.Scene;
@@ -397,6 +406,8 @@ export function createPartialBlockRemovedVisualCellIndexes(
   }
   if (removed.size >= targetRemovedCount) return [...removed];
 
+  const rankedCells = createPartialBlockRemovalRanking(cell);
+
   for (let cutIndex = cell.cuts.length - 1; cutIndex >= 0; cutIndex -= 1) {
     const cut = cell.cuts[cutIndex];
     if (!cut || !isTinyCoreCut(cut)) continue;
@@ -409,24 +420,40 @@ export function createPartialBlockRemovedVisualCellIndexes(
         z: -cut.normal.z
       }
     )) {
-      removed.add(tunnelIndex);
+      addConnectedRemovedVisualCell(removed, tunnelIndex);
       if (removed.size >= targetRemovedCount) return [...removed];
     }
   }
 
-  const rankedCells = PARTIAL_BLOCK_LATTICE_CELLS
-    .map((latticeCell) => ({
-      index: latticeCell.index,
-      score: scorePartialBlockLatticeCellForRemoval(cell, latticeCell)
-    }))
-    .sort((left, right) => left.score - right.score || left.index - right.index);
-
-  for (const rankedCell of rankedCells) {
-    removed.add(rankedCell.index);
-    if (removed.size >= targetRemovedCount) break;
-  }
+  fillConnectedRemovedVisualCells(removed, rankedCells, targetRemovedCount);
 
   return [...removed];
+}
+
+export function arePartialBlockVisualCellIndexesConnected(indexes: readonly number[]): boolean {
+  const validIndexes = new Set<number>();
+  for (const index of indexes) {
+    if (isValidPartialBlockLatticeCellIndex(index)) validIndexes.add(index);
+  }
+  if (validIndexes.size <= 1) return true;
+
+  const firstIndex = validIndexes.values().next().value as number | undefined;
+  if (firstIndex === undefined) return true;
+
+  const visited = new Set<number>([firstIndex]);
+  const queue = [firstIndex];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined) break;
+
+    for (const neighbor of getPartialBlockAdjacentLatticeCellIndexes(current)) {
+      if (!validIndexes.has(neighbor) || visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      queue.push(neighbor);
+    }
+  }
+
+  return visited.size === validIndexes.size;
 }
 
 export function createPartialBlockTrajectoryTunnelCellIndexes(
@@ -439,21 +466,20 @@ export function createPartialBlockTrajectoryTunnelCellIndexes(
   const dominantAxis = getDominantPartialBlockAxis(direction);
   const axisDirection = direction[dominantAxis];
   const depthSlots = createPartialBlockDepthSlots(axisDirection);
+  // A tiny core only has enough material budget for one three-cell tunnel.
+  // Lock the non-dominant axes to the entry column so gravity or shallow angle
+  // drift cannot create diagonal gaps that would need extra bridge cells.
+  const lateralSlots = {
+    x: getNearestPartialBlockLatticeSlot(localPoint.x),
+    y: getNearestPartialBlockLatticeSlot(localPoint.y),
+    z: getNearestPartialBlockLatticeSlot(localPoint.z)
+  };
   const indexes: number[] = [];
 
   for (const depthSlot of depthSlots) {
-    const axisCenter = getPartialBlockLatticeSlotCenter(depthSlot);
-    const travel = Math.abs(axisDirection) > PARTIAL_BLOCK_SURFACE_EPSILON
-      ? (axisCenter - localPoint[dominantAxis]) / axisDirection
-      : 0;
-    const pointOnLine = {
-      x: localPoint.x + direction.x * travel,
-      y: localPoint.y + direction.y * travel,
-      z: localPoint.z + direction.z * travel
-    };
-    const x = dominantAxis === "x" ? depthSlot : getNearestPartialBlockLatticeSlot(pointOnLine.x);
-    const y = dominantAxis === "y" ? depthSlot : getNearestPartialBlockLatticeSlot(pointOnLine.y);
-    const z = dominantAxis === "z" ? depthSlot : getNearestPartialBlockLatticeSlot(pointOnLine.z);
+    const x = dominantAxis === "x" ? depthSlot : lateralSlots.x;
+    const y = dominantAxis === "y" ? depthSlot : lateralSlots.y;
+    const z = dominantAxis === "z" ? depthSlot : lateralSlots.z;
     indexes.push(x + y * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE + z * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE ** 2);
   }
 
@@ -464,6 +490,82 @@ function createPartialBlockRemovedLatticeCellSet(cell: PartialBlockCell): Set<nu
   return new Set(
     cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
   );
+}
+
+function createPartialBlockRemovalRanking(
+  cell: Pick<PartialBlockCell, "cuts">
+): readonly { readonly index: number; readonly score: number }[] {
+  return PARTIAL_BLOCK_LATTICE_CELLS
+    .map((latticeCell) => ({
+      index: latticeCell.index,
+      score: scorePartialBlockLatticeCellForRemoval(cell, latticeCell)
+    }))
+    .sort((left, right) => left.score - right.score || left.index - right.index);
+}
+
+function fillConnectedRemovedVisualCells(
+  removed: Set<number>,
+  rankedCells: readonly { readonly index: number; readonly score: number }[],
+  targetRemovedCount: number
+): void {
+  // The old selector took the top-scoring cells globally, which could leave
+  // isolated missing sub-cubes. Damage should look like a bite chewing outward,
+  // so after the first seed every new cell must share a face with the wound.
+  if (removed.size === 0) {
+    const seed = rankedCells.find((rankedCell) => !removed.has(rankedCell.index));
+    if (seed) removed.add(seed.index);
+  }
+
+  while (removed.size < targetRemovedCount) {
+    const next = rankedCells.find((rankedCell) =>
+      !removed.has(rankedCell.index) &&
+      isPartialBlockLatticeCellAdjacentToRemoved(rankedCell.index, removed)
+    );
+    if (next) {
+      removed.add(next.index);
+      continue;
+    }
+
+    // This should only happen with malformed legacy state or a fully exhausted
+    // lattice, but keep the function total so damage never stalls mid-frame.
+    const fallback = rankedCells.find((rankedCell) => !removed.has(rankedCell.index));
+    if (!fallback) return;
+    removed.add(fallback.index);
+  }
+}
+
+function addConnectedRemovedVisualCell(removed: Set<number>, index: number): boolean {
+  if (!isValidPartialBlockLatticeCellIndex(index)) return false;
+  if (removed.has(index)) return true;
+  if (removed.size > 0 && !isPartialBlockLatticeCellAdjacentToRemoved(index, removed)) return false;
+  removed.add(index);
+  return true;
+}
+
+function isPartialBlockLatticeCellAdjacentToRemoved(index: number, removed: ReadonlySet<number>): boolean {
+  return getPartialBlockAdjacentLatticeCellIndexes(index).some((neighbor) => removed.has(neighbor));
+}
+
+function getPartialBlockAdjacentLatticeCellIndexes(index: number): readonly number[] {
+  const cell = PARTIAL_BLOCK_LATTICE_CELLS[index];
+  if (!cell) return [];
+
+  const neighbors: number[] = [];
+  for (const offset of PARTIAL_BLOCK_LATTICE_NEIGHBOR_OFFSETS) {
+    const neighbor = getPartialBlockLatticeCellIndex(
+      cell.x + offset.x,
+      cell.y + offset.y,
+      cell.z + offset.z
+    );
+    if (neighbor !== null) neighbors.push(neighbor);
+  }
+  return neighbors;
+}
+
+function isValidPartialBlockLatticeCellIndex(index: number): boolean {
+  return Number.isInteger(index) &&
+    index >= 0 &&
+    index < PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT;
 }
 
 function scorePartialBlockLatticeCellForRemoval(
@@ -517,10 +619,6 @@ function createPartialBlockDepthSlots(axisDirection: number): readonly number[] 
     { length: PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE },
     (_, index) => axisDirection >= 0 ? index : PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE - 1 - index
   );
-}
-
-function getPartialBlockLatticeSlotCenter(slot: number): number {
-  return (slot + 0.5) / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
 }
 
 function getNearestPartialBlockLatticeSlot(value: number): number {
