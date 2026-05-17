@@ -2,13 +2,14 @@ import * as THREE from "three";
 import {
   BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
   BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
+  BLOCK_DEBRIS_MAX_VISUAL_AXIS,
+  BLOCK_DEBRIS_MIN_FRAGMENT_COUNT,
   BLOCK_FRAGMENT_COUNT,
   BLOCK_FRAGMENT_COLLISION_RADIUS,
   BLOCK_FRAGMENT_GRID_SIZE,
   BLOCK_FRAGMENT_SPACING,
   BLOCK_FRAGMENT_VISUAL_SIZE,
   BLOCK_RUBBLE_MATERIAL_UNITS,
-  TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
   getBlockRubbleMaterialUnitsForHealth,
   getEjectedBlockRubbleMaterialUnits,
   getBlockFragmentMaterialUnits,
@@ -3388,7 +3389,7 @@ test("terrain impact fragment counts eject chips without duplicating material", 
 
   assertEqual(
     getMinimumDebrisFragmentCountForMaterialUnits(BLOCK_RUBBLE_MATERIAL_UNITS),
-    39,
+    BLOCK_DEBRIS_MIN_FRAGMENT_COUNT,
     "one full block needs at least 39 shards when each shard is capped below one subvoxel"
   );
   assertEqual(
@@ -3408,8 +3409,13 @@ test("terrain impact fragment counts eject chips without duplicating material", 
   );
   assertEqual(
     getTerrainImpactFragmentCount(QUALITY_PRESETS.potato.blockFragmentCount, BLOCK_RUBBLE_MATERIAL_UNITS * 0.1, false),
-    TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
-    "ordinary one-damage chip hits should split into the soft chip burst size"
+    6,
+    "Potato one-damage chip hits should split into more than the old fixed four-piece burst"
+  );
+  assert(
+    getTerrainImpactFragmentCount(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount, 0.1, false) >
+      getTerrainImpactFragmentCount(QUALITY_PRESETS.potato.blockFragmentCount, 0.1, false),
+    "the break-debris slider should visibly increase ordinary chip burst counts"
   );
 
   for (const materialUnits of [0.04, 0.1, 0.27, 0.5, BLOCK_RUBBLE_MATERIAL_UNITS]) {
@@ -3464,6 +3470,11 @@ test("aggressive debris shapes stay inside the ejected material volume budget", 
         assert(
           fittedShape.estimatedVisualVolume <= BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT + 0.000001,
           "fitted shard visuals should stay under the per-piece volume cap"
+        );
+        assert(
+          Math.max(fittedShape.visualScale.x, fittedShape.visualScale.y, fittedShape.visualScale.z) <=
+            BLOCK_DEBRIS_MAX_VISUAL_AXIS + 0.000001,
+          "fitted shard visuals should stay below the per-axis size cap"
         );
         totalVisualVolume += fittedShape.estimatedVisualVolume;
         remainingVolume -= fittedShape.estimatedVisualVolume;
@@ -6102,7 +6113,7 @@ test("quality settings clamp custom menu overrides", () => {
 
   assertDeepEqual(
     normalDefaults,
-    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 54 },
+    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 108 },
     "normal preset should expose its default tunable settings"
   );
   assertEqual(normalizeRenderDistance(-20), RENDER_DISTANCE_MIN, "render distance should keep a lower bound");
@@ -6133,7 +6144,11 @@ test("quality settings clamp custom menu overrides", () => {
   );
   assertEqual(formatRenderDistance(6), "6 chunks", "render distance label should stay human-readable");
   assertEqual(formatShadowQuality(0), "Off", "shadow quality label should call out disabled shadows");
-  assertEqual(formatBlockFragmentCount(0), "1 shard", "debris count label should show the clamped shard count");
+  assertEqual(
+    formatBlockFragmentCount(0),
+    "39 max shards/block",
+    "debris count label should show the clamped mass-safe shard count"
+  );
 });
 
 test("physics object budget clamps and steps predictably", () => {
@@ -6499,15 +6514,15 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     getShadowTexelSize(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID]) < getShadowTexelSize(QUALITY_PRESETS.ultra),
     "Super Ultra should have the sharpest nearby shadows"
   );
-  assertEqual(QUALITY_PRESETS.potato.blockFragmentCount, 39, "Potato should use the minimum mass-safe full-block burst");
-  assertEqual(QUALITY_PRESETS.low.blockFragmentCount, 45, "Low should add a few extra visible chips");
-  assertEqual(QUALITY_PRESETS.normal.blockFragmentCount, 54, "Normal should split full-block bursts into many small chips");
-  assertEqual(QUALITY_PRESETS.high.blockFragmentCount, 63, "High should push fuller small-shard coverage");
-  assertEqual(QUALITY_PRESETS.ultra.blockFragmentCount, 72, "Ultra should oversample the fracture grid");
+  assertEqual(QUALITY_PRESETS.potato.blockFragmentCount, 54, "Potato should exceed the minimum mass-safe burst");
+  assertEqual(QUALITY_PRESETS.low.blockFragmentCount, 72, "Low should add visible chip density");
+  assertEqual(QUALITY_PRESETS.normal.blockFragmentCount, 108, "Normal should split bursts into many small chips");
+  assertEqual(QUALITY_PRESETS.high.blockFragmentCount, 144, "High should push fuller small-shard coverage");
+  assertEqual(QUALITY_PRESETS.ultra.blockFragmentCount, 180, "Ultra should heavily oversample the fracture grid");
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount,
-    81,
-    "Super Ultra should triple-sample the 27-cell source grid"
+    216,
+    "Super Ultra should heavily sample the 27-cell source grid"
   );
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget,

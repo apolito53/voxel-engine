@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
+import { BLOCK_DEBRIS_MAX_VISUAL_AXIS, BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
 
 export const DEBRIS_SHAPE_IDS = [
   "chunky-chip",
@@ -43,9 +43,9 @@ type DebrisShapeTemplate = {
 type RubbleShapeVertex = readonly [number, number, number];
 
 const DEBRIS_VISUAL_SCALE_MIN = BLOCK_FRAGMENT_VISUAL_SIZE * 0.32;
-const DEBRIS_VISUAL_SCALE_MAX = BLOCK_FRAGMENT_VISUAL_SIZE * 3.8;
+const DEBRIS_VISUAL_SCALE_MAX = BLOCK_DEBRIS_MAX_VISUAL_AXIS;
 const DEBRIS_COLLIDER_PADDING = 1.08;
-const DEBRIS_SHARD_SIZE_SCALE = 0.86;
+const DEBRIS_SHARD_SIZE_SCALE = 0.58;
 const DEBRIS_VOLUME_FIT_EPSILON = 0.000001;
 
 const HEX_FACES: readonly (readonly number[])[] = [
@@ -210,9 +210,9 @@ export function createDebrisShapeForBlock(block: number, seed: DebrisShapeSeed):
   const seedValue = hashDebrisShapeSeed(block, seed);
   const shapeId = DEBRIS_SHAPE_IDS[seedValue % DEBRIS_SHAPE_IDS.length];
   const template = getDebrisShapeTemplate(shapeId);
-  const xJitter = 0.55 + hashUnit(seedValue ^ 0x6d2b79f5) * 1.65;
-  const yJitter = 0.55 + hashUnit(seedValue ^ 0x1b873593) * 1.65;
-  const zJitter = 0.55 + hashUnit(seedValue ^ 0x85ebca6b) * 1.65;
+  const xJitter = 0.45 + hashUnit(seedValue ^ 0x6d2b79f5) * 1.2;
+  const yJitter = 0.45 + hashUnit(seedValue ^ 0x1b873593) * 1.2;
+  const zJitter = 0.45 + hashUnit(seedValue ^ 0x85ebca6b) * 1.2;
 
   return createDebrisShapeFromScale(shapeId, [
     template.baseScale[0] * xJitter * DEBRIS_SHARD_SIZE_SCALE,

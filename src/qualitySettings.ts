@@ -1,4 +1,8 @@
-import { BLOCK_DEBRIS_MAX_FRAGMENT_COUNT, normalizeBlockFragmentCount } from "./blockFragments";
+import {
+  BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
+  BLOCK_DEBRIS_MIN_FRAGMENT_COUNT,
+  normalizeBlockFragmentCount
+} from "./blockFragments";
 import type { QualityPreset, QualityPresetId } from "./qualityPresets";
 
 export const QUALITY_SETTINGS_STORAGE_PREFIX = "voxel-quality-settings:";
@@ -8,7 +12,7 @@ export const RENDER_DISTANCE_STEP = 1;
 export const SHADOW_MAP_SIZE_OPTIONS = [0, 1024, 2048, 4096, 8192] as const;
 export const SHADOW_QUALITY_MIN_LEVEL = 0;
 export const SHADOW_QUALITY_MAX_LEVEL = SHADOW_MAP_SIZE_OPTIONS.length - 1;
-export const BLOCK_FRAGMENT_MIN_COUNT = 1;
+export const BLOCK_FRAGMENT_MIN_COUNT = BLOCK_DEBRIS_MIN_FRAGMENT_COUNT;
 export const BLOCK_FRAGMENT_MAX_COUNT = BLOCK_DEBRIS_MAX_FRAGMENT_COUNT;
 
 export type QualitySettings = {
@@ -21,7 +25,7 @@ export function createDefaultQualitySettings(preset: QualityPreset): QualitySett
   return {
     loadRadius: normalizeRenderDistance(preset.loadRadius),
     shadowMapSize: normalizeShadowMapSize(preset.shadows ? preset.shadowMapSize : 0),
-    blockFragmentCount: normalizeBlockFragmentCount(preset.blockFragmentCount)
+    blockFragmentCount: normalizeBlockFragmentCountSetting(preset.blockFragmentCount)
   };
 }
 
@@ -63,7 +67,7 @@ export function normalizeQualitySettings(
   return {
     loadRadius: normalizeRenderDistance(settings.loadRadius, fallback.loadRadius),
     shadowMapSize: normalizeShadowMapSize(settings.shadowMapSize, fallback.shadowMapSize),
-    blockFragmentCount: normalizeBlockFragmentCount(
+    blockFragmentCount: normalizeBlockFragmentCountSetting(
       settings.blockFragmentCount ?? fallback.blockFragmentCount
     )
   };
@@ -126,8 +130,15 @@ export function formatShadowQuality(shadowMapSize: number): string {
 }
 
 export function formatBlockFragmentCount(fragmentCount: number): string {
-  const normalizedFragmentCount = normalizeBlockFragmentCount(fragmentCount);
-  return `${normalizedFragmentCount} ${normalizedFragmentCount === 1 ? "shard" : "shards"}`;
+  const normalizedFragmentCount = normalizeBlockFragmentCountSetting(fragmentCount);
+  return `${normalizedFragmentCount} max shards/block`;
+}
+
+function normalizeBlockFragmentCountSetting(fragmentCount: unknown): number {
+  return Math.max(
+    BLOCK_FRAGMENT_MIN_COUNT,
+    Math.min(BLOCK_FRAGMENT_MAX_COUNT, normalizeBlockFragmentCount(Number(fragmentCount)))
+  );
 }
 
 function clampRenderDistance(value: number): number {

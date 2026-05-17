@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.15 - 2026-05-17
+
+### Changed
+
+- Reduced debris shard visual size by capping every shard axis to 60% of a damage-lattice subvoxel edge, so legal low-mass slabs and splinters no longer appear as oversized plates.
+- Changed ordinary chip hits to scale with the `Max Break Debris` slider instead of staying hidden behind the old four-piece soft cap.
+- Raised visible-debris presets from `54` max shards/block on Potato through `216` on Super Ultra, while keeping the total ejected material volume bounded by the removed material.
+- Clarified the settings label from `Break Debris` to `Max Break Debris` because the slider controls the full-block/quality ceiling, not a guaranteed count on every tiny hit.
+
 ## 0.6.14 - 2026-05-17
 
 ### Changed

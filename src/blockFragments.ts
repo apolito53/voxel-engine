@@ -3,13 +3,17 @@ export const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 // Gameplay rubble uses normalized block-volume material. A whole terrain block
 // is 1.0 no matter how many visible shards the current quality tier spawns.
 export const BLOCK_RUBBLE_MATERIAL_UNITS = 1;
-export const BLOCK_DEBRIS_MAX_FRAGMENT_COUNT = BLOCK_FRAGMENT_COUNT * 3;
 export const BLOCK_DEBRIS_SUBVOXEL_MATERIAL_UNITS = BLOCK_RUBBLE_MATERIAL_UNITS / BLOCK_FRAGMENT_COUNT;
 export const BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT = BLOCK_DEBRIS_SUBVOXEL_MATERIAL_UNITS * 0.7;
+export const BLOCK_DEBRIS_MIN_FRAGMENT_COUNT = Math.ceil(
+  BLOCK_RUBBLE_MATERIAL_UNITS / BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT
+);
+export const BLOCK_DEBRIS_MAX_FRAGMENT_COUNT = BLOCK_FRAGMENT_COUNT * 8;
+export const BLOCK_DEBRIS_MAX_VISUAL_AXIS = (1 / BLOCK_FRAGMENT_GRID_SIZE) * 0.6;
 export const BLOCK_FRAGMENT_SPACING = 0.28;
 export const BLOCK_FRAGMENT_VISUAL_SIZE = 0.12;
 export const BLOCK_FRAGMENT_COLLISION_RADIUS = 0.08;
-export const TERRAIN_CHIP_FRAGMENT_MAX_COUNT = 4;
+export const TERRAIN_CHIP_FRAGMENT_MAX_COUNT = 24;
 
 export type BlockFragmentOffset = {
   readonly x: number;
@@ -94,7 +98,7 @@ export function getTerrainImpactFragmentCount(
   const materialHonestCount = Math.max(proportionalCount, massSafeMinimumCount);
   if (destroyed) return Math.min(BLOCK_DEBRIS_MAX_FRAGMENT_COUNT, materialHonestCount);
 
-  const qualityScaledChipCap = Math.max(1, Math.ceil(normalizedMaxVisible * 0.2));
+  const qualityScaledChipCap = Math.max(1, Math.ceil(normalizedMaxVisible * 0.35));
   return Math.min(
     BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
     Math.max(
