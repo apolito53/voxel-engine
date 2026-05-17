@@ -17,9 +17,9 @@ const RIGID_DEBRIS_MAX_FRAME_DELTA = 1 / 12;
 const RIGID_DEBRIS_MAX_SUBSTEPS = 4;
 const RIGID_DEBRIS_STATIC_REFRESH_SECONDS = 0.12;
 const RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS = RIGID_DEBRIS_STATIC_REFRESH_SECONDS + RIGID_DEBRIS_FIXED_STEP;
-const RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES = 4;
-const RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS = 2;
-export const RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET = 4096;
+const RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES = 2;
+const RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS = 1;
+export const RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET = 1536;
 const RIGID_DEBRIS_MASS = 0.4;
 const RIGID_DEBRIS_LINEAR_DAMPING = 0.45;
 const RIGID_DEBRIS_ANGULAR_DAMPING = 0.85;
@@ -478,7 +478,7 @@ export class RigidDebrisSimulation {
     this.desiredTerrainColliderKeys.clear();
     for (const key of this.activeColliderCells) {
       const cell = parseStaticColliderCellKey(key);
-      if (!cell || !collisionWorld.isSolid(cell.x, cell.y, cell.z)) continue;
+      if (!cell || !isTerrainSurfaceColliderCell(collisionWorld, cell)) continue;
 
       this.desiredTerrainColliderKeys.add(key);
     }
@@ -646,6 +646,24 @@ function isRecordNearSupport(record: RigidDebrisBody, collisionWorld: CollisionW
   });
   return supportHeight !== null &&
     bottomY <= supportHeight + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE;
+}
+
+function isTerrainSurfaceColliderCell(collisionWorld: CollisionWorld, cell: StaticColliderCell): boolean {
+  if (!collisionWorld.isSolid(cell.x, cell.y, cell.z)) return false;
+
+  // Rapier only needs a static cuboid where a shard can actually touch the
+  // outside of terrain. Buried interior voxels were quietly becoming thousands
+  // of useless colliders during high-debris tests, which made the CPU pay for
+  // stone nobody could collide with. Keep exposed surfaces and discard the
+  // sealed interior.
+  return (
+    !collisionWorld.isSolid(cell.x + 1, cell.y, cell.z) ||
+    !collisionWorld.isSolid(cell.x - 1, cell.y, cell.z) ||
+    !collisionWorld.isSolid(cell.x, cell.y + 1, cell.z) ||
+    !collisionWorld.isSolid(cell.x, cell.y - 1, cell.z) ||
+    !collisionWorld.isSolid(cell.x, cell.y, cell.z + 1) ||
+    !collisionWorld.isSolid(cell.x, cell.y, cell.z - 1)
+  );
 }
 
 function getVectorLengthSq(vector: { readonly x: number; readonly y: number; readonly z: number }): number {

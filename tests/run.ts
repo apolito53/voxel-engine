@@ -197,7 +197,10 @@ import {
   getEffectiveGroundDebrisLifetimeSeconds,
   normalizeGroundDebrisLifetime
 } from "../src/debrisLifetime";
-import { RigidDebrisSimulation } from "../src/rigidDebris";
+import {
+  RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET,
+  RigidDebrisSimulation
+} from "../src/rigidDebris";
 import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
@@ -4079,6 +4082,47 @@ test("rigid debris adapter keeps fast falling shards from outrunning terrain col
   assert(
     rigidDebris.getStats().terrainColliders > 0,
     "fast falling rigid debris should build temporary terrain colliders along its predicted path"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter keeps temporary terrain colliders surface-only and capped", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const denseGroundWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 3;
+    }
+  };
+
+  const singleFragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 3.45, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  rigidDebris.registerFragment(singleFragment);
+  rigidDebris.update(1 / 60, denseGroundWorld);
+  assert(
+    rigidDebris.getStats().terrainColliders <= 9,
+    "a shard over a dense slab should only build exposed top-surface terrain colliders"
+  );
+  rigidDebris.clear();
+
+  for (let index = 0; index < 180; index += 1) {
+    const x = (index % 30) * 3 + 0.5;
+    const z = Math.floor(index / 30) * 3 + 0.5;
+    rigidDebris.registerFragment(PhysicsToy.createBlockFragment(
+      BLOCK.stone,
+      new THREE.Vector3(x, 3.45, z),
+      new THREE.Vector3(0, 0, 0),
+      1
+    ));
+  }
+  rigidDebris.update(1 / 60, denseGroundWorld);
+  assert(
+    rigidDebris.getStats().terrainColliders <= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET,
+    "stress debris should not create more temporary terrain colliders than the hard cap"
   );
   rigidDebris.clear();
 });

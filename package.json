@@ -1,6 +1,6 @@
 {
   "name": "voxel-sandbox-engine",
-  "version": "0.6.15.2",
+  "version": "0.6.16",
   "private": true,
   "type": "module",
   "scripts": {

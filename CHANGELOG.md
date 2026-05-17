@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.16 - 2026-05-17
+
+### Changed
+
+- Reduced rigid-debris CPU pressure by shrinking temporary support-collider scan bubbles, keeping terrain support colliders surface-only, and hard-capping temporary terrain collider cells.
+- Changed rigid-debris budget relief so extreme airborne debris bursts can poof farthest active shards after exceeding the body cap instead of waiting until every shard is grounded.
+
 ## 0.6.15.2 - 2026-05-17
 
 ### Added

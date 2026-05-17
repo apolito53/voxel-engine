@@ -2312,25 +2312,44 @@ function enforcePhysicsToyBudget(): void {
 
 function enforceRigidDebrisBudget(): void {
   const rigidDebrisBodyBudget = getCurrentRigidDebrisBodyBudget();
-  const groundedCandidates = getGroundedDebrisCleanupCandidates();
-  const overBudgetCount = groundedCandidates.length - rigidDebrisBodyBudget;
+  const candidates = getRigidDebrisBudgetCandidates();
+  const overBudgetCount = candidates.length - rigidDebrisBodyBudget;
   if (overBudgetCount <= 0) return;
 
   // The ground-debris slider is a visual/CPU pressure valve, not a gameplay
-  // material signal. Let the explosion happen, then drop ground clutter after
-  // first terrain/rubble contact instead of suppressing the burst.
-  const pressureCandidates = groundedCandidates
+  // material signal. Prefer dropping grounded clutter, but if a stress burst
+  // creates more Rapier bodies than the cap while debris is still airborne,
+  // expire the farthest active shards too instead of letting the solver melt.
+  const pressureCandidates = candidates
     .sort((left, right) => {
-      if (left.isSleeping !== right.isSleeping) return left.isSleeping ? -1 : 1;
-      return right.mesh.position.distanceToSquared(camera.position) -
-        left.mesh.position.distanceToSquared(camera.position);
+      if (left.grounded !== right.grounded) return left.grounded ? -1 : 1;
+      if (left.toy.isSleeping !== right.toy.isSleeping) return left.toy.isSleeping ? -1 : 1;
+      return right.distanceToCameraSq - left.distanceToCameraSq;
     });
   for (let index = 0; index < overBudgetCount; index += 1) {
-    const candidate = pressureCandidates[index];
+    const candidate = pressureCandidates[index]?.toy;
     if (candidate) expireGroundDebrisWithPoof(candidate);
   }
   pruneExpiredToys();
   rigidDebrisStats = rigidDebris.getStats();
+}
+
+function getRigidDebrisBudgetCandidates(): Array<{
+  readonly toy: PhysicsToy;
+  readonly grounded: boolean;
+  readonly distanceToCameraSq: number;
+}> {
+  return toys
+    .filter((toy) => (
+      toy.isInstancedFragment &&
+      toy.isRigidDebrisDriven &&
+      !toy.isExpired
+    ))
+    .map((toy) => ({
+      toy,
+      grounded: isGroundDebrisCleanupGrounded(toy),
+      distanceToCameraSq: toy.mesh.position.distanceToSquared(camera.position)
+    }));
 }
 
 function getCurrentRigidDebrisBodyBudget(): number {
