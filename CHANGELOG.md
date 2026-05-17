@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.10 - 2026-05-17
+
+### Changed
+
+- Changed the Physics Core Aim Preview bite-cell overlay to split predicted sub-voxel damage into bright white camera-visible cells and softer red hidden/far-side cells.
+
 ## 0.6.9 - 2026-05-16
 
 ### Fixed

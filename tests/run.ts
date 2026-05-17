@@ -27,7 +27,12 @@ import {
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import type { CollisionBounds, CollisionWorld } from "../src/collision";
-import { predictPhysicsCoreTrajectory } from "../src/coreAimPreview";
+import {
+  PhysicsCoreAimPreview,
+  isAimPreviewLatticeCellVisibleFromPoint,
+  predictPhysicsCoreTrajectory,
+  splitAimPreviewLatticeCellsByVisibility
+} from "../src/coreAimPreview";
 import {
   createDebrisShape,
   createDebrisShapeForBlock,
@@ -362,6 +367,10 @@ function decodeTestLatticeIndex(index: number): { readonly x: number; readonly y
     y: Math.floor(index / BLOCK_FRAGMENT_GRID_SIZE) % BLOCK_FRAGMENT_GRID_SIZE,
     z: Math.floor(index / (BLOCK_FRAGMENT_GRID_SIZE ** 2)) % BLOCK_FRAGMENT_GRID_SIZE
   };
+}
+
+function encodeTestLatticeIndex(x: number, y: number, z: number): number {
+  return x + y * BLOCK_FRAGMENT_GRID_SIZE + z * BLOCK_FRAGMENT_GRID_SIZE ** 2;
 }
 
 function expectedRubbleHealthForPieces(pieces: number): number {
@@ -5085,6 +5094,82 @@ test("physics core trajectory preview predicts the first swept terrain hit", () 
     prediction.impact.speed > BLOCK_DAMAGE_IMPACT_SPEED,
     "previewed impact speed should be usable for the damage lattice overlay"
   );
+});
+
+test("physics core aim preview classifies visible and hidden bite cells from the camera side", () => {
+  const nearFaceCell = encodeTestLatticeIndex(0, 1, 1);
+  const farFaceCell = encodeTestLatticeIndex(2, 1, 1);
+  const topFaceCell = encodeTestLatticeIndex(1, 2, 1);
+  const blockPosition = { x: 10, y: 4, z: -2 };
+
+  assert(
+    isAimPreviewLatticeCellVisibleFromPoint(blockPosition, nearFaceCell, { x: 8, y: 4.5, z: -1.5 }),
+    "cells on the side facing the camera should be bright preview cells"
+  );
+  assert(
+    !isAimPreviewLatticeCellVisibleFromPoint(blockPosition, farFaceCell, { x: 8, y: 4.5, z: -1.5 }),
+    "cells buried on the far side of the block should be treated as hidden preview cells"
+  );
+  assert(
+    isAimPreviewLatticeCellVisibleFromPoint(blockPosition, topFaceCell, { x: 10.5, y: 7, z: -1.5 }),
+    "flying above a block should make the top lattice layer visible"
+  );
+
+  const split = splitAimPreviewLatticeCellsByVisibility(
+    blockPosition,
+    [nearFaceCell, farFaceCell],
+    { x: 8, y: 4.5, z: -1.5 }
+  );
+  assertDeepEqual(split.visibleCellIndexes, [nearFaceCell], "visible preview cells should stay in the bright batch");
+  assertDeepEqual(split.hiddenCellIndexes, [farFaceCell], "hidden preview cells should move into the soft red batch");
+
+  const fallbackSplit = splitAimPreviewLatticeCellsByVisibility(blockPosition, [nearFaceCell, farFaceCell]);
+  assertDeepEqual(
+    fallbackSplit,
+    { visibleCellIndexes: [nearFaceCell, farFaceCell], hiddenCellIndexes: [] },
+    "callers without a camera should keep the old all-bright behavior"
+  );
+});
+
+test("physics core aim preview renders hidden bite cells as a separate soft overlay", () => {
+  const scene = new THREE.Scene();
+  const preview = new PhysicsCoreAimPreview(scene);
+  const nearFaceCell = encodeTestLatticeIndex(0, 1, 1);
+  const farFaceCell = encodeTestLatticeIndex(2, 1, 1);
+
+  try {
+    preview.update({
+      points: [new THREE.Vector3(8, 4.5, -1.5), new THREE.Vector3(10, 4.5, -1.5)]
+    }, {
+      targets: [{
+        block: BLOCK.stone,
+        position: { x: 10, y: 4, z: -2 },
+        point: { x: 10, y: 4.5, z: -1.5 },
+        normal: { x: -1, y: 0, z: 0 },
+        primary: true,
+        remainingHealth: 9,
+        maxHealth: 10,
+        destroyed: false,
+        affectedVisualCellIndexes: [nearFaceCell, farFaceCell]
+      }]
+    }, new THREE.Vector3(8, 4.5, -1.5));
+
+    const visibleLines = preview.object.getObjectByName("Physics core visible bite cells") as THREE.LineSegments;
+    const hiddenLines = preview.object.getObjectByName("Physics core hidden bite cells") as THREE.LineSegments;
+    const visiblePosition = visibleLines.geometry.getAttribute("position");
+    const hiddenPosition = hiddenLines.geometry.getAttribute("position");
+
+    assertEqual(visiblePosition.count, 24, "one bright bite-cell box should draw twelve line segments");
+    assertEqual(hiddenPosition.count, 24, "one soft hidden bite-cell box should draw twelve line segments");
+    assert(hiddenLines.visible, "hidden bite cells should still be drawn, just softer");
+    assertEqual(
+      (hiddenLines.material as THREE.LineBasicMaterial).color.getHex(),
+      0xff4f57,
+      "hidden bite cells should use the soft red material"
+    );
+  } finally {
+    preview.dispose();
+  }
 });
 
 test("small fast physics cores pass through existing visual holes in partial blocks", () => {

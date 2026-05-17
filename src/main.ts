@@ -1657,7 +1657,7 @@ function updateCoreAimPreview(activeWorld: VoxelWorld, activePlayer: PlayerContr
     })
     : null;
 
-  coreAimPreview.update(prediction, brushPreview);
+  coreAimPreview.update(prediction, brushPreview, camera.position);
 }
 
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
