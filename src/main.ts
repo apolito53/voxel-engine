@@ -31,9 +31,10 @@ import {
 } from "./codexPilot";
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
+import { DebrisStuckCleanupTracker } from "./debrisCleanup";
 import { createDeleteWorldDialogCopy } from "./deleteWorldDialog";
 import { DebrisPoofRenderer } from "./debrisPoof";
-import { createDebrisShapeForBlock } from "./debrisShapes";
+import { createDebrisShapeForBlock, fitDebrisShapeToVolumeBudget } from "./debrisShapes";
 import { PhysicsCoreAimPreview, predictPhysicsCoreTrajectory } from "./coreAimPreview";
 import {
   DEBRIS_ACTIVE_RADIUS_BUFFER_METERS,
@@ -73,6 +74,10 @@ import {
   HITSCAN_CORE_RANGE,
   raycastHitscanCore
 } from "./hitscanCore";
+import {
+  HITSCAN_DEBRIS_CLEAR_RADIUS,
+  collectHitscanDebrisTargets
+} from "./hitscanDebris";
 import { HitscanBoltTracer } from "./hitscanBoltTracer";
 import {
   EMPTY_HANDS_ITEM_ID,
@@ -210,6 +215,7 @@ import {
   type BlockDamageResult,
   type BlockPierceContinuation,
   type ChunkCoords,
+  type DebrisEjectionHint,
   type WorldStats
 } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
@@ -460,6 +466,7 @@ const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
 const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
+const debrisStuckCleanup = new DebrisStuckCleanupTracker();
 const partialBlockMeshField = new PartialBlockMeshField(scene);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
@@ -1275,6 +1282,7 @@ function animate(): void {
     enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
     updateGroundDebrisCleanup(delta);
+    updateStuckDebrisCleanup(delta, activeWorld);
     debrisSettlerStats = debrisSettler.getStats();
     emitRubbleBatchEvents();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
@@ -1739,7 +1747,8 @@ function applyCoreTerrainImpact(
       spawnedFragmentCount = spawnBlockFragments(result.block, result.position, impact, {
         fragmentCount,
         materialUnits: ejectedMaterialUnits,
-        chipOnly: !result.destroyed
+        chipOnly: !result.destroyed,
+        ejectionHint: result.debrisEjectionHint
       });
     }
 
@@ -1788,19 +1797,25 @@ function spawnBlockFragments(
     readonly fragmentCount: number;
     readonly materialUnits: number;
     readonly chipOnly?: boolean;
+    readonly ejectionHint?: DebrisEjectionHint;
   }
 ): number {
   const fragmentBaseSpeed = Math.min(FRAGMENT_IMPACT_SPEED_CAP, impact.speed * FRAGMENT_IMPACT_SPEED_SCALE);
   const blockCenter = options.chipOnly
-    ? impact.position.clone().addScaledVector(impact.normal, 0.08)
+    ? (options.ejectionHint
+      ? createVectorFromVoxel(options.ejectionHint.origin)
+      : impact.position.clone()).addScaledVector(impact.normal, 0.08)
     : new THREE.Vector3(position.x + 0.5, position.y + 0.5, position.z + 0.5);
   const requestedFragmentCount = options.fragmentCount;
   const fragmentCount = requestedFragmentCount;
   if (fragmentCount <= 0) return 0;
 
   const fragments: PhysicsToy[] = [];
+  let remainingVisualVolumeBudget = Math.max(0, options.materialUnits);
 
   for (let index = 0; index < fragmentCount; index += 1) {
+    if (remainingVisualVolumeBudget <= 0.000001) break;
+
     const fragmentGridIndex = getDistributedBlockFragmentIndex(index, fragmentCount);
     const fragmentOffset = getBlockFragmentOffset(fragmentGridIndex);
     const offset = new THREE.Vector3(
@@ -1812,24 +1827,37 @@ function spawnBlockFragments(
     // player should see fragments tumble out of the voxel, not a shrunken copy
     // of the original block politely waiting to become rubble.
     const spawnJitter = createFragmentSpawnJitter();
+    const preferredDirection = getDebrisEjectionDirection(options.ejectionHint, index, impact.normal);
     const scatter = createFragmentScatterDirection(offset).multiplyScalar(
       FRAGMENT_SCATTER_SPEED_MIN + Math.random() * FRAGMENT_SCATTER_SPEED_RANGE
     );
-    const velocity = impact.normal.clone()
+    const launchDirection = preferredDirection
+      .clone()
+      .multiplyScalar(0.88)
+      .add(impact.normal.clone().multiplyScalar(0.24))
+      .add(scatter.clone().normalize().multiplyScalar(0.18));
+    if (launchDirection.lengthSq() <= 0.0001) {
+      launchDirection.copy(impact.normal);
+    } else {
+      launchDirection.normalize();
+    }
+    const velocity = launchDirection
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
       .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
       .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
     const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, requestedFragmentCount, options.materialUnits);
-    const debrisShape = createDebrisShapeForBlock(block, {
+    const candidateDebrisShape = createDebrisShapeForBlock(block, {
       fragmentIndex: index,
       distributedFragmentIndex: fragmentGridIndex,
       origin: position
     });
+    const debrisShape = fitDebrisShapeToVolumeBudget(candidateDebrisShape, remainingVisualVolumeBudget);
+    if (!debrisShape) continue;
 
     const fragment = PhysicsToy.createBlockFragment(
       block,
-      blockCenter.clone().add(offset).add(spawnJitter),
+      getDebrisFragmentSpawnPosition(blockCenter, offset, spawnJitter, options.ejectionHint, index),
       velocity,
       rubbleMaterialUnits,
       debrisShape
@@ -1837,11 +1865,56 @@ function spawnBlockFragments(
     addPhysicsToy(fragment);
     rigidDebris.registerFragment(fragment);
     fragments.push(fragment);
+    remainingVisualVolumeBudget = Math.max(0, remainingVisualVolumeBudget - debrisShape.estimatedVisualVolume);
   }
 
   rigidDebris.invalidateStaticColliders();
-  debrisSettler.registerFracture(block, blockCenter, fragments);
+  if (fragments.length > 0) {
+    debrisSettler.registerFracture(block, blockCenter, fragments);
+  }
   return fragments.length;
+}
+
+function createVectorFromVoxel(position: { readonly x: number; readonly y: number; readonly z: number } | undefined): THREE.Vector3 {
+  return position
+    ? new THREE.Vector3(position.x, position.y, position.z)
+    : new THREE.Vector3();
+}
+
+function getDebrisFragmentSpawnPosition(
+  blockCenter: THREE.Vector3,
+  offset: THREE.Vector3,
+  spawnJitter: THREE.Vector3,
+  ejectionHint: DebrisEjectionHint | undefined,
+  fragmentIndex: number
+): THREE.Vector3 {
+  const biteCellCenter = ejectionHint?.biteCellCenters.length
+    ? ejectionHint.biteCellCenters[fragmentIndex % ejectionHint.biteCellCenters.length]
+    : null;
+  const basePosition = biteCellCenter
+    ? createVectorFromVoxel(biteCellCenter)
+    : blockCenter.clone().add(offset);
+  return basePosition.add(spawnJitter);
+}
+
+function getDebrisEjectionDirection(
+  ejectionHint: DebrisEjectionHint | undefined,
+  fragmentIndex: number,
+  fallbackNormal: THREE.Vector3
+): THREE.Vector3 {
+  const preferredDirection = ejectionHint?.preferredDirections.length
+    ? ejectionHint.preferredDirections[fragmentIndex % ejectionHint.preferredDirections.length]
+    : null;
+  const direction = preferredDirection
+    ? createVectorFromVoxel(preferredDirection)
+    : fallbackNormal.clone();
+  if (direction.lengthSq() <= 0.0001) {
+    direction.copy(fallbackNormal);
+  }
+  if (direction.lengthSq() <= 0.0001) {
+    direction.set(0, 1, 0);
+  }
+  return direction.normalize();
 }
 
 function createFragmentScatterDirection(offset: THREE.Vector3): THREE.Vector3 {
@@ -1956,8 +2029,20 @@ function firePlayerHitscanCore(): void {
     impactSpeed = pierceContinuation.speed;
   }
 
+  clearLooseDebrisAlongHitscanBeam(visualStart, visualEnd);
   hitscanBoltTracer.spawn(visualStart, visualEnd);
   engineEvents.emit("physics:core-thrown", { source: "player", mode: "hitscan" });
+}
+
+function clearLooseDebrisAlongHitscanBeam(start: THREE.Vector3, end: THREE.Vector3): void {
+  const beamRadius = Math.max(HITSCAN_DEBRIS_CLEAR_RADIUS, HITSCAN_CORE_RADIUS * 2.2);
+  const debrisTargets = collectHitscanDebrisTargets(toys, start, end, beamRadius);
+  if (debrisTargets.length === 0) return;
+
+  for (const toy of debrisTargets) {
+    expireGroundDebrisWithPoof(toy);
+  }
+  pruneExpiredToys();
 }
 
 function createPlayerCoreFiringSolution(radius: number): PlayerCoreFiringSolution {
@@ -2234,6 +2319,20 @@ function updateGroundDebrisCleanup(delta: number): void {
     const expiredByCleanup = toy.updateGroundDebrisCleanup(delta, lifetimeSeconds, isGroundDebrisCleanupGrounded(toy));
     if (expiredByCleanup) {
       debrisPoofRenderer.spawn(toy.mesh.position, toy.fragmentBlock);
+    }
+  }
+}
+
+function updateStuckDebrisCleanup(delta: number, activeWorld: VoxelWorld): void {
+  const cleanupWorld = {
+    isSolid: (x: number, y: number, z: number) => terrainAndRubbleCollisionWorld.isSolid(x, y, z),
+    isPartialBlock: (x: number, y: number, z: number) => Boolean(activeWorld.getPartialBlock(x, y, z))
+  };
+
+  for (const toy of toys) {
+    if (!toy?.isInstancedFragment || toy.isExpired) continue;
+    if (debrisStuckCleanup.shouldExpire(toy, delta, cleanupWorld)) {
+      expireGroundDebrisWithPoof(toy);
     }
   }
 }

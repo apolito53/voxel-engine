@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.6.13 - 2026-05-17
+
+### Added
+
+- Added opening-biased debris ejection hints so partial-block chips prefer exposed bite holes and tunnel exits instead of spawning as clutter inside the wound.
+- Added Hitscan Core cleanup for loose debris in the beam path; visual shards poof without blocking the terrain drilling trace.
+
+### Changed
+
+- Changed loose debris cleanup so trapped or enclosed shards can poof even when ground-debris lifetime is set to `Forever`, while open-ground debris still follows the normal lifetime slider.
+- Changed shard randomization to allow more dramatic low-poly shapes and non-uniform sizes while fitting every spawned shard inside the material volume removed by that damage event.
+
 ## 0.6.12 - 2026-05-17
 
 ### Fixed

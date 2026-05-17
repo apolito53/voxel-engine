@@ -36,8 +36,13 @@ import {
 import {
   createDebrisShape,
   createDebrisShapeForBlock,
+  fitDebrisShapeToVolumeBudget,
   getDebrisShapeGeometry
 } from "../src/debrisShapes";
+import {
+  DebrisStuckCleanupTracker,
+  isDebrisTrappedForCleanup
+} from "../src/debrisCleanup";
 import { DebrisPoofRenderer, getDebrisPoofLifetimeSeconds } from "../src/debrisPoof";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
@@ -277,6 +282,10 @@ import {
   HITSCAN_CORE_RADIUS,
   raycastHitscanCore
 } from "../src/hitscanCore";
+import {
+  collectHitscanDebrisTargets,
+  doesHitscanBeamTouchDebris
+} from "../src/hitscanDebris";
 import { getHitscanBoltLifetimeSeconds } from "../src/hitscanBoltTracer";
 import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
 import {
@@ -2326,6 +2335,92 @@ test("partial block carve results expose material poof positions for newly destr
   );
 });
 
+test("partial block debris ejection hints prefer exposed openings", () => {
+  const world = new VoxelWorld({ seed: "partial-ejection-opening-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(result?.debrisEjectionHint, "partial bites should report debris ejection hints");
+  assert(
+    result.debrisEjectionHint.preferredDirections.some((direction) => direction.x < -0.9),
+    "side hits should bias chips through the exposed face opening"
+  );
+  assert(
+    result.debrisEjectionHint.biteCellCenters.every((center) =>
+      center.x >= 2 && center.x <= 3 &&
+      center.y >= 3 && center.y <= 4 &&
+      center.z >= 4 && center.z <= 5
+    ),
+    "ejection bite centers should stay inside the damaged macro voxel"
+  );
+});
+
+test("partial block debris ejection hints can use a drilled tunnel exit", () => {
+  const world = new VoxelWorld({ seed: "partial-ejection-tunnel-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.air);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(result?.debrisEjectionHint, "tunnel bites should still report ejection hints");
+  assert(
+    result.debrisEjectionHint.preferredDirections.some((direction) => direction.x > 0.9),
+    "complete tiny-core tunnels should allow debris to spray toward the exit opening too"
+  );
+});
+
+test("partial block debris ejection hints fall back to impact normal when surrounded", () => {
+  const world = new VoxelWorld({ seed: "partial-ejection-surrounded-test" });
+  world.setBlock(1, 3, 4, BLOCK.stone);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(3, 3, 4, BLOCK.stone);
+  world.setBlock(2, 2, 4, BLOCK.stone);
+  world.setBlock(2, 4, 4, BLOCK.stone);
+  world.setBlock(2, 3, 3, BLOCK.stone);
+  world.setBlock(2, 3, 5, BLOCK.stone);
+
+  const result = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    coreRadius: HITSCAN_CORE_RADIUS,
+    speed: HITSCAN_CORE_IMPACT_SPEED,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assert(result?.debrisEjectionHint, "surrounded bites should still report a fallback ejection hint");
+  assert(
+    result.debrisEjectionHint.preferredDirections.some((direction) => direction.x < -0.9),
+    "surrounded bites should fall back to the impact normal"
+  );
+});
+
 test("damage brushes carve neighboring macro blocks across seams", () => {
   const world = new VoxelWorld({ seed: "damage-brush-seam-test" });
   for (let z = 4; z <= 5; z += 1) {
@@ -3307,6 +3402,56 @@ test("terrain impact fragment counts eject chips without duplicating material", 
   }
 });
 
+test("aggressive debris shapes stay inside the ejected material volume budget", () => {
+  assertEqual(getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, 0, false), 0, "zero material should spawn no debris");
+  assertEqual(fitDebrisShapeToVolumeBudget(createDebrisShape("chunky-chip"), 0), null, "zero visual volume should fit no shard");
+
+  for (const maxVisibleFragments of [
+    QUALITY_PRESETS.potato.blockFragmentCount,
+    QUALITY_PRESETS.normal.blockFragmentCount,
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount
+  ]) {
+    for (const materialUnits of [0.04, 0.1, 0.27, BLOCK_RUBBLE_MATERIAL_UNITS]) {
+      const fragmentCount = getTerrainImpactFragmentCount(maxVisibleFragments, materialUnits, materialUnits <= 0.1);
+      let remainingVolume = materialUnits;
+      let totalVisualVolume = 0;
+
+      for (let index = 0; index < fragmentCount; index += 1) {
+        const shape = createDebrisShapeForBlock(BLOCK.stone, {
+          fragmentIndex: index,
+          distributedFragmentIndex: getDistributedBlockFragmentIndex(index, fragmentCount),
+          origin: { x: 11, y: 7, z: -3 }
+        });
+        const fittedShape = fitDebrisShapeToVolumeBudget(shape, remainingVolume);
+        if (!fittedShape) continue;
+        totalVisualVolume += fittedShape.estimatedVisualVolume;
+        remainingVolume -= fittedShape.estimatedVisualVolume;
+      }
+
+      assert(
+        totalVisualVolume <= materialUnits + 0.000001,
+        "fitted shard AABB volumes should never exceed the removed terrain material"
+      );
+    }
+  }
+
+  const fullQualityScales: number[] = [];
+  for (let index = 0; index < BLOCK_FRAGMENT_COUNT; index += 1) {
+    const shape = createDebrisShapeForBlock(BLOCK.grass, {
+      fragmentIndex: index,
+      distributedFragmentIndex: getDistributedBlockFragmentIndex(index, BLOCK_FRAGMENT_COUNT),
+      origin: { x: 2, y: 4, z: 6 }
+    });
+    fullQualityScales.push(shape.visualScale.x, shape.visualScale.y, shape.visualScale.z);
+  }
+  const minScale = Math.min(...fullQualityScales);
+  const maxScale = Math.max(...fullQualityScales);
+  assert(
+    maxScale / minScale > 2.5,
+    "aggressive shard randomization should produce a visibly wide scale range"
+  );
+});
+
 test("block fragments render through instanced batches instead of scene children", () => {
   const scene = new THREE.Scene();
   const instancer = new PhysicsFragmentInstancer(scene);
@@ -3469,6 +3614,61 @@ test("stale airborne debris eventually uses cleanup as a floater fallback", () =
   fragment.update(0.2, airWorld);
   fragment.updateGroundDebrisCleanup(3.1, 3, false);
   assert(fragment.isExpired, "stale never-grounded debris should not float forever");
+});
+
+test("stuck debris cleanup detects partial-block traps without expiring open-ground debris", () => {
+  const partialTrapWorld = {
+    isSolid: (_x: number, _y: number, _z: number) => false,
+    isPartialBlock: (x: number, y: number, z: number) => x === 2 && y === 3 && z === 4
+  };
+  const openGroundWorld = {
+    isSolid: (_x: number, y: number, _z: number) => y === 0,
+    isPartialBlock: () => false
+  };
+
+  assert(
+    isDebrisTrappedForCleanup(partialTrapWorld, { x: 2.5, y: 3.5, z: 4.5 }, 0.08),
+    "debris centered inside a partial terrain cell should count as trapped"
+  );
+  assert(
+    !isDebrisTrappedForCleanup(openGroundWorld, { x: 2.5, y: 1.08, z: 4.5 }, 0.08),
+    "debris resting on open ground should not count as trapped just because it has floor support"
+  );
+});
+
+test("stuck debris cleanup can override forever lifetime for trapped fragments", () => {
+  const tracker = new DebrisStuckCleanupTracker();
+  const trappedFragment = createTestFragment(BLOCK.stone, 2.5, 3.5, 4.5);
+  const trapWorld = {
+    isSolid: (_x: number, _y: number, _z: number) => false,
+    isPartialBlock: (x: number, y: number, z: number) => x === 2 && y === 3 && z === 4
+  };
+  trappedFragment.update(0.5, { isSolid: () => false });
+  trappedFragment.mesh.position.set(2.5, 3.5, 4.5);
+  trappedFragment.velocity.set(0, 0, 0);
+  trappedFragment.angularVelocity.set(0, 0, 0);
+  trappedFragment.updateGroundDebrisCleanup(
+    120,
+    getEffectiveGroundDebrisLifetimeSeconds(FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS),
+    false
+  );
+
+  assert(!trappedFragment.isExpired, "forever lifetime should not expire a fragment through the normal timer");
+  assert(!tracker.shouldExpire(trappedFragment, 0.2, trapWorld), "freshly detected trapped debris should get a short grace beat");
+  assert(
+    tracker.shouldExpire(trappedFragment, 0.2, trapWorld),
+    "trapped quiet debris should be eligible for forced poof cleanup even when lifetime is forever"
+  );
+
+  const openFragment = createTestFragment(BLOCK.grass, 2.5, 1.08, 4.5);
+  sleepTestFragment(openFragment);
+  assert(
+    !tracker.shouldExpire(openFragment, 1, {
+      isSolid: (_x: number, y: number, _z: number) => y === 0,
+      isPartialBlock: () => false
+    }),
+    "open-ground sleeping debris should stay under normal lifetime rules"
+  );
 });
 
 test("debris cleanup poof renders as a short-lived material-tinted burst", () => {
@@ -5511,6 +5711,42 @@ test("hitscan cores still hit remaining partial-block material", () => {
     hit.block,
     { x: 2, y: 3, z: 4 },
     "hitscan cores should only pass through removed bite cells, not every chipped voxel"
+  );
+});
+
+test("hitscan debris beam touches active and sleeping fragments without blocking terrain", () => {
+  const start = new THREE.Vector3(0, 1, 0);
+  const end = new THREE.Vector3(6, 1, 0);
+  const activeFragment = createTestFragment(BLOCK.grass, 2, 1.04, 0.04);
+  const sleepingFragment = createTestFragment(BLOCK.dirt, 4, 1.04, -0.04);
+  const offAxisFragment = createTestFragment(BLOCK.stone, 3, 1, 1.1);
+  sleepTestFragment(sleepingFragment);
+
+  assert(
+    doesHitscanBeamTouchDebris(start, end, activeFragment.mesh.position, activeFragment.radius),
+    "beam capsule should intersect nearby active debris"
+  );
+  const touchedFragments = collectHitscanDebrisTargets(
+    [activeFragment, sleepingFragment, offAxisFragment],
+    start,
+    end
+  );
+
+  assert(touchedFragments.includes(activeFragment), "hitscan beam should collect active debris in its capsule");
+  assert(touchedFragments.includes(sleepingFragment), "hitscan beam should collect sleeping debris in its capsule");
+  assert(!touchedFragments.includes(offAxisFragment), "hitscan beam should leave off-axis debris alone");
+
+  for (const fragment of touchedFragments) {
+    fragment.expire();
+  }
+
+  const world = new VoxelWorld({ seed: "hitscan-debris-nonblocking-test" });
+  world.setBlock(6, 20, 0, BLOCK.stone);
+  const terrainHit = raycastHitscanCore(world, new THREE.Vector3(0, 20, 0), new THREE.Vector3(1, 0, 0), 8);
+  assertDeepEqual(
+    terrainHit?.block,
+    { x: 6, y: 20, z: 0 },
+    "clearing visual debris should not consume the hitscan terrain trace"
   );
 });
 

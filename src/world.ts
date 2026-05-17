@@ -98,7 +98,15 @@ export type BlockDamageResult = {
   readonly destroyed: boolean;
   readonly bitePoofPositions?: readonly VoxelVector[];
   readonly ejectedRubbleMaterialUnits?: number;
+  readonly debrisEjectionHint?: DebrisEjectionHint;
   readonly pierceContinuation?: BlockPierceContinuation;
+};
+
+export type DebrisEjectionHint = {
+  readonly origin: VoxelVector;
+  readonly preferredDirections: readonly VoxelVector[];
+  readonly biteCellCenters: readonly VoxelVector[];
+  readonly ejectedMaterialUnits: number;
 };
 
 export type BlockDamageBrushResult = {
@@ -156,6 +164,15 @@ export type VoxelVector = {
   readonly y: number;
   readonly z: number;
 };
+
+const PARTIAL_BLOCK_LATTICE_OPENING_OFFSETS: readonly VoxelVector[] = [
+  { x: 1, y: 0, z: 0 },
+  { x: -1, y: 0, z: 0 },
+  { x: 0, y: 1, z: 0 },
+  { x: 0, y: -1, z: 0 },
+  { x: 0, y: 0, z: 1 },
+  { x: 0, y: 0, z: -1 }
+];
 
 type PartialBlockCutResult = {
   readonly cell: PartialBlockCell;
@@ -433,6 +450,49 @@ function createPartialBlockBitePoofPositions(
   });
 }
 
+function createPartialBlockVisualCellCenter(position: VoxelBlockPosition, cellIndex: number): VoxelVector {
+  const visualCell = decodePartialBlockVisualCell(cellIndex);
+  return {
+    x: position.x + (visualCell.x + 0.5) / BLOCK_FRAGMENT_GRID_SIZE,
+    y: position.y + (visualCell.y + 0.5) / BLOCK_FRAGMENT_GRID_SIZE,
+    z: position.z + (visualCell.z + 0.5) / BLOCK_FRAGMENT_GRID_SIZE
+  };
+}
+
+function averageVoxelVectors(vectors: readonly VoxelVector[], fallback: VoxelVector): VoxelVector {
+  if (vectors.length === 0) return fallback;
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (const vector of vectors) {
+    x += vector.x;
+    y += vector.y;
+    z += vector.z;
+  }
+  return {
+    x: x / vectors.length,
+    y: y / vectors.length,
+    z: z / vectors.length
+  };
+}
+
+function createFallbackDebrisEjectionHint(
+  position: VoxelBlockPosition,
+  input: BlockCarveInput,
+  ejectedMaterialUnits: number
+): DebrisEjectionHint {
+  const fallbackDirection = normalizeVoxelVector(input.normal) ??
+    normalizeVoxelVector(input.incomingDirection) ??
+    { x: 0, y: 1, z: 0 };
+  const origin = clampPointToBlock(input.point, position);
+  return {
+    origin,
+    preferredDirections: [fallbackDirection],
+    biteCellCenters: [origin],
+    ejectedMaterialUnits
+  };
+}
+
 function normalizeVoxelVector(vector: Pick<THREE.Vector3, "x" | "y" | "z"> | undefined): VoxelVector | null {
   if (!vector) return null;
   const length = Math.hypot(vector.x, vector.y, vector.z);
@@ -442,6 +502,17 @@ function normalizeVoxelVector(vector: Pick<THREE.Vector3, "x" | "y" | "z"> | und
     y: vector.y / length,
     z: vector.z / length
   };
+}
+
+function addUniqueDebrisDirection(directions: VoxelVector[], direction: VoxelVector): void {
+  const normalizedDirection = normalizeVoxelVector(direction);
+  if (!normalizedDirection) return;
+  if (directions.some((existing) => dotVoxelVectors(existing, normalizedDirection) > 0.96)) return;
+  directions.push(normalizedDirection);
+}
+
+function dotVoxelVectors(left: VoxelVector, right: VoxelVector): number {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
 }
 
 function getPartialBlockPierceTunnelCellCount(
@@ -1325,6 +1396,12 @@ export class VoxelWorld implements CollisionWorld {
           input.normal
         ),
         ejectedRubbleMaterialUnits,
+        debrisEjectionHint: this.createPartialBlockDebrisEjectionHint(
+          partialCell,
+          partialCutResult.newlyRemovedVisualCellIndexes,
+          input,
+          ejectedRubbleMaterialUnits
+        ),
         pierceContinuation: latestCut
           ? this.createPartialBlockPierceContinuation(partialCell, latestCut, definition.health, input)
           : undefined
@@ -1342,7 +1419,8 @@ export class VoxelWorld implements CollisionWorld {
       remainingHealth: 0,
       maxHealth: definition.health,
       destroyed: true,
-      ejectedRubbleMaterialUnits
+      ejectedRubbleMaterialUnits,
+      debrisEjectionHint: createFallbackDebrisEjectionHint(position, input, ejectedRubbleMaterialUnits)
     };
   }
 
@@ -1722,6 +1800,88 @@ export class VoxelWorld implements CollisionWorld {
       cell,
       newlyRemovedVisualCellIndexes
     };
+  }
+
+  private createPartialBlockDebrisEjectionHint(
+    cell: PartialBlockCell,
+    newlyRemovedVisualCellIndexes: readonly number[],
+    input: BlockCarveInput,
+    ejectedMaterialUnits: number
+  ): DebrisEjectionHint {
+    const biteCellCenters = newlyRemovedVisualCellIndexes.map((index) =>
+      createPartialBlockVisualCellCenter(cell.position, index)
+    );
+    const preferredDirections = this.createPartialBlockOpeningDirections(
+      cell,
+      newlyRemovedVisualCellIndexes,
+      input
+    );
+    const fallback = createFallbackDebrisEjectionHint(cell.position, input, ejectedMaterialUnits);
+    return {
+      origin: averageVoxelVectors(biteCellCenters, fallback.origin),
+      preferredDirections: preferredDirections.length > 0
+        ? preferredDirections
+        : fallback.preferredDirections,
+      biteCellCenters: biteCellCenters.length > 0
+        ? biteCellCenters
+        : fallback.biteCellCenters,
+      ejectedMaterialUnits
+    };
+  }
+
+  private createPartialBlockOpeningDirections(
+    cell: PartialBlockCell,
+    newlyRemovedVisualCellIndexes: readonly number[],
+    input: BlockCarveInput
+  ): readonly VoxelVector[] {
+    const removedVisualCells = new Set(cell.removedVisualCellIndexes ?? []);
+    const sourceIndexes = newlyRemovedVisualCellIndexes.length > 0
+      ? newlyRemovedVisualCellIndexes
+      : [...removedVisualCells];
+    const directions: VoxelVector[] = [];
+
+    for (const index of sourceIndexes) {
+      const visualCell = decodePartialBlockVisualCell(index);
+      for (const offset of PARTIAL_BLOCK_LATTICE_OPENING_OFFSETS) {
+        if (this.isPartialBlockCellOpenAlongDirection(cell.position, visualCell, offset, removedVisualCells)) {
+          addUniqueDebrisDirection(directions, offset);
+        }
+      }
+    }
+
+    const fallbackDirection = normalizeVoxelVector(input.normal) ??
+      normalizeVoxelVector(input.incomingDirection) ??
+      { x: 0, y: 1, z: 0 };
+    addUniqueDebrisDirection(directions, fallbackDirection);
+    return directions.slice(0, 4);
+  }
+
+  private isPartialBlockCellOpenAlongDirection(
+    position: VoxelBlockPosition,
+    visualCell: { readonly x: number; readonly y: number; readonly z: number },
+    direction: VoxelVector,
+    removedVisualCells: ReadonlySet<number>
+  ): boolean {
+    let x = visualCell.x + direction.x;
+    let y = visualCell.y + direction.y;
+    let z = visualCell.z + direction.z;
+
+    while (
+      x >= 0 && x < BLOCK_FRAGMENT_GRID_SIZE &&
+      y >= 0 && y < BLOCK_FRAGMENT_GRID_SIZE &&
+      z >= 0 && z < BLOCK_FRAGMENT_GRID_SIZE
+    ) {
+      const index = x + y * BLOCK_FRAGMENT_GRID_SIZE + z * BLOCK_FRAGMENT_GRID_SIZE ** 2;
+      if (!removedVisualCells.has(index)) return false;
+      x += direction.x;
+      y += direction.y;
+      z += direction.z;
+    }
+
+    const neighborX = position.x + (x < 0 ? -1 : x >= BLOCK_FRAGMENT_GRID_SIZE ? 1 : 0);
+    const neighborY = position.y + (y < 0 ? -1 : y >= BLOCK_FRAGMENT_GRID_SIZE ? 1 : 0);
+    const neighborZ = position.z + (z < 0 ? -1 : z >= BLOCK_FRAGMENT_GRID_SIZE ? 1 : 0);
+    return !this.isSolid(neighborX, neighborY, neighborZ);
   }
 
   private createPartialBlockPierceContinuation(

@@ -212,6 +212,10 @@ export class PhysicsToy {
     return this.rigidDebrisBodyAttached;
   }
 
+  get age(): number {
+    return this.ageSeconds;
+  }
+
   get rigidDebrisExternalMutationRevision(): number {
     return this.rigidDebrisExternalRevision;
   }

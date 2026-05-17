@@ -18,6 +18,7 @@ export type DebrisShape = {
   readonly shapeId: DebrisShapeId;
   readonly visualScale: THREE.Vector3;
   readonly colliderHalfExtents: THREE.Vector3;
+  readonly estimatedVisualVolume: number;
 };
 
 type VectorLike = {
@@ -41,10 +42,11 @@ type DebrisShapeTemplate = {
 
 type RubbleShapeVertex = readonly [number, number, number];
 
-const DEBRIS_VISUAL_SCALE_MIN = BLOCK_FRAGMENT_VISUAL_SIZE * 0.65;
-const DEBRIS_VISUAL_SCALE_MAX = BLOCK_FRAGMENT_VISUAL_SIZE * 1.45;
+const DEBRIS_VISUAL_SCALE_MIN = BLOCK_FRAGMENT_VISUAL_SIZE * 0.32;
+const DEBRIS_VISUAL_SCALE_MAX = BLOCK_FRAGMENT_VISUAL_SIZE * 3.8;
 const DEBRIS_COLLIDER_PADDING = 1.08;
-const DEBRIS_SHARD_SIZE_SCALE = 0.5;
+const DEBRIS_SHARD_SIZE_SCALE = 0.86;
+const DEBRIS_VOLUME_FIT_EPSILON = 0.000001;
 
 const HEX_FACES: readonly (readonly number[])[] = [
   [1, 3, 7, 5],
@@ -208,9 +210,9 @@ export function createDebrisShapeForBlock(block: number, seed: DebrisShapeSeed):
   const seedValue = hashDebrisShapeSeed(block, seed);
   const shapeId = DEBRIS_SHAPE_IDS[seedValue % DEBRIS_SHAPE_IDS.length];
   const template = getDebrisShapeTemplate(shapeId);
-  const xJitter = 0.92 + hashUnit(seedValue ^ 0x6d2b79f5) * 0.16;
-  const yJitter = 0.92 + hashUnit(seedValue ^ 0x1b873593) * 0.16;
-  const zJitter = 0.92 + hashUnit(seedValue ^ 0x85ebca6b) * 0.16;
+  const xJitter = 0.55 + hashUnit(seedValue ^ 0x6d2b79f5) * 1.65;
+  const yJitter = 0.55 + hashUnit(seedValue ^ 0x1b873593) * 1.65;
+  const zJitter = 0.55 + hashUnit(seedValue ^ 0x85ebca6b) * 1.65;
 
   return createDebrisShapeFromScale(shapeId, [
     template.baseScale[0] * xJitter * DEBRIS_SHARD_SIZE_SCALE,
@@ -223,8 +225,28 @@ export function cloneDebrisShape(shape: DebrisShape): DebrisShape {
   return {
     shapeId: shape.shapeId,
     visualScale: shape.visualScale.clone(),
-    colliderHalfExtents: shape.colliderHalfExtents.clone()
+    colliderHalfExtents: shape.colliderHalfExtents.clone(),
+    estimatedVisualVolume: shape.estimatedVisualVolume
   };
+}
+
+export function fitDebrisShapeToVolumeBudget(
+  shape: DebrisShape,
+  maxEstimatedVisualVolume: number
+): DebrisShape | null {
+  const safeBudget = Math.max(0, Number.isFinite(maxEstimatedVisualVolume) ? maxEstimatedVisualVolume : 0);
+  if (safeBudget <= DEBRIS_VOLUME_FIT_EPSILON) return null;
+  if (shape.estimatedVisualVolume <= safeBudget) return cloneDebrisShape(shape);
+
+  const fitScale = Math.cbrt(safeBudget / Math.max(shape.estimatedVisualVolume, DEBRIS_VOLUME_FIT_EPSILON)) * 0.985;
+  const fittedShape = createDebrisShapeFromScale(shape.shapeId, [
+    shape.visualScale.x * fitScale,
+    shape.visualScale.y * fitScale,
+    shape.visualScale.z * fitScale
+  ]);
+  return fittedShape.estimatedVisualVolume <= safeBudget + DEBRIS_VOLUME_FIT_EPSILON
+    ? fittedShape
+    : null;
 }
 
 export function getDebrisShapeGeometry(shapeId: DebrisShapeId): THREE.BufferGeometry {
@@ -250,7 +272,8 @@ function createDebrisShapeFromScale(
     visualScale,
     // Rapier still gets a simple cuboid envelope. Keep it slightly padded so a
     // chipped visual face never pokes obviously through terrain while settling.
-    colliderHalfExtents: visualScale.clone().multiplyScalar(0.5 * DEBRIS_COLLIDER_PADDING)
+    colliderHalfExtents: visualScale.clone().multiplyScalar(0.5 * DEBRIS_COLLIDER_PADDING),
+    estimatedVisualVolume: visualScale.x * visualScale.y * visualScale.z
   };
 }
 
