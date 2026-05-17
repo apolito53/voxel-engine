@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.20.1 - 2026-05-17
+
+### Added
+
+- Added a local visual test recorder API at `globalThis.__VOXEL_VISUAL_TEST__` so automated pilot runs can capture WebM canvas recordings, sampled frames, metadata, and matching hitch-log pass context.
+- Added a `POST /__voxel_visual_test` endpoint to the local `5174` debug server that writes visual run folders under `logs/visual-runs/` with `recording.webm`, frame samples, optional `ffmpeg`-extracted video frames, `manifest.json`, and `review.html`.
+
 ## 0.6.20 - 2026-05-17
 
 ### Changed

@@ -344,6 +344,10 @@ import {
   normalizeCodexPilotMove,
   normalizeCodexPilotWeapon
 } from "../src/codexPilot";
+import {
+  normalizeVisualPilotRecordOptions,
+  normalizeVisualTestRecorderOptions
+} from "../src/visualTestRecorder";
 import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar";
 import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
@@ -1145,6 +1149,35 @@ test("codex pilot normalizes high-level play commands into safe controller input
   const aim = createCodexPilotLookAtAngles(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5));
   assertNearlyEqual(aim.yaw, 0, 0.000001, "pilot zero-yaw aim should face negative z");
   assertNearlyEqual(aim.pitch, 0, 0.000001, "pilot flat aim should keep pitch level");
+});
+
+test("visual test recorder normalizes capture options safely", () => {
+  const recorderOptions = normalizeVisualTestRecorderOptions({
+    label: " Debris Clip Repro!!! ",
+    fps: 500,
+    frameSampleFps: -4,
+    maxSeconds: 999,
+    metadata: { purpose: "motion review" }
+  });
+
+  assertEqual(recorderOptions.label, "debris-clip-repro", "visual test labels should become filesystem-safe tokens");
+  assertEqual(recorderOptions.fps, 60, "visual recording FPS should clamp to a sane browser capture ceiling");
+  assertEqual(recorderOptions.frameSampleFps, 0, "negative frame sampling should clamp off instead of scheduling nonsense");
+  assertEqual(recorderOptions.maxSeconds, 120, "visual recordings should keep a max-duration safety stop");
+  assertDeepEqual(recorderOptions.metadata, { purpose: "motion review" }, "visual recorder metadata should survive normalization");
+
+  const pilotOptions = normalizeVisualPilotRecordOptions({
+    label: "",
+    fps: 1,
+    frameSampleFps: 10,
+    maxSeconds: -1,
+    settleMs: 50000
+  });
+  assertEqual(pilotOptions.label, "visual-test", "empty visual labels should fall back to a stable name");
+  assertEqual(pilotOptions.fps, 5, "visual recording FPS should keep a useful lower bound");
+  assertEqual(pilotOptions.frameSampleFps, 4, "frame samples should cap before screenshots become the performance bug");
+  assertEqual(pilotOptions.maxSeconds, 1, "maxSeconds should keep a one-second lower bound");
+  assertEqual(pilotOptions.settleMs, 10000, "pilot recordings should clamp post-run settle time");
 });
 
 test("block color variants are deterministic and stay tied to block identity", () => {

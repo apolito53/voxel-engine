@@ -235,6 +235,12 @@ import {
   type TestAvatarApi
 } from "./testAvatar";
 import {
+  VisualTestRecorder,
+  normalizeVisualPilotRecordOptions,
+  type VisualPilotRecordOptions,
+  type VisualTestRecorderApi
+} from "./visualTestRecorder";
+import {
   VoxelWorld,
   type BlockDamageResult,
   type BlockPierceContinuation,
@@ -276,6 +282,7 @@ type VoxelRuntimeGlobal = typeof globalThis & {
   __VOXEL_HITCHES__?: () => readonly PerformanceHitchRecord[];
   __VOXEL_HITCH_PASS__?: () => PerformanceHitchLogPass;
   __VOXEL_HITCH_START_PASS__?: (label?: string) => PerformanceHitchLogPass;
+  __VOXEL_VISUAL_TEST__?: VisualTestRecorderApi;
 };
 type ViteHotContext = {
   dispose(callback: () => void): void;
@@ -577,6 +584,15 @@ const testAvatar = new TestAvatar({
   throwPlayerCore: () => throwPlayerCore(requirePlayer()),
   noteActivity: noteUserActivity
 });
+const visualTestRecorder = new VisualTestRecorder({
+  canvas: renderer.domElement,
+  getMetadata: () => ({
+    worldActive: inWorld,
+    selectedItemLabel: inWorld ? getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry) : null,
+    qualityLabel: getVisualRecorderQualityLabel(),
+    currentHitchPass: performanceHitchLog.getPass()
+  })
+});
 const codexPilot = new CodexPilot({
   isWorldActive: () => inWorld,
   getWorld: requireWorld,
@@ -603,6 +619,15 @@ voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
 voxelRuntimeGlobal.__VOXEL_HITCHES__ = () => performanceHitchLog.getRecent();
 voxelRuntimeGlobal.__VOXEL_HITCH_PASS__ = () => performanceHitchLog.getPass();
 voxelRuntimeGlobal.__VOXEL_HITCH_START_PASS__ = (label?: string) => performanceHitchLog.startPass(label);
+voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = {
+  snapshot: () => visualTestRecorder.snapshot(),
+  start: (options) => visualTestRecorder.start({
+    ...options,
+    logPass: options?.logPass ?? performanceHitchLog.getPass()
+  }),
+  stop: (options) => visualTestRecorder.stop(options),
+  recordPilotPlay
+};
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
@@ -1691,6 +1716,57 @@ function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats:
     rubblePatchCount: rubbleStats.clusters,
     rubblePieceCount: rubbleStats.pieces
   });
+}
+
+async function recordPilotPlay(script = "wall-range", options: VisualPilotRecordOptions = {}): Promise<unknown> {
+  const normalizedOptions = normalizeVisualPilotRecordOptions({
+    ...options,
+    label: options.label ?? `pilot-${script}`
+  });
+  performanceHitchLog.startPass(`visual-${normalizedOptions.label}`);
+  await visualTestRecorder.start({
+    ...normalizedOptions,
+    logPass: performanceHitchLog.getPass(),
+    metadata: {
+      ...(normalizedOptions.metadata ?? {}),
+      script,
+      recorderKind: "pilot-play"
+    }
+  });
+
+  try {
+    const pilotResult = await codexPilot.play(script === "free-roam" ? "free-roam" : "wall-range");
+    if (normalizedOptions.settleMs > 0) await waitForMilliseconds(normalizedOptions.settleMs);
+    const recording = await visualTestRecorder.stop({
+      status: "passed",
+      metadata: { pilotResult }
+    });
+    return { script, pilotResult, recording };
+  } catch (error) {
+    const recording = visualTestRecorder.snapshot().status === "recording"
+      ? await visualTestRecorder.stop({
+          status: "failed",
+          error: error instanceof Error ? error.message : "Pilot visual recording failed."
+        })
+      : null;
+    return {
+      script,
+      recording,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function getVisualRecorderQualityLabel(): string {
+  try {
+    return qualityController.preset.label;
+  } catch {
+    return bootPreset.label;
+  }
+}
+
+function waitForMilliseconds(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
 }
 
 function getActiveHotbarItems(): readonly HotbarItem[] {
@@ -3240,6 +3316,7 @@ function disposeRuntime(): void {
   // browser smoke navigations can otherwise leave old WebGL contexts alive in
   // Firefox's GPU process until the browser finally decides to clean house.
   codexPilot.dispose();
+  visualTestRecorder.dispose();
   player?.dispose();
   clearToys();
   coreAimPreview.dispose();
@@ -3270,6 +3347,7 @@ function disposeRuntime(): void {
   voxelRuntimeGlobal.__VOXEL_ADMIN__ = undefined;
   voxelRuntimeGlobal.__VOXEL_CODEX_PILOT__ = undefined;
   voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = undefined;
+  voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = undefined;
 }
 
 voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = disposeRuntime;

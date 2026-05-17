@@ -18,6 +18,8 @@ pnpm-debug.log*
 logs/*.log
 logs/*.jsonl
 logs/*.png
+logs/visual-runs/
+.tmp-chrome-visual-recorder/
 
 Thumbs.db
 Desktop.ini
