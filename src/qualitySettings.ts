@@ -1,4 +1,4 @@
-import { BLOCK_FRAGMENT_COUNT, normalizeBlockFragmentCount } from "./blockFragments";
+import { BLOCK_DEBRIS_MAX_FRAGMENT_COUNT, normalizeBlockFragmentCount } from "./blockFragments";
 import type { QualityPreset, QualityPresetId } from "./qualityPresets";
 
 export const QUALITY_SETTINGS_STORAGE_PREFIX = "voxel-quality-settings:";
@@ -9,7 +9,7 @@ export const SHADOW_MAP_SIZE_OPTIONS = [0, 1024, 2048, 4096, 8192] as const;
 export const SHADOW_QUALITY_MIN_LEVEL = 0;
 export const SHADOW_QUALITY_MAX_LEVEL = SHADOW_MAP_SIZE_OPTIONS.length - 1;
 export const BLOCK_FRAGMENT_MIN_COUNT = 1;
-export const BLOCK_FRAGMENT_MAX_COUNT = BLOCK_FRAGMENT_COUNT;
+export const BLOCK_FRAGMENT_MAX_COUNT = BLOCK_DEBRIS_MAX_FRAGMENT_COUNT;
 
 export type QualitySettings = {
   readonly loadRadius: number;

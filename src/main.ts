@@ -10,6 +10,7 @@ import {
   type AdminCommandHooks
 } from "./adminCommands";
 import {
+  BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
@@ -1852,7 +1853,12 @@ function spawnBlockFragments(
       distributedFragmentIndex: fragmentGridIndex,
       origin: position
     });
-    const debrisShape = fitDebrisShapeToVolumeBudget(candidateDebrisShape, remainingVisualVolumeBudget);
+    const perPieceVisualVolumeBudget = Math.min(
+      remainingVisualVolumeBudget,
+      rubbleMaterialUnits,
+      BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT
+    );
+    const debrisShape = fitDebrisShapeToVolumeBudget(candidateDebrisShape, perPieceVisualVolumeBudget);
     if (!debrisShape) continue;
 
     const fragment = PhysicsToy.createBlockFragment(

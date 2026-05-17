@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import {
+  BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
+  BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
   BLOCK_FRAGMENT_COUNT,
   BLOCK_FRAGMENT_COLLISION_RADIUS,
   BLOCK_FRAGMENT_GRID_SIZE,
@@ -12,6 +14,7 @@ import {
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
+  getMinimumDebrisFragmentCountForMaterialUnits,
   getTerrainImpactFragmentCount,
   normalizeBlockFragmentCount
 } from "../src/blockFragments";
@@ -3251,7 +3254,7 @@ test("destroyed impact craters skip empty back faces instead of leaving floating
 
 test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
   assertEqual(BLOCK_FRAGMENT_GRID_SIZE, 3, "block fracture grid should be three pieces per axis");
-  assertEqual(BLOCK_FRAGMENT_COUNT, 27, "block fracture grid should create 27 loose pieces");
+  assertEqual(BLOCK_FRAGMENT_COUNT, 27, "block fracture grid should create 27 source cells");
 
   const uniqueOffsets = new Set<string>();
   const uniqueX = new Set<number>();
@@ -3288,7 +3291,11 @@ test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
 
 test("quality-scaled block fracture counts sample the full debris grid", () => {
   assertEqual(normalizeBlockFragmentCount(-1), 1, "fragment count should keep at least one shard");
-  assertEqual(normalizeBlockFragmentCount(99), BLOCK_FRAGMENT_COUNT, "fragment count should clamp to the full grid");
+  assertEqual(
+    normalizeBlockFragmentCount(999),
+    BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
+    "visible debris count should clamp to the VFX shard limit"
+  );
 
   assertEqual(getDistributedBlockFragmentIndex(0, BLOCK_FRAGMENT_COUNT), 0, "full debris should keep first grid index");
   assertEqual(
@@ -3308,11 +3315,24 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
   }
   assertEqual(
     highQualityIndexes.size,
-    QUALITY_PRESETS.high.blockFragmentCount,
-    "high-quality debris should choose unique grid indexes"
+    BLOCK_FRAGMENT_COUNT,
+    "high-quality debris should cover every damage-lattice source cell"
   );
 
-  for (const fragmentCount of [2, 4, 7, 14, BLOCK_FRAGMENT_COUNT]) {
+  const superUltraIndexes = new Set<number>();
+  for (let index = 0; index < QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount; index += 1) {
+    superUltraIndexes.add(getDistributedBlockFragmentIndex(
+      index,
+      QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount
+    ));
+  }
+  assertEqual(
+    superUltraIndexes.size,
+    BLOCK_FRAGMENT_COUNT,
+    "extra-high visible debris should reuse every 3x3x3 source cell instead of expanding the damage lattice"
+  );
+
+  for (const fragmentCount of [4, 12, BLOCK_FRAGMENT_COUNT, 54, BLOCK_DEBRIS_MAX_FRAGMENT_COUNT]) {
     let totalMaterialUnits = 0;
     const shapeIds = new Set<string>();
     for (let index = 0; index < fragmentCount; index += 1) {
@@ -3330,7 +3350,7 @@ test("quality-scaled block fracture counts sample the full debris grid", () => {
       "quality-scaled visible fragments should still carry one full block of rubble material"
     );
     assert(shapeIds.size >= 1, "shape assignment should not affect fragment material accounting");
-    if (fragmentCount === BLOCK_FRAGMENT_COUNT) {
+    if (fragmentCount >= BLOCK_FRAGMENT_COUNT) {
       assert(shapeIds.size > 1, "full-quality fractures should visibly mix shard shapes");
     }
   }
@@ -3367,24 +3387,29 @@ test("terrain impact fragment counts eject chips without duplicating material", 
   );
 
   assertEqual(
+    getMinimumDebrisFragmentCountForMaterialUnits(BLOCK_RUBBLE_MATERIAL_UNITS),
+    39,
+    "one full block needs at least 39 shards when each shard is capped below one subvoxel"
+  );
+  assertEqual(
     getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, true),
-    BLOCK_FRAGMENT_COUNT,
-    "a whole-block fracture can use the full visible debris budget"
+    39,
+    "a whole-block fracture should add shards when the requested visible count would make pieces too massive"
   );
   assertEqual(
     getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS * 0.1, true),
-    3,
-    "a nearly-empty final fracture should only spawn debris for the remaining material"
+    4,
+    "a nearly-empty final fracture should still split material below the per-shard cap"
   );
   assertEqual(
     getTerrainImpactFragmentCount(BLOCK_FRAGMENT_COUNT, BLOCK_RUBBLE_MATERIAL_UNITS, false),
-    TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
-    "non-final chip hits should stay visually small even when they remove a large material slice"
+    39,
+    "non-final chip hits should override the soft chip cap if a large material slice would make oversized pieces"
   );
   assertEqual(
-    getTerrainImpactFragmentCount(QUALITY_PRESETS.potato.blockFragmentCount, BLOCK_RUBBLE_MATERIAL_UNITS, false),
-    1,
-    "Potato chip hits should still spawn a visible shard without flooding the CPU"
+    getTerrainImpactFragmentCount(QUALITY_PRESETS.potato.blockFragmentCount, BLOCK_RUBBLE_MATERIAL_UNITS * 0.1, false),
+    TERRAIN_CHIP_FRAGMENT_MAX_COUNT,
+    "ordinary one-damage chip hits should split into the soft chip burst size"
   );
 
   for (const materialUnits of [0.04, 0.1, 0.27, 0.5, BLOCK_RUBBLE_MATERIAL_UNITS]) {
@@ -3398,6 +3423,10 @@ test("terrain impact fragment counts eject chips without duplicating material", 
       materialUnits,
       0.000001,
       "proportional terrain debris should carry exactly the material slice it ejected"
+    );
+    assert(
+      carriedUnits / fragmentCount <= BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT + 0.000001,
+      "terrain debris should keep each visible shard below the subvoxel mass cap"
     );
   }
 });
@@ -3417,13 +3446,25 @@ test("aggressive debris shapes stay inside the ejected material volume budget", 
       let totalVisualVolume = 0;
 
       for (let index = 0; index < fragmentCount; index += 1) {
+        const perPieceMaterialUnits = getBlockFragmentMaterialUnits(index, fragmentCount, materialUnits);
         const shape = createDebrisShapeForBlock(BLOCK.stone, {
           fragmentIndex: index,
           distributedFragmentIndex: getDistributedBlockFragmentIndex(index, fragmentCount),
           origin: { x: 11, y: 7, z: -3 }
         });
-        const fittedShape = fitDebrisShapeToVolumeBudget(shape, remainingVolume);
+        assert(
+          perPieceMaterialUnits <= BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT + 0.000001,
+          "spawned shard material should stay under 70 percent of a source subvoxel"
+        );
+        const fittedShape = fitDebrisShapeToVolumeBudget(
+          shape,
+          Math.min(remainingVolume, perPieceMaterialUnits, BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT)
+        );
         if (!fittedShape) continue;
+        assert(
+          fittedShape.estimatedVisualVolume <= BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT + 0.000001,
+          "fitted shard visuals should stay under the per-piece volume cap"
+        );
         totalVisualVolume += fittedShape.estimatedVisualVolume;
         remainingVolume -= fittedShape.estimatedVisualVolume;
       }
@@ -3742,10 +3783,11 @@ test("expired quality-scaled fragments still graduate into rubble", () => {
   }
 
   const rubbleStats = rubble.getStats();
-  assertEqual(
+  assertClose(
     rubbleStats.pieces,
     BLOCK_RUBBLE_MATERIAL_UNITS,
-    "Potato's two visible shards should still deposit one full block of rubble material"
+    0.000001,
+    "Potato's mass-safe visible shards should still deposit one full block of rubble material"
   );
   assertNearlyEqual(
     rubbleStats.health,
@@ -4394,7 +4436,12 @@ test("debris settler finalizes potato fragments into full rubble material", () =
 
   const afterFinalize = settler.update(0.02, rubble);
   assertEqual(afterFinalize.finalizedBatches, 1, "region should finalize shortly after the delay");
-  assertClose(afterFinalize.finalizedPieces, BLOCK_RUBBLE_MATERIAL_UNITS, 0.000001, "two Potato shards should expand into full rubble material");
+  assertClose(
+    afterFinalize.finalizedPieces,
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    0.000001,
+    "Potato's mass-safe shard burst should still expand into full rubble material"
+  );
   assertClose(rubble.getStats().pieces, BLOCK_RUBBLE_MATERIAL_UNITS, 0.000001, "rubble field should receive all gameplay material");
   assert(fragments.every((fragment) => fragment.isExpired), "finalized visible fragments should be marked for pruning");
   assert(
@@ -4988,9 +5035,10 @@ test("quality-reduced fragments still settle into full rubble material", () => {
   }
 
   const rubbleStats = rubble.getStats();
-  assertEqual(
+  assertClose(
     rubbleStats.pieces,
     BLOCK_RUBBLE_MATERIAL_UNITS,
+    0.000001,
     "low visible debris counts should still produce one full block of rubble material"
   );
   assertNearlyEqual(
@@ -6054,7 +6102,7 @@ test("quality settings clamp custom menu overrides", () => {
 
   assertDeepEqual(
     normalDefaults,
-    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 7 },
+    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 54 },
     "normal preset should expose its default tunable settings"
   );
   assertEqual(normalizeRenderDistance(-20), RENDER_DISTANCE_MIN, "render distance should keep a lower bound");
@@ -6081,7 +6129,7 @@ test("quality settings clamp custom menu overrides", () => {
   assertEqual(
     normalized.blockFragmentCount,
     BLOCK_FRAGMENT_MAX_COUNT,
-    "custom debris count should clamp to the fracture-grid limit"
+    "custom debris count should clamp to the visible VFX shard limit"
   );
   assertEqual(formatRenderDistance(6), "6 chunks", "render distance label should stay human-readable");
   assertEqual(formatShadowQuality(0), "Off", "shadow quality label should call out disabled shadows");
@@ -6396,8 +6444,9 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       `${preset.label} rigid debris budget should stay within the CPU safety cap`
     );
     assert(
-      preset.blockFragmentCount >= 1 && preset.blockFragmentCount <= BLOCK_FRAGMENT_COUNT,
-      `${preset.label} debris count should stay within the fracture grid`
+      preset.blockFragmentCount >= getMinimumDebrisFragmentCountForMaterialUnits(BLOCK_RUBBLE_MATERIAL_UNITS) &&
+        preset.blockFragmentCount <= BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
+      `${preset.label} debris count should stay within the visible VFX shard limit`
     );
     assert(
       preset.debrisActiveRadiusMeters >= previousDebrisActiveRadius,
@@ -6450,15 +6499,15 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     getShadowTexelSize(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID]) < getShadowTexelSize(QUALITY_PRESETS.ultra),
     "Super Ultra should have the sharpest nearby shadows"
   );
-  assertEqual(QUALITY_PRESETS.potato.blockFragmentCount, 2, "Potato should spawn only two shards per destroyed block");
-  assertEqual(QUALITY_PRESETS.low.blockFragmentCount, 4, "Low should spawn four shards per destroyed block");
-  assertEqual(QUALITY_PRESETS.normal.blockFragmentCount, 7, "Normal should spawn seven shards per destroyed block");
-  assertEqual(QUALITY_PRESETS.high.blockFragmentCount, 14, "High should spawn about half of the full shard count");
-  assertEqual(QUALITY_PRESETS.ultra.blockFragmentCount, 27, "Ultra should keep the full fracture grid");
+  assertEqual(QUALITY_PRESETS.potato.blockFragmentCount, 39, "Potato should use the minimum mass-safe full-block burst");
+  assertEqual(QUALITY_PRESETS.low.blockFragmentCount, 45, "Low should add a few extra visible chips");
+  assertEqual(QUALITY_PRESETS.normal.blockFragmentCount, 54, "Normal should split full-block bursts into many small chips");
+  assertEqual(QUALITY_PRESETS.high.blockFragmentCount, 63, "High should push fuller small-shard coverage");
+  assertEqual(QUALITY_PRESETS.ultra.blockFragmentCount, 72, "Ultra should oversample the fracture grid");
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].blockFragmentCount,
-    27,
-    "Super Ultra should keep the full fracture grid"
+    81,
+    "Super Ultra should triple-sample the 27-cell source grid"
   );
   assertEqual(
     QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget,

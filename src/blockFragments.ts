@@ -3,6 +3,9 @@ export const BLOCK_FRAGMENT_COUNT = BLOCK_FRAGMENT_GRID_SIZE ** 3;
 // Gameplay rubble uses normalized block-volume material. A whole terrain block
 // is 1.0 no matter how many visible shards the current quality tier spawns.
 export const BLOCK_RUBBLE_MATERIAL_UNITS = 1;
+export const BLOCK_DEBRIS_MAX_FRAGMENT_COUNT = BLOCK_FRAGMENT_COUNT * 3;
+export const BLOCK_DEBRIS_SUBVOXEL_MATERIAL_UNITS = BLOCK_RUBBLE_MATERIAL_UNITS / BLOCK_FRAGMENT_COUNT;
+export const BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT = BLOCK_DEBRIS_SUBVOXEL_MATERIAL_UNITS * 0.7;
 export const BLOCK_FRAGMENT_SPACING = 0.28;
 export const BLOCK_FRAGMENT_VISUAL_SIZE = 0.12;
 export const BLOCK_FRAGMENT_COLLISION_RADIUS = 0.08;
@@ -39,9 +42,10 @@ export function getDistributedBlockFragmentIndex(fragmentIndex: number, fragment
     throw new RangeError(`Fragment selection index ${fragmentIndex} is outside the ${normalizedCount}-piece budget.`);
   }
 
-  // Sample the 27-piece fracture grid at the middle of each quality-budgeted
-  // bucket. Reduced debris counts stay spread across the block instead of
-  // always spawning the same low-corner pieces.
+  // Sample the 27-cell damage lattice at the middle of each visible-debris
+  // bucket. Counts above 27 deliberately revisit cells; spawn jitter and shape
+  // seeds split one lattice bite into several smaller VFX chips without making
+  // the terrain gameplay grid any finer.
   return Math.min(
     BLOCK_FRAGMENT_COUNT - 1,
     Math.floor(((fragmentIndex + 0.5) * BLOCK_FRAGMENT_COUNT) / normalizedCount)
@@ -59,9 +63,9 @@ export function getBlockFragmentMaterialUnits(
   }
 
   // Split normalized block-volume material across however many visible shards
-  // the current quality tier spawns. A 2-shard Potato fracture therefore still
-  // settles into the same full-block material as a 27-shard Ultra fracture, and
-  // chip damage can carry fractional volume instead of rounding HP loss.
+  // the current quality tier spawns. A low-detail fracture therefore still
+  // carries the same gameplay material as a high-detail burst, and chip damage
+  // can carry fractional volume instead of rounding HP loss.
   const normalizedMaterialUnits = Math.max(
     0,
     Number.isFinite(materialUnits) ? materialUnits : BLOCK_RUBBLE_MATERIAL_UNITS
@@ -82,14 +86,22 @@ export function getTerrainImpactFragmentCount(
   ));
   if (normalizedMaterialUnits <= 0) return 0;
 
+  const massSafeMinimumCount = getMinimumDebrisFragmentCountForMaterialUnits(normalizedMaterialUnits);
   const proportionalCount = Math.max(
     1,
     Math.ceil((normalizedMaterialUnits / BLOCK_RUBBLE_MATERIAL_UNITS) * normalizedMaxVisible)
   );
-  if (destroyed) return Math.min(normalizedMaxVisible, proportionalCount);
+  const materialHonestCount = Math.max(proportionalCount, massSafeMinimumCount);
+  if (destroyed) return Math.min(BLOCK_DEBRIS_MAX_FRAGMENT_COUNT, materialHonestCount);
 
   const qualityScaledChipCap = Math.max(1, Math.ceil(normalizedMaxVisible * 0.2));
-  return Math.min(proportionalCount, TERRAIN_CHIP_FRAGMENT_MAX_COUNT, qualityScaledChipCap);
+  return Math.min(
+    BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
+    Math.max(
+      massSafeMinimumCount,
+      Math.min(proportionalCount, TERRAIN_CHIP_FRAGMENT_MAX_COUNT, qualityScaledChipCap)
+    )
+  );
 }
 
 export function getBlockRubbleMaterialUnitsForHealth(
@@ -128,7 +140,20 @@ export function getEjectedBlockRubbleMaterialUnits(
   return Math.max(0, previousMaterialUnits - nextMaterialUnits);
 }
 
+export function getMinimumDebrisFragmentCountForMaterialUnits(materialUnits: number): number {
+  const normalizedMaterialUnits = Math.max(0, Math.min(
+    BLOCK_RUBBLE_MATERIAL_UNITS,
+    Number.isFinite(materialUnits) ? materialUnits : 0
+  ));
+  if (normalizedMaterialUnits <= 0) return 0;
+
+  return Math.min(
+    BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
+    Math.max(1, Math.ceil(normalizedMaterialUnits / BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT))
+  );
+}
+
 export function normalizeBlockFragmentCount(fragmentCount: number): number {
   if (!Number.isFinite(fragmentCount)) return 1;
-  return Math.min(BLOCK_FRAGMENT_COUNT, Math.max(1, Math.round(fragmentCount)));
+  return Math.min(BLOCK_DEBRIS_MAX_FRAGMENT_COUNT, Math.max(1, Math.round(fragmentCount)));
 }

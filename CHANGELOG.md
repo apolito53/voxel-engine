@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.6.14 - 2026-05-17
+
+### Changed
+
+- Changed debris burst sizing so the 27-cell damage lattice remains the source map, but visible debris can oversample it up to 81 VFX shards for smaller, denser chips.
+- Capped each spawned shard to at most 70% of one damage-lattice subvoxel's material volume while preserving the total ejected material budget for each hit.
+- Raised the built-in debris-count presets from `39` shards on Potato through `81` shards on Super Ultra, with ordinary chip hits splitting into enough pieces to avoid oversized debris.
+
 ## 0.6.13 - 2026-05-17
 
 ### Added
