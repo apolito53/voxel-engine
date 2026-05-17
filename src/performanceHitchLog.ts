@@ -21,6 +21,8 @@ export type PerformanceHitchBucket =
   | "render"
   | "other";
 
+export type PerformanceHitchKind = "frame-hitch" | "low-fps";
+
 export type PerformanceHitchStatsSnapshot = {
   readonly qualityLabel: string;
   readonly physicsObjectCount: number;
@@ -44,10 +46,12 @@ export type PerformanceHitchLogPass = {
 };
 
 export type PerformanceHitchRecord = {
+  readonly kind: PerformanceHitchKind;
   readonly id: number;
   readonly timestampMs: number;
   readonly logPass: PerformanceHitchLogPass;
   readonly frameMs: number;
+  readonly observedFps?: number;
   readonly primaryBucket: PerformanceHitchBucket;
   readonly primaryBucketMs: number;
   readonly primaryBucketShare: number;
@@ -58,13 +62,17 @@ export type PerformanceHitchRecord = {
 };
 
 export type PerformanceHitchInput = {
+  readonly kind?: PerformanceHitchKind;
   readonly frameMs: number;
+  readonly observedFps?: number;
   readonly timings: FrameTimings;
   readonly stats: PerformanceHitchStatsSnapshot;
 };
 
 const DEFAULT_MAX_RECORDS = 30;
 const DEFAULT_CONSOLE_LOG_INTERVAL_MS = 1000;
+export const LOW_FPS_LOG_THRESHOLD = 60;
+export const LOW_FPS_LOG_INTERVAL_MS = 1000;
 const LOCAL_DEV_HITCH_LOG_ENDPOINT = "http://127.0.0.1:5174/__voxel_hitch_log";
 const REMOTE_HITCH_LOG_BATCH_DELAY_MS = 1000;
 const REMOTE_HITCH_LOG_KEEPALIVE_MAX_BYTES = 60 * 1024;
@@ -88,6 +96,7 @@ export class PerformanceHitchLog {
   private nextPassIndex = 1;
   private currentPass: PerformanceHitchLogPass;
   private lastConsoleLogAt = Number.NEGATIVE_INFINITY;
+  private lastLowFpsLogAt = Number.NEGATIVE_INFINITY;
   private suppressedConsoleLogs = 0;
   private remoteQueue: PerformanceHitchRecord[] = [];
   private remoteFlushTimer: number | null = null;
@@ -107,7 +116,23 @@ export class PerformanceHitchLog {
   }
 
   record(input: PerformanceHitchInput): PerformanceHitchRecord {
-    const record = createPerformanceHitchRecord(this.nextId, this.getNow(), input, this.currentPass);
+    return this.addRecord(input, this.getNow());
+  }
+
+  recordLowFpsSample(input: Omit<PerformanceHitchInput, "kind"> & {
+    readonly observedFps: number;
+  }): PerformanceHitchRecord | null {
+    if (!Number.isFinite(input.observedFps) || input.observedFps >= LOW_FPS_LOG_THRESHOLD) return null;
+
+    const now = this.getNow();
+    if (now - this.lastLowFpsLogAt < LOW_FPS_LOG_INTERVAL_MS) return null;
+
+    this.lastLowFpsLogAt = now;
+    return this.addRecord({ ...input, kind: "low-fps" }, now);
+  }
+
+  private addRecord(input: PerformanceHitchInput, timestampMs: number): PerformanceHitchRecord {
+    const record = createPerformanceHitchRecord(this.nextId, timestampMs, input, this.currentPass);
     this.nextId += 1;
     this.records.unshift(record);
     if (this.records.length > this.maxRecords) {
@@ -136,6 +161,7 @@ export class PerformanceHitchLog {
     this.nextId = 1;
     this.suppressedConsoleLogs = 0;
     this.lastConsoleLogAt = Number.NEGATIVE_INFINITY;
+    this.lastLowFpsLogAt = Number.NEGATIVE_INFINITY;
     this.currentPass = this.createNextPass(label);
     return this.currentPass;
   }
@@ -144,6 +170,7 @@ export class PerformanceHitchLog {
     this.records = [];
     this.suppressedConsoleLogs = 0;
     this.lastConsoleLogAt = Number.NEGATIVE_INFINITY;
+    this.lastLowFpsLogAt = Number.NEGATIVE_INFINITY;
   }
 
   private logToConsole(record: PerformanceHitchRecord): void {
@@ -266,21 +293,24 @@ export function createPerformanceHitchRecord(
   input: PerformanceHitchInput,
   logPass: PerformanceHitchLogPass = createFallbackHitchLogPass(timestampMs)
 ): PerformanceHitchRecord {
+  const kind = input.kind ?? "frame-hitch";
   const [primaryBucket, primaryTimingKey] = getPrimaryTimingBucket(input.timings);
   const primaryBucketMs = input.timings[primaryTimingKey];
   const primaryBucketShare = input.frameMs > 0 ? primaryBucketMs / input.frameMs : 0;
   const details = getPerformanceHitchDetails(primaryBucket, input);
   const summary = [
-    `${formatMs(input.frameMs)} frame hitch`,
+    createPerformanceSummaryLead(kind, input),
     `${primaryBucket} ${formatMs(primaryBucketMs)}`,
     details[0] ?? "no obvious counter spike"
   ].join(" - ");
 
   return {
+    kind,
     id,
     timestampMs,
     logPass,
     frameMs: input.frameMs,
+    observedFps: input.observedFps,
     primaryBucket,
     primaryBucketMs,
     primaryBucketShare,
@@ -293,8 +323,20 @@ export function createPerformanceHitchRecord(
 
 export function formatPerformanceHitchRecord(record: PerformanceHitchRecord): string {
   const detail = record.details[0] ?? "no obvious counter spike";
+  if (record.kind === "low-fps") {
+    return `${formatFps(record.observedFps ?? getFpsFromFrameMs(record.frameMs))} low FPS: ` +
+      `${record.primaryBucket} led at ${formatMs(record.primaryBucketMs)} ` +
+      `(${Math.round(record.primaryBucketShare * 100)}%). ${detail}`;
+  }
   return `${formatMs(record.frameMs)} hitch: ${record.primaryBucket} led at ` +
     `${formatMs(record.primaryBucketMs)} (${Math.round(record.primaryBucketShare * 100)}%). ${detail}`;
+}
+
+function createPerformanceSummaryLead(kind: PerformanceHitchKind, input: PerformanceHitchInput): string {
+  if (kind === "low-fps") {
+    return `${formatFps(input.observedFps ?? getFpsFromFrameMs(input.frameMs))} low FPS sample`;
+  }
+  return `${formatMs(input.frameMs)} frame hitch`;
 }
 
 function getPrimaryTimingBucket(timings: FrameTimings): readonly [PerformanceHitchBucket, keyof FrameTimings] {
@@ -460,6 +502,15 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
 
 function formatMs(value: number): string {
   return `${value.toFixed(1)}ms`;
+}
+
+function formatFps(value: number): string {
+  if (!Number.isFinite(value)) return "unknown fps";
+  return `${value < 10 ? value.toFixed(1) : value.toFixed(0)} fps`;
+}
+
+function getFpsFromFrameMs(frameMs: number): number {
+  return frameMs > 0 ? 1000 / frameMs : Number.POSITIVE_INFINITY;
 }
 
 function createHitchLogSessionId(): string {

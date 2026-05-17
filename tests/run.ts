@@ -245,6 +245,7 @@ import {
 } from "../src/frameLoop";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import {
+  LOW_FPS_LOG_INTERVAL_MS,
   createPerformanceHitchRecord,
   formatPerformanceHitchRecord,
   PerformanceHitchLog,
@@ -1603,6 +1604,76 @@ test("performance hitch log versions records by debugging pass", () => {
         secondRecord.logPass.passId.includes("debris-sleep-repro"),
       "manual repro passes should get distinct readable ids for file splitting"
     );
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("performance hitch log samples sub-60 FPS at most once per second", () => {
+  const timings = {
+    playerMs: 2,
+    chunkMs: 3,
+    physicsMs: 8,
+    meshMs: 4,
+    minimapMs: 0.5,
+    renderMs: 6,
+    otherMs: 1,
+    frameMs: 21
+  };
+  const originalWarn = console.warn;
+  console.warn = () => undefined;
+
+  try {
+    let now = 100;
+    const log = new PerformanceHitchLog({
+      getNow: () => now,
+      maxRecords: 5,
+      sessionId: "low-fps-test"
+    });
+
+    const firstRecord = log.recordLowFpsSample({
+      frameMs: timings.frameMs,
+      observedFps: 55,
+      timings,
+      stats: createTestHitchStats()
+    });
+    assert(firstRecord, "the first sub-60 FPS frame should emit a low-FPS sample");
+    assertEqual(firstRecord.kind, "low-fps", "low-FPS samples should be distinguishable from hard frame hitches");
+    assert(
+      firstRecord.summary.includes("55 fps low FPS sample"),
+      "low-FPS sample summaries should name the observed FPS"
+    );
+    assert(
+      formatPerformanceHitchRecord(firstRecord).includes("low FPS"),
+      "Nova Terminal summaries should make low-FPS samples readable"
+    );
+
+    now += LOW_FPS_LOG_INTERVAL_MS - 1;
+    const suppressedRecord = log.recordLowFpsSample({
+      frameMs: timings.frameMs,
+      observedFps: 54,
+      timings,
+      stats: createTestHitchStats()
+    });
+    assertEqual(suppressedRecord, null, "sub-60 FPS samples should not spam faster than once per second");
+
+    now += 1;
+    const secondRecord = log.recordLowFpsSample({
+      frameMs: timings.frameMs,
+      observedFps: 53,
+      timings,
+      stats: createTestHitchStats()
+    });
+    assert(secondRecord, "sustained sub-60 FPS should emit another sample after one second");
+
+    now += LOW_FPS_LOG_INTERVAL_MS;
+    const aboveThresholdRecord = log.recordLowFpsSample({
+      frameMs: 15,
+      observedFps: 60,
+      timings: { ...timings, frameMs: 15 },
+      stats: createTestHitchStats()
+    });
+    assertEqual(aboveThresholdRecord, null, "60 FPS and above should not create low-FPS diagnostics");
   } finally {
     console.warn = originalWarn;
   }

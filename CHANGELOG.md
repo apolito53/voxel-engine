@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.15.2 - 2026-05-17
+
+### Added
+
+- Added once-per-second low-FPS diagnostics while observed frame cadence stays below 60 FPS, sharing the same counter snapshot as hard frame hitch logs.
+
 ## 0.6.15.1 - 2026-05-17
 
 ### Added

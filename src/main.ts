@@ -95,6 +95,7 @@ import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPi
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
 import {
+  LOW_FPS_LOG_THRESHOLD,
   PerformanceHitchLog,
   type PerformanceHitchLogPass,
   type PerformanceHitchRecord
@@ -1328,29 +1329,44 @@ function animate(): void {
   renderer.render(scene, camera);
   frameTimingSample.renderMs = performance.now() - renderStartedAt;
   frameTimingSample.frameMs = performance.now() - frameStartedAt;
-  if (inWorld && frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
-    const diagnosis = performanceHitchLog.record({
-      frameMs: frameTimingSample.frameMs,
-      timings: frameTimingSample,
-      stats: {
-        qualityLabel: qualityController.preset.label,
-        physicsObjectCount: toys.length,
-        physicsObjectBudget,
-        rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
-        world: debugWorldStats ?? requireWorld().getStats(),
-        physics: physicsCollisionStats,
-        rigidDebris: rigidDebrisStats,
-        fragmentRender: physicsFragmentInstancer.getStats(),
-        partialMesh: debugPartialMeshStats,
-        debrisSettler: debrisSettlerStats,
-        rubble: debugRubbleStats ?? rubbleField.getStats()
-      }
-    });
-    engineEvents.emit("performance:frame-spike", {
-      frameMs: frameTimingSample.frameMs,
-      timings: frameTimingSample,
-      diagnosis
-    });
+
+  if (inWorld) {
+    const performanceStats = {
+      qualityLabel: qualityController.preset.label,
+      physicsObjectCount: toys.length,
+      physicsObjectBudget,
+      rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
+      world: debugWorldStats ?? requireWorld().getStats(),
+      physics: physicsCollisionStats,
+      rigidDebris: rigidDebrisStats,
+      fragmentRender: physicsFragmentInstancer.getStats(),
+      partialMesh: debugPartialMeshStats,
+      debrisSettler: debrisSettlerStats,
+      rubble: debugRubbleStats ?? rubbleField.getStats()
+    };
+
+    if (frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
+      const diagnosis = performanceHitchLog.record({
+        frameMs: frameTimingSample.frameMs,
+        timings: frameTimingSample,
+        stats: performanceStats
+      });
+      engineEvents.emit("performance:frame-spike", {
+        frameMs: frameTimingSample.frameMs,
+        timings: frameTimingSample,
+        diagnosis
+      });
+    }
+
+    const observedFps = 1 / Math.max(rawDelta, 1 / 240);
+    if (observedFps < LOW_FPS_LOG_THRESHOLD) {
+      performanceHitchLog.recordLowFpsSample({
+        frameMs: Math.max(frameTimingSample.frameMs, rawDelta * 1000),
+        observedFps,
+        timings: frameTimingSample,
+        stats: performanceStats
+      });
+    }
   }
   smoothedFrameTimings = smoothFrameTimings(
     smoothedFrameTimings,
