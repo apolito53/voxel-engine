@@ -1164,6 +1164,7 @@ test("codex pilot normalizes high-level play commands into safe controller input
   assert(CODEX_PILOT_PLAY_SCRIPTS.includes("debris-grounding"), "pilot script list should include the debris visual repro");
   assert(CODEX_PILOT_PLAY_SCRIPTS.includes("preview-parity"), "pilot script list should include the aim-preview parity run");
   assert(CODEX_PILOT_PLAY_SCRIPTS.includes("debris-pressure"), "pilot script list should include the debris pressure run");
+  assert(CODEX_PILOT_PLAY_SCRIPTS.includes("partial-seam-carve"), "pilot script list should include the partial seam carve run");
   assertEqual(
     normalizeCodexPilotPlayScriptId("preview-parity"),
     "preview-parity",
@@ -1186,6 +1187,7 @@ test("visual test scenarios expose stable scripted review catalog", () => {
   const ids = scenarios.map((scenario) => scenario.id);
   assert(ids.includes("preview-parity"), "visual scenario catalog should include the aim-preview parity repro");
   assert(ids.includes("debris-pressure"), "visual scenario catalog should include the debris pressure repro");
+  assert(ids.includes("partial-seam-carve"), "visual scenario catalog should include the seam-carve repro");
   assert(ids.includes("debris-grounding"), "visual scenario catalog should include the debris grounding repro");
   assert(ids.includes("hitscan-tunnel"), "visual scenario catalog should include the hitscan tunnel repro");
   assert(ids.includes("builder-fixture"), "visual scenario catalog should include a builder/admin fixture shot");
@@ -1206,6 +1208,11 @@ test("visual test scenarios expose stable scripted review catalog", () => {
     (pressureScenario.defaultOptions.maxSeconds ?? 0) > (getVisualTestScenario("debris").defaultOptions.maxSeconds ?? 0),
     "pressure review should reserve more time than the smaller debris grounding repro"
   );
+
+  const seamScenario = getVisualTestScenario("corner-carve");
+  assertEqual(seamScenario.id, "partial-seam-carve", "seam aliases should resolve to the partial seam carve scenario");
+  assertEqual(seamScenario.pilotScript, "partial-seam-carve", "seam scenario should route to its matching pilot script");
+  assert(seamScenario.tags.includes("partial-blocks"), "seam scenario should advertise the partial-block system it protects");
 
   const debrisScenario = getVisualTestScenario("debris");
   assertEqual(debrisScenario.id, "debris-grounding", "scenario aliases should resolve to the canonical id");

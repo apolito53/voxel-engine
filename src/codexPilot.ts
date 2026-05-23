@@ -23,6 +23,7 @@ export type CodexPilotWeapon = "selected" | "physics-core" | "hitscan-core";
 export const CODEX_PILOT_PLAY_SCRIPTS = [
   "preview-parity",
   "debris-pressure",
+  "partial-seam-carve",
   "wall-range",
   "debris-grounding",
   "hitscan-tunnel",
@@ -207,11 +208,12 @@ export class CodexPilot {
     if (
       name === "preview-parity" ||
       name === "debris-pressure" ||
+      name === "partial-seam-carve" ||
       name === "wall-range" ||
       name === "debris-grounding" ||
       name === "hitscan-tunnel"
     ) {
-      this.run(name === "hitscan-tunnel" || name === "debris-pressure"
+      this.run(name === "hitscan-tunnel" || name === "debris-pressure" || name === "partial-seam-carve"
         ? "spawn wall stone 9 4"
         : "spawn wall stone 8 4");
     } else if (name === "builder-fixture") {
@@ -372,6 +374,44 @@ export class CodexPilot {
       await this.move({ right: 1, seconds: 0.45, flight: true });
       await this.move({ right: -1, seconds: 0.45, flight: true });
       steps.push("debris pressure parallax sweep");
+    } else if (script === "partial-seam-carve") {
+      await this.scenario({ name: "partial-seam-carve", freshSuperflat: true });
+      startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
+      steps.push("superflat seam wall");
+      await this.move({ forward: -1, seconds: 0.5, flight: true });
+      steps.push("backed up for seam view");
+
+      const previousAimPreviewEnabled = this.hooks.getCoreAimPreviewEnabled();
+      this.hooks.setCoreAimPreviewEnabled(true);
+      try {
+        // Aim just off integer X/Y block boundaries so the sparse brush has to
+        // prove it can promote neighboring macro blocks without creating random
+        // disconnected bites. This is a visual trust run, not a stress test.
+        this.hooks.selectWeapon("hitscan-core");
+        this.lookAt({ x: 0.48, y: 2.65, z: -5, eyeOffset: 0 });
+        await wait(DEFAULT_PLAY_STEP_MS);
+        await this.fire({ weapon: "hitscan-core", count: 4, intervalMs: 90, ads: true });
+        steps.push("vertical seam hitscan carve");
+
+        this.lookAt({ x: 0.48, y: 3.95, z: -5, eyeOffset: 0 });
+        await wait(DEFAULT_PLAY_STEP_MS);
+        await this.fire({ weapon: "hitscan-core", count: 3, intervalMs: 100, ads: true });
+        steps.push("corner seam hitscan carve");
+
+        this.hooks.selectWeapon("physics-core");
+        this.lookAt({ x: -0.52, y: 2.8, z: -5, eyeOffset: 0 });
+        await wait(DEFAULT_PLAY_STEP_MS);
+        await this.fire({ weapon: "physics-core", count: 2, intervalMs: 320 });
+        steps.push("projectile seam chip check");
+
+        await wait(900);
+        await this.move({ right: 1, seconds: 0.45, flight: true });
+        await this.move({ right: -1, seconds: 0.45, flight: true });
+        steps.push("seam carve parallax sweep");
+      } finally {
+        this.hooks.setAdsActive(false);
+        this.hooks.setCoreAimPreviewEnabled(previousAimPreviewEnabled);
+      }
     } else if (script === "wall-range") {
       await this.scenario({ name: "wall-range", freshSuperflat: true });
       startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);

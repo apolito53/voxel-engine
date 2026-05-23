@@ -52,6 +52,21 @@ const VISUAL_TEST_SCENARIOS: readonly VisualTestScenario[] = [
     }
   },
   {
+    id: "partial-seam-carve",
+    title: "Partial Seam Carve",
+    description: "Fresh Superflat wall, Core Aim Preview enabled, hitscan seam/corner bites, projectile seam chips, and a parallax sweep for catching disconnected partial-block carve artifacts.",
+    pilotScript: "partial-seam-carve",
+    tags: ["partial-blocks", "seams", "hitscan", "physics-core", "preview"],
+    aliases: ["seam", "partial-seam", "seam-carve", "corner-carve"],
+    defaultOptions: {
+      label: "scenario-partial-seam-carve",
+      fps: 30,
+      frameSampleFps: 1,
+      maxSeconds: 30,
+      settleMs: 1400
+    }
+  },
+  {
     id: "debris-grounding",
     title: "Debris Grounding",
     description: "Fresh Superflat wall, repeated projectile-core impacts, settle watch, and parallax sweep for debris clipping/ground contact review.",
