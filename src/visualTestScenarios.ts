@@ -22,6 +22,21 @@ export type VisualTestScenarioSummary = Omit<VisualTestScenario, "defaultOptions
 
 const VISUAL_TEST_SCENARIOS: readonly VisualTestScenario[] = [
   {
+    id: "preview-parity",
+    title: "Preview Parity",
+    description: "Fresh Superflat wall, Core Aim Preview enabled, projectile and hitscan core impacts, and a short sweep for checking predicted target overlays against real damage.",
+    pilotScript: "preview-parity",
+    tags: ["preview", "physics-core", "hitscan", "partial-blocks"],
+    aliases: ["preview", "parity", "aim-preview"],
+    defaultOptions: {
+      label: "scenario-preview-parity",
+      fps: 30,
+      frameSampleFps: 1,
+      maxSeconds: 26,
+      settleMs: 1200
+    }
+  },
+  {
     id: "debris-grounding",
     title: "Debris Grounding",
     description: "Fresh Superflat wall, repeated projectile-core impacts, settle watch, and parallax sweep for debris clipping/ground contact review.",

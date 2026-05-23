@@ -21,6 +21,7 @@ const TARGET_EYE_OFFSET = 0.45;
 
 export type CodexPilotWeapon = "selected" | "physics-core" | "hitscan-core";
 export const CODEX_PILOT_PLAY_SCRIPTS = [
+  "preview-parity",
   "wall-range",
   "debris-grounding",
   "hitscan-tunnel",
@@ -113,6 +114,8 @@ export type CodexPilotHooks = {
   selectWeapon(weapon: CodexPilotWeapon): boolean;
   fireSelectedPrimary(): void;
   setAdsActive(active: boolean): void;
+  getCoreAimPreviewEnabled(): boolean;
+  setCoreAimPreviewEnabled(enabled: boolean): void;
   resumePlayer(): void;
   startHitchPass(label?: string): PerformanceHitchLogPass;
   getRecentHitches(): readonly PerformanceHitchRecord[];
@@ -200,7 +203,12 @@ export class CodexPilot {
     this.ensureWorldActive();
     this.status = `Preparing ${name}`;
     this.hooks.noteActivity();
-    if (name === "wall-range" || name === "debris-grounding" || name === "hitscan-tunnel") {
+    if (
+      name === "preview-parity" ||
+      name === "wall-range" ||
+      name === "debris-grounding" ||
+      name === "hitscan-tunnel"
+    ) {
       this.run(name === "hitscan-tunnel" ? "spawn wall stone 9 4" : "spawn wall stone 8 4");
     } else if (name === "builder-fixture") {
       this.run("spawn platform grass 9");
@@ -301,7 +309,41 @@ export class CodexPilot {
     this.status = `Playing ${script}`;
     steps.push("started");
 
-    if (script === "wall-range") {
+    if (script === "preview-parity") {
+      await this.scenario({ name: "preview-parity", freshSuperflat: true });
+      startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
+      steps.push("superflat preview wall");
+      await this.move({ forward: -1, seconds: 0.45, flight: true });
+      steps.push("backed up for preview view");
+
+      const previousAimPreviewEnabled = this.hooks.getCoreAimPreviewEnabled();
+      this.hooks.setCoreAimPreviewEnabled(true);
+      try {
+        // Give the renderer a frame between weapon selection and firing so the
+        // captured run shows the same preview overlay the player trusts.
+        this.hooks.selectWeapon("physics-core");
+        this.status = "Previewing physics core target";
+        this.hooks.noteActivity();
+        await wait(DEFAULT_PLAY_STEP_MS);
+        await this.fire({ weapon: "physics-core", count: 2, intervalMs: 300 });
+        steps.push("physics preview/impact check");
+
+        this.hooks.selectWeapon("hitscan-core");
+        this.hooks.setAdsActive(true);
+        this.status = "Previewing hitscan core target";
+        this.hooks.noteActivity();
+        await wait(DEFAULT_PLAY_STEP_MS);
+        await this.fire({ weapon: "hitscan-core", count: 4, intervalMs: 120, ads: true });
+        steps.push("hitscan preview/impact check");
+
+        await this.move({ right: 1, seconds: 0.35, flight: true });
+        await this.move({ right: -1, seconds: 0.35, flight: true });
+        steps.push("preview/damage parallax sweep");
+      } finally {
+        this.hooks.setAdsActive(false);
+        this.hooks.setCoreAimPreviewEnabled(previousAimPreviewEnabled);
+      }
+    } else if (script === "wall-range") {
       await this.scenario({ name: "wall-range", freshSuperflat: true });
       startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
       steps.push("superflat wall-range");

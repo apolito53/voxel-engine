@@ -621,6 +621,8 @@ const codexPilot = new CodexPilot({
   setAdsActive: (active) => {
     rightMouseButtonDown = active;
   },
+  getCoreAimPreviewEnabled: () => coreAimPreviewEnabled,
+  setCoreAimPreviewEnabled,
   resumePlayer: () => requirePlayer().resume(),
   startHitchPass: (label) => performanceHitchLog.startPass(label),
   getRecentHitches: () => performanceHitchLog.getRecent(),

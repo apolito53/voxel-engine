@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Added a `preview-parity` Codex Pilot and visual-test scenario that enables Core Aim Preview, exercises both Physics Core and Hitscan Core against a fresh Superflat wall, and records the run through the existing visual-test catalog.
+
 ## 0.6.24 - 2026-05-17
 
 ### Added

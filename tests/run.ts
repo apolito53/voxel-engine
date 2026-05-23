@@ -1159,6 +1159,12 @@ test("codex pilot normalizes high-level play commands into safe controller input
   assertNearlyEqual(aim.yaw, 0, 0.000001, "pilot zero-yaw aim should face negative z");
   assertNearlyEqual(aim.pitch, 0, 0.000001, "pilot flat aim should keep pitch level");
   assert(CODEX_PILOT_PLAY_SCRIPTS.includes("debris-grounding"), "pilot script list should include the debris visual repro");
+  assert(CODEX_PILOT_PLAY_SCRIPTS.includes("preview-parity"), "pilot script list should include the aim-preview parity run");
+  assertEqual(
+    normalizeCodexPilotPlayScriptId("preview-parity"),
+    "preview-parity",
+    "pilot script normalizer should accept the preview parity review run"
+  );
   assertEqual(
     normalizeCodexPilotPlayScriptId("hitscan-tunnel"),
     "hitscan-tunnel",
@@ -1174,9 +1180,19 @@ test("codex pilot normalizes high-level play commands into safe controller input
 test("visual test scenarios expose stable scripted review catalog", () => {
   const scenarios = listVisualTestScenarios();
   const ids = scenarios.map((scenario) => scenario.id);
+  assert(ids.includes("preview-parity"), "visual scenario catalog should include the aim-preview parity repro");
   assert(ids.includes("debris-grounding"), "visual scenario catalog should include the debris grounding repro");
   assert(ids.includes("hitscan-tunnel"), "visual scenario catalog should include the hitscan tunnel repro");
   assert(ids.includes("builder-fixture"), "visual scenario catalog should include a builder/admin fixture shot");
+
+  const previewScenario = getVisualTestScenario("aim-preview");
+  assertEqual(previewScenario.id, "preview-parity", "preview aliases should resolve to the parity scenario");
+  assertEqual(previewScenario.pilotScript, "preview-parity", "preview scenario should route to its matching pilot script");
+  assertEqual(
+    previewScenario.defaultOptions.label,
+    "scenario-preview-parity",
+    "preview scenario defaults should carry a review-friendly label"
+  );
 
   const debrisScenario = getVisualTestScenario("debris");
   assertEqual(debrisScenario.id, "debris-grounding", "scenario aliases should resolve to the canonical id");
