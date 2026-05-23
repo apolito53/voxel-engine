@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added a `debris-pressure` Codex Pilot and visual-test scenario that runs bounded multi-angle projectile-core bursts against a fresh Superflat wall to capture rigid debris pressure, sleep behavior, and hitch attribution in a repeatable review pass.
 - Added a `preview-parity` Codex Pilot and visual-test scenario that enables Core Aim Preview, exercises both Physics Core and Hitscan Core against a fresh Superflat wall, and records the run through the existing visual-test catalog.
 
 ## 0.6.24 - 2026-05-17

@@ -1160,6 +1160,7 @@ test("codex pilot normalizes high-level play commands into safe controller input
   assertNearlyEqual(aim.pitch, 0, 0.000001, "pilot flat aim should keep pitch level");
   assert(CODEX_PILOT_PLAY_SCRIPTS.includes("debris-grounding"), "pilot script list should include the debris visual repro");
   assert(CODEX_PILOT_PLAY_SCRIPTS.includes("preview-parity"), "pilot script list should include the aim-preview parity run");
+  assert(CODEX_PILOT_PLAY_SCRIPTS.includes("debris-pressure"), "pilot script list should include the debris pressure run");
   assertEqual(
     normalizeCodexPilotPlayScriptId("preview-parity"),
     "preview-parity",
@@ -1181,6 +1182,7 @@ test("visual test scenarios expose stable scripted review catalog", () => {
   const scenarios = listVisualTestScenarios();
   const ids = scenarios.map((scenario) => scenario.id);
   assert(ids.includes("preview-parity"), "visual scenario catalog should include the aim-preview parity repro");
+  assert(ids.includes("debris-pressure"), "visual scenario catalog should include the debris pressure repro");
   assert(ids.includes("debris-grounding"), "visual scenario catalog should include the debris grounding repro");
   assert(ids.includes("hitscan-tunnel"), "visual scenario catalog should include the hitscan tunnel repro");
   assert(ids.includes("builder-fixture"), "visual scenario catalog should include a builder/admin fixture shot");
@@ -1192,6 +1194,14 @@ test("visual test scenarios expose stable scripted review catalog", () => {
     previewScenario.defaultOptions.label,
     "scenario-preview-parity",
     "preview scenario defaults should carry a review-friendly label"
+  );
+
+  const pressureScenario = getVisualTestScenario("debris-stress");
+  assertEqual(pressureScenario.id, "debris-pressure", "pressure aliases should resolve to the debris pressure scenario");
+  assertEqual(pressureScenario.pilotScript, "debris-pressure", "pressure scenario should route to its matching pilot script");
+  assert(
+    (pressureScenario.defaultOptions.maxSeconds ?? 0) > (getVisualTestScenario("debris").defaultOptions.maxSeconds ?? 0),
+    "pressure review should reserve more time than the smaller debris grounding repro"
   );
 
   const debrisScenario = getVisualTestScenario("debris");

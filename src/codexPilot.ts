@@ -22,6 +22,7 @@ const TARGET_EYE_OFFSET = 0.45;
 export type CodexPilotWeapon = "selected" | "physics-core" | "hitscan-core";
 export const CODEX_PILOT_PLAY_SCRIPTS = [
   "preview-parity",
+  "debris-pressure",
   "wall-range",
   "debris-grounding",
   "hitscan-tunnel",
@@ -205,11 +206,14 @@ export class CodexPilot {
     this.hooks.noteActivity();
     if (
       name === "preview-parity" ||
+      name === "debris-pressure" ||
       name === "wall-range" ||
       name === "debris-grounding" ||
       name === "hitscan-tunnel"
     ) {
-      this.run(name === "hitscan-tunnel" ? "spawn wall stone 9 4" : "spawn wall stone 8 4");
+      this.run(name === "hitscan-tunnel" || name === "debris-pressure"
+        ? "spawn wall stone 9 4"
+        : "spawn wall stone 8 4");
     } else if (name === "builder-fixture") {
       this.run("spawn platform grass 9");
     } else if (name === "free-roam") {
@@ -343,6 +347,31 @@ export class CodexPilot {
         this.hooks.setAdsActive(false);
         this.hooks.setCoreAimPreviewEnabled(previousAimPreviewEnabled);
       }
+    } else if (script === "debris-pressure") {
+      await this.scenario({ name: "debris-pressure", freshSuperflat: true });
+      startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);
+      steps.push("superflat pressure wall");
+      await this.move({ forward: -1, seconds: 0.65, flight: true });
+      steps.push("backed up for debris pressure view");
+
+      // This run is intentionally louder than debris-grounding, but still
+      // bounded: three short bursts from slightly different sightlines produce
+      // enough active shards to exercise rigid debris pressure without turning
+      // every automation run into a user-hostile stress test.
+      await this.fire({ weapon: "physics-core", count: 6, intervalMs: 140 });
+      steps.push("center projectile burst");
+      await this.move({ right: 1, seconds: 0.35, flight: true });
+      await this.fire({ weapon: "physics-core", count: 5, intervalMs: 130 });
+      steps.push("right-angle projectile burst");
+      await this.move({ right: -1, seconds: 0.7, flight: true });
+      await this.fire({ weapon: "physics-core", count: 5, intervalMs: 130 });
+      steps.push("left-angle projectile burst");
+
+      await wait(2200);
+      steps.push("pressure settle window");
+      await this.move({ right: 1, seconds: 0.45, flight: true });
+      await this.move({ right: -1, seconds: 0.45, flight: true });
+      steps.push("debris pressure parallax sweep");
     } else if (script === "wall-range") {
       await this.scenario({ name: "wall-range", freshSuperflat: true });
       startedPass = this.hooks.startHitchPass(`codex-pilot-${script}`);

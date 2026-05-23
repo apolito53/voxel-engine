@@ -37,6 +37,21 @@ const VISUAL_TEST_SCENARIOS: readonly VisualTestScenario[] = [
     }
   },
   {
+    id: "debris-pressure",
+    title: "Debris Pressure",
+    description: "Fresh Superflat wall, bounded multi-angle projectile-core bursts, settle watch, and parallax sweep for reviewing rigid debris pressure, sleep behavior, and hitch attribution.",
+    pilotScript: "debris-pressure",
+    tags: ["debris", "physics-core", "pressure", "performance"],
+    aliases: ["pressure", "stress", "debris-stress"],
+    defaultOptions: {
+      label: "scenario-debris-pressure",
+      fps: 30,
+      frameSampleFps: 1,
+      maxSeconds: 34,
+      settleMs: 1800
+    }
+  },
+  {
     id: "debris-grounding",
     title: "Debris Grounding",
     description: "Fresh Superflat wall, repeated projectile-core impacts, settle watch, and parallax sweep for debris clipping/ground contact review.",
