@@ -1,0 +1,129 @@
+# Destruction, Debris, And Rubble
+
+This page describes the current gameplay contract for terrain damage. Durable
+terrain state is owned by partial-block damage. Loose debris is visual feedback.
+
+## Terrain Damage
+
+Ordinary terrain blocks have 10 HP. Core impacts above 2 m/s carve one health
+step by removing hidden cells from a 3x3x3 bite lattice inside the macro block.
+That lattice is presentation and targeting resolution, not a global tiny-voxel
+world.
+
+The visible fill tracks remaining HP. A block at 7/10 HP keeps roughly 70% of
+its presentation lattice. Removed bite cells persist and grow through
+face-adjacent neighbors, so later hits cannot visually refill older damage or
+create isolated disconnected holes.
+
+Damage is applied through a sparse brush:
+
+- Centered hits usually touch only the struck macro block.
+- Seam and corner hits can promote only overlapped neighboring macro blocks into
+  their own partial bite lattices.
+- One impact damage/material budget is shared across touched macro blocks by
+  overlap.
+- Affected sub-voxels stay face-adjacent in world space so seams do not produce
+  disconnected damage islands.
+
+Chipped cells stay full-cube for player collision and raycast until the block
+breaks, but projectile and hitscan cores collide against the remaining
+bite-lattice material. Shots can pass through visual tunnels while still hitting
+visible partial material in front.
+
+Final fractures release only the block material still left inside, clear the
+bite mesh, and leave air instead of stamping the old wrinkled surface puddle.
+Carved shapes are not persisted to saves yet; leaving the active world clears
+partial-block state.
+
+## Projectile And Hitscan Cores
+
+Physics Core:
+
+- Throws a swept projectile from the lowered right-side muzzle.
+- Uses the configured projectile core size and velocity.
+- Holding right click uses centered reticle ADS with a slight 15% zoom.
+- Small fast cores can pierce through a complete bite-lattice tunnel when the
+  exit cell is air, then continue with reduced speed.
+
+Hitscan Core:
+
+- Fires an instant 10%-radius, 500%-speed core trace.
+- Uses the same partial-block bite and piercing rules as projectile cores.
+- Repeats tunnel continuation instantly along the trace.
+- Clears loose debris VFX along the beam without blocking terrain drilling.
+- Draws a short additive energy-beam flash along the shot line.
+
+Core radius and impact trajectory rank bite cells. Tiny cores drill narrow
+lattice columns. Larger cores chew broader connected face footprints before
+reaching deeper cells.
+
+## Core Aim Preview
+
+`F6` toggles Core Aim Preview:
+
+- Physics Core draws a dotted ballistic arc.
+- Hitscan Core draws a straight dotted beam.
+- Both show the predicted impact ring and 3x3x3 bite cells for the next terrain
+  hit.
+- Visible cells draw bright white; hidden/far-side cells draw as a softer red
+  ghost.
+
+The preview is a debug aid, not durable gameplay state.
+
+## Debris VFX
+
+Loose block debris is temporary VFX in the normal runtime.
+
+Visible low-poly shards burst apart as smaller Rapier cuboids, collide against
+each other, terrain, support colliders, and explicit collision boxes generated
+from surviving partial-block lattice cells. They sleep while inside the
+player-centered active debris bubble and can wake when hit by cores or active
+shards.
+
+Debris presentation is material-budgeted:
+
+- Physics Core carving treats a full block as `1.0` normalized block-volume.
+- Remaining material is derived from remaining HP.
+- Each visible shard carries at most 70% of one 3x3x3 damage-lattice subvoxel's
+  material.
+- No visual axis can exceed 60% of a subvoxel edge.
+- The sum of conservative visual shard volume stays within the material removed
+  by the hit.
+
+The `Max Break Debris` slider is a visible shard ceiling for full-block debris
+density and also scales ordinary chip bursts. It is not a promise that every
+tiny hit spawns the full value.
+
+Debris ejection prefers exposed bite openings or drilled tunnel exits so chips
+spray out of wounds instead of filling them. Stale never-grounded floaters and
+trapped tunnel/partial-block clutter force-poof after a grace window.
+
+## Debris Budgets And Cleanup
+
+The ground-debris settings govern aftermath:
+
+- Full bursts can exceed the ground cap while airborne.
+- Excess sleeping regions are culled after they settle.
+- Timed-out shards disappear in a material-tinted poof after first ground
+  contact unless lifetime is set to `Forever`.
+- Distance and pressure cleanup can still remove shards even when lifetime is
+  `Forever`.
+- Extreme airborne bursts can drop farthest active shards once they exceed the
+  rigid-body cap.
+- Sustained sub-60 FPS with heavy debris pressure can temporarily lower the
+  effective rigid-debris cap until frames recover.
+
+`Despawn All Objects` performs the full cleanup path and releases physics cores,
+loose debris VFX, and any existing rubble cover.
+
+## Parked Rubble Mechanics
+
+`RubbleField` and the older material-preserving bake-out helpers remain parked
+for experiments and tests. They include destructible cover patches, hidden
+support footprints, baked shard visuals, scaled durability, core collision,
+walkable partial-height support queries, fall/merge behavior, and promotion into
+the generated `Rubble` block.
+
+The active gameplay direction is partial-block terrain damage plus debris VFX,
+not automatic settled rubble piles. Do not reintroduce automatic debris-to-rubble
+bake-out unless that mechanic is deliberately revived.

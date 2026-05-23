@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-05-17
+Last reviewed: 2026-05-23
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -30,6 +30,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 ## Fast Lookup
 
+- Project front door, quick start, ports, short control map, and links to focused docs: `README.md`
+- Focused docs index and living user/developer references split out of the root README: `docs/README.md`, `docs/controls.md`, `docs/destruction.md`, `docs/nova-companion.md`, `docs/performance-hitch-logging.md`, `docs/automation.md`
 - App bootstrap, render loop, input glue, world lifecycle orchestration, terrain/rubble target selection, partial-block mesh updates, damage indicator wiring, and WebGL runtime teardown: `src/main.ts`
 - HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
