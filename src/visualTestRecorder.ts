@@ -1,4 +1,9 @@
-import type { PerformanceHitchLogPass } from "./performanceHitchLog";
+import type { CodexPilotSnapshot } from "./codexPilot";
+import type {
+  PerformanceHitchLogPass,
+  PerformanceHitchRecord,
+  PerformanceHitchStatsSnapshot
+} from "./performanceHitchLog";
 import type { VisualTestScenarioSummary } from "./visualTestScenarios";
 import packageManifest from "../package.json";
 
@@ -18,6 +23,7 @@ const DEFAULT_POST_RUN_SETTLE_MS = 1200;
 const MIN_POST_RUN_SETTLE_MS = 0;
 const MAX_POST_RUN_SETTLE_MS = 10000;
 const MAX_SAMPLED_FRAMES = 240;
+export const VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES = 8;
 const FRAME_SAMPLE_MIME_TYPE = "image/webp";
 const FRAME_SAMPLE_QUALITY = 0.82;
 
@@ -78,6 +84,28 @@ export type NormalizedVisualPilotRecordOptions = NormalizedVisualTestRecorderOpt
   readonly settleMs: number;
 };
 
+export type VisualTestScenarioHitchSummary = {
+  readonly kind: PerformanceHitchRecord["kind"];
+  readonly id: number;
+  readonly frameMs: number;
+  readonly observedFps?: number;
+  readonly primaryBucket: PerformanceHitchRecord["primaryBucket"];
+  readonly summary: string;
+  readonly details: readonly string[];
+};
+
+export type VisualTestScenarioRuntimeSnapshot = {
+  readonly capturedAtIso: string;
+  readonly scenario: VisualTestScenarioSummary;
+  readonly worldActive: boolean;
+  readonly selectedItemLabel: string | null;
+  readonly qualityLabel: string;
+  readonly currentHitchPass: PerformanceHitchLogPass | null;
+  readonly pilot: CodexPilotSnapshot | null;
+  readonly stats: PerformanceHitchStatsSnapshot | null;
+  readonly recentHitches: readonly VisualTestScenarioHitchSummary[];
+};
+
 type VisualFrameSample = {
   readonly index: number;
   readonly capturedAtMs: number;
@@ -102,6 +130,7 @@ export type VisualTestRecorderApi = {
   start(options?: VisualTestRecorderOptions): Promise<VisualTestRecorderSnapshot>;
   stop(options?: VisualTestRecorderStopOptions): Promise<VisualTestUploadResult>;
   listScenarios(): readonly VisualTestScenarioSummary[];
+  scenarioSnapshot(id?: string): VisualTestScenarioRuntimeSnapshot;
   recordScenario(id?: string, options?: VisualPilotRecordOptions): Promise<unknown>;
   recordPilotPlay(script?: string, options?: VisualPilotRecordOptions): Promise<unknown>;
 };
@@ -321,6 +350,23 @@ export function normalizeVisualPilotRecordOptions(
   };
 }
 
+export function summarizeVisualTestScenarioHitches(
+  records: readonly PerformanceHitchRecord[],
+  limit = VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES
+): readonly VisualTestScenarioHitchSummary[] {
+  const safeLimit = Math.max(0, Math.floor(limit));
+  if (safeLimit === 0) return [];
+  return records.slice(-safeLimit).map((record) => ({
+    kind: record.kind,
+    id: record.id,
+    frameMs: roundSnapshotNumber(record.frameMs),
+    observedFps: record.observedFps === undefined ? undefined : roundSnapshotNumber(record.observedFps),
+    primaryBucket: record.primaryBucket,
+    summary: record.summary,
+    details: record.details
+  }));
+}
+
 function canRecordCanvas(canvas: HTMLCanvasElement): canvas is HTMLCanvasElement & {
   captureStream: (frameRate?: number) => MediaStream;
 } {
@@ -412,4 +458,8 @@ function sanitizeVisualTestLabel(value: string): string {
 function clampFinite(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function roundSnapshotNumber(value: number): number {
+  return Math.round(value * 100) / 100;
 }

@@ -36,7 +36,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Admin command parsing/routing, Superflat Lab launcher hook, and spawnable terrain fixtures used by Nova Terminal and the Builder panel for repeatable testing: `src/adminCommands.ts`
 - F8 scripted runtime avatar for in-browser gameplay smoke checks, including health-aware repeated core shots for sturdy terrain: `src/testAvatar.ts`
 - Browser automation play bridge exposed as `globalThis.__VOXEL_CODEX_PILOT__`, with high-level Superflat/scenario/move/look/fire/play commands that still drive real player and hotbar systems: `src/codexPilot.ts`
-- Local visual test recorder exposed as `globalThis.__VOXEL_VISUAL_TEST__`, with named scenario listing, WebM canvas capture, sampled review frames, pilot-play/scenario recording, and upload to `logs/visual-runs/` through the `5174` debug receiver: `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`
+- Local visual test recorder exposed as `globalThis.__VOXEL_VISUAL_TEST__`, with named scenario listing, compact scenario runtime snapshots, WebM canvas capture, sampled review frames, pilot-play/scenario recording, and upload to `logs/visual-runs/` through the `5174` debug receiver: `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`
 - Floating health-bar projection for damaged terrain/rubble targets; visibility is gated by the pause-menu `Health Bars` toggle in `src/main.ts`: `src/damageIndicators.ts`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`

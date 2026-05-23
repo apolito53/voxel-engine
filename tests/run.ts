@@ -269,6 +269,7 @@ import {
   createPerformanceHitchRecord,
   formatPerformanceHitchRecord,
   PerformanceHitchLog,
+  type PerformanceHitchRecord,
   type PerformanceHitchStatsSnapshot
 } from "../src/performanceHitchLog";
 import {
@@ -349,8 +350,10 @@ import {
   normalizeCodexPilotWeapon
 } from "../src/codexPilot";
 import {
+  VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES,
   normalizeVisualPilotRecordOptions,
-  normalizeVisualTestRecorderOptions
+  normalizeVisualTestRecorderOptions,
+  summarizeVisualTestScenarioHitches
 } from "../src/visualTestRecorder";
 import {
   getVisualTestScenario,
@@ -1256,6 +1259,45 @@ test("visual test recorder normalizes capture options safely", () => {
   assertEqual(pilotOptions.frameSampleFps, 4, "frame samples should cap before screenshots become the performance bug");
   assertEqual(pilotOptions.maxSeconds, 1, "maxSeconds should keep a one-second lower bound");
   assertEqual(pilotOptions.settleMs, 10000, "pilot recordings should clamp post-run settle time");
+});
+
+test("visual test scenario hitch summaries stay compact for manifests", () => {
+  const records: PerformanceHitchRecord[] = [];
+  for (let index = 0; index < VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES + 2; index += 1) {
+    records.push(createPerformanceHitchRecord(index, 1000 + index, {
+      kind: index % 2 === 0 ? "frame-hitch" : "low-fps",
+      frameMs: 47.123 + index,
+      observedFps: 48.456 - index,
+      timings: {
+        ...createEmptyFrameTimings(),
+        physicsMs: 35 + index,
+        frameMs: 47.123 + index
+      },
+      stats: createTestHitchStats({
+        fragmentRender: {
+          batches: 2,
+          instances: 100 + index,
+          capacity: 128
+        }
+      })
+    }));
+  }
+
+  const summaries = summarizeVisualTestScenarioHitches(records);
+  assertEqual(
+    summaries.length,
+    VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES,
+    "scenario manifests should keep only the latest compact hitch summaries"
+  );
+  assertEqual(summaries[0]?.id, 2, "summary trimming should keep the newest records");
+  assertEqual(summaries[summaries.length - 1]?.id, records.length - 1, "summary trimming should include the latest record");
+  assertEqual(
+    summaries[summaries.length - 1]?.frameMs,
+    56.12,
+    "manifest hitch frame times should be rounded for compact JSON"
+  );
+  assert(!("stats" in (summaries[0] ?? {})), "manifest hitch summaries should omit heavy nested stats");
+  assertEqual(summarizeVisualTestScenarioHitches(records, 0).length, 0, "zero summary limit should return no hitches");
 });
 
 test("block color variants are deterministic and stay tied to block identity", () => {

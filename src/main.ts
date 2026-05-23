@@ -125,7 +125,8 @@ import {
   LOW_FPS_LOG_THRESHOLD,
   PerformanceHitchLog,
   type PerformanceHitchLogPass,
-  type PerformanceHitchRecord
+  type PerformanceHitchRecord,
+  type PerformanceHitchStatsSnapshot
 } from "./performanceHitchLog";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
@@ -242,13 +243,16 @@ import {
 import {
   VisualTestRecorder,
   normalizeVisualPilotRecordOptions,
+  summarizeVisualTestScenarioHitches,
   type VisualPilotRecordOptions,
-  type VisualTestRecorderApi
+  type VisualTestRecorderApi,
+  type VisualTestScenarioRuntimeSnapshot
 } from "./visualTestRecorder";
 import {
   getVisualTestScenario,
   listVisualTestScenarios,
-  type VisualTestScenario
+  type VisualTestScenario,
+  type VisualTestScenarioSummary
 } from "./visualTestScenarios";
 import {
   VoxelWorld,
@@ -644,6 +648,7 @@ voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = {
   }),
   stop: (options) => visualTestRecorder.stop(options),
   listScenarios: () => listVisualTestScenarios(),
+  scenarioSnapshot: (id) => createVisualScenarioSnapshot(getVisualTestScenario(id)),
   recordScenario,
   recordPilotPlay
 };
@@ -1758,6 +1763,48 @@ async function recordPilotPlay(script = "wall-range", options: VisualPilotRecord
   }, "pilot-play");
 }
 
+function createVisualScenarioSnapshot(scenario: VisualTestScenario): VisualTestScenarioRuntimeSnapshot {
+  return {
+    capturedAtIso: new Date().toISOString(),
+    scenario: getVisualScenarioSummary(scenario),
+    worldActive: inWorld,
+    selectedItemLabel: inWorld ? getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry) : null,
+    qualityLabel: getVisualRecorderQualityLabel(),
+    currentHitchPass: performanceHitchLog.getPass(),
+    pilot: inWorld ? codexPilot.snapshot() : null,
+    stats: createCurrentPerformanceStatsSnapshot(),
+    recentHitches: summarizeVisualTestScenarioHitches(performanceHitchLog.getRecent())
+  };
+}
+
+function getVisualScenarioSummary(scenario: VisualTestScenario): VisualTestScenarioSummary {
+  const summary = listVisualTestScenarios().find((candidate) => candidate.id === scenario.id);
+  if (!summary) {
+    throw new Error(`Visual test scenario ${scenario.id} is missing from the public scenario list.`);
+  }
+  return summary;
+}
+
+function createCurrentPerformanceStatsSnapshot(
+  overrides: Partial<Pick<PerformanceHitchStatsSnapshot, "world" | "partialMesh" | "rubble">> = {}
+): PerformanceHitchStatsSnapshot | null {
+  if (!inWorld) return null;
+  return {
+    qualityLabel: qualityController.preset.label,
+    physicsObjectCount: toys.length,
+    physicsObjectBudget,
+    rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
+    debrisPressure: debrisPerformancePressure,
+    world: overrides.world ?? requireWorld().getStats(),
+    physics: physicsCollisionStats,
+    rigidDebris: rigidDebrisStats,
+    fragmentRender: physicsFragmentInstancer.getStats(),
+    partialMesh: overrides.partialMesh ?? partialBlockMeshField.getStats(),
+    debrisSettler: debrisSettlerStats,
+    rubble: overrides.rubble ?? rubbleField.getStats()
+  };
+}
+
 async function recordVisualScenario(
   scenario: VisualTestScenario,
   options: VisualPilotRecordOptions,
@@ -1772,6 +1819,7 @@ async function recordVisualScenario(
     }
   });
   performanceHitchLog.startPass(`visual-${normalizedOptions.label}`);
+  const beforeSnapshot = createVisualScenarioSnapshot(scenario);
   await visualTestRecorder.start({
     ...normalizedOptions,
     logPass: performanceHitchLog.getPass(),
@@ -1781,27 +1829,33 @@ async function recordVisualScenario(
       scenarioTitle: scenario.title,
       scenarioTags: scenario.tags,
       pilotScript: scenario.pilotScript,
-      recorderKind
+      recorderKind,
+      beforeSnapshot
     }
   });
 
   try {
     const pilotResult = await codexPilot.play(scenario.pilotScript);
     if (normalizedOptions.settleMs > 0) await waitForMilliseconds(normalizedOptions.settleMs);
+    const afterSnapshot = createVisualScenarioSnapshot(scenario);
     const recording = await visualTestRecorder.stop({
       status: "passed",
-      metadata: { pilotResult }
+      metadata: { pilotResult, beforeSnapshot, afterSnapshot }
     });
-    return { scenario, pilotResult, recording };
+    return { scenario, pilotResult, beforeSnapshot, afterSnapshot, recording };
   } catch (error) {
+    const failureSnapshot = createVisualScenarioSnapshot(scenario);
     const recording = visualTestRecorder.snapshot().status === "recording"
       ? await visualTestRecorder.stop({
           status: "failed",
-          error: error instanceof Error ? error.message : "Pilot visual recording failed."
+          error: error instanceof Error ? error.message : "Pilot visual recording failed.",
+          metadata: { beforeSnapshot, failureSnapshot }
         })
       : null;
     return {
       scenario,
+      beforeSnapshot,
+      failureSnapshot,
       recording,
       error: error instanceof Error ? error.message : String(error)
     };
