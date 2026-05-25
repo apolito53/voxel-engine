@@ -89,6 +89,7 @@ keeps parked feature ideas visible without pretending they are current scope.
 
 ```powershell
 npm.cmd run typecheck
+npm.cmd run source:check
 npm.cmd run docs:check
 npm.cmd run test
 npm.cmd run build
@@ -96,7 +97,8 @@ git diff --check
 ```
 
 `npm.cmd run test` also runs the Markdown docs-link check, so broken local
-README/docs references fail alongside the engine robustness tests.
+README/docs references and TypeScript source-hygiene regressions fail alongside
+the engine robustness tests.
 `npm.cmd run validate` runs the normal test, production build, and whitespace
 diff check sequence in one pass.
 

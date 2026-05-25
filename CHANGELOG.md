@@ -8,6 +8,8 @@
   anchors are validated instead of skipped.
 - Added `npm.cmd run validate` as a one-command local validation pass for tests,
   production build, and whitespace diff checks.
+- Added `npm.cmd run source:check` and wired it into `npm.cmd run test` so
+  `src` stays free of `@ts-nocheck`, `@ts-ignore`, and explicit `any`.
 
 ## 0.6.25 - 2026-05-24
 
