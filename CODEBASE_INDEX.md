@@ -25,6 +25,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Markdown docs link check: `npm.cmd run docs:check`
 - Engine robustness tests: `npm.cmd run test`
 - Production build: `npm.cmd run build`
+- Standard local validation pass: `npm.cmd run validate`
 - Preview build: `npm.cmd run preview -- --port 4173`
 - TypeScript migration plan: `python .\scripts\ts_migration.py plan`
 - TypeScript migration audit: `python .\scripts\ts_migration_audit.py`

@@ -6,6 +6,8 @@
   broken local README/docs Markdown links fail during normal validation.
 - Tightened the docs-link checker so same-file and cross-file Markdown heading
   anchors are validated instead of skipped.
+- Added `npm.cmd run validate` as a one-command local validation pass for tests,
+  production build, and whitespace diff checks.
 
 ## 0.6.25 - 2026-05-24
 
