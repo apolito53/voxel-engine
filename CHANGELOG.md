@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.6.27 - 2026-05-25
+
+### Changed
+
+- Saved worlds now carry terrain-profile provenance so older edited worlds keep
+  streaming legacy `classic` chunks instead of mixing old saved chunk snapshots
+  with newly generated varied-profile neighbors.
+- Chunk-worker generation now receives the saved world's terrain profile, keeping
+  async streamed chunks aligned with the main-thread terrain context.
+- Tuned the varied terrain profile so sandy washes stay present without turning
+  common generated worlds into broad desert blankets, and softened terracing so
+  high ground reads less like a contour map.
+
 ## 0.6.26 - 2026-05-25
 
 ### Added

@@ -1,4 +1,5 @@
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
+import { isSuperflatSeed, type TerrainProfile } from "./terrain";
 
 const DATABASE_NAME = "voxel-engine";
 const DATABASE_VERSION = 1;
@@ -10,12 +11,14 @@ const ACTIVE_WORLD_KEY = "active-world";
 const DEFAULT_WORLD_ID = "default";
 const DEFAULT_WORLD_NAME = "Default World";
 const DEFAULT_WORLD_SEED = "";
+const VARIED_TERRAIN_PROFILE_INTRODUCED_AT = Date.UTC(2026, 4, 25, 4, 31, 0);
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
 
 export type SavedWorld = {
   readonly id: string;
   name: string;
   seed: string;
+  terrainProfile: TerrainProfile;
   createdAt: number;
   updatedAt: number;
   playerState?: SavedPlayerState;
@@ -479,10 +482,12 @@ export class WorldRegistry {
 
   async createWorld(name: string, seed: string): Promise<SavedWorld> {
     const now = Date.now();
-    const world = {
+    const worldSeed = sanitizeWorldSeed(seed) || createRandomSeed(now);
+    const world: SavedWorld = {
       id: createWorldId(now),
       name: sanitizeWorldName(name),
-      seed: sanitizeWorldSeed(seed) || createRandomSeed(now),
+      seed: worldSeed,
+      terrainProfile: getNewWorldTerrainProfile(worldSeed),
       createdAt: now,
       updatedAt: now
     };
@@ -521,6 +526,7 @@ export class WorldRegistry {
       id: DEFAULT_WORLD_ID,
       name: DEFAULT_WORLD_NAME,
       seed: DEFAULT_WORLD_SEED,
+      terrainProfile: "classic",
       createdAt: now,
       updatedAt: now
     });
@@ -585,14 +591,18 @@ function sanitizeWorldSeed(seed: unknown): string {
 
 function normalizeWorld(world: unknown): SavedWorld | null {
   if (!isRecord(world) || typeof world.id !== "string") return null;
+  const seed = sanitizeWorldSeed(world.seed);
+  const createdAt = readTimestamp(world.createdAt);
+  const updatedAt = readTimestamp(world.updatedAt);
 
   // Normalize on read so future metadata additions can be optional and backwards-compatible.
   const normalizedWorld: SavedWorld = {
     id: world.id,
     name: sanitizeWorldName(world.name),
-    seed: sanitizeWorldSeed(world.seed),
-    createdAt: readTimestamp(world.createdAt),
-    updatedAt: readTimestamp(world.updatedAt)
+    seed,
+    terrainProfile: normalizeSavedTerrainProfile(world.terrainProfile, seed, createdAt),
+    createdAt,
+    updatedAt
   };
 
   const playerState = normalizeSavedPlayerState(world.playerState);
@@ -609,6 +619,25 @@ function cloneSavedWorld(world: SavedWorld): SavedWorld {
   const clonedWorld: SavedWorld = { ...world };
   if (world.playerState) clonedWorld.playerState = cloneSavedPlayerState(world.playerState);
   return clonedWorld;
+}
+
+export function getNewWorldTerrainProfile(seed: string): TerrainProfile {
+  return isSuperflatSeed(seed) ? "classic" : "varied";
+}
+
+export function normalizeSavedTerrainProfile(
+  value: unknown,
+  seed = "",
+  createdAt = 0
+): TerrainProfile {
+  if (value === "varied" || value === "classic") return value;
+  if (!seed || isSuperflatSeed(seed)) return "classic";
+
+  // Legacy saved worlds predate terrain-profile metadata, so keep them on the
+  // old seeded generator instead of mixing saved old chunks with newly streamed
+  // varied-profile neighbors. Worlds created during the short v0.6.26 window
+  // after varied terrain shipped but before this metadata existed stay varied.
+  return createdAt >= VARIED_TERRAIN_PROFILE_INTRODUCED_AT ? "varied" : "classic";
 }
 
 function readTimestamp(value: unknown): number {

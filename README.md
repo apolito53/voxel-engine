@@ -13,10 +13,13 @@ Clear this site's browser data to reset saved worlds. The home screen creates,
 loads, and deletes local saved worlds; `Superflat Lab` creates a flat test world
 using the reserved `superflat` seed.
 
-Random saved-world seeds use the newer varied terrain profile with broader
-plains, ridges, sandy washes, terraced high ground, and rocky highlands. The
-empty seed shown as `classic` in the save list keeps the original rolling terrain
-shape for old default worlds, and `superflat` remains reserved for test labs.
+New saved-world seeds use the newer varied terrain profile with broader plains,
+ridges, sandy washes, terraced high ground, and rocky highlands. Existing saved
+worlds without terrain-profile metadata stay on the legacy `classic` generator
+so full edited chunk snapshots do not border newly streamed terrain from a
+different profile. The varied profile keeps sand focused on lowlands and wash
+channels so generated worlds still read primarily as traversable grass and
+highland terrain; `superflat` remains reserved for test labs.
 
 ## Quick Start
 

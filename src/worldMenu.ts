@@ -33,7 +33,7 @@ export async function renderHomeWorldList(
       button.append(
         createWorldSlotLine("world-slot-name", savedWorld.name),
         createWorldSlotLine("world-slot-meta", formatWorldMeta(savedWorld, isActive)),
-        createWorldSlotLine("world-slot-seed", `Seed: ${savedWorld.seed || "classic"}`)
+        createWorldSlotLine("world-slot-seed", `Seed: ${savedWorld.seed || "classic"} | Terrain: ${savedWorld.terrainProfile}`)
       );
       row.append(button);
 

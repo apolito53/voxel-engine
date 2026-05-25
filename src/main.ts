@@ -752,7 +752,8 @@ async function startApp(): Promise<void> {
     const initialWorld = await worldRegistry.getActiveWorld();
     world = new VoxelWorld({
       storage: await createChunkStorage(initialWorld.id),
-      seed: initialWorld.seed
+      seed: initialWorld.seed,
+      terrainProfile: initialWorld.terrainProfile
     });
     await world.loadSavedChunkIndex();
 
@@ -3259,7 +3260,7 @@ async function loadWorld(worldId: string): Promise<void> {
     const loadOrigin = savedWorld.playerState?.feetPosition ?? { x: 2, z: 2 };
 
     // Loading from the home screen is the only place world slots swap into the active engine.
-    await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed);
+    await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     partialBlockMeshField.clear();
     renderedPartialBlockRevision = -1;
     await activeWorld.preloadSavedChunksAround(

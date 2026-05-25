@@ -247,6 +247,8 @@ import {
 import {
   createMemorySaveDatabase,
   createWorldRegistry,
+  getNewWorldTerrainProfile,
+  normalizeSavedTerrainProfile,
   type ChunkStorage
 } from "../src/chunkStorage";
 import { parseChangelogEntries } from "../src/changelog";
@@ -1029,23 +1031,45 @@ test("terrain generation is deterministic by seed", () => {
   assert(hasAnyDifference(alphaChunkA, betaChunk), "different seed should generate a different chunk payload");
 });
 
+test("classic terrain profile preserves legacy seeded terrain separately from varied terrain", () => {
+  const classicTerrain = createTerrainContext("legacy-profile-seed", "classic");
+  const variedTerrain = createTerrainContext("legacy-profile-seed", "varied");
+
+  assertEqual(classicTerrain.profile, "classic", "explicit classic profile should stay on the old generator lane");
+  assertEqual(variedTerrain.profile, "varied", "explicit varied profile should stay on the new generator lane");
+  assert(
+    getTerrainHeight(11, -7, classicTerrain) !== getTerrainHeight(11, -7, variedTerrain) ||
+      getTerrainHeight(41, 19, classicTerrain) !== getTerrainHeight(41, 19, variedTerrain),
+    "terrain profile should affect generated height for the same seed"
+  );
+
+  const classicChunk = generateChunkBlocks(1, -2, classicTerrain);
+  const variedChunk = generateChunkBlocks(1, -2, variedTerrain);
+  assert(hasAnyDifference(classicChunk, variedChunk), "terrain profiles should not collapse to the same chunk payload");
+});
+
 test("seeded terrain generation creates varied landforms and surfaces", () => {
   const terrain = createTerrainContext("landform-test");
   const heights: number[] = [];
   const surfaceBlocks = new Set<BlockId>();
+  const surfaceCounts = new Map<BlockId, number>();
 
   assertEqual(terrain.profile, "varied", "non-special generated seeds should use the varied terrain profile");
 
   for (let z = -160; z <= 160; z += 8) {
     for (let x = -160; x <= 160; x += 8) {
       const height = getTerrainHeight(x, z, terrain);
+      const surfaceBlock = getTerrainSurfaceBlock(x, z, height, terrain);
       heights.push(height);
-      surfaceBlocks.add(getTerrainSurfaceBlock(x, z, height, terrain));
+      surfaceBlocks.add(surfaceBlock);
+      surfaceCounts.set(surfaceBlock, (surfaceCounts.get(surfaceBlock) ?? 0) + 1);
     }
   }
 
   const minHeight = Math.min(...heights);
   const maxHeight = Math.max(...heights);
+  const grassSurfaces = surfaceCounts.get(BLOCK.grass) ?? 0;
+  const sandSurfaces = surfaceCounts.get(BLOCK.sand) ?? 0;
 
   assert(minHeight >= 2, "varied terrain should leave a solid lower bound above the world floor");
   assert(maxHeight <= WORLD_HEIGHT - 6, "varied terrain should leave air above the tallest generated land");
@@ -1053,6 +1077,7 @@ test("seeded terrain generation creates varied landforms and surfaces", () => {
   assert(surfaceBlocks.has(BLOCK.grass), "varied terrain should still produce grassy playable ground");
   assert(surfaceBlocks.has(BLOCK.sand), "varied terrain should create sandy lowlands or washes");
   assert(surfaceBlocks.has(BLOCK.stone), "varied terrain should expose rocky highland surfaces");
+  assert(grassSurfaces > sandSurfaces, "varied terrain should not let sandy washes dominate the common surface");
 });
 
 test("superflat terrain seed creates a flat test lab surface", () => {
@@ -2556,6 +2581,30 @@ test("world registry deletes saved worlds and their edited chunks", async () => 
   );
 });
 
+test("world registry stores terrain profile provenance", async () => {
+  const database = createMemorySaveDatabase();
+  const registry = await createWorldRegistry(database);
+  const defaultWorld = await registry.getActiveWorld();
+  const variedWorld = await registry.createWorld("Varied Terrain", "new-terrain-seed");
+  const superflatWorld = await registry.createWorld("Flat Lab", SUPERFLAT_WORLD_SEED);
+
+  assertEqual(defaultWorld.terrainProfile, "classic", "the built-in default world should remain classic");
+  assertEqual(variedWorld.terrainProfile, "varied", "new ordinary worlds should opt into varied terrain");
+  assertEqual(superflatWorld.terrainProfile, "classic", "superflat lab worlds should stay on the classic test profile");
+  assertEqual(getNewWorldTerrainProfile("fresh-seed"), "varied", "new seeded worlds should use varied terrain");
+  assertEqual(getNewWorldTerrainProfile(SUPERFLAT_WORLD_SEED), "classic", "superflat seed should keep the lab profile");
+  assertEqual(
+    normalizeSavedTerrainProfile(undefined, "legacy-seed", 1),
+    "classic",
+    "older saved worlds without metadata should stay on the legacy terrain profile"
+  );
+  assertEqual(
+    normalizeSavedTerrainProfile(undefined, "fresh-seed", Date.UTC(2026, 4, 25, 4, 32, 0)),
+    "varied",
+    "worlds created during the brief pre-metadata varied terrain window should stay varied"
+  );
+});
+
 test("world registry stores player location with saved-world metadata", async () => {
   const database = createMemorySaveDatabase();
   const registry = await createWorldRegistry(database);
@@ -2596,6 +2645,7 @@ test("delete-world dialog copy names the save and warns about permanence", () =>
     id: "world-copy-test",
     name: "Definitely Important",
     seed: "copy-seed",
+    terrainProfile: "varied",
     createdAt: 1,
     updatedAt: 2
   });

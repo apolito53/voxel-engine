@@ -67,11 +67,11 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Short-lived material-tinted poofs shared by partial-block bite-cell destruction feedback and grounded debris cleanup: `src/debrisPoof.ts`
 - Parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments: `src/fragmentRubble.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
-- IndexedDB storage adapter for saved worlds, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths, including the empty-seed `classic` terrain profile, varied random-seed landforms, and the reserved `superflat` test-world seed: `src/terrain.ts`
+- IndexedDB storage adapter for saved worlds, saved terrain-profile provenance, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
+- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, varied new-world landforms, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
-- Shared chunk worker request/result message contracts, including partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
-- Worker-side chunk terrain generation and greedy mesh buffer building, including partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkWorker.ts`
+- Shared chunk worker request/result message contracts, including terrain-profile generation provenance and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
+- Worker-side chunk terrain generation and greedy mesh buffer building, including terrain-profile-aware generation caches and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkWorker.ts`
 - Chunk ownership, worker scheduling, cached chunk-window streaming/unloading, dirty/modified chunk indexes, reads/writes, sparse block damage, partial-block carve state, coalesced chunk-save writes, idle pending-work reporting, and worker/chunk disposal: `src/world.ts`
 - Shared collision-world shape, collision bounds, and optional partial-height support contract used by player movement and loose debris physics: `src/collision.ts`
 - First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, pointer lock, input-listener disposal, voxel collision, and partial-height rubble stepping: `src/player.ts`
@@ -181,7 +181,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 - `.env.local` and `.vercel/` are local Vercel/Blob linkage artifacts and must stay untracked. The Blob token lets the CLI inspect private production hitches; do not echo it in chat or commit it.
 - Vercel serverless functions run as Node ESM after deployment; imports from `api/` into shared TypeScript modules need Node-resolvable `.js` specifiers even when the source file is `.ts`.
 - `VoxelWorld.savedChunkKeys` mirrors the persisted edited chunk index; `savedChunks` is only a cache of loaded edited chunk payloads.
-- Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format.
+- Saved worlds are local browser slots in IndexedDB; edited chunks persist as full binary chunk snapshots, which is simple and reliable but not a final save-file format. Because edited chunks are full snapshots, saved-world terrain-profile metadata must travel with the seed so old chunks do not border newly streamed chunks from a different generator profile.
 - Player resume location is saved as feet position plus yaw/pitch in saved-world metadata; avoid storing raw camera height or crouch view offsets, or crouched exits can reload into terrain.
 - Edited chunk saves are debounced and coalesced per chunk so rapid destruction does not spam IndexedDB with intermediate snapshots; call `VoxelWorld.flushStorageWrites()` before switching storage or unloading a world.
 - Worker meshing has a synchronous fallback path; keep both paths healthy when changing chunk storage or mesh formats.

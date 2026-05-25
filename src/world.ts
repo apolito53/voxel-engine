@@ -30,7 +30,7 @@ import {
   type PartialBlockPosition,
   type PartialBlockSurfaceSample
 } from "./partialBlocks";
-import { createTerrainContext, generateChunkBlocks, type TerrainContext } from "./terrain";
+import { createTerrainContext, generateChunkBlocks, type TerrainContext, type TerrainProfile } from "./terrain";
 
 const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
@@ -89,6 +89,7 @@ export type WorldStats = {
 export type WorldOptions = {
   readonly storage?: ChunkStorage;
   readonly seed?: string;
+  readonly terrainProfile?: TerrainProfile;
 };
 
 export type ChunkCoords = {
@@ -631,6 +632,7 @@ export class VoxelWorld implements CollisionWorld {
   chunks: Map<string, Chunk>;
   storage: ChunkStorage;
   seed: string;
+  terrainProfile: TerrainProfile;
   terrain: TerrainContext;
   savedChunkKeys: Set<string>;
   savedChunks: Map<string, Uint8Array>;
@@ -675,11 +677,12 @@ export class VoxelWorld implements CollisionWorld {
   private readonly partialBlocks: Map<string, PartialBlockCell>;
   private partialBlockGeometryRevision: number;
 
-  constructor({ storage = createNullChunkStorage(), seed = "" }: WorldOptions = {}) {
+  constructor({ storage = createNullChunkStorage(), seed = "", terrainProfile }: WorldOptions = {}) {
     this.chunks = new Map();
     this.storage = storage;
     this.seed = String(seed || "");
-    this.terrain = createTerrainContext(this.seed);
+    this.terrain = createTerrainContext(this.seed, terrainProfile);
+    this.terrainProfile = this.terrain.profile;
     // The key set is cheap to keep in memory; full chunk payloads are loaded only when needed.
     this.savedChunkKeys = new Set();
     this.savedChunks = new Map();
@@ -725,13 +728,19 @@ export class VoxelWorld implements CollisionWorld {
     this.partialBlockGeometryRevision = 0;
   }
 
-  async switchStorage(storage: ChunkStorage, scene: THREE.Scene, seed = ""): Promise<void> {
+  async switchStorage(
+    storage: ChunkStorage,
+    scene: THREE.Scene,
+    seed = "",
+    terrainProfile?: TerrainProfile
+  ): Promise<void> {
     await this.flushStorageWrites();
     this.storageGeneration += 1;
     this.disposeLoadedChunks(scene);
     this.storage = storage;
     this.seed = String(seed || "");
-    this.terrain = createTerrainContext(this.seed);
+    this.terrain = createTerrainContext(this.seed, terrainProfile);
+    this.terrainProfile = this.terrain.profile;
     this.savedChunks.clear();
     this.blockDamage.clear();
     this.partialBlocks.clear();
@@ -1134,7 +1143,8 @@ export class VoxelWorld implements CollisionWorld {
       requestId,
       cx,
       cz,
-      seed: this.seed
+      seed: this.seed,
+      terrainProfile: this.terrainProfile
     };
     this.worker.postMessage(message);
   }

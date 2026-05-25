@@ -28,7 +28,7 @@ export type TerrainContext = {
 export const SUPERFLAT_WORLD_SEED = "superflat";
 export const SUPERFLAT_TERRAIN_HEIGHT = 4;
 
-export function createTerrainContext(seed = ""): TerrainContext {
+export function createTerrainContext(seed = "", profileOverride?: TerrainProfile): TerrainContext {
   const normalizedSeed = String(seed || "");
   if (isSuperflatSeed(normalizedSeed)) {
     return {
@@ -54,31 +54,40 @@ export function createTerrainContext(seed = ""): TerrainContext {
   }
 
   const hash = hashSeed(normalizedSeed);
+  if (profileOverride === "classic") return createClassicTerrainContext(normalizedSeed, hash);
 
   // Empty seed preserves the original unseeded terrain so existing default saves still line up.
   if (!normalizedSeed) {
-    return {
-      seed: "",
-      mode: "generated",
-      profile: "classic",
-      continentOffsetX: 0,
-      continentOffsetZ: 0,
-      detailOffsetX: 9.2,
-      detailOffsetZ: -4.8,
-      landformOffsetX: 0,
-      landformOffsetZ: 0,
-      ridgeOffsetX: 0,
-      ridgeOffsetZ: 0,
-      washOffsetX: 0,
-      washOffsetZ: 0,
-      climateOffsetX: 0,
-      climateOffsetZ: 0,
-      terraceOffsetX: 0,
-      terraceOffsetZ: 0,
-      heightOffset: 0
-    };
+    return createClassicTerrainContext(normalizedSeed, hash);
   }
 
+  return createVariedTerrainContext(normalizedSeed, hash);
+}
+
+function createClassicTerrainContext(seed: string, hash: number): TerrainContext {
+  return {
+    seed,
+    mode: "generated",
+    profile: "classic",
+    continentOffsetX: seed ? seededRange(hash, 0, -900, 900) : 0,
+    continentOffsetZ: seed ? seededRange(hash, 8, -900, 900) : 0,
+    detailOffsetX: seed ? seededRange(hash, 16, -1300, 1300) : 9.2,
+    detailOffsetZ: seed ? seededRange(hash, 24, -1300, 1300) : -4.8,
+    landformOffsetX: 0,
+    landformOffsetZ: 0,
+    ridgeOffsetX: 0,
+    ridgeOffsetZ: 0,
+    washOffsetX: 0,
+    washOffsetZ: 0,
+    climateOffsetX: 0,
+    climateOffsetZ: 0,
+    terraceOffsetX: 0,
+    terraceOffsetZ: 0,
+    heightOffset: seed ? seededRange(hash, 32, -2, 2) : 0
+  };
+}
+
+function createVariedTerrainContext(normalizedSeed: string, hash: number): TerrainContext {
   return {
     seed: normalizedSeed,
     mode: "generated",
@@ -179,9 +188,9 @@ export function getTerrainHeight(wx: number, wz: number, terrain: TerrainContext
     wz * 0.006 + terrain.terraceOffsetZ,
     3
   );
-  const terraceMask = smoothstep(0.42, 0.82, landform) * smoothstep(-0.05, 0.45, terraceField);
+  const terraceMask = smoothstep(0.56, 0.9, landform) * smoothstep(0.12, 0.55, terraceField);
   const terracedHeight = Math.round(height / 2) * 2;
-  height += (terracedHeight - height) * terraceMask * 0.65;
+  height += (terracedHeight - height) * terraceMask * 0.35;
 
   return Math.floor(clamp(height, 2, WORLD_HEIGHT - 6));
 }
@@ -206,9 +215,15 @@ export function getTerrainSurfaceBlock(
     4
   );
   const wash = 1 - smoothstep(0.035, 0.17, Math.abs(washSource));
+  const ridgeSource = signedFbm2(
+    wx * 0.011 + terrain.ridgeOffsetX,
+    wz * 0.011 + terrain.ridgeOffsetZ,
+    4
+  );
+  const ridge = Math.pow(1 - Math.abs(ridgeSource), 2.35);
 
-  if (height <= 10 || wash > 0.62 || (climate < 0.24 && height < 24)) return BLOCK.sand;
-  if (height >= 29 || (height >= 25 && climate < 0.38)) return BLOCK.stone;
+  if (height >= 31 || (height >= 27 && ridge > 0.74 && climate < 0.58)) return BLOCK.stone;
+  if (height <= 8 || (wash > 0.78 && height <= 20) || (climate < 0.18 && height <= 17)) return BLOCK.sand;
   return BLOCK.grass;
 }
 

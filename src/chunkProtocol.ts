@@ -1,3 +1,5 @@
+import type { TerrainProfile } from "./terrain";
+
 export type ChunkNeighborBuffers = {
   readonly negativeX: ArrayBuffer | null;
   readonly positiveX: ArrayBuffer | null;
@@ -28,6 +30,7 @@ export type ChunkGenerateRequest = {
   readonly cx: number;
   readonly cz: number;
   readonly seed: string;
+  readonly terrainProfile: TerrainProfile;
 };
 
 export type ChunkMeshRequest = {

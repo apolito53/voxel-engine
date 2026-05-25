@@ -10,7 +10,7 @@ import type {
   ChunkWorkerRequest
 } from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
-import type { TerrainContext } from "./terrain";
+import type { TerrainContext, TerrainProfile } from "./terrain";
 import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
@@ -25,7 +25,7 @@ workerScope.onmessage = (event: MessageEvent<ChunkWorkerRequest>) => {
     const blocks = generateChunkBlocks(
       message.cx,
       message.cz,
-      getTerrainContext(message.seed)
+      getTerrainContext(message.seed, message.terrainProfile)
     );
     workerScope.postMessage(
       {
@@ -71,12 +71,13 @@ workerScope.onmessage = (event: MessageEvent<ChunkWorkerRequest>) => {
   }
 };
 
-function getTerrainContext(seed = ""): TerrainContext {
-  const key = String(seed || "");
+function getTerrainContext(seed = "", terrainProfile?: TerrainProfile): TerrainContext {
+  const key = `${String(seed || "")}|${terrainProfile ?? "auto"}`;
   let context = terrainContexts.get(key);
   if (!context) {
-    // Cache by seed so chunk streaming does not rebuild the same terrain offsets every request.
-    context = createTerrainContext(key);
+    // Cache by seed/profile so legacy saves and newer varied worlds can coexist
+    // without worker-generated chunks drifting between terrain provenance lanes.
+    context = createTerrainContext(seed, terrainProfile);
     terrainContexts.set(key, context);
   }
   return context;
