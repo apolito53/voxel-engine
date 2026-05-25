@@ -12,6 +12,8 @@
   `src` stays free of `@ts-nocheck`, `@ts-ignore`, and explicit `any`.
 - Added GitHub Actions CI to run `npm run validate` on pushes and pull requests
   to `main`.
+- Added manual dispatch and stale-run cancellation to the CI validation
+  workflow.
 
 ## 0.6.25 - 2026-05-24
 
