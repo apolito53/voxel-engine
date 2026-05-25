@@ -41,6 +41,7 @@ Physics Core:
 
 - Throws a swept projectile from the lowered right-side muzzle.
 - Uses the configured projectile core size and velocity.
+- Uses the configured core hue and optional short projectile trail from Gameplay settings.
 - Holding right click uses centered reticle ADS with a slight 15% zoom.
 - Small fast cores can pierce through a complete bite-lattice tunnel when the
   exit cell is air, then continue with reduced speed.
@@ -49,6 +50,7 @@ Hitscan Core:
 
 - Fires an instant 10%-radius, 500%-speed core trace.
 - Uses the same partial-block bite and piercing rules as projectile cores.
+- Uses the configured core hue for the short additive beam flash.
 - Repeats tunnel continuation instantly along the trace.
 - Clears loose debris VFX along the beam without blocking terrain drilling.
 - Draws a short additive energy-beam flash along the shot line.

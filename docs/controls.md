@@ -97,6 +97,8 @@ Pause menu `Settings` is split into three tabs.
 
 - Projectile core size
 - Projectile core velocity
+- Projectile/hitscan core color
+- Projectile core trail toggle
 - Core Aim Preview toggle
 - Health Bars toggle
 - Despawn All Objects

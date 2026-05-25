@@ -164,9 +164,14 @@ import {
   PHYSICS_CORE_VELOCITY_MAX_PERCENT,
   PHYSICS_CORE_VELOCITY_MIN_PERCENT,
   PHYSICS_CORE_VELOCITY_STEP_PERCENT,
+  PHYSICS_CORE_HUE_MAX_DEGREES,
+  PHYSICS_CORE_HUE_MIN_DEGREES,
+  PHYSICS_CORE_HUE_STEP_DEGREES,
+  formatPhysicsCoreHue,
   formatPhysicsCorePercent,
   getPhysicsCoreRadius,
   getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreHueDegrees,
   normalizePhysicsCoreSettings,
   normalizePhysicsCoreSizePercent,
   normalizePhysicsCoreVelocityPercent,
@@ -174,6 +179,13 @@ import {
   writePhysicsCoreSettingsPreference,
   type PhysicsCoreSettings
 } from "./physicsCoreSettings";
+import { PhysicsCoreTrail } from "./physicsCoreTrail";
+import {
+  applyPhysicsCoreMaterialColor,
+  createPhysicsCoreColor,
+  createPhysicsCoreMaterial,
+  getPhysicsCoreCssColor
+} from "./physicsCoreVisuals";
 import { QualityController, type QualityChangeSource } from "./qualityController";
 import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import {
@@ -362,6 +374,9 @@ const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
 const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
 const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
 const coreVelocityValue = requireElement<HTMLElement>("#core-velocity-value");
+const coreColorSlider = requireElement<HTMLInputElement>("#core-color-slider");
+const coreColorValue = requireElement<HTMLElement>("#core-color-value");
+const coreTrailToggle = requireElement<HTMLInputElement>("#core-trail-toggle");
 const groundDebrisBudgetSlider = requireElement<HTMLInputElement>("#ground-debris-budget-slider");
 const groundDebrisBudgetValue = requireElement<HTMLElement>("#ground-debris-budget-value");
 const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-debris-lifetime-slider");
@@ -532,6 +547,7 @@ const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
 const builderBrushPreview = new BuilderBrushPreview(scene);
 const hitscanBoltTracer = new HitscanBoltTracer(scene);
+const physicsCoreTrail = new PhysicsCoreTrail(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
 const partialBlockMeshField = new PartialBlockMeshField(scene);
@@ -816,6 +832,12 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   coreVelocitySlider.addEventListener("input", () => {
     setPhysicsCoreVelocityPercent(coreVelocitySlider.value);
+  }, eventListenerOptions);
+  coreColorSlider.addEventListener("input", () => {
+    setPhysicsCoreHueDegrees(coreColorSlider.value);
+  }, eventListenerOptions);
+  coreTrailToggle.addEventListener("change", () => {
+    setPhysicsCoreTrailEnabled(coreTrailToggle.checked);
   }, eventListenerOptions);
   groundDebrisBudgetSlider.addEventListener("input", () => {
     setGroundDebrisBudget(groundDebrisBudgetSlider.value);
@@ -1497,6 +1519,7 @@ function animate(): void {
     rubbleField.settle(activeWorld);
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
+    physicsCoreTrail.update(delta);
     hitscanBoltTracer.update(delta);
     debrisPoofRenderer.update(delta);
     recordTimingSection("physicsMs");
@@ -1680,6 +1703,7 @@ function hasActiveEngineWork(): boolean {
   if (!inWorld || !world) return false;
   if (world.hasPendingRuntimeWork()) return true;
   if (debrisSettlerStats.activeFragments > 0) return true;
+  if (physicsCoreTrail.getActiveTrailCount() > 0) return true;
 
   for (const toy of toys) {
     if (!toy.isExpired && !toy.isSleeping) return true;
@@ -2587,7 +2611,7 @@ function firePlayerHitscanCore(): void {
   }
 
   clearLooseDebrisAlongHitscanBeam(visualStart, visualEnd);
-  hitscanBoltTracer.spawn(visualStart, visualEnd);
+  hitscanBoltTracer.spawn(visualStart, visualEnd, createPhysicsCoreColor(physicsCoreSettings));
   engineEvents.emit("physics:core-thrown", { source: "player", mode: "hitscan" });
 }
 
@@ -2654,14 +2678,19 @@ function throwNovaPilotCore(): void {
 }
 
 function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): PhysicsToy {
-  return new PhysicsToy(position, velocity, {
+  const core = new PhysicsToy(position, velocity, {
     // Thrown cores are the expensive, gameplay-relevant actors. Keep their
     // damage/collision behavior while moving, then let them sleep after
     // settling so old shots stop taxing the frame forever.
     radius: getPhysicsCoreRadius(physicsCoreSettings),
+    material: createPhysicsCoreMaterial(physicsCoreSettings),
     sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
     sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
   });
+  if (physicsCoreSettings.trailEnabled) {
+    physicsCoreTrail.track(core, createPhysicsCoreColor(physicsCoreSettings));
+  }
+  return core;
 }
 
 function addPhysicsToy(toy: PhysicsToy): void {
@@ -2739,10 +2768,25 @@ function setPhysicsCoreVelocityPercent(velocityPercent: unknown): void {
   });
 }
 
+function setPhysicsCoreHueDegrees(hueDegrees: unknown): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    hueDegrees: normalizePhysicsCoreHueDegrees(hueDegrees, physicsCoreSettings.hueDegrees)
+  });
+}
+
+function setPhysicsCoreTrailEnabled(enabled: boolean): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    trailEnabled: enabled
+  });
+}
+
 function updatePhysicsCoreSettings(settings: PhysicsCoreSettings): void {
   physicsCoreSettings = normalizePhysicsCoreSettings(settings, physicsCoreSettings);
   writePhysicsCoreSettingsPreference(physicsCoreSettings);
   updatePhysicsCoreControls();
+  syncActiveCoreVisuals();
 }
 
 function updatePhysicsCoreControls(): void {
@@ -2757,6 +2801,33 @@ function updatePhysicsCoreControls(): void {
   coreVelocitySlider.step = String(PHYSICS_CORE_VELOCITY_STEP_PERCENT);
   coreVelocitySlider.value = String(physicsCoreSettings.velocityPercent);
   coreVelocityValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.velocityPercent);
+
+  const coreCssColor = getPhysicsCoreCssColor(physicsCoreSettings);
+  coreColorSlider.min = String(PHYSICS_CORE_HUE_MIN_DEGREES);
+  coreColorSlider.max = String(PHYSICS_CORE_HUE_MAX_DEGREES);
+  coreColorSlider.step = String(PHYSICS_CORE_HUE_STEP_DEGREES);
+  coreColorSlider.value = String(physicsCoreSettings.hueDegrees);
+  coreColorSlider.style.accentColor = coreCssColor;
+  coreColorValue.textContent = formatPhysicsCoreHue(physicsCoreSettings.hueDegrees);
+  coreColorValue.style.color = coreCssColor;
+  coreTrailToggle.checked = physicsCoreSettings.trailEnabled;
+  coreTrailToggle.style.accentColor = coreCssColor;
+}
+
+function syncActiveCoreVisuals(): void {
+  const color = createPhysicsCoreColor(physicsCoreSettings);
+  physicsCoreTrail.setColor(color);
+  if (!physicsCoreSettings.trailEnabled) {
+    physicsCoreTrail.clear();
+  }
+
+  for (const toy of toys) {
+    if (toy.isInstancedFragment || !(toy.mesh.material instanceof THREE.MeshStandardMaterial)) continue;
+    applyPhysicsCoreMaterialColor(toy.mesh.material, physicsCoreSettings);
+    if (physicsCoreSettings.trailEnabled && !toy.isExpired && !toy.isSleeping) {
+      physicsCoreTrail.track(toy, color);
+    }
+  }
 }
 
 function setGroundDebrisBudget(nextBudget: unknown): void {
@@ -3119,6 +3190,7 @@ function removePhysicsToyAt(index: number): void {
   debrisSettler.forget(removedToy);
   physicsToyCollider.forget(removedToy);
   rigidDebris.forget(removedToy);
+  physicsCoreTrail.forget(removedToy);
   if (!removedToy.isInstancedFragment) {
     scene.remove(removedToy.mesh);
   }
@@ -3425,6 +3497,7 @@ function clearToys(): void {
     debrisSettler.forget(toy);
     physicsToyCollider.forget(toy);
     rigidDebris.forget(toy);
+    physicsCoreTrail.forget(toy);
     if (!toy.isInstancedFragment) {
       scene.remove(toy.mesh);
     }
@@ -3438,6 +3511,7 @@ function clearToys(): void {
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.
   physicsFragmentInstancer.dispose();
+  physicsCoreTrail.clear();
   hitscanBoltTracer.clear();
   rubbleField.clear();
 }
@@ -3504,6 +3578,7 @@ function disposeRuntime(): void {
   clearToys();
   coreAimPreview.dispose();
   builderBrushPreview.dispose();
+  physicsCoreTrail.dispose();
   hitscanBoltTracer.dispose();
   debrisPoofRenderer.dispose();
   rigidDebris.dispose();

@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 0.6.25 - 2026-05-24
+
 ### Added
 
+- Added Gameplay settings for Core Color and Core Trail so projectile cores and hitscan beams can share a player-tuned hue, with thrown Physics Cores leaving a short optional trail.
 - Added `globalThis.__VOXEL_VISUAL_TEST__.scenarioSnapshot(id)` and embedded before/after scenario snapshots in visual recording manifests, giving automated visual runs compact runtime pressure and hitch receipts alongside the video artifacts.
 - Added a `debris-pressure` Codex Pilot and visual-test scenario that runs bounded multi-angle projectile-core bursts against a fresh Superflat wall to capture rigid debris pressure, sleep behavior, and hitch attribution in a repeatable review pass.
 - Added a `preview-parity` Codex Pilot and visual-test scenario that enables Core Aim Preview, exercises both Physics Core and Hitscan Core against a fresh Superflat wall, and records the run through the existing visual-test catalog.

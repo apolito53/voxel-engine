@@ -8,15 +8,24 @@ export const PHYSICS_CORE_VELOCITY_MIN_PERCENT = 60;
 export const PHYSICS_CORE_VELOCITY_MAX_PERCENT = 500;
 export const PHYSICS_CORE_VELOCITY_STEP_PERCENT = 5;
 export const PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT = 140;
+export const PHYSICS_CORE_HUE_MIN_DEGREES = 0;
+export const PHYSICS_CORE_HUE_MAX_DEGREES = 360;
+export const PHYSICS_CORE_HUE_STEP_DEGREES = 5;
+export const PHYSICS_CORE_DEFAULT_HUE_DEGREES = 350;
+export const PHYSICS_CORE_DEFAULT_TRAIL_ENABLED = true;
 
 export type PhysicsCoreSettings = {
   readonly sizePercent: number;
   readonly velocityPercent: number;
+  readonly hueDegrees: number;
+  readonly trailEnabled: boolean;
 };
 
 export const DEFAULT_PHYSICS_CORE_SETTINGS: PhysicsCoreSettings = {
   sizePercent: PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
-  velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT
+  velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+  hueDegrees: PHYSICS_CORE_DEFAULT_HUE_DEGREES,
+  trailEnabled: PHYSICS_CORE_DEFAULT_TRAIL_ENABLED
 };
 
 export function normalizePhysicsCoreSettings(
@@ -25,7 +34,9 @@ export function normalizePhysicsCoreSettings(
 ): PhysicsCoreSettings {
   return {
     sizePercent: normalizePhysicsCoreSizePercent(settings.sizePercent, fallback.sizePercent),
-    velocityPercent: normalizePhysicsCoreVelocityPercent(settings.velocityPercent, fallback.velocityPercent)
+    velocityPercent: normalizePhysicsCoreVelocityPercent(settings.velocityPercent, fallback.velocityPercent),
+    hueDegrees: normalizePhysicsCoreHueDegrees(settings.hueDegrees, fallback.hueDegrees),
+    trailEnabled: typeof settings.trailEnabled === "boolean" ? settings.trailEnabled : fallback.trailEnabled
   };
 }
 
@@ -55,6 +66,19 @@ export function normalizePhysicsCoreVelocityPercent(
   );
 }
 
+export function normalizePhysicsCoreHueDegrees(
+  value: unknown,
+  fallback = PHYSICS_CORE_DEFAULT_HUE_DEGREES
+): number {
+  return normalizeSteppedPercent(
+    value,
+    fallback,
+    PHYSICS_CORE_HUE_MIN_DEGREES,
+    PHYSICS_CORE_HUE_MAX_DEGREES,
+    PHYSICS_CORE_HUE_STEP_DEGREES
+  );
+}
+
 export function getPhysicsCoreRadius(settings: PhysicsCoreSettings): number {
   return PHYSICS_CORE_BASE_RADIUS * (normalizePhysicsCoreSizePercent(settings.sizePercent) / 100);
 }
@@ -65,6 +89,10 @@ export function getPhysicsCoreVelocityMultiplier(settings: PhysicsCoreSettings):
 
 export function formatPhysicsCorePercent(value: number): string {
   return `${Math.round(value)}%`;
+}
+
+export function formatPhysicsCoreHue(value: number): string {
+  return `${Math.round(normalizePhysicsCoreHueDegrees(value))}°`;
 }
 
 export function readPhysicsCoreSettingsPreference(): PhysicsCoreSettings {

@@ -8,6 +8,7 @@ const HITSCAN_BOLT_LIFETIME_SECONDS = 0.14;
 const HITSCAN_BOLT_FORWARD_EPSILON = 0.000001;
 const HITSCAN_BOLT_AXIS = new THREE.Vector3(1, 0, 0);
 const HITSCAN_BOLT_PLANE_ROTATIONS = [0, Math.PI / 3, Math.PI * 2 / 3] as const;
+const DEFAULT_HITSCAN_BOLT_COLOR = new THREE.Color(0x8cecff);
 
 type HitscanBoltInstance = {
   readonly group: THREE.Group;
@@ -31,7 +32,7 @@ export class HitscanBoltTracer {
     this.texture.generateMipmaps = false;
   }
 
-  spawn(start: THREE.Vector3, end: THREE.Vector3): void {
+  spawn(start: THREE.Vector3, end: THREE.Vector3, color: THREE.Color = DEFAULT_HITSCAN_BOLT_COLOR): void {
     const beam = createSafeBeamSegment(start, end);
     if (!beam) return;
 
@@ -41,7 +42,7 @@ export class HitscanBoltTracer {
     group.quaternion.setFromUnitVectors(HITSCAN_BOLT_AXIS, beam.direction);
     group.renderOrder = 40;
 
-    const materials = this.createBeamMaterials();
+    const materials = this.createBeamMaterials(color);
     const coreMaterial = materials[0];
     const core = new THREE.Mesh(this.cylinderGeometry, coreMaterial);
     core.name = "Hitscan energy beam core";
@@ -95,9 +96,11 @@ export class HitscanBoltTracer {
     this.planeGeometry.dispose();
   }
 
-  private createBeamMaterials(): THREE.Material[] {
+  private createBeamMaterials(color: THREE.Color): THREE.Material[] {
+    const coreColor = color.clone().lerp(new THREE.Color(0xffffff), 0.12);
+    const textureColor = color.clone().lerp(new THREE.Color(0xffffff), 0.45);
     const coreMaterial = new THREE.MeshBasicMaterial({
-      color: 0x8cecff,
+      color: coreColor,
       transparent: true,
       opacity: 0.38,
       blending: THREE.AdditiveBlending,
@@ -111,7 +114,7 @@ export class HitscanBoltTracer {
     const textureMaterials = HITSCAN_BOLT_PLANE_ROTATIONS.map(() => {
       const material = new THREE.MeshBasicMaterial({
         map: this.texture,
-        color: 0xd8fbff,
+        color: textureColor,
         transparent: true,
         opacity: 0.72,
         blending: THREE.AdditiveBlending,

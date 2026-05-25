@@ -145,17 +145,25 @@ import {
 import {
   DEFAULT_PHYSICS_CORE_SETTINGS,
   PHYSICS_CORE_BASE_RADIUS,
+  PHYSICS_CORE_DEFAULT_HUE_DEGREES,
   PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
+  PHYSICS_CORE_DEFAULT_TRAIL_ENABLED,
   PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+  PHYSICS_CORE_HUE_MAX_DEGREES,
+  PHYSICS_CORE_HUE_MIN_DEGREES,
   PHYSICS_CORE_SIZE_MAX_PERCENT,
   PHYSICS_CORE_SIZE_MIN_PERCENT,
   PHYSICS_CORE_VELOCITY_MAX_PERCENT,
   PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+  formatPhysicsCoreHue,
   formatPhysicsCorePercent,
   getPhysicsCoreRadius,
   getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreHueDegrees,
   normalizePhysicsCoreSettings
 } from "../src/physicsCoreSettings";
+import { PhysicsCoreTrail } from "../src/physicsCoreTrail";
+import { createPhysicsCoreColor, createPhysicsCoreMaterial } from "../src/physicsCoreVisuals";
 import {
   IMPACT_CRATER_MAX_STAMPS,
   ImpactCraterField,
@@ -7126,14 +7134,18 @@ test("physics core settings clamp slider values", () => {
     DEFAULT_PHYSICS_CORE_SETTINGS,
     {
       sizePercent: PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
-      velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT
+      velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+      hueDegrees: PHYSICS_CORE_DEFAULT_HUE_DEGREES,
+      trailEnabled: PHYSICS_CORE_DEFAULT_TRAIL_ENABLED
     },
     "default core tuning should expose the smaller faster first-pass feel"
   );
 
   const tinyFastCore = normalizePhysicsCoreSettings({
     sizePercent: -40,
-    velocityPercent: 999
+    velocityPercent: 999,
+    hueDegrees: -40,
+    trailEnabled: false
   });
   assertEqual(
     tinyFastCore.sizePercent,
@@ -7145,10 +7157,17 @@ test("physics core settings clamp slider values", () => {
     PHYSICS_CORE_VELOCITY_MAX_PERCENT,
     "core velocity slider should clamp to the fastest safe percentage"
   );
+  assertEqual(
+    tinyFastCore.hueDegrees,
+    PHYSICS_CORE_HUE_MIN_DEGREES,
+    "core hue slider should clamp to the warmest boundary"
+  );
+  assertEqual(tinyFastCore.trailEnabled, false, "core trail toggle should preserve explicit false");
 
   const largeSlowCore = normalizePhysicsCoreSettings({
     sizePercent: 999,
-    velocityPercent: -40
+    velocityPercent: -40,
+    hueDegrees: 999
   });
   assertEqual(
     largeSlowCore.sizePercent,
@@ -7159,6 +7178,11 @@ test("physics core settings clamp slider values", () => {
     largeSlowCore.velocityPercent,
     PHYSICS_CORE_VELOCITY_MIN_PERCENT,
     "core velocity slider should clamp to the slowest safe percentage"
+  );
+  assertEqual(
+    largeSlowCore.hueDegrees,
+    PHYSICS_CORE_HUE_MAX_DEGREES,
+    "core hue slider should clamp to the full color wheel"
   );
   assertNearlyEqual(
     getPhysicsCoreRadius(DEFAULT_PHYSICS_CORE_SETTINGS),
@@ -7173,6 +7197,33 @@ test("physics core settings clamp slider values", () => {
     "core velocity percent should become a launch multiplier"
   );
   assertEqual(formatPhysicsCorePercent(140), "140%", "core slider labels should be terse percentages");
+  assertEqual(formatPhysicsCoreHue(185), "185°", "core hue labels should stay readable in degrees");
+  assertEqual(normalizePhysicsCoreHueDegrees(187), 185, "core hue should snap to slider steps");
+});
+
+test("physics core visuals use the selected hue and clean up trails", () => {
+  const scene = new THREE.Scene();
+  const color = createPhysicsCoreColor({ ...DEFAULT_PHYSICS_CORE_SETTINGS, hueDegrees: 210 });
+  const material = createPhysicsCoreMaterial({ ...DEFAULT_PHYSICS_CORE_SETTINGS, hueDegrees: 210 });
+  assertEqual(
+    material.color.getHex(),
+    color.getHex(),
+    "core material color should come from the selected hue"
+  );
+
+  const trail = new PhysicsCoreTrail(scene);
+  const core = new PhysicsToy(
+    new THREE.Vector3(0, 2, 0),
+    new THREE.Vector3(1, 0, 0),
+    { material }
+  );
+  trail.track(core, color);
+  assertEqual(trail.getActiveTrailCount(), 1, "active projectile cores should be trackable by the trail renderer");
+  trail.setColor(createPhysicsCoreColor({ ...DEFAULT_PHYSICS_CORE_SETTINGS, hueDegrees: 120 }));
+  trail.forget(core);
+  assertEqual(trail.getActiveTrailCount(), 0, "removing a core should dispose its trail entry");
+  trail.dispose();
+  core.dispose();
 });
 
 test("player physics core launch inherits player velocity", () => {
