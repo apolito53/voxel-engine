@@ -21,6 +21,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Dev server: `npm.cmd run dev -- --port 5173`; `scripts/dev-server.mjs` writes a `logs/server-starts-YYYY-MM-DD.jsonl` repo-state marker before launching Vite.
 - Hitch-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5174`.
 - Remote hitch-log inspection: `vercel blob list --prefix hitches --limit 20` then `vercel blob get <pathname> --access private`; local `.env.local` supplies the Blob token and must stay untracked.
+- GitHub Actions CI: `.github/workflows/ci.yml` runs `npm run validate` on pushes and pull requests to `main`.
 - Strict type check: `npm.cmd run typecheck`
 - Strict source hygiene check: `npm.cmd run source:check`
 - Markdown docs link check: `npm.cmd run docs:check`

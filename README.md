@@ -101,6 +101,8 @@ README/docs references and TypeScript source-hygiene regressions fail alongside
 the engine robustness tests.
 `npm.cmd run validate` runs the normal test, production build, and whitespace
 diff check sequence in one pass.
+GitHub Actions runs the same validation command on pushes and pull requests to
+`main`.
 
 `npm.cmd run build` may still emit the known large vendor chunk warning; the
 warning is expected unless the build fails.

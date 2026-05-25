@@ -10,6 +10,8 @@
   production build, and whitespace diff checks.
 - Added `npm.cmd run source:check` and wired it into `npm.cmd run test` so
   `src` stays free of `@ts-nocheck`, `@ts-ignore`, and explicit `any`.
+- Added GitHub Actions CI to run `npm run validate` on pushes and pull requests
+  to `main`.
 
 ## 0.6.25 - 2026-05-24
 
