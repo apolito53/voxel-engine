@@ -68,7 +68,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments: `src/fragmentRubble.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
 - IndexedDB storage adapter for saved worlds, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths, including the reserved `superflat` test-world seed: `src/terrain.ts`
+- Seeded terrain generation shared by fallback and worker paths, including the empty-seed `classic` terrain profile, varied random-seed landforms, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
 - Shared chunk worker request/result message contracts, including partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building, including partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkWorker.ts`

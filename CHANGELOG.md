@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.6.26 - 2026-05-25
+
+### Added
+
+- Reworked non-special seeded terrain generation with a varied landform profile
+  that creates broader plains, raised ridges, sandy washes, terraced high
+  ground, and rocky highland surfaces while keeping `superflat` unchanged.
+- Preserved the empty seed path, shown as `classic` in the save list, so old
+  default worlds can still stream the original rolling terrain shape in
+  unedited chunks.
 - Added `npm.cmd run docs:check` and wired it into `npm.cmd run test` so
   broken local README/docs Markdown links fail during normal validation.
 - Tightened the docs-link checker so same-file and cross-file Markdown heading

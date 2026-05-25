@@ -19,7 +19,7 @@ import {
   getTerrainImpactFragmentCount,
   normalizeBlockFragmentCount
 } from "../src/blockFragments";
-import { BLOCK, BLOCKS, PLACEABLE_BLOCKS } from "../src/blocks";
+import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "../src/blocks";
 import {
   BLOCK_COLOR_VARIANT_COUNT,
   createBlockMeshKey,
@@ -340,6 +340,7 @@ import {
   createTerrainContext,
   generateChunkBlocks,
   getTerrainHeight,
+  getTerrainSurfaceBlock,
   isSuperflatSeed
 } from "../src/terrain";
 import {
@@ -1026,6 +1027,32 @@ test("terrain generation is deterministic by seed", () => {
   const betaChunk = generateChunkBlocks(1, -2, betaTerrain);
   assertUint8ArraysEqual(alphaChunkA, alphaChunkB, "same seed should generate identical chunk blocks");
   assert(hasAnyDifference(alphaChunkA, betaChunk), "different seed should generate a different chunk payload");
+});
+
+test("seeded terrain generation creates varied landforms and surfaces", () => {
+  const terrain = createTerrainContext("landform-test");
+  const heights: number[] = [];
+  const surfaceBlocks = new Set<BlockId>();
+
+  assertEqual(terrain.profile, "varied", "non-special generated seeds should use the varied terrain profile");
+
+  for (let z = -160; z <= 160; z += 8) {
+    for (let x = -160; x <= 160; x += 8) {
+      const height = getTerrainHeight(x, z, terrain);
+      heights.push(height);
+      surfaceBlocks.add(getTerrainSurfaceBlock(x, z, height, terrain));
+    }
+  }
+
+  const minHeight = Math.min(...heights);
+  const maxHeight = Math.max(...heights);
+
+  assert(minHeight >= 2, "varied terrain should leave a solid lower bound above the world floor");
+  assert(maxHeight <= WORLD_HEIGHT - 6, "varied terrain should leave air above the tallest generated land");
+  assert(maxHeight - minHeight >= 18, "varied terrain should have more range than endless rolling hills");
+  assert(surfaceBlocks.has(BLOCK.grass), "varied terrain should still produce grassy playable ground");
+  assert(surfaceBlocks.has(BLOCK.sand), "varied terrain should create sandy lowlands or washes");
+  assert(surfaceBlocks.has(BLOCK.stone), "varied terrain should expose rocky highland surfaces");
 });
 
 test("superflat terrain seed creates a flat test lab surface", () => {
