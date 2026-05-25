@@ -81,9 +81,9 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 - [docs/automation.md](docs/automation.md): F8 avatar, Codex pilot bridge,
   visual scenario recorder, and Chrome/playtest automation notes.
 
-`CODEBASE_INDEX.md` is the surgical code map for module ownership and common
-change targets. `TODO.md` keeps parked feature ideas visible without pretending
-they are current scope.
+`CODEBASE_INDEX.md` is the surgical code map for module ownership and
+[common change targets](CODEBASE_INDEX.md#common-change-targets). `TODO.md`
+keeps parked feature ideas visible without pretending they are current scope.
 
 ## Development Checks
 

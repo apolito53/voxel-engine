@@ -122,7 +122,6 @@ function toGithubAnchor(headingText) {
 
 function shouldSkipTarget(target) {
   return (
-    target.startsWith("#") ||
     target.startsWith("http://") ||
     target.startsWith("https://") ||
     target.startsWith("mailto:") ||
