@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added `npm.cmd run docs:check` and wired it into `npm.cmd run test` so
+  broken local README/docs Markdown links fail during normal validation.
+
 ## 0.6.25 - 2026-05-24
 
 ### Added

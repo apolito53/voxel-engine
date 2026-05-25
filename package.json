@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit && node scripts/run_tests.mjs"
+    "docs:check": "node scripts/check_docs_links.mjs",
+    "test": "tsc --noEmit && node scripts/run_tests.mjs && node scripts/check_docs_links.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

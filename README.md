@@ -89,10 +89,14 @@ they are current scope.
 
 ```powershell
 npm.cmd run typecheck
+npm.cmd run docs:check
 npm.cmd run test
 npm.cmd run build
 git diff --check
 ```
+
+`npm.cmd run test` also runs the Markdown docs-link check, so broken local
+README/docs references fail alongside the engine robustness tests.
 
 `npm.cmd run build` may still emit the known large vendor chunk warning; the
 warning is expected unless the build fails.

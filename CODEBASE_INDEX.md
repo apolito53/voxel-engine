@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-05-23
+Last reviewed: 2026-05-25
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -22,6 +22,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Hitch-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5174`.
 - Remote hitch-log inspection: `vercel blob list --prefix hitches --limit 20` then `vercel blob get <pathname> --access private`; local `.env.local` supplies the Blob token and must stay untracked.
 - Strict type check: `npm.cmd run typecheck`
+- Markdown docs link check: `npm.cmd run docs:check`
 - Engine robustness tests: `npm.cmd run test`
 - Production build: `npm.cmd run build`
 - Preview build: `npm.cmd run preview -- --port 4173`
@@ -107,7 +108,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Windows startup helper: `start.ps1`
 - Linux/Ubuntu startup helper: `start.sh`
 - Project backlog and parked feature ideas: `TODO.md`
-- Tiny Node test bundler: `scripts/run_tests.mjs`
+- Tiny Node test bundler and Markdown docs-link guardrail: `scripts/run_tests.mjs`, `scripts/check_docs_links.mjs`
 - Engine robustness test entrypoint: `tests/run.ts`
 - TypeScript migration helpers: `scripts/ts_migration.py`, `scripts/ts_migration_audit.py`, `scripts/run_python.ps1`, `scripts/run_python.sh`, `scripts/README.md`
 - Vite production-build config and manual vendor chunking: `vite.config.ts`
