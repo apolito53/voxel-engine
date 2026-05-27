@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-05-27
+
+Minor milestone: this introduces the first reusable tool/mining/material identity layer, so the version now reflects a real engine capability step instead of another tiny patch.
+
+### Added
+
+- Added `Mining Tool` to the Items lane for held left-click terrain mining with
+  material-specific HP, mining cadence, and chip debris flavor.
+
+### Changed
+
+- Changed placeable block items to build-only behavior: left click no longer
+  mines or erases terrain, while right click still places the selected block.
+- Changed terrain material identity so Leaves, Sand, Grass, Dirt, Ember, Wood,
+  Stone, and Rubble each own distinct HP and debris ejection feel.
+
 ## 0.7.0 - 2026-05-25
 
 Minor milestone: deterministic voxel trees make generated terrain materially richer instead of just tuning an existing system.

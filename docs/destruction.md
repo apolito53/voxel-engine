@@ -5,15 +5,18 @@ terrain state is owned by partial-block damage. Loose debris is visual feedback.
 
 ## Terrain Damage
 
-Ordinary terrain blocks have 10 HP. Core impacts above 2 m/s carve one health
-step by removing hidden cells from a 3x3x3 bite lattice inside the macro block.
-That lattice is presentation and targeting resolution, not a global tiny-voxel
-world.
+Terrain HP is material-specific: Leaves 3, Sand 5, Grass 6, Dirt 8, Ember 10,
+Wood 12, Stone 16, and Rubble 4. Mining Tool hits spend 1 damage per material
+cadence tick, while Physics Core and Hitscan Core still damage terrain through
+the core impact path.
 
-The visible fill tracks remaining HP. A block at 7/10 HP keeps roughly 70% of
-its presentation lattice. Removed bite cells persist and grow through
-face-adjacent neighbors, so later hits cannot visually refill older damage or
-create isolated disconnected holes.
+Core impacts above 2 m/s carve one health step by removing hidden cells from a
+3x3x3 bite lattice inside the macro block. That lattice is presentation and
+targeting resolution, not a global tiny-voxel world.
+
+The visible fill tracks remaining HP against that material's max health. Removed
+bite cells persist and grow through face-adjacent neighbors, so later hits cannot
+visually refill older damage or create isolated disconnected holes.
 
 Damage is applied through a sparse brush:
 
@@ -36,6 +39,9 @@ Carved shapes are not persisted to saves yet; leaving the active world clears
 partial-block state.
 
 ## Projectile And Hitscan Cores
+
+Mining Tool owns normal manual mining. Placeable block items are build-only:
+left click does nothing, and right click places the selected block brush.
 
 Physics Core:
 
@@ -86,6 +92,9 @@ Debris presentation is material-budgeted:
 
 - Physics Core carving treats a full block as `1.0` normalized block-volume.
 - Remaining material is derived from remaining HP.
+- Material identity controls chip cadence, preferred debris shapes, and ejection
+  feel, so leaves shred quickly, wood splinters, stone breaks into heavier
+  angular pieces, and sand/rubble spray lower and softer.
 - Each visible shard carries at most 70% of one 3x3x3 damage-lattice subvoxel's
   material.
 - No visual axis can exceed 60% of a subvoxel edge.

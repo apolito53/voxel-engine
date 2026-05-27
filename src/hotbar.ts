@@ -2,6 +2,7 @@ import type { BlockId } from "./blocks";
 import {
   EMPTY_HANDS_ITEM_ID,
   HITSCAN_CORE_ITEM_ID,
+  MINING_TOOL_ITEM_ID,
   PHYSICS_CORE_ITEM_ID,
   createBlockItemId,
   createItemStack,
@@ -21,6 +22,7 @@ export type HotbarScrollDirection = -1 | 1;
 export function createToolHotbarItems(): readonly HotbarItem[] {
   return [
     createItemStack(EMPTY_HANDS_ITEM_ID),
+    createItemStack(MINING_TOOL_ITEM_ID),
     createItemStack(PHYSICS_CORE_ITEM_ID),
     createItemStack(HITSCAN_CORE_ITEM_ID)
   ];
@@ -86,8 +88,8 @@ export function getHotbarSecondaryAction(item: HotbarItem, registry: ItemRegistr
   return getItemAction(registry, item, "secondary");
 }
 
-export function canDestroyBlockWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
-  return getHotbarPrimaryAction(item, registry).kind === "terrain:destroy-block";
+export function canMineBlockWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
+  return getHotbarPrimaryAction(item, registry).kind === "terrain:mine-block";
 }
 
 export function canPlaceBlockWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {

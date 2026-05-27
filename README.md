@@ -63,8 +63,8 @@ ignored by git.
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - `G` toggles between `Items` and `Blocks`
 - `Mouse wheel` selects within the active lane
-- `Left click` fires the selected core or erases blocks in build mode
-- `Right click` places blocks in build mode; hold while firing cores for ADS
+- `Left click` fires selected cores or mines with the Mining Tool
+- `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
 - `F3` toggles the debug overlay
 - `F4` cycles quality presets

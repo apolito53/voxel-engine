@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BLOCK_DEBRIS_MAX_VISUAL_AXIS, BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
+import { getDebrisSpawnProfile, type DebrisSpawnProfile } from "./blockMaterialRules";
 
 export const DEBRIS_SHAPE_IDS = [
   "chunky-chip",
@@ -206,18 +207,23 @@ export function createDefaultDebrisShape(): DebrisShape {
   ]);
 }
 
+export function selectDebrisShapeIdForBlock(block: number, seed: DebrisShapeSeed): DebrisShapeId {
+  return selectDebrisShapeIdFromSeed(hashDebrisShapeSeed(block, seed), getDebrisSpawnProfile(block));
+}
+
 export function createDebrisShapeForBlock(block: number, seed: DebrisShapeSeed): DebrisShape {
   const seedValue = hashDebrisShapeSeed(block, seed);
-  const shapeId = DEBRIS_SHAPE_IDS[seedValue % DEBRIS_SHAPE_IDS.length];
+  const debrisProfile = getDebrisSpawnProfile(block);
+  const shapeId = selectDebrisShapeIdFromSeed(seedValue, debrisProfile);
   const template = getDebrisShapeTemplate(shapeId);
   const xJitter = 0.45 + hashUnit(seedValue ^ 0x6d2b79f5) * 1.2;
   const yJitter = 0.45 + hashUnit(seedValue ^ 0x1b873593) * 1.2;
   const zJitter = 0.45 + hashUnit(seedValue ^ 0x85ebca6b) * 1.2;
 
   return createDebrisShapeFromScale(shapeId, [
-    template.baseScale[0] * xJitter * DEBRIS_SHARD_SIZE_SCALE,
-    template.baseScale[1] * yJitter * DEBRIS_SHARD_SIZE_SCALE,
-    template.baseScale[2] * zJitter * DEBRIS_SHARD_SIZE_SCALE
+    template.baseScale[0] * xJitter * DEBRIS_SHARD_SIZE_SCALE * debrisProfile.visualScaleMultiplier,
+    template.baseScale[1] * yJitter * DEBRIS_SHARD_SIZE_SCALE * debrisProfile.visualScaleMultiplier,
+    template.baseScale[2] * zJitter * DEBRIS_SHARD_SIZE_SCALE * debrisProfile.visualScaleMultiplier
   ]);
 }
 
@@ -294,6 +300,13 @@ function getDebrisShapeTemplate(shapeId: DebrisShapeId): DebrisShapeTemplate {
     throw new Error(`Unknown debris shape id: ${shapeId}`);
   }
   return template;
+}
+
+function selectDebrisShapeIdFromSeed(seedValue: number, debrisProfile: DebrisSpawnProfile): DebrisShapeId {
+  const shapeIds = debrisProfile.preferredShapeIds.length > 0
+    ? debrisProfile.preferredShapeIds
+    : DEBRIS_SHAPE_IDS;
+  return shapeIds[seedValue % shapeIds.length] ?? DEBRIS_SHAPE_IDS[seedValue % DEBRIS_SHAPE_IDS.length];
 }
 
 function createGeometryFromTemplate(template: DebrisShapeTemplate): THREE.BufferGeometry {

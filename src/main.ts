@@ -18,6 +18,12 @@ import {
 } from "./blockFragments";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
+  getDebrisSpawnProfile,
+  getMiningDamageAmount,
+  getMiningTickSeconds,
+  type DebrisSpawnProfile
+} from "./blockMaterialRules";
+import {
   BUILDER_BRUSH_MAX_SIZE,
   BUILDER_BRUSH_MIN_SIZE,
   BUILDER_BRUSH_STEP,
@@ -292,6 +298,9 @@ const FRAGMENT_SCATTER_SPEED_RANGE = 2.6;
 const FRAGMENT_JITTER_SPEED = 13.5;
 const FRAGMENT_UPWARD_SPEED_MIN = 1;
 const FRAGMENT_UPWARD_SPEED_RANGE = 1.75;
+// Held mining is intentionally slower and more "tool-like" than a core hit.
+// The speed feeds partial-block bite visuals, not block durability.
+const MINING_TOOL_IMPACT_SPEED = 6;
 const FRAME_SPIKE_EVENT_MS = 45;
 const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
 const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
@@ -480,7 +489,9 @@ let debrisPerformancePressure = createDebrisPerformancePressureState(
   getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget)
 );
 let renderedPartialBlockRevision = -1;
+let leftMouseButtonDown = false;
 let rightMouseButtonDown = false;
+let miningToolState: MiningToolState | null = null;
 let coreAimPreviewEnabled = false;
 
 const engineEvents = createEngineEventBus();
@@ -524,6 +535,13 @@ type TargetHit =
       readonly block: VoxelRaycastHit["block"];
       readonly distance: number;
     };
+type TerrainDamageFeedbackImpact = {
+  readonly normal: THREE.Vector3;
+  readonly speed: number;
+  readonly position: THREE.Vector3;
+  readonly incomingVelocity: THREE.Vector3;
+  readonly radius?: number;
+};
 type CoreTerrainImpact = {
   readonly block: VoxelRaycastHit["block"];
   readonly normal: THREE.Vector3;
@@ -540,6 +558,11 @@ type CoreTerrainImpactApplyResult = {
 type PlayerCoreFiringSolution = {
   readonly origin: THREE.Vector3;
   readonly direction: THREE.Vector3;
+};
+type MiningToolState = {
+  readonly targetKey: string;
+  readonly tickSeconds: number;
+  elapsedSeconds: number;
 };
 type SettingsCategory = "graphics" | "gameplay" | "experimental";
 const physicsToyCollider = new PhysicsToyCollider();
@@ -775,7 +798,7 @@ function wireMenuControls(): void {
   activePlayer.onPauseChange = (paused: boolean) => {
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
     if (paused) {
-      rightMouseButtonDown = false;
+      clearPointerHoldState();
       void queueActivePlayerLocationSave(true);
     }
     if (!paused) closePauseSubmenus();
@@ -1018,7 +1041,7 @@ function openNovaChatInputMode(): void {
 
 function closeNovaChatInputMode(): void {
   if (!inWorld) return;
-  rightMouseButtonDown = false;
+  clearPointerHoldState();
   requirePlayer().resume();
 }
 
@@ -1241,7 +1264,7 @@ document.addEventListener("visibilitychange", () => {
   noteUserActivity();
   drainFrameClockAfterIdle();
   if (document.hidden) {
-    rightMouseButtonDown = false;
+    clearPointerHoldState();
     void queueActivePlayerLocationSave(true);
     enterIdleHeartbeat();
     return;
@@ -1260,12 +1283,12 @@ window.addEventListener("pageshow", () => {
   resumeAnimationLoopAfterIdle();
 }, eventListenerOptions);
 window.addEventListener("pagehide", () => {
-  rightMouseButtonDown = false;
+  clearPointerHoldState();
   void queueActivePlayerLocationSave(true);
   enterIdleHeartbeat();
 }, eventListenerOptions);
 window.addEventListener("blur", () => {
-  rightMouseButtonDown = false;
+  clearPointerHoldState();
 }, eventListenerOptions);
 window.addEventListener("beforeunload", () => {
   void queueActivePlayerLocationSave(true);
@@ -1280,6 +1303,7 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   const activePlayer = requirePlayer();
 
   if (event.button === 0) {
+    leftMouseButtonDown = true;
     rightMouseButtonDown = (event.buttons & 2) !== 0;
     useSelectedHotbarPrimaryAction(activePlayer);
     return;
@@ -1291,12 +1315,16 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   }
 }, eventListenerOptions);
 document.addEventListener("mouseup", (event) => {
+  if (event.button === 0) {
+    leftMouseButtonDown = false;
+    resetMiningToolState();
+  }
   if (event.button === 2) {
     rightMouseButtonDown = false;
   }
 }, eventListenerOptions);
 document.addEventListener("pointercancel", () => {
-  rightMouseButtonDown = false;
+  clearPointerHoldState();
 }, eventListenerOptions);
 renderer.domElement.addEventListener("wheel", (event) => {
   noteUserActivity();
@@ -1309,6 +1337,16 @@ renderer.domElement.addEventListener("wheel", (event) => {
   const activeHotbarItems = getActiveHotbarItems();
   selectHotbarIndex(stepHotbarIndex(getActiveHotbarIndex(), direction, activeHotbarItems.length));
 }, wheelListenerOptions);
+
+function clearPointerHoldState(): void {
+  leftMouseButtonDown = false;
+  rightMouseButtonDown = false;
+  resetMiningToolState();
+}
+
+function resetMiningToolState(): void {
+  miningToolState = null;
+}
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
   useSelectedHotbarAction(activePlayer, getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry));
@@ -1323,15 +1361,13 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
   // is the seam future FPS weapons, dungeon tools, or RTS commands can share.
   switch (action.kind) {
     case "none":
+      resetMiningToolState();
       return;
-    case "terrain:destroy-block":
-      if (activeBuilderLane === "blocks") {
-        applyBuilderBrushAtTarget("erase");
-      } else {
-        destroyTargetBlock();
-      }
+    case "terrain:mine-block":
+      startOrContinueMiningTool(0, true);
       return;
     case "terrain:place-block":
+      resetMiningToolState();
       if (activeBuilderLane === "blocks") {
         applyBuilderBrushAtTarget("place");
       } else {
@@ -1339,24 +1375,14 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
       }
       return;
     case "physics:throw-core":
+      resetMiningToolState();
       if (activePlayer.isLooking()) throwPlayerCore(activePlayer);
       return;
     case "physics:fire-hitscan-core":
+      resetMiningToolState();
       if (activePlayer.isLooking()) firePlayerHitscanCore();
       return;
   }
-}
-
-function destroyTargetBlock(): void {
-  const hit = getTargetHit();
-  if (!hit) return;
-
-  if (hit.source === "rubble") {
-    damageTargetedRubbleCell(hit.block);
-    return;
-  }
-
-  requireWorld().setBlock(hit.block.x, hit.block.y, hit.block.z, 0);
 }
 
 function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): void {
@@ -1422,13 +1448,132 @@ function showBuilderStatus(message: string): void {
   novaMessage.textContent = message;
 }
 
-function damageTargetedRubbleCell(cell: VoxelRaycastHit["block"]): void {
+function updateMiningTool(delta: number): void {
+  if (!leftMouseButtonDown) {
+    resetMiningToolState();
+    return;
+  }
+
+  const action = getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry);
+  if (action.kind !== "terrain:mine-block") {
+    resetMiningToolState();
+    return;
+  }
+
+  startOrContinueMiningTool(delta, false);
+}
+
+function startOrContinueMiningTool(delta: number, immediate: boolean): void {
+  if (!inWorld || !requirePlayer().isLooking()) {
+    resetMiningToolState();
+    return;
+  }
+
+  const hit = getTargetHit();
+  if (!hit) {
+    resetMiningToolState();
+    return;
+  }
+
+  const targetKey = createMiningTargetKey(hit);
+  const tickSeconds = getMiningTargetTickSeconds(hit);
+  if (tickSeconds <= 0) {
+    resetMiningToolState();
+    return;
+  }
+
+  if (!miningToolState || miningToolState.targetKey !== targetKey) {
+    miningToolState = {
+      targetKey,
+      tickSeconds,
+      elapsedSeconds: 0
+    };
+    applyMiningToolTick(targetKey);
+    return;
+  }
+
+  miningToolState.elapsedSeconds += Math.max(0, delta);
+  if (immediate) {
+    miningToolState.elapsedSeconds = Math.max(miningToolState.elapsedSeconds, tickSeconds);
+  }
+
+  // A hidden-tab resume or debug hitch should not chew an entire wall in one
+  // catch-up frame. Carry the leftover time, but cap actual terrain mutations.
+  let ticksThisFrame = 0;
+  while (miningToolState && miningToolState.elapsedSeconds >= miningToolState.tickSeconds && ticksThisFrame < 4) {
+    const currentTargetKey = miningToolState.targetKey;
+    miningToolState.elapsedSeconds -= miningToolState.tickSeconds;
+    ticksThisFrame += 1;
+
+    if (!applyMiningToolTick(currentTargetKey)) {
+      resetMiningToolState();
+      return;
+    }
+  }
+}
+
+function createMiningTargetKey(hit: TargetHit): string {
+  return `${hit.source}:${hit.block.x},${hit.block.y},${hit.block.z}`;
+}
+
+function getMiningTargetTickSeconds(hit: TargetHit): number {
+  if (hit.source === "rubble") return getMiningTickSeconds(BLOCK.rubble);
+  const block = requireWorld().getBlock(hit.block.x, hit.block.y, hit.block.z);
+  return getMiningTickSeconds(block);
+}
+
+function applyMiningToolTick(expectedTargetKey: string): boolean {
+  const hit = getTargetHit();
+  if (!hit || createMiningTargetKey(hit) !== expectedTargetKey) return false;
+
+  if (hit.source === "rubble") {
+    damageTargetedRubbleCell(hit.block, getMiningDamageAmount(BLOCK.rubble));
+    return true;
+  }
+
+  const activeWorld = requireWorld();
+  const block = activeWorld.getBlock(hit.block.x, hit.block.y, hit.block.z);
+  const damageAmount = getMiningDamageAmount(block);
+  if (damageAmount <= 0) return false;
+
+  const miningDirection = getCameraDirection();
+  const impactPoint = camera.position.clone().addScaledVector(miningDirection, hit.distance);
+  const impactNormal = new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z);
+  const impact: TerrainDamageFeedbackImpact = {
+    normal: impactNormal,
+    speed: MINING_TOOL_IMPACT_SPEED,
+    position: impactPoint,
+    incomingVelocity: miningDirection.clone().multiplyScalar(MINING_TOOL_IMPACT_SPEED)
+  };
+  const result = activeWorld.carveBlock({
+    x: hit.block.x,
+    y: hit.block.y,
+    z: hit.block.z,
+    point: impactPoint,
+    normal: impactNormal,
+    incomingDirection: miningDirection,
+    speed: MINING_TOOL_IMPACT_SPEED,
+    amount: damageAmount
+  });
+  if (!result) return false;
+
+  applyTerrainDamageFeedback(activeWorld, [result], impact);
+  return !result.destroyed;
+}
+
+function getCameraDirection(): THREE.Vector3 {
+  camera.getWorldDirection(direction);
+  if (direction.lengthSq() <= 0.0001) return new THREE.Vector3(0, 0, -1);
+  return direction.clone().normalize();
+}
+
+function damageTargetedRubbleCell(cell: VoxelRaycastHit["block"], amount = PHYSICS_CORE_BLOCK_DAMAGE): void {
   // The rubble proxy is intentionally cheaper than real per-cube collision, but
   // once the player is targeting its occupied cell the normal destroy action
   // should hit that destructible cover instead of silently editing terrain
   // behind it.
   const cellCenter = new THREE.Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5);
-  rubbleField.damageNearest(cellCenter, PHYSICS_CORE_BLOCK_DAMAGE, 0.9);
+  rubbleField.damageNearest(cellCenter, amount, 0.9);
   emitRubbleDamageEvents();
 }
 
@@ -1466,6 +1611,7 @@ function animate(): void {
     debugPlayerVelocity = activePlayer.velocity;
 
     activePlayer.update(delta);
+    updateMiningTool(delta);
     testAvatar.update(delta);
     maybeAutosavePlayerLocation(frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
@@ -1702,6 +1848,7 @@ function shouldSuspendAnimationLoop(now: number): boolean {
 
 function hasActiveEngineWork(): boolean {
   if (!inWorld || !world) return false;
+  if (leftMouseButtonDown && miningToolState) return true;
   if (world.hasPendingRuntimeWork()) return true;
   if (debrisSettlerStats.activeFragments > 0) return true;
   if (physicsCoreTrail.getActiveTrailCount() > 0) return true;
@@ -1742,7 +1889,7 @@ function updateHud(): void {
   const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
   const novaSuffix = novaPilot.active ? " | Nova" : "";
   const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry);
-  const laneLabel = activeBuilderLane === "blocks" ? "Builder" : "Items";
+  const laneLabel = activeBuilderLane === "blocks" ? "Blocks" : "Items";
   hudTitle.textContent = `Voxel Sandbox Engine | ${laneLabel}: ${selectedLabel}${modeSuffix}${novaSuffix}`;
 }
 
@@ -1991,6 +2138,7 @@ function getBlockCssColor(block: BlockId): string {
 }
 
 function selectHotbarIndex(index: number): void {
+  resetMiningToolState();
   const activeHotbarItems = getActiveHotbarItems();
   if (activeBuilderLane === "blocks") {
     selectedBlockHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);
@@ -2300,8 +2448,21 @@ function applyCoreTerrainImpact(
   });
   if (!brushResult) return null;
 
-  for (const result of brushResult.results) {
-    damagedBlocksThisFrame.add(activeWorld.damageKey(result.position.x, result.position.y, result.position.z));
+  applyTerrainDamageFeedback(activeWorld, brushResult.results, impact, damagedBlocksThisFrame);
+
+  return brushResult;
+}
+
+function applyTerrainDamageFeedback(
+  activeWorld: VoxelWorld,
+  results: readonly BlockDamageResult[],
+  impact: TerrainDamageFeedbackImpact,
+  damagedBlocksThisFrame?: Set<string>
+): void {
+  let changedTerrainCollider = false;
+
+  for (const result of results) {
+    damagedBlocksThisFrame?.add(activeWorld.damageKey(result.position.x, result.position.y, result.position.z));
 
     engineEvents.emit("block:damaged", {
       position: result.position,
@@ -2325,10 +2486,12 @@ function applyCoreTerrainImpact(
         fragmentCount,
         materialUnits: ejectedMaterialUnits,
         chipOnly: !result.destroyed,
-        ejectionHint: result.debrisEjectionHint
+        ejectionHint: result.debrisEjectionHint,
+        debrisProfile: getDebrisSpawnProfile(result.block)
       });
     }
 
+    changedTerrainCollider = true;
     if (result.destroyed) {
       engineEvents.emit("block:destroyed", {
         position: result.position,
@@ -2339,7 +2502,10 @@ function applyCoreTerrainImpact(
     }
   }
 
-  return brushResult;
+  // Partial-block cuts and final block removals both alter support/collision
+  // candidates for active debris. Keep Rapier's temporary static collider cache
+  // honest even when a very small chip produces no visible fragment.
+  if (changedTerrainCollider) rigidDebris.invalidateStaticColliders();
 }
 
 function spawnPartialBlockBitePoofs(result: BlockDamageResult): void {
@@ -2369,15 +2535,20 @@ function continuePhysicsCoreAfterPierce(source: PhysicsToy, pierceContinuation: 
 function spawnBlockFragments(
   block: number,
   position: { readonly x: number; readonly y: number; readonly z: number },
-  impact: CoreTerrainImpact,
+  impact: TerrainDamageFeedbackImpact,
   options: {
     readonly fragmentCount: number;
     readonly materialUnits: number;
     readonly chipOnly?: boolean;
     readonly ejectionHint?: DebrisEjectionHint;
+    readonly debrisProfile?: DebrisSpawnProfile;
   }
 ): number {
-  const fragmentBaseSpeed = Math.min(FRAGMENT_IMPACT_SPEED_CAP, impact.speed * FRAGMENT_IMPACT_SPEED_SCALE);
+  const debrisProfile = options.debrisProfile ?? getDebrisSpawnProfile(block);
+  const fragmentBaseSpeed = Math.min(
+    FRAGMENT_IMPACT_SPEED_CAP,
+    impact.speed * FRAGMENT_IMPACT_SPEED_SCALE * debrisProfile.ejectionSpeedMultiplier
+  );
   const blockCenter = options.chipOnly
     ? (options.ejectionHint
       ? createVectorFromVoxel(options.ejectionHint.origin)
@@ -2406,7 +2577,8 @@ function spawnBlockFragments(
     const spawnJitter = createFragmentSpawnJitter();
     const preferredDirection = getDebrisEjectionDirection(options.ejectionHint, index, impact.normal);
     const scatter = createFragmentScatterDirection(offset).multiplyScalar(
-      FRAGMENT_SCATTER_SPEED_MIN + Math.random() * FRAGMENT_SCATTER_SPEED_RANGE
+      (FRAGMENT_SCATTER_SPEED_MIN + Math.random() * FRAGMENT_SCATTER_SPEED_RANGE) *
+        debrisProfile.ejectionSpeedMultiplier
     );
     const launchDirection = preferredDirection
       .clone()
@@ -2422,7 +2594,12 @@ function spawnBlockFragments(
       .multiplyScalar(fragmentBaseSpeed)
       .add(scatter)
       .add(spawnJitter.clone().multiplyScalar(FRAGMENT_JITTER_SPEED))
-      .add(new THREE.Vector3(0, FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE, 0));
+      .add(new THREE.Vector3(
+        0,
+        (FRAGMENT_UPWARD_SPEED_MIN + Math.random() * FRAGMENT_UPWARD_SPEED_RANGE) *
+          debrisProfile.upwardSpeedMultiplier,
+        0
+      ));
     const rubbleMaterialUnits = getBlockFragmentMaterialUnits(index, requestedFragmentCount, options.materialUnits);
     const candidateDebrisShape = createDebrisShapeForBlock(block, {
       fragmentIndex: index,
@@ -3351,7 +3528,7 @@ async function confirmPendingWorldDeletion(): Promise<void> {
 async function exitToHome(): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
-  rightMouseButtonDown = false;
+  clearPointerHoldState();
 
   try {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.

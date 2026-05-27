@@ -21,6 +21,13 @@ import {
 } from "../src/blockFragments";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "../src/blocks";
 import {
+  BLOCK_MATERIAL_RULES,
+  getBlockMaterialRule,
+  getDebrisSpawnProfile,
+  getMiningDamageAmount,
+  getMiningTickSeconds
+} from "../src/blockMaterialRules";
+import {
   BLOCK_COLOR_VARIANT_COUNT,
   createBlockMeshKey,
   getBlockColorVariant,
@@ -50,7 +57,8 @@ import {
   createDebrisShape,
   createDebrisShapeForBlock,
   fitDebrisShapeToVolumeBudget,
-  getDebrisShapeGeometry
+  getDebrisShapeGeometry,
+  selectDebrisShapeIdForBlock
 } from "../src/debrisShapes";
 import {
   DebrisStuckCleanupTracker,
@@ -291,7 +299,7 @@ import {
 import { shouldAbsorbFragmentIntoRubble } from "../src/fragmentRubble";
 import {
   canFireHitscanCoreWithHotbarItem,
-  canDestroyBlockWithHotbarItem,
+  canMineBlockWithHotbarItem,
   canPlaceBlockWithHotbarItem,
   canThrowCoreWithHotbarItem,
   createBlockHotbarItems,
@@ -307,6 +315,7 @@ import {
 import {
   EMPTY_HANDS_ITEM_ID,
   HITSCAN_CORE_ITEM_ID,
+  MINING_TOOL_ITEM_ID,
   PHYSICS_CORE_ITEM_ID,
   createBlockItemId,
   createItemStack,
@@ -778,7 +787,9 @@ test("nova terminal routes chat, slash commands, and bare admin commands", () =>
 test("item registry describes reusable held-item actions", () => {
   const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
   const grassItemId = createBlockItemId(BLOCK.grass);
+  const grassPrimaryAction = getItemAction(itemRegistry, grassItemId, "primary");
   const grassSecondaryAction = getItemAction(itemRegistry, grassItemId, "secondary");
+  const miningToolDefinition = getItemDefinition(itemRegistry, MINING_TOOL_ITEM_ID);
 
   assertEqual(getItemLabel(itemRegistry, EMPTY_HANDS_ITEM_ID), "Unarmed", "empty hands should be an explicit item");
   assertEqual(
@@ -792,9 +803,39 @@ test("item registry describes reusable held-item actions", () => {
     "placeable blocks should already carry stack metadata for later inventory work"
   );
   assertEqual(
-    getItemAction(itemRegistry, grassItemId, "primary").kind,
-    "terrain:destroy-block",
-    "selected block primary action should describe terrain destruction"
+    getItemLabel(itemRegistry, MINING_TOOL_ITEM_ID),
+    "Mining Tool",
+    "mining tool should have a readable item label"
+  );
+  assertEqual(
+    miningToolDefinition.category,
+    "tool",
+    "mining tool should be described as a tool item"
+  );
+  assertEqual(
+    miningToolDefinition.maxStack,
+    1,
+    "mining tool should be a single held tool instead of a stackable block"
+  );
+  assertDeepEqual(
+    miningToolDefinition.tags,
+    ["tool", "terrain", "mining"],
+    "mining tool should advertise tool, terrain, and mining tags"
+  );
+  assertEqual(
+    getItemAction(itemRegistry, MINING_TOOL_ITEM_ID, "primary").kind,
+    "terrain:mine-block",
+    "mining tool primary action should describe terrain mining"
+  );
+  assertEqual(
+    getItemAction(itemRegistry, MINING_TOOL_ITEM_ID, "secondary").kind,
+    "none",
+    "mining tool secondary action should be inert"
+  );
+  assertEqual(
+    grassPrimaryAction.kind,
+    "none",
+    "placeable block primary action should be a build-only no-op"
   );
   assertEqual(
     grassSecondaryAction.kind,
@@ -827,23 +868,29 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
   const combinedHotbarItems = createHotbarItems(PLACEABLE_BLOCKS);
   const firstItem = toolHotbarItems[0];
-  const projectileCoreItem = toolHotbarItems[1];
-  const hitscanCoreItem = toolHotbarItems[2];
+  const miningToolItem = toolHotbarItems[1];
+  const projectileCoreItem = toolHotbarItems[2];
+  const hitscanCoreItem = toolHotbarItems[3];
   const firstBlockItem = blockHotbarItems[0];
   const grassItem = createItemStack(createBlockItemId(BLOCK.grass));
 
   assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "tool lane should start in the explicit unarmed state");
   assertEqual(
+    miningToolItem?.itemId,
+    MINING_TOOL_ITEM_ID,
+    "tool lane should put the mining tool immediately after unarmed"
+  );
+  assertEqual(
     projectileCoreItem?.itemId,
     PHYSICS_CORE_ITEM_ID,
-    "tool lane should keep the projectile physics core before the hitscan core"
+    "tool lane should keep the projectile physics core after the mining tool"
   );
   assertEqual(
     hitscanCoreItem?.itemId,
     HITSCAN_CORE_ITEM_ID,
     "tool lane should end with the hitscan core item"
   );
-  assertEqual(toolHotbarItems.length, 3, "tool lane should contain only unarmed and core tools");
+  assertEqual(toolHotbarItems.length, 4, "tool lane should contain unarmed, mining, and core tools");
   assertEqual(
     blockHotbarItems.length,
     PLACEABLE_BLOCKS.length,
@@ -865,6 +912,11 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
     "unarmed slot should have a readable HUD label"
   );
   assertEqual(
+    getHotbarItemLabel(miningToolItem ?? createItemStack(MINING_TOOL_ITEM_ID), itemRegistry),
+    "Mining Tool",
+    "mining tool slot should have a readable HUD label"
+  );
+  assertEqual(
     getHotbarItemLabel(projectileCoreItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "Physics Core",
     "projectile core slot should have a readable HUD label"
@@ -875,19 +927,23 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
     "hitscan core slot should have a readable HUD label"
   );
   assert(
-    !canDestroyBlockWithHotbarItem(createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
+    !canMineBlockWithHotbarItem(createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
     "unarmed should leave left click inert until tools exist"
   );
   assert(
-    canDestroyBlockWithHotbarItem(grassItem, itemRegistry),
-    "selected blocks should own left-click terrain destruction"
+    canMineBlockWithHotbarItem(createItemStack(MINING_TOOL_ITEM_ID), itemRegistry),
+    "selected mining tool should mine terrain on left click"
   );
   assert(
-    !canDestroyBlockWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
+    !canMineBlockWithHotbarItem(grassItem, itemRegistry),
+    "selected blocks should not mine terrain on left click"
+  );
+  assert(
+    !canMineBlockWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
     "holding a core should not also break targeted blocks on left click"
   );
   assert(
-    !canDestroyBlockWithHotbarItem(createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
+    !canMineBlockWithHotbarItem(createItemStack(HITSCAN_CORE_ITEM_ID), itemRegistry),
     "holding a hitscan core should not also break targeted blocks on left click"
   );
   assert(
@@ -904,8 +960,8 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   );
   assertEqual(
     getHotbarPrimaryAction(grassItem, itemRegistry).kind,
-    "terrain:destroy-block",
-    "hotbar primary action should resolve through the item registry"
+    "none",
+    "block hotbar primary action should resolve as a build-only no-op"
   );
   assertEqual(
     getHotbarSecondaryAction(grassItem, itemRegistry).kind,
@@ -2986,7 +3042,7 @@ test("partial block debris ejection hints prefer exposed openings", () => {
 test("partial block debris ejection hints can use a drilled tunnel exit", () => {
   const world = new VoxelWorld({ seed: "partial-ejection-tunnel-test" });
   world.setBlock(1, 3, 4, BLOCK.air);
-  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(2, 3, 4, BLOCK.ember);
   world.setBlock(3, 3, 4, BLOCK.air);
 
   const result = world.carveBlock({
@@ -3188,6 +3244,7 @@ test("damage brush previews include sparse seam neighbors", () => {
 
 test("damage brush previews keep affected micro-cells adjacent across seams", () => {
   const world = new VoxelWorld({ seed: "damage-brush-preview-connected-test" });
+  const connectedFootprintDamage = BLOCKS[BLOCK.stone].health * 0.1;
   for (let y = 2; y <= 3; y += 1) {
     for (let z = 1; z <= 2; z += 1) {
       for (let x = 0; x <= 1; x += 1) {
@@ -3205,7 +3262,7 @@ test("damage brush previews keep affected micro-cells adjacent across seams", ()
     incomingDirection: new THREE.Vector3(1, -0.02, 0.01),
     coreRadius: 0.42,
     speed: 18,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: connectedFootprintDamage
   });
   const cellKeys = getPreviewGlobalBiteCellKeys(preview);
 
@@ -3220,6 +3277,7 @@ test("damage brush previews keep affected micro-cells adjacent across seams", ()
 
 test("damage brush carving keeps affected micro-cells adjacent across seams", () => {
   const world = new VoxelWorld({ seed: "damage-brush-carve-connected-test" });
+  const connectedFootprintDamage = BLOCKS[BLOCK.stone].health * 0.1;
   for (let y = 2; y <= 3; y += 1) {
     for (let z = 1; z <= 2; z += 1) {
       for (let x = 0; x <= 1; x += 1) {
@@ -3237,7 +3295,7 @@ test("damage brush carving keeps affected micro-cells adjacent across seams", ()
     incomingDirection: new THREE.Vector3(1, -0.02, 0.01),
     coreRadius: 0.42,
     speed: 18,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: connectedFootprintDamage
   });
   const positions = result?.results.map((hit) => hit.position) ?? [];
   const cellKeys = getWorldPartialBlockGlobalBiteCellKeys(world, positions);
@@ -3382,6 +3440,7 @@ test("partial block damage lattice approximates remaining material fraction", ()
 
 test("partial block bite footprint follows tiny core trajectory through the lattice", () => {
   const world = new VoxelWorld({ seed: "partial-bite-tiny-footprint-test" });
+  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
   world.setBlock(2, 3, 4, BLOCK.stone);
 
   world.carveBlock({
@@ -3393,13 +3452,13 @@ test("partial block bite footprint follows tiny core trajectory through the latt
     incomingDirection: new THREE.Vector3(1, 0, 0),
     coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
     speed: 18,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: oneTenthStoneDamage
   });
 
   const removedCellIndexes = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [];
   const removedCells = removedCellIndexes.map(decodeTestLatticeIndex);
 
-  assertEqual(removedCells.length, 3, "one 10-HP carve step should remove three presentation cells");
+  assertEqual(removedCells.length, 3, "one tenth of stone HP should remove three presentation cells");
   assert(
     arePartialBlockVisualCellIndexesConnected(removedCellIndexes),
     "tiny core tunnel bites should be face-connected instead of isolated missing cells"
@@ -3417,6 +3476,7 @@ test("partial block bite footprint follows tiny core trajectory through the latt
 
 test("partial block bite footprint widens for large cores before drilling deep", () => {
   const world = new VoxelWorld({ seed: "partial-bite-large-footprint-test" });
+  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
   world.setBlock(2, 3, 4, BLOCK.stone);
 
   world.carveBlock({
@@ -3428,7 +3488,7 @@ test("partial block bite footprint widens for large cores before drilling deep",
     incomingDirection: new THREE.Vector3(1, 0, 0),
     coreRadius: 0.42,
     speed: 18,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: oneTenthStoneDamage
   });
 
   const removedCellIndexes = world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [];
@@ -3436,7 +3496,7 @@ test("partial block bite footprint widens for large cores before drilling deep",
   const entryPlaneCells = removedCells.filter((cell) => cell.x === 0);
   const lateralSlots = new Set(entryPlaneCells.map((cell) => `${cell.y},${cell.z}`));
 
-  assertEqual(removedCells.length, 3, "one 10-HP carve step should still remove three presentation cells");
+  assertEqual(removedCells.length, 3, "one tenth of stone HP should still remove three presentation cells");
   assert(
     arePartialBlockVisualCellIndexesConnected(removedCellIndexes),
     "large core bites should still remove one connected chunk with no gaps"
@@ -3487,6 +3547,8 @@ test("partial block bite lattice keeps older damage from visually refilling", ()
 
 test("tiny fast partial-block bites can pierce through an open tunnel", () => {
   const world = new VoxelWorld({ seed: "partial-bite-pierce-test" });
+  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const impactSpeed = 24;
   world.setBlock(2, 3, 4, BLOCK.stone);
   world.setBlock(3, 3, 4, BLOCK.air);
 
@@ -3498,18 +3560,24 @@ test("tiny fast partial-block bites can pierce through an open tunnel", () => {
     normal: new THREE.Vector3(-1, 0, 0),
     incomingDirection: new THREE.Vector3(1, 0, 0),
     coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.3,
-    speed: 18,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    speed: impactSpeed,
+    amount: oneTenthStoneDamage
   });
 
   assert(result?.pierceContinuation, "tiny fast cores should continue after opening a complete lattice tunnel");
   assert(result.pierceContinuation.position.x > 3, "piercing should place the core just beyond the exit face");
-  assertClose(result.pierceContinuation.speed, 18 - 3 * 2.8, 0.000001, "exit speed should pay tunnel material cost");
+  assertClose(
+    result.pierceContinuation.speed,
+    impactSpeed - 3 * 2.8 * (BLOCKS[BLOCK.stone].health / 10),
+    0.000001,
+    "exit speed should pay tunnel material cost scaled by material HP"
+  );
   assert(result.pierceContinuation.velocity.x > 0, "pierce continuation should keep forward velocity");
 });
 
 test("tiny fast off-center bites still reserve a continuous pierce tunnel", () => {
   const world = new VoxelWorld({ seed: "partial-bite-off-center-pierce-test" });
+  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
   world.setBlock(2, 3, 4, BLOCK.stone);
   world.setBlock(3, 3, 4, BLOCK.air);
 
@@ -3522,13 +3590,13 @@ test("tiny fast off-center bites still reserve a continuous pierce tunnel", () =
     incomingDirection: new THREE.Vector3(1, 0, 0),
     coreRadius: PHYSICS_CORE_BASE_RADIUS * 0.2,
     speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * (PHYSICS_CORE_VELOCITY_MAX_PERCENT / 100),
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: oneTenthStoneDamage
   });
   const removedCells = (world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [])
     .map(decodeTestLatticeIndex);
 
   assert(result?.pierceContinuation, "tiny fast cores should pierce even when the aim point is near lattice seams");
-  assertEqual(removedCells.length, 3, "one tiny pierce should still spend one carve step of visual material");
+  assertEqual(removedCells.length, 3, "one tiny pierce should still spend one tenth of stone visual material");
   assertDeepEqual(
     removedCells.map((cell) => cell.x).sort(),
     [0, 1, 2],
@@ -3969,6 +4037,192 @@ test("block fracture pattern produces a centered 3x3x3 debris grid", () => {
       z: -BLOCK_FRAGMENT_SPACING
     },
     "first shard should sit at the low corner of the centered grid"
+  );
+});
+
+test("block material rules keep HP, mining cadence, and debris flavor keyed by block", () => {
+  const allKnownRuleKeys = Object.keys(BLOCK_MATERIAL_RULES).map(Number).sort((left, right) => left - right);
+  const allBlockIds = Object.values(BLOCK).sort((left, right) => left - right);
+  assertDeepEqual(allKnownRuleKeys, allBlockIds, "material rules should cover every declared BlockId");
+
+  const expectedRules = [
+    {
+      block: BLOCK.leaves,
+      health: 3,
+      cadence: "very-fast",
+      tickSeconds: 0.08,
+      flavor: "light-shredded",
+      shapeIds: ["narrow-shard", "flat-slab", "long-splinter"],
+      visualScaleMultiplier: 0.78,
+      ejectionSpeedMultiplier: 0.82,
+      upwardSpeedMultiplier: 0.9
+    },
+    {
+      block: BLOCK.sand,
+      health: 5,
+      cadence: "fast",
+      tickSeconds: 0.12,
+      flavor: "soft-low-spray",
+      shapeIds: ["flat-slab", "squat-block", "chunky-chip"],
+      visualScaleMultiplier: 0.82,
+      ejectionSpeedMultiplier: 0.68,
+      upwardSpeedMultiplier: 0.48
+    },
+    {
+      block: BLOCK.grass,
+      health: 6,
+      cadence: "quick",
+      tickSeconds: 0.16,
+      flavor: "moderate-chunks",
+      shapeIds: ["chunky-chip", "squat-block", "sheared-chunk"],
+      visualScaleMultiplier: 1,
+      ejectionSpeedMultiplier: 1,
+      upwardSpeedMultiplier: 1
+    },
+    {
+      block: BLOCK.dirt,
+      health: 8,
+      cadence: "medium",
+      tickSeconds: 0.22,
+      flavor: "heavier-chunks",
+      shapeIds: ["squat-block", "chunky-chip", "sheared-chunk", "corner-chunk"],
+      visualScaleMultiplier: 1.08,
+      ejectionSpeedMultiplier: 0.9,
+      upwardSpeedMultiplier: 0.82
+    },
+    {
+      block: BLOCK.ember,
+      health: 10,
+      cadence: "medium-hard",
+      tickSeconds: 0.28,
+      flavor: "sharp-hot-ejection",
+      shapeIds: ["narrow-shard", "wedge", "sheared-chunk", "corner-chunk"],
+      visualScaleMultiplier: 1,
+      ejectionSpeedMultiplier: 1.18,
+      upwardSpeedMultiplier: 1.16
+    },
+    {
+      block: BLOCK.wood,
+      health: 12,
+      cadence: "slow",
+      tickSeconds: 0.36,
+      flavor: "splinter-biased",
+      shapeIds: ["long-splinter", "narrow-shard", "wedge"],
+      visualScaleMultiplier: 0.95,
+      ejectionSpeedMultiplier: 1.05,
+      upwardSpeedMultiplier: 0.95
+    },
+    {
+      block: BLOCK.stone,
+      health: 16,
+      cadence: "slowest",
+      tickSeconds: 0.45,
+      flavor: "heavy-angular",
+      shapeIds: ["corner-chunk", "wedge", "sheared-chunk", "chunky-chip"],
+      visualScaleMultiplier: 1.12,
+      ejectionSpeedMultiplier: 0.82,
+      upwardSpeedMultiplier: 0.72
+    },
+    {
+      block: BLOCK.rubble,
+      health: 4,
+      cadence: "quick",
+      tickSeconds: 0.16,
+      flavor: "muted",
+      shapeIds: ["squat-block", "flat-slab", "chunky-chip"],
+      visualScaleMultiplier: 0.72,
+      ejectionSpeedMultiplier: 0.55,
+      upwardSpeedMultiplier: 0.5
+    }
+  ] as const;
+
+  for (const expected of expectedRules) {
+    const blockName = BLOCKS[expected.block].name;
+    const rule = getBlockMaterialRule(expected.block);
+    const debrisProfile = getDebrisSpawnProfile(expected.block);
+
+    assertEqual(BLOCKS[expected.block].health, expected.health, `${blockName} BLOCKS HP should match its material`);
+    assertEqual(rule.health, expected.health, `${blockName} material HP should stay explicit`);
+    assertEqual(rule.miningCadence, expected.cadence, `${blockName} mining cadence should stay material-specific`);
+    assertEqual(getMiningTickSeconds(expected.block), expected.tickSeconds, `${blockName} mining tick should be explicit`);
+    assertEqual(getMiningDamageAmount(expected.block), 1, `${blockName} mining damage should not be derived from HP`);
+    assertEqual(debrisProfile.flavor, expected.flavor, `${blockName} debris flavor should match the material`);
+    assertDeepEqual(
+      [...debrisProfile.preferredShapeIds],
+      [...expected.shapeIds],
+      `${blockName} debris shapes should preserve the intended bias`
+    );
+    assertEqual(
+      debrisProfile.visualScaleMultiplier,
+      expected.visualScaleMultiplier,
+      `${blockName} debris visual scale should stay material-specific`
+    );
+    assertEqual(
+      debrisProfile.ejectionSpeedMultiplier,
+      expected.ejectionSpeedMultiplier,
+      `${blockName} debris ejection speed should stay material-specific`
+    );
+    assertEqual(
+      debrisProfile.upwardSpeedMultiplier,
+      expected.upwardSpeedMultiplier,
+      `${blockName} debris upward speed should stay material-specific`
+    );
+  }
+
+  assertEqual(getBlockMaterialRule(999).block, BLOCK.air, "unknown block ids should fall back to the inert rule");
+  assertEqual(getMiningDamageAmount(BLOCK.air), 0, "air should not spend mining damage");
+  assertEqual(getMiningTickSeconds(BLOCK.air), 0, "air should not schedule mining ticks");
+});
+
+test("material debris profiles deterministically bias shard shape helpers", () => {
+  const seed = {
+    fragmentIndex: 7,
+    distributedFragmentIndex: 12,
+    origin: { x: -3, y: 5, z: 11 }
+  };
+
+  assertEqual(
+    selectDebrisShapeIdForBlock(BLOCK.wood, seed),
+    selectDebrisShapeIdForBlock(BLOCK.wood, seed),
+    "material-biased shape selection should be deterministic for the same seed"
+  );
+
+  const woodProfile = getDebrisSpawnProfile(BLOCK.wood);
+  const woodShapeIds = new Set<ReturnType<typeof selectDebrisShapeIdForBlock>>();
+  for (let index = 0; index < 24; index += 1) {
+    woodShapeIds.add(selectDebrisShapeIdForBlock(BLOCK.wood, {
+      fragmentIndex: index,
+      distributedFragmentIndex: getDistributedBlockFragmentIndex(index, 24),
+      origin: { x: index - 4, y: 2, z: 9 }
+    }));
+  }
+  assert(woodShapeIds.size > 1, "wood debris should still vary within its splinter-biased profile");
+  for (const shapeId of woodShapeIds) {
+    assert(
+      woodProfile.preferredShapeIds.includes(shapeId),
+      "wood debris should select only splinter-biased shape ids"
+    );
+  }
+
+  const stoneShape = createDebrisShapeForBlock(BLOCK.stone, seed);
+  assert(
+    getDebrisSpawnProfile(BLOCK.stone).preferredShapeIds.includes(stoneShape.shapeId),
+    "stone debris should choose from heavy angular shape ids"
+  );
+  assert(
+    stoneShape.estimatedVisualVolume > 0,
+    "material-biased debris shape creation should still return a usable visual volume"
+  );
+  const fittedStoneShape = fitDebrisShapeToVolumeBudget(stoneShape, 0.01);
+  assert(
+    !fittedStoneShape || fittedStoneShape.estimatedVisualVolume <= 0.010001,
+    "material debris shape bias should leave volume-budget fitting in charge"
+  );
+
+  assertEqual(
+    selectDebrisShapeIdForBlock(999, seed),
+    selectDebrisShapeIdForBlock(BLOCK.air, seed),
+    "unknown block debris should reuse the inert fallback profile"
   );
 });
 
@@ -6495,6 +6749,7 @@ test("physics core aim preview renders hidden bite cells as a separate soft over
 
 test("small fast physics cores pass through existing visual holes in partial blocks", () => {
   const world = new VoxelWorld({ seed: "small-core-existing-hole-test" });
+  const openTunnelDamage = BLOCKS[BLOCK.stone].health * 0.1;
   const tinyFastSettings = {
     sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
     velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
@@ -6510,7 +6765,7 @@ test("small fast physics cores pass through existing visual holes in partial blo
     incomingDirection: new THREE.Vector3(1, 0, 0),
     coreRadius: getPhysicsCoreRadius(tinyFastSettings),
     speed: PLAYER_PHYSICS_CORE_BASE_LAUNCH_SPEED * getPhysicsCoreVelocityMultiplier(tinyFastSettings),
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: openTunnelDamage
   });
 
   const core = new PhysicsToy(
@@ -6612,6 +6867,7 @@ test("small fast physics cores hit visible partial-block material from inside th
 
 test("hitscan cores pass through existing visual holes in partial blocks", () => {
   const world = new VoxelWorld({ seed: "hitscan-existing-hole-test" });
+  const openTunnelDamage = BLOCKS[BLOCK.stone].health * 0.1;
   world.setBlock(1, 3, 4, BLOCK.air);
   world.setBlock(2, 3, 4, BLOCK.stone);
   world.setBlock(3, 3, 4, BLOCK.stone);
@@ -6624,7 +6880,7 @@ test("hitscan cores pass through existing visual holes in partial blocks", () =>
     incomingDirection: new THREE.Vector3(1, 0, 0),
     coreRadius: HITSCAN_CORE_RADIUS,
     speed: HITSCAN_CORE_IMPACT_SPEED,
-    amount: PARTIAL_BLOCK_CORE_DAMAGE
+    amount: openTunnelDamage
   });
 
   const hit = raycastHitscanCore(
@@ -6783,9 +7039,9 @@ test("hitscan bolt tracer lifetime stays quick but readable", () => {
 
 test("small fast physics cores can pierce a block and damage one behind an air gap", () => {
   const world = new VoxelWorld({ seed: "small-core-pierce-runtime-test" });
-  world.setBlock(2, 3, 4, BLOCK.stone);
+  world.setBlock(2, 3, 4, BLOCK.ember);
   world.setBlock(3, 3, 4, BLOCK.air);
-  world.setBlock(4, 3, 4, BLOCK.stone);
+  world.setBlock(4, 3, 4, BLOCK.ember);
   world.setBlock(5, 3, 4, BLOCK.air);
   const tinyFastSettings = {
     sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,

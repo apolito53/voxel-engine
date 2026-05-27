@@ -1,6 +1,7 @@
 import type { BlockDefinition, BlockId } from "./blocks";
 
 export const EMPTY_HANDS_ITEM_ID = "core:empty-hands";
+export const MINING_TOOL_ITEM_ID = "tool:mining-tool";
 export const PHYSICS_CORE_ITEM_ID = "tool:physics-core";
 export const HITSCAN_CORE_ITEM_ID = "tool:hitscan-core";
 
@@ -20,8 +21,8 @@ export type NoItemAction = {
   readonly kind: "none";
 };
 
-export type DestroyBlockItemAction = {
-  readonly kind: "terrain:destroy-block";
+export type MineBlockItemAction = {
+  readonly kind: "terrain:mine-block";
 };
 
 export type PlaceBlockItemAction = {
@@ -39,7 +40,7 @@ export type FireHitscanCoreItemAction = {
 
 export type ItemAction =
   | NoItemAction
-  | DestroyBlockItemAction
+  | MineBlockItemAction
   | PlaceBlockItemAction
   | ThrowPhysicsCoreItemAction
   | FireHitscanCoreItemAction;
@@ -135,11 +136,24 @@ export function createPlaceableBlockItemDefinition(
     maxStack: 99,
     tags: ["voxel", "placeable", definition.solid ? "solid" : "non-solid"],
     actions: {
-      // Selecting a block currently means "terrain edit mode": left removes
-      // the target, right places this block into the adjacent voxel. A future
-      // tool can take over destruction without changing hotbar selection code.
-      primary: { kind: "terrain:destroy-block" },
+      // Blocks are build-only inventory entries: right click places the
+      // selected material, while mining/destruction belongs to dedicated tools.
+      primary: NO_ITEM_ACTION,
       secondary: { kind: "terrain:place-block", block }
+    }
+  };
+}
+
+export function createMiningToolItemDefinition(): ItemDefinition {
+  return {
+    id: MINING_TOOL_ITEM_ID,
+    name: "Mining Tool",
+    category: "tool",
+    maxStack: 1,
+    tags: ["tool", "terrain", "mining"],
+    actions: {
+      primary: { kind: "terrain:mine-block" },
+      secondary: NO_ITEM_ACTION
     }
   };
 }
@@ -178,6 +192,7 @@ export function createVoxelSandboxItemDefinitions(
 ): readonly ItemDefinition[] {
   return [
     createEmptyHandsItemDefinition(),
+    createMiningToolItemDefinition(),
     ...placeableBlocks.map((block) => createPlaceableBlockItemDefinition(block, blocks[block])),
     createPhysicsCoreItemDefinition(),
     createHitscanCoreItemDefinition()

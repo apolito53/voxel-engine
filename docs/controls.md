@@ -50,9 +50,14 @@ the root README.
 - `G` toggles the active lane between `Items` and `Blocks`.
 - `Mouse wheel` selects within the active lane.
 - Number keys map to the current lane.
+- The `Items` lane contains `Unarmed`, `Mining Tool`, `Physics Core`, and
+  `Hitscan Core`.
 - `Unarmed` is intentionally inert on both clicks for now.
-- In the `Blocks` lane, `Left click` erases the targeted brush volume and
-  `Right click` places the selected block brush into adjacent space.
+- `Mining Tool` uses held `Left click` to mine the targeted terrain block.
+  Mining spends 1 damage per tick; material controls block HP, cadence, and chip
+  debris flavor.
+- In the `Blocks` lane, `Left click` does nothing and `Right click` places the
+  selected block brush into adjacent space.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
