@@ -74,6 +74,9 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
+Gameplay settings include Physics Core size, velocity, terrain-damaging bounce
+count, color, and trail controls.
+
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).
 

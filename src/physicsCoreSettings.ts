@@ -8,6 +8,10 @@ export const PHYSICS_CORE_VELOCITY_MIN_PERCENT = 60;
 export const PHYSICS_CORE_VELOCITY_MAX_PERCENT = 500;
 export const PHYSICS_CORE_VELOCITY_STEP_PERCENT = 5;
 export const PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT = 140;
+export const PHYSICS_CORE_BOUNCE_MIN_COUNT = 1;
+export const PHYSICS_CORE_BOUNCE_MAX_COUNT = 12;
+export const PHYSICS_CORE_BOUNCE_STEP_COUNT = 1;
+export const PHYSICS_CORE_DEFAULT_BOUNCE_COUNT = 1;
 export const PHYSICS_CORE_HUE_MIN_DEGREES = 0;
 export const PHYSICS_CORE_HUE_MAX_DEGREES = 360;
 export const PHYSICS_CORE_HUE_STEP_DEGREES = 5;
@@ -17,6 +21,7 @@ export const PHYSICS_CORE_DEFAULT_TRAIL_ENABLED = true;
 export type PhysicsCoreSettings = {
   readonly sizePercent: number;
   readonly velocityPercent: number;
+  readonly terrainBounceCount: number;
   readonly hueDegrees: number;
   readonly trailEnabled: boolean;
 };
@@ -24,6 +29,7 @@ export type PhysicsCoreSettings = {
 export const DEFAULT_PHYSICS_CORE_SETTINGS: PhysicsCoreSettings = {
   sizePercent: PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
   velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+  terrainBounceCount: PHYSICS_CORE_DEFAULT_BOUNCE_COUNT,
   hueDegrees: PHYSICS_CORE_DEFAULT_HUE_DEGREES,
   trailEnabled: PHYSICS_CORE_DEFAULT_TRAIL_ENABLED
 };
@@ -35,6 +41,7 @@ export function normalizePhysicsCoreSettings(
   return {
     sizePercent: normalizePhysicsCoreSizePercent(settings.sizePercent, fallback.sizePercent),
     velocityPercent: normalizePhysicsCoreVelocityPercent(settings.velocityPercent, fallback.velocityPercent),
+    terrainBounceCount: normalizePhysicsCoreBounceCount(settings.terrainBounceCount, fallback.terrainBounceCount),
     hueDegrees: normalizePhysicsCoreHueDegrees(settings.hueDegrees, fallback.hueDegrees),
     trailEnabled: typeof settings.trailEnabled === "boolean" ? settings.trailEnabled : fallback.trailEnabled
   };
@@ -66,6 +73,19 @@ export function normalizePhysicsCoreVelocityPercent(
   );
 }
 
+export function normalizePhysicsCoreBounceCount(
+  value: unknown,
+  fallback = PHYSICS_CORE_DEFAULT_BOUNCE_COUNT
+): number {
+  return normalizeSteppedPercent(
+    value,
+    fallback,
+    PHYSICS_CORE_BOUNCE_MIN_COUNT,
+    PHYSICS_CORE_BOUNCE_MAX_COUNT,
+    PHYSICS_CORE_BOUNCE_STEP_COUNT
+  );
+}
+
 export function normalizePhysicsCoreHueDegrees(
   value: unknown,
   fallback = PHYSICS_CORE_DEFAULT_HUE_DEGREES
@@ -89,6 +109,11 @@ export function getPhysicsCoreVelocityMultiplier(settings: PhysicsCoreSettings):
 
 export function formatPhysicsCorePercent(value: number): string {
   return `${Math.round(value)}%`;
+}
+
+export function formatPhysicsCoreBounceCount(value: number): string {
+  const bounceCount = normalizePhysicsCoreBounceCount(value);
+  return `${bounceCount} bounce${bounceCount === 1 ? "" : "s"}`;
 }
 
 export function formatPhysicsCoreHue(value: number): string {

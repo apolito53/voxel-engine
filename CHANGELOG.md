@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.1 - 2026-05-27
+
+### Added
+
+- Added a Gameplay settings slider for Physics Core terrain bounces, letting
+  projectile cores damage terrain across multiple rebounds before self-destructing.
+
 ## 0.8.0 - 2026-05-27
 
 Minor milestone: this introduces the first reusable tool/mining/material identity layer, so the version now reflects a real engine capability step instead of another tiny patch.

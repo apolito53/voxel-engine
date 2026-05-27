@@ -60,6 +60,7 @@ type PhysicsToyOptions = {
   readonly rubbleMaterialUnits?: number;
   readonly debrisShape?: DebrisShape | null;
   readonly damagesBlocks?: boolean;
+  readonly terrainDamageBounceCount?: number;
   readonly inverseMass?: number;
   readonly castShadow?: boolean;
   readonly maxAgeSeconds?: number | null;
@@ -115,6 +116,7 @@ export class PhysicsToy {
   private readonly maxAgeSeconds: number | null;
   private readonly sleepSpeed: number;
   private readonly sleepAfterSeconds: number;
+  private terrainDamageBouncesRemaining: number;
   private ageSeconds = 0;
   private settledSeconds = 0;
   private supportContactLastUpdate = false;
@@ -144,6 +146,11 @@ export class PhysicsToy {
     this.rubbleMaterialUnits = normalizeRubbleMaterialUnits(options.rubbleMaterialUnits, this.fragmentBlock !== null);
     this.debrisShape = options.debrisShape ? cloneDebrisShape(options.debrisShape) : null;
     this.damagesBlocks = options.damagesBlocks ?? true;
+    // Projectile cores spend this budget only after terrain damage actually
+    // applies. Loose debris never damages terrain, so it carries no budget.
+    this.terrainDamageBouncesRemaining = this.damagesBlocks
+      ? normalizeTerrainDamageBounceCount(options.terrainDamageBounceCount)
+      : 0;
     this.disposeGeometry = options.disposeGeometry ?? true;
     this.disposeMaterial = options.disposeMaterial ?? true;
     this.maxAgeSeconds = options.maxAgeSeconds ?? null;
@@ -210,6 +217,10 @@ export class PhysicsToy {
     return this.rigidDebrisBodyAttached;
   }
 
+  get terrainDamageBouncesLeft(): number {
+    return this.terrainDamageBouncesRemaining;
+  }
+
   get age(): number {
     return this.ageSeconds;
   }
@@ -244,6 +255,13 @@ export class PhysicsToy {
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
     this.resetGroundDebrisCleanupClock();
+  }
+
+  consumeTerrainDamageBounce(): boolean {
+    if (!this.damagesBlocks || this.expired) return false;
+
+    this.terrainDamageBouncesRemaining = Math.max(0, this.terrainDamageBouncesRemaining - 1);
+    return this.terrainDamageBouncesRemaining > 0;
   }
 
   expire(): void {
@@ -1097,6 +1115,12 @@ function normalizeRubbleMaterialUnits(value: number | undefined, isFragment: boo
   const numericValue = value ?? 1;
   if (!Number.isFinite(numericValue)) return 1;
   return Math.max(0.0001, numericValue);
+}
+
+function normalizeTerrainDamageBounceCount(value: number | undefined): number {
+  const numericValue = value ?? 1;
+  if (!Number.isFinite(numericValue)) return 1;
+  return Math.max(1, Math.floor(numericValue));
 }
 
 function getGroundDebrisAirborneFallbackSeconds(lifetimeSeconds: number): number {

@@ -153,6 +153,9 @@ import {
 import {
   DEFAULT_PHYSICS_CORE_SETTINGS,
   PHYSICS_CORE_BASE_RADIUS,
+  PHYSICS_CORE_BOUNCE_MAX_COUNT,
+  PHYSICS_CORE_BOUNCE_MIN_COUNT,
+  PHYSICS_CORE_DEFAULT_BOUNCE_COUNT,
   PHYSICS_CORE_DEFAULT_HUE_DEGREES,
   PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
   PHYSICS_CORE_DEFAULT_TRAIL_ENABLED,
@@ -163,10 +166,12 @@ import {
   PHYSICS_CORE_SIZE_MIN_PERCENT,
   PHYSICS_CORE_VELOCITY_MAX_PERCENT,
   PHYSICS_CORE_VELOCITY_MIN_PERCENT,
+  formatPhysicsCoreBounceCount,
   formatPhysicsCoreHue,
   formatPhysicsCorePercent,
   getPhysicsCoreRadius,
   getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreBounceCount,
   normalizePhysicsCoreHueDegrees,
   normalizePhysicsCoreSettings
 } from "../src/physicsCoreSettings";
@@ -7503,6 +7508,7 @@ test("physics core settings clamp slider values", () => {
     {
       sizePercent: PHYSICS_CORE_DEFAULT_SIZE_PERCENT,
       velocityPercent: PHYSICS_CORE_DEFAULT_VELOCITY_PERCENT,
+      terrainBounceCount: PHYSICS_CORE_DEFAULT_BOUNCE_COUNT,
       hueDegrees: PHYSICS_CORE_DEFAULT_HUE_DEGREES,
       trailEnabled: PHYSICS_CORE_DEFAULT_TRAIL_ENABLED
     },
@@ -7512,6 +7518,7 @@ test("physics core settings clamp slider values", () => {
   const tinyFastCore = normalizePhysicsCoreSettings({
     sizePercent: -40,
     velocityPercent: 999,
+    terrainBounceCount: 999,
     hueDegrees: -40,
     trailEnabled: false
   });
@@ -7526,6 +7533,11 @@ test("physics core settings clamp slider values", () => {
     "core velocity slider should clamp to the fastest safe percentage"
   );
   assertEqual(
+    tinyFastCore.terrainBounceCount,
+    PHYSICS_CORE_BOUNCE_MAX_COUNT,
+    "core bounce slider should clamp to the largest safe bounce budget"
+  );
+  assertEqual(
     tinyFastCore.hueDegrees,
     PHYSICS_CORE_HUE_MIN_DEGREES,
     "core hue slider should clamp to the warmest boundary"
@@ -7535,6 +7547,7 @@ test("physics core settings clamp slider values", () => {
   const largeSlowCore = normalizePhysicsCoreSettings({
     sizePercent: 999,
     velocityPercent: -40,
+    terrainBounceCount: -40,
     hueDegrees: 999
   });
   assertEqual(
@@ -7546,6 +7559,11 @@ test("physics core settings clamp slider values", () => {
     largeSlowCore.velocityPercent,
     PHYSICS_CORE_VELOCITY_MIN_PERCENT,
     "core velocity slider should clamp to the slowest safe percentage"
+  );
+  assertEqual(
+    largeSlowCore.terrainBounceCount,
+    PHYSICS_CORE_BOUNCE_MIN_COUNT,
+    "core bounce slider should clamp to at least one terrain hit"
   );
   assertEqual(
     largeSlowCore.hueDegrees,
@@ -7565,8 +7583,32 @@ test("physics core settings clamp slider values", () => {
     "core velocity percent should become a launch multiplier"
   );
   assertEqual(formatPhysicsCorePercent(140), "140%", "core slider labels should be terse percentages");
+  assertEqual(formatPhysicsCoreBounceCount(1), "1 bounce", "single-bounce labels should stay singular");
+  assertEqual(formatPhysicsCoreBounceCount(4), "4 bounces", "multi-bounce labels should stay readable");
+  assertEqual(normalizePhysicsCoreBounceCount(4.6), 5, "core bounce counts should snap to whole steps");
   assertEqual(formatPhysicsCoreHue(185), "185°", "core hue labels should stay readable in degrees");
   assertEqual(normalizePhysicsCoreHueDegrees(187), 185, "core hue should snap to slider steps");
+});
+
+test("physics cores spend terrain damage bounces before expiring", () => {
+  const defaultCore = new PhysicsToy(new THREE.Vector3(), new THREE.Vector3());
+  assertEqual(defaultCore.terrainDamageBouncesLeft, 1, "default projectile cores should preserve one-hit behavior");
+  assert(!defaultCore.consumeTerrainDamageBounce(), "default cores should expire after their first damaging terrain hit");
+  assertEqual(defaultCore.terrainDamageBouncesLeft, 0, "spent default cores should have no bounce budget left");
+
+  const ricochetCore = new PhysicsToy(new THREE.Vector3(), new THREE.Vector3(), {
+    terrainDamageBounceCount: 3
+  });
+  assert(ricochetCore.consumeTerrainDamageBounce(), "first damaging hit should leave a multi-bounce core alive");
+  assertEqual(ricochetCore.terrainDamageBouncesLeft, 2, "first hit should spend one bounce");
+  assert(ricochetCore.consumeTerrainDamageBounce(), "second damaging hit should still leave one bounce");
+  assertEqual(ricochetCore.terrainDamageBouncesLeft, 1, "second hit should spend one more bounce");
+  assert(!ricochetCore.consumeTerrainDamageBounce(), "final damaging hit should spend the core");
+  assertEqual(ricochetCore.terrainDamageBouncesLeft, 0, "final hit should drain the bounce budget");
+
+  const fragment = PhysicsToy.createBlockFragment(BLOCK.grass, new THREE.Vector3(), new THREE.Vector3());
+  assertEqual(fragment.terrainDamageBouncesLeft, 0, "debris fragments should not carry terrain damage bounces");
+  assert(!fragment.consumeTerrainDamageBounce(), "debris fragments should never consume a damage bounce");
 });
 
 test("physics core visuals use the selected hue and clean up trails", () => {

@@ -62,6 +62,9 @@ the root README.
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
   from the lowered right-side muzzle.
+- Gameplay settings can raise the Physics Core bounce count. Each terrain hit
+  that actually damages blocks spends one bounce, so higher values let a core
+  ricochet through pits before self-destructing.
 - Selected Hitscan Core uses `Left click` to fire an instant core trace from the
   lowered right-side muzzle.
 - Holding `Right click` while firing a core uses centered reticle ADS with a
@@ -102,6 +105,7 @@ Pause menu `Settings` is split into three tabs.
 
 - Projectile core size
 - Projectile core velocity
+- Projectile core bounce count
 - Projectile/hitscan core color
 - Projectile core trail toggle
 - Core Aim Preview toggle

@@ -164,6 +164,9 @@ import {
   type PhysicsBudgetDirection
 } from "./physicsBudget";
 import {
+  PHYSICS_CORE_BOUNCE_MAX_COUNT,
+  PHYSICS_CORE_BOUNCE_MIN_COUNT,
+  PHYSICS_CORE_BOUNCE_STEP_COUNT,
   PHYSICS_CORE_SIZE_MAX_PERCENT,
   PHYSICS_CORE_SIZE_MIN_PERCENT,
   PHYSICS_CORE_SIZE_STEP_PERCENT,
@@ -173,10 +176,12 @@ import {
   PHYSICS_CORE_HUE_MAX_DEGREES,
   PHYSICS_CORE_HUE_MIN_DEGREES,
   PHYSICS_CORE_HUE_STEP_DEGREES,
+  formatPhysicsCoreBounceCount,
   formatPhysicsCoreHue,
   formatPhysicsCorePercent,
   getPhysicsCoreRadius,
   getPhysicsCoreVelocityMultiplier,
+  normalizePhysicsCoreBounceCount,
   normalizePhysicsCoreHueDegrees,
   normalizePhysicsCoreSettings,
   normalizePhysicsCoreSizePercent,
@@ -383,6 +388,8 @@ const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
 const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
 const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
 const coreVelocityValue = requireElement<HTMLElement>("#core-velocity-value");
+const coreBounceSlider = requireElement<HTMLInputElement>("#core-bounce-slider");
+const coreBounceValue = requireElement<HTMLElement>("#core-bounce-value");
 const coreColorSlider = requireElement<HTMLInputElement>("#core-color-slider");
 const coreColorValue = requireElement<HTMLElement>("#core-color-value");
 const coreTrailToggle = requireElement<HTMLInputElement>("#core-trail-toggle");
@@ -856,6 +863,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   coreVelocitySlider.addEventListener("input", () => {
     setPhysicsCoreVelocityPercent(coreVelocitySlider.value);
+  }, eventListenerOptions);
+  coreBounceSlider.addEventListener("input", () => {
+    setPhysicsCoreBounceCount(coreBounceSlider.value);
   }, eventListenerOptions);
   coreColorSlider.addEventListener("input", () => {
     setPhysicsCoreHueDegrees(coreColorSlider.value);
@@ -2417,9 +2427,13 @@ function handlePhysicsImpact(
   if (pierceContinuation) {
     continuePhysicsCoreAfterPierce(impact.source, pierceContinuation);
   } else {
-    // Most terrain impacts still spend the projectile on the terrain event.
-    // Small fast cores are the one exception: a complete bite-lattice tunnel
-    // can hand back an exit pose and reduced forward speed.
+    // Terrain-damaging rebounds now spend a per-core bounce budget. The
+    // default budget is one, preserving the old "hit once, then disappear"
+    // behavior until the Gameplay slider asks for chaos.
+    if (impact.source.consumeTerrainDamageBounce()) {
+      return true;
+    }
+
     impact.source.expire();
   }
 
@@ -2862,6 +2876,7 @@ function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): Ph
     // settling so old shots stop taxing the frame forever.
     radius: getPhysicsCoreRadius(physicsCoreSettings),
     material: createPhysicsCoreMaterial(physicsCoreSettings),
+    terrainDamageBounceCount: physicsCoreSettings.terrainBounceCount,
     sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
     sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
   });
@@ -2946,6 +2961,13 @@ function setPhysicsCoreVelocityPercent(velocityPercent: unknown): void {
   });
 }
 
+function setPhysicsCoreBounceCount(bounceCount: unknown): void {
+  updatePhysicsCoreSettings({
+    ...physicsCoreSettings,
+    terrainBounceCount: normalizePhysicsCoreBounceCount(bounceCount, physicsCoreSettings.terrainBounceCount)
+  });
+}
+
 function setPhysicsCoreHueDegrees(hueDegrees: unknown): void {
   updatePhysicsCoreSettings({
     ...physicsCoreSettings,
@@ -2979,6 +3001,12 @@ function updatePhysicsCoreControls(): void {
   coreVelocitySlider.step = String(PHYSICS_CORE_VELOCITY_STEP_PERCENT);
   coreVelocitySlider.value = String(physicsCoreSettings.velocityPercent);
   coreVelocityValue.textContent = formatPhysicsCorePercent(physicsCoreSettings.velocityPercent);
+
+  coreBounceSlider.min = String(PHYSICS_CORE_BOUNCE_MIN_COUNT);
+  coreBounceSlider.max = String(PHYSICS_CORE_BOUNCE_MAX_COUNT);
+  coreBounceSlider.step = String(PHYSICS_CORE_BOUNCE_STEP_COUNT);
+  coreBounceSlider.value = String(physicsCoreSettings.terrainBounceCount);
+  coreBounceValue.textContent = formatPhysicsCoreBounceCount(physicsCoreSettings.terrainBounceCount);
 
   const coreCssColor = getPhysicsCoreCssColor(physicsCoreSettings);
   coreColorSlider.min = String(PHYSICS_CORE_HUE_MIN_DEGREES);
