@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-05-25
+
+Minor milestone: deterministic voxel trees make generated terrain materially richer instead of just tuning an existing system.
+
+### Added
+
+- Added first-pass deterministic voxel trees to varied-profile generated worlds:
+  grassy gentle terrain can now spawn Wood trunks and Leaves canopies, while
+  `classic` saved worlds and `superflat` labs stay clear.
+- Added Wood and Leaves as destructible/placeable block types.
+- Added regression coverage proving tree placement is deterministic and does not
+  backfill old terrain profiles.
+
 ## 0.6.27 - 2026-05-25
 
 ### Changed

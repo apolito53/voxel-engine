@@ -14,7 +14,9 @@ export const BLOCK = {
   stone: 3,
   sand: 4,
   ember: 5,
-  rubble: 6
+  rubble: 6,
+  wood: 7,
+  leaves: 8
 } as const;
 
 export type BlockId = (typeof BLOCK)[keyof typeof BLOCK];
@@ -27,7 +29,9 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   [BLOCK.stone]: { name: "Stone", solid: true, color: [0.46, 0.49, 0.5], health: DEFAULT_TERRAIN_BLOCK_HEALTH },
   [BLOCK.sand]: { name: "Sand", solid: true, color: [0.78, 0.68, 0.42], health: DEFAULT_TERRAIN_BLOCK_HEALTH },
   [BLOCK.ember]: { name: "Ember", solid: true, color: [0.9, 0.25, 0.12], health: DEFAULT_TERRAIN_BLOCK_HEALTH },
-  [BLOCK.rubble]: { name: "Rubble", solid: true, color: [0.43, 0.39, 0.33], health: 3 }
+  [BLOCK.rubble]: { name: "Rubble", solid: true, color: [0.43, 0.39, 0.33], health: 3 },
+  [BLOCK.wood]: { name: "Wood", solid: true, color: [0.36, 0.22, 0.12], health: DEFAULT_TERRAIN_BLOCK_HEALTH },
+  [BLOCK.leaves]: { name: "Leaves", solid: true, color: [0.18, 0.5, 0.2], health: 4 }
 };
 
 export const PLACEABLE_BLOCKS: readonly BlockId[] = [
@@ -35,5 +39,7 @@ export const PLACEABLE_BLOCKS: readonly BlockId[] = [
   BLOCK.dirt,
   BLOCK.stone,
   BLOCK.sand,
-  BLOCK.ember
+  BLOCK.ember,
+  BLOCK.wood,
+  BLOCK.leaves
 ];

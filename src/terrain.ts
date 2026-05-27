@@ -23,10 +23,17 @@ export type TerrainContext = {
   readonly terraceOffsetX: number;
   readonly terraceOffsetZ: number;
   readonly heightOffset: number;
+  readonly treeOffsetX: number;
+  readonly treeOffsetZ: number;
+  readonly treeSeed: number;
 };
 
 export const SUPERFLAT_WORLD_SEED = "superflat";
 export const SUPERFLAT_TERRAIN_HEIGHT = 4;
+const TREE_CANDIDATE_GRID_SIZE = 6;
+const TREE_CANOPY_RADIUS = 3;
+const TREE_MIN_TRUNK_HEIGHT = 4;
+const TREE_TRUNK_HEIGHT_VARIATION = 3;
 
 export function createTerrainContext(seed = "", profileOverride?: TerrainProfile): TerrainContext {
   const normalizedSeed = String(seed || "");
@@ -49,7 +56,10 @@ export function createTerrainContext(seed = "", profileOverride?: TerrainProfile
       climateOffsetZ: 0,
       terraceOffsetX: 0,
       terraceOffsetZ: 0,
-      heightOffset: 0
+      heightOffset: 0,
+      treeOffsetX: 0,
+      treeOffsetZ: 0,
+      treeSeed: 0
     };
   }
 
@@ -83,7 +93,10 @@ function createClassicTerrainContext(seed: string, hash: number): TerrainContext
     climateOffsetZ: 0,
     terraceOffsetX: 0,
     terraceOffsetZ: 0,
-    heightOffset: seed ? seededRange(hash, 32, -2, 2) : 0
+    heightOffset: seed ? seededRange(hash, 32, -2, 2) : 0,
+    treeOffsetX: 0,
+    treeOffsetZ: 0,
+    treeSeed: mixHash(hash ^ 0x6d2b79f5)
   };
 }
 
@@ -106,7 +119,10 @@ function createVariedTerrainContext(normalizedSeed: string, hash: number): Terra
     climateOffsetZ: seededRange(hash, 88, -1400, 1400),
     terraceOffsetX: seededRange(hash, 96, -1600, 1600),
     terraceOffsetZ: seededRange(hash, 104, -1600, 1600),
-    heightOffset: seededRange(hash, 112, -2, 2)
+    heightOffset: seededRange(hash, 112, -2, 2),
+    treeOffsetX: seededRange(hash, 120, -1900, 1900),
+    treeOffsetZ: seededRange(hash, 128, -1900, 1900),
+    treeSeed: mixHash(hash ^ 0xa511e9b3)
   };
 }
 
@@ -133,6 +149,7 @@ export function generateChunkBlocks(
     }
   }
 
+  decorateChunkTrees(cx, cz, blocks, terrain);
   return blocks;
 }
 
@@ -273,6 +290,163 @@ function getTerrainBlock(
   if (surfaceBlock === BLOCK.stone && depth <= 2) return BLOCK.stone;
   if (y > height - 4) return BLOCK.dirt;
   return BLOCK.stone;
+}
+
+function decorateChunkTrees(
+  cx: number,
+  cz: number,
+  blocks: Uint8Array,
+  terrain: TerrainContext
+): void {
+  if (terrain.mode !== "generated" || terrain.profile !== "varied") return;
+
+  const ox = cx * CHUNK_SIZE;
+  const oz = cz * CHUNK_SIZE;
+  const minCellX = Math.floor((ox - TREE_CANOPY_RADIUS) / TREE_CANDIDATE_GRID_SIZE);
+  const maxCellX = Math.floor((ox + CHUNK_SIZE - 1 + TREE_CANOPY_RADIUS) / TREE_CANDIDATE_GRID_SIZE);
+  const minCellZ = Math.floor((oz - TREE_CANOPY_RADIUS) / TREE_CANDIDATE_GRID_SIZE);
+  const maxCellZ = Math.floor((oz + CHUNK_SIZE - 1 + TREE_CANOPY_RADIUS) / TREE_CANDIDATE_GRID_SIZE);
+
+  for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+    for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+      const root = createTreeRootCandidate(cellX, cellZ, terrain);
+      if (
+        root.x < ox - TREE_CANOPY_RADIUS ||
+        root.x >= ox + CHUNK_SIZE + TREE_CANOPY_RADIUS ||
+        root.z < oz - TREE_CANOPY_RADIUS ||
+        root.z >= oz + CHUNK_SIZE + TREE_CANOPY_RADIUS
+      ) {
+        continue;
+      }
+
+      placeTreeInChunk(root.x, root.z, root.hash, cx, cz, blocks, terrain);
+    }
+  }
+}
+
+function createTreeRootCandidate(
+  cellX: number,
+  cellZ: number,
+  terrain: TerrainContext
+): { readonly x: number; readonly z: number; readonly hash: number } {
+  const hash = hashTreeCell(terrain.treeSeed, cellX, cellZ);
+  const jitterX = Math.floor(hashUnit(hash ^ 0x9e3779b9) * TREE_CANDIDATE_GRID_SIZE);
+  const jitterZ = Math.floor(hashUnit(hash ^ 0x85ebca6b) * TREE_CANDIDATE_GRID_SIZE);
+  return {
+    x: cellX * TREE_CANDIDATE_GRID_SIZE + jitterX,
+    z: cellZ * TREE_CANDIDATE_GRID_SIZE + jitterZ,
+    hash
+  };
+}
+
+function placeTreeInChunk(
+  wx: number,
+  wz: number,
+  hash: number,
+  cx: number,
+  cz: number,
+  blocks: Uint8Array,
+  terrain: TerrainContext
+): void {
+  const surfaceY = getTerrainHeight(wx, wz, terrain);
+  if (surfaceY < 7 || surfaceY > WORLD_HEIGHT - 10) return;
+  if (getTerrainSurfaceBlock(wx, wz, surfaceY, terrain) !== BLOCK.grass) return;
+  if (!isTreeFriendlySlope(wx, wz, surfaceY, terrain)) return;
+
+  const probability = getTreeProbability(wx, wz, surfaceY, terrain);
+  if (hashUnit(hash ^ 0xc2b2ae35) > probability) return;
+
+  const trunkHeight = TREE_MIN_TRUNK_HEIGHT +
+    Math.floor(hashUnit(hash ^ 0x27d4eb2f) * TREE_TRUNK_HEIGHT_VARIATION);
+  const trunkTopY = surfaceY + trunkHeight;
+  if (trunkTopY + 2 >= WORLD_HEIGHT) return;
+
+  for (let y = surfaceY + 1; y <= trunkTopY; y += 1) {
+    setDecoratedBlockIfInside(cx, cz, blocks, wx, y, wz, BLOCK.wood, true);
+  }
+
+  for (let dy = -2; dy <= 2; dy += 1) {
+    const radius = dy >= 1 ? 1 : 2;
+    for (let dz = -radius; dz <= radius; dz += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const distance = Math.abs(dx) + Math.abs(dz) + Math.max(0, dy);
+        if (distance > radius + 1) continue;
+        if (dx === 0 && dz === 0 && dy <= 0) continue;
+        const leafHash = hashWorldCell(hash ^ 0x165667b1, wx + dx, trunkTopY + dy, wz + dz);
+        if (distance >= radius + 1 && hashUnit(leafHash) < 0.35) continue;
+        setDecoratedBlockIfInside(cx, cz, blocks, wx + dx, trunkTopY + dy, wz + dz, BLOCK.leaves);
+      }
+    }
+  }
+
+  setDecoratedBlockIfInside(cx, cz, blocks, wx, trunkTopY + 2, wz, BLOCK.leaves);
+}
+
+function isTreeFriendlySlope(wx: number, wz: number, surfaceY: number, terrain: TerrainContext): boolean {
+  return Math.abs(getTerrainHeight(wx + 1, wz, terrain) - surfaceY) <= 1 &&
+    Math.abs(getTerrainHeight(wx - 1, wz, terrain) - surfaceY) <= 1 &&
+    Math.abs(getTerrainHeight(wx, wz + 1, terrain) - surfaceY) <= 1 &&
+    Math.abs(getTerrainHeight(wx, wz - 1, terrain) - surfaceY) <= 1;
+}
+
+function getTreeProbability(wx: number, wz: number, surfaceY: number, terrain: TerrainContext): number {
+  const grove = normalizedFbm2(
+    wx * 0.018 + terrain.treeOffsetX,
+    wz * 0.018 + terrain.treeOffsetZ,
+    4
+  );
+  const climate = normalizedFbm2(
+    wx * 0.013 + terrain.climateOffsetX,
+    wz * 0.013 + terrain.climateOffsetZ,
+    4
+  );
+  const washSource = signedFbm2(
+    wx * 0.009 + terrain.washOffsetX,
+    wz * 0.009 + terrain.washOffsetZ,
+    4
+  );
+  const washPenalty = 1 - smoothstep(0.02, 0.16, Math.abs(washSource));
+  const elevationPenalty = smoothstep(25, 32, surfaceY);
+  const groveWeight = smoothstep(0.42, 0.78, grove);
+  const climateWeight = smoothstep(0.25, 0.48, climate) * (1 - smoothstep(0.78, 0.95, climate));
+  return clamp(groveWeight * climateWeight * (1 - washPenalty) * (1 - elevationPenalty) * 0.58, 0, 0.45);
+}
+
+function setDecoratedBlockIfInside(
+  cx: number,
+  cz: number,
+  blocks: Uint8Array,
+  wx: number,
+  y: number,
+  wz: number,
+  block: BlockId,
+  replaceLeaves = false
+): void {
+  if (y < 0 || y >= WORLD_HEIGHT) return;
+  const lx = wx - cx * CHUNK_SIZE;
+  const lz = wz - cz * CHUNK_SIZE;
+  if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return;
+
+  const blockIndex = index(lx, y, lz);
+  const existingBlock = blocks[blockIndex];
+  if (existingBlock !== BLOCK.air && !(replaceLeaves && existingBlock === BLOCK.leaves)) return;
+  blocks[blockIndex] = block;
+}
+
+function hashTreeCell(seed: number, cellX: number, cellZ: number): number {
+  return hashWorldCell(seed, cellX, 0, cellZ);
+}
+
+function hashWorldCell(seed: number, x: number, y: number, z: number): number {
+  let hash = seed >>> 0;
+  hash = mixHash(hash ^ Math.imul(x, 73856093));
+  hash = mixHash(hash ^ Math.imul(y, 19349663));
+  hash = mixHash(hash ^ Math.imul(z, 83492791));
+  return hash >>> 0;
+}
+
+function hashUnit(seed: number): number {
+  return (mixHash(seed) >>> 0) / 0xffffffff;
 }
 
 function hashSeed(seed: string): number {

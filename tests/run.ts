@@ -515,6 +515,14 @@ function hasAnyDifference(left: Uint8Array, right: Uint8Array): boolean {
   return false;
 }
 
+function countBlockInPayload(blocks: Uint8Array, block: number): number {
+  let count = 0;
+  for (const payloadBlock of blocks) {
+    if (payloadBlock === block) count += 1;
+  }
+  return count;
+}
+
 function createFakeNovaMessageTarget(): NovaPilotMessageTarget & { readonly isVisible: () => boolean } {
   const classes = new Set<string>();
   return {
@@ -1078,6 +1086,33 @@ test("seeded terrain generation creates varied landforms and surfaces", () => {
   assert(surfaceBlocks.has(BLOCK.sand), "varied terrain should create sandy lowlands or washes");
   assert(surfaceBlocks.has(BLOCK.stone), "varied terrain should expose rocky highland surfaces");
   assert(grassSurfaces > sandSurfaces, "varied terrain should not let sandy washes dominate the common surface");
+});
+
+test("varied terrain decorates deterministic voxel trees", () => {
+  const terrain = createTerrainContext("tree-test-forest", "varied");
+  let woodBlocks = 0;
+  let leafBlocks = 0;
+
+  for (let cz = -4; cz <= 4; cz += 1) {
+    for (let cx = -4; cx <= 4; cx += 1) {
+      const chunk = generateChunkBlocks(cx, cz, terrain);
+      woodBlocks += countBlockInPayload(chunk, BLOCK.wood);
+      leafBlocks += countBlockInPayload(chunk, BLOCK.leaves);
+    }
+  }
+
+  const firstChunk = generateChunkBlocks(0, 0, terrain);
+  const repeatedChunk = generateChunkBlocks(0, 0, terrain);
+  const classicChunk = generateChunkBlocks(0, 0, createTerrainContext("tree-test-forest", "classic"));
+  const superflatChunk = generateChunkBlocks(0, 0, createTerrainContext(SUPERFLAT_WORLD_SEED));
+
+  assert(woodBlocks > 0, "varied terrain should generate tree trunks somewhere in the sampled world");
+  assert(leafBlocks > woodBlocks, "varied terrain trees should produce leafy canopies around trunks");
+  assertUint8ArraysEqual(firstChunk, repeatedChunk, "tree placement should be deterministic for the same seed/profile");
+  assertEqual(countBlockInPayload(classicChunk, BLOCK.wood), 0, "classic terrain should not backfill trees into old saves");
+  assertEqual(countBlockInPayload(classicChunk, BLOCK.leaves), 0, "classic terrain should not backfill leaves into old saves");
+  assertEqual(countBlockInPayload(superflatChunk, BLOCK.wood), 0, "superflat labs should stay clear of generated trees");
+  assertEqual(countBlockInPayload(superflatChunk, BLOCK.leaves), 0, "superflat labs should stay clear of generated leaves");
 });
 
 test("superflat terrain seed creates a flat test lab surface", () => {

@@ -58,7 +58,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Builder brush sizing, centered brush cell collection, guarded block placement, and erase/place helpers used by the pause-menu Builder panel: `src/builderTools.ts`
 - Translucent block-color Builder placement ghost for the active build brush: `src/builderPreview.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
-- Block IDs, colors, 10-HP ordinary terrain definitions, generated `Rubble` block, and placeable palette: `src/blocks.ts`
+- Block IDs, colors, 10-HP ordinary terrain definitions, generated `Rubble` block, Wood/Leaves tree blocks, and placeable palette: `src/blocks.ts`
 - Deterministic per-block tint buckets used by worker and fallback meshing: `src/blockColors.ts`
 - Block fracture grid, oversampled visible-fragment sampling, slider-scaled terrain chip counts, normalized block-volume material, and per-shard mass/visual-axis caps: `src/blockFragments.ts`
 - Shared low-poly shard geometry catalog, deterministic material-aware debris shape selection, small non-uniform visual scale, conservative visual-volume estimates, per-piece volume-budget fitting, and cuboid physics envelope helpers: `src/debrisShapes.ts`
@@ -68,7 +68,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments: `src/fragmentRubble.ts`
 - Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
 - IndexedDB storage adapter for saved worlds, saved terrain-profile provenance, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, varied new-world landforms, and the reserved `superflat` test-world seed: `src/terrain.ts`
+- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, varied new-world landforms, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
 - Shared chunk worker request/result message contracts, including terrain-profile generation provenance and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
 - Worker-side chunk terrain generation and greedy mesh buffer building, including terrain-profile-aware generation caches and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkWorker.ts`
