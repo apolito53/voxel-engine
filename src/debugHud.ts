@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
+import { RollingFrameRateMeter, type FrameRateSample } from "./frameRateMeter";
 import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
 import type { PartialBlockMeshStats } from "./partialBlocks";
@@ -38,9 +39,9 @@ export class DebugHud {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly gpuInfo: GpuInfo;
   private readonly getQualityPreset: () => QualityPreset;
+  private readonly frameRateMeter = new RollingFrameRateMeter();
   private visible = true;
   private accumulator = Infinity;
-  private smoothedFps = 0;
   private peakFrameMs = 0;
   private peakFrameHoldSeconds = 0;
 
@@ -58,6 +59,9 @@ export class DebugHud {
 
   reset(): void {
     this.accumulator = Infinity;
+    this.frameRateMeter.reset();
+    this.peakFrameMs = 0;
+    this.peakFrameHoldSeconds = 0;
   }
 
   update(
@@ -80,10 +84,7 @@ export class DebugHud {
   ): void {
     if (!this.visible) return;
 
-    const currentFps = Math.min(240, 1 / Math.max(rawDelta, 1 / 240));
-    this.smoothedFps = this.smoothedFps === 0
-      ? currentFps
-      : this.smoothedFps * 0.92 + currentFps * 0.08;
+    const frameRate = this.frameRateMeter.push(rawDelta);
     this.accumulator += rawDelta;
     this.trackPeakFrame(rawDelta);
 
@@ -106,7 +107,8 @@ export class DebugHud {
       partialMeshStats,
       debrisSettlerStats,
       rubbleStats,
-      timings
+      timings,
+      frameRate
     });
   }
 
@@ -142,6 +144,7 @@ export class DebugHud {
     readonly debrisSettlerStats: DebrisSettlerStats;
     readonly rubbleStats: RubbleFieldStats;
     readonly timings: FrameTimings;
+    readonly frameRate: FrameRateSample;
   }): void {
     const render = this.renderer.info.render;
     const memory = this.renderer.info.memory;
@@ -153,7 +156,8 @@ export class DebugHud {
       {
         title: "Perf",
         rows: [
-          { label: "fps", value: `${Math.round(this.smoothedFps)} @ ${(snapshot.rawDelta * 1000).toFixed(1)}ms` },
+          { label: "fps", value: `${formatHudFps(snapshot.frameRate.fps)} avg | low ${formatHudFps(snapshot.frameRate.lowFps)}` },
+          { label: "frame", value: `${snapshot.frameRate.latestFrameMs.toFixed(1)}ms now | avg ${snapshot.frameRate.averageFrameMs.toFixed(1)}ms` },
           { label: "peak", value: `${this.peakFrameMs.toFixed(1)}ms` },
           { label: "cpu", value: `${snapshot.timings.frameMs.toFixed(1)}ms total` },
           { label: "work", value: `p ${snapshot.timings.playerMs.toFixed(1)} c ${snapshot.timings.chunkMs.toFixed(1)} ph ${snapshot.timings.physicsMs.toFixed(1)}` },
@@ -215,7 +219,7 @@ export class DebugHud {
     header.className = "debug-hud-header";
     header.append(
       createTextNode("span", "debug-hud-kicker", "F3 Debug"),
-      createTextNode("span", "debug-hud-summary", `${Math.round(this.smoothedFps)} fps | ${qualityPreset.label}`)
+      createTextNode("span", "debug-hud-summary", `${formatHudFps(snapshot.frameRate.fps)} fps | low ${formatHudFps(snapshot.frameRate.lowFps)} | ${qualityPreset.label}`)
     );
     fragment.append(header);
 
@@ -227,6 +231,11 @@ export class DebugHud {
     fragment.append(grid);
     this.panel.replaceChildren(fragment);
   }
+}
+
+function formatHudFps(fps: number): string {
+  if (!Number.isFinite(fps) || fps <= 0) return "0";
+  return fps < 10 ? fps.toFixed(1) : Math.round(fps).toString();
 }
 
 function createDebugSection(section: DebugHudSection): HTMLElement {

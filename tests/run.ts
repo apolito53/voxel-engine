@@ -196,6 +196,7 @@ import {
   PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
   shouldDeferPartialBlockMeshUpdate
 } from "../src/partialBlockMeshBudget";
+import { RollingFrameRateMeter } from "../src/frameRateMeter";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
@@ -1879,6 +1880,29 @@ test("frame timing smoothing keeps debug profiler values readable", () => {
     smoothFrameTimings(sample, empty, true, -1).frameMs,
     sample.frameMs,
     "blend values below zero should clamp to the previous sample"
+  );
+});
+
+test("rolling frame rate meter reports elapsed-time FPS instead of pretty instant averages", () => {
+  const meter = new RollingFrameRateMeter(1);
+  let sample = meter.push(0.005);
+  for (let index = 0; index < 19; index += 1) {
+    sample = meter.push(index % 2 === 0 ? 0.05 : 0.005);
+  }
+
+  const naiveInstantAverageFps = (10 * 200 + 10 * 20) / 20;
+  assertNearlyEqual(
+    sample.fps,
+    20 / 0.55,
+    "rolling FPS should be frames divided by elapsed window time"
+  );
+  assert(
+    naiveInstantAverageFps > sample.fps * 2,
+    "the old style of averaging instantaneous FPS would hide uneven frame pacing"
+  );
+  assert(
+    sample.lowFps < sample.fps,
+    "low FPS should expose the slow side of the frame window"
   );
 });
 

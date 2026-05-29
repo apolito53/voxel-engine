@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.8.3.1 - 2026-05-29
+
+### Fixed
+
+- Replaced the debug HUD's overly flattering smoothed instant-FPS counter with
+  a rolling elapsed-time frame-rate meter plus low-FPS readout, so uneven frame
+  pacing is visible instead of being averaged into nonsense.
+
 ## 0.8.3 - 2026-05-29
 
 ### Fixed
