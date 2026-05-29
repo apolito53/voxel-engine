@@ -64,7 +64,9 @@ the root README.
   from the lowered right-side muzzle.
 - Gameplay settings can raise the Physics Core bounce count. Each terrain hit
   that actually damages blocks spends one bounce, so higher values let a core
-  ricochet through pits before self-destructing.
+  ricochet through pits before self-destructing. Surviving damaging rebounds
+  lose some speed, so the setting buys extra chaos without making the core
+  ignore impact energy.
 - Selected Hitscan Core uses `Left click` to fire an instant core trace from the
   lowered right-side muzzle.
 - Holding `Right click` while firing a core uses centered reticle ADS with a

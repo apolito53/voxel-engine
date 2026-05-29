@@ -7611,6 +7611,27 @@ test("physics cores spend terrain damage bounces before expiring", () => {
   assert(!fragment.consumeTerrainDamageBounce(), "debris fragments should never consume a damage bounce");
 });
 
+test("surviving terrain damage bounces bleed core velocity", () => {
+  const core = new PhysicsToy(new THREE.Vector3(), new THREE.Vector3(12, 4, 0), {
+    terrainDamageBounceCount: 3
+  });
+  const speedBeforeDamageBounce = core.velocity.length();
+  const survivedFirstBounce = core.consumeTerrainDamageBounce({
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 12
+  });
+
+  assert(survivedFirstBounce, "a multi-bounce core should survive while it still has bounce budget");
+  assert(
+    core.velocity.length() < speedBeforeDamageBounce,
+    "a surviving damage bounce should spend some projectile speed instead of preserving full launch velocity"
+  );
+  assert(
+    core.velocity.length() > BLOCK_DAMAGE_IMPACT_SPEED,
+    "one energetic bounce should not kill the projectile's useful motion outright"
+  );
+});
+
 test("physics core visuals use the selected hue and clean up trails", () => {
   const scene = new THREE.Scene();
   const color = createPhysicsCoreColor({ ...DEFAULT_PHYSICS_CORE_SETTINGS, hueDegrees: 210 });

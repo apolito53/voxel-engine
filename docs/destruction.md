@@ -50,7 +50,9 @@ Physics Core:
 - Uses the configured core hue and optional short projectile trail from Gameplay settings.
 - Uses the configured bounce count from Gameplay settings. Each terrain impact
   that actually damages terrain spends one bounce; at the default `1 bounce`,
-  projectile cores keep the old one-hit self-destruct behavior.
+  projectile cores keep the old one-hit self-destruct behavior. Surviving
+  terrain-damaging rebounds lose projectile speed so repeated impacts read as
+  spent energy instead of a free infinite ricochet.
 - Holding right click uses centered reticle ADS with a slight 15% zoom.
 - Small fast cores can pierce through a complete bite-lattice tunnel when the
   exit cell is air, then continue with reduced speed.

@@ -30,6 +30,9 @@ const GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER = 2;
 const GROUND_DEBRIS_AIRBORNE_MIN_SECONDS = 6;
 const CORE_COLLISION_RESTITUTION = 1.55;
 const CORE_COLLISION_DAMPING = 0.985;
+const CORE_TERRAIN_DAMAGE_BOUNCE_BASE_DAMPING = 0.9;
+const CORE_TERRAIN_DAMAGE_BOUNCE_DAMPING_PER_MPS = 0.012;
+const CORE_TERRAIN_DAMAGE_BOUNCE_MIN_DAMPING = 0.62;
 const PHYSICS_TOY_COLLISION_CELL_SIZE = 1;
 const PHYSICS_TOY_COLLISION_RESTITUTION = 0.42;
 const PHYSICS_TOY_COLLISION_DAMPING = 0.995;
@@ -68,6 +71,11 @@ type PhysicsToyOptions = {
   readonly sleepAfterSeconds?: number;
   readonly disposeGeometry?: boolean;
   readonly disposeMaterial?: boolean;
+};
+
+type TerrainDamageBounceImpact = {
+  readonly normal: THREE.Vector3;
+  readonly speed: number;
 };
 
 export type RigidDebrisState = {
@@ -257,11 +265,15 @@ export class PhysicsToy {
     this.resetGroundDebrisCleanupClock();
   }
 
-  consumeTerrainDamageBounce(): boolean {
+  consumeTerrainDamageBounce(impact?: TerrainDamageBounceImpact): boolean {
     if (!this.damagesBlocks || this.expired) return false;
 
     this.terrainDamageBouncesRemaining = Math.max(0, this.terrainDamageBouncesRemaining - 1);
-    return this.terrainDamageBouncesRemaining > 0;
+    const survivesBounce = this.terrainDamageBouncesRemaining > 0;
+    if (survivesBounce && impact) {
+      this.applyTerrainDamageBounceVelocityLoss(impact);
+    }
+    return survivesBounce;
   }
 
   expire(): void {
@@ -568,6 +580,19 @@ export class PhysicsToy {
       this.velocity.multiplyScalar(FRAGMENT_WALL_DAMPING);
       this.angularVelocity.multiplyScalar(0.88);
     }
+  }
+
+  private applyTerrainDamageBounceVelocityLoss(impact: TerrainDamageBounceImpact): void {
+    if (this.velocity.lengthSq() <= PHYSICS_TOY_COLLISION_EPSILON) return;
+
+    // The low-level collision step has already reflected the core away from the
+    // block. Terrain damage is a second energy sink: carving a bite out of the
+    // world should visibly tax the rebound, especially for high bounce counts.
+    const damping = Math.max(
+      CORE_TERRAIN_DAMAGE_BOUNCE_MIN_DAMPING,
+      CORE_TERRAIN_DAMAGE_BOUNCE_BASE_DAMPING - impact.speed * CORE_TERRAIN_DAMAGE_BOUNCE_DAMPING_PER_MPS
+    );
+    this.velocity.multiplyScalar(damping);
   }
 
   private resolvePartialSupport(world: CollisionWorld): boolean {

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-05-28
+
+### Changed
+
+- Changed surviving Physics Core terrain bounces to bleed projectile velocity
+  after damaging terrain, so high bounce counts dig repeatedly without
+  preserving full launch speed forever.
+
 ## 0.8.1 - 2026-05-27
 
 ### Added

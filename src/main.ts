@@ -2429,8 +2429,10 @@ function handlePhysicsImpact(
   } else {
     // Terrain-damaging rebounds now spend a per-core bounce budget. The
     // default budget is one, preserving the old "hit once, then disappear"
-    // behavior until the Gameplay slider asks for chaos.
-    if (impact.source.consumeTerrainDamageBounce()) {
+    // behavior until the Gameplay slider asks for chaos. Surviving bounces also
+    // bleed speed so repeated terrain damage feels like spent impact energy,
+    // not just an invisible hit counter.
+    if (impact.source.consumeTerrainDamageBounce(impact)) {
       return true;
     }
 
