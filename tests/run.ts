@@ -2187,6 +2187,20 @@ test("debris pressure effective cap bottoms out at the conservative budget ratio
   );
 });
 
+test("debris pressure can shed below the smallest normal slider step", () => {
+  const pressuredSmallCap = getDebrisPressureEffectiveRigidDebrisBodyBudget(32, 1);
+
+  assertEqual(
+    pressuredSmallCap,
+    MIN_RIGID_DEBRIS_BODY_BUDGET,
+    "full pressure should use the emergency floor for tiny custom debris caps"
+  );
+  assert(
+    pressuredSmallCap < 32,
+    "a stressed 32-body cap should still have room to shed active Rapier debris"
+  );
+});
+
 test("remote hitch log payloads preserve version and deployment metadata", () => {
   const timings = {
     playerMs: 1,

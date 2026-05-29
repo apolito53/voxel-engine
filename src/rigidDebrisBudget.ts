@@ -1,6 +1,9 @@
 import { PHYSICS_OBJECT_BUDGET_STEP } from "./physicsBudget";
 
-export const MIN_RIGID_DEBRIS_BODY_BUDGET = 32;
+// This floor is the adaptive-pressure escape hatch, not the user's normal
+// ground-debris slider step. A 32-body Rapier pile can already be too expensive
+// on cratered partial terrain, so stressed frames need permission to shed lower.
+export const MIN_RIGID_DEBRIS_BODY_BUDGET = 8;
 export const MAX_RIGID_DEBRIS_BODY_BUDGET = 768;
 export const GROUND_DEBRIS_BUDGET_STORAGE_KEY = "voxel-ground-debris-budget";
 export const DEFAULT_GROUND_DEBRIS_BUDGET = 128;

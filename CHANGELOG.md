@@ -10,6 +10,12 @@
   after damaging terrain, so high bounce counts dig repeatedly without
   preserving full launch speed forever.
 
+### Fixed
+
+- Fixed the adaptive rigid-debris pressure governor being pinned at a 32-body
+  floor, which made crater spam stay CPU-bound even after hitch logs reported
+  maximum debris pressure.
+
 ## 0.8.1 - 2026-05-27
 
 ### Added
