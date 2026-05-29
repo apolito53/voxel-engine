@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.8.3.2 - 2026-05-29
+
+### Fixed
+
+- Re-ran rigid-debris budget pruning after the adaptive pressure governor lowers
+  the effective body cap, so stressed frames do not keep reporting more Rapier
+  debris bodies than the current cap allows.
+
 ## 0.8.3.1 - 2026-05-29
 
 ### Fixed

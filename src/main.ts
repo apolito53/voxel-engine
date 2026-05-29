@@ -1721,6 +1721,11 @@ function animate(): void {
   if (inWorld) {
     const observedFps = 1 / Math.max(rawDelta, 1 / 240);
     updateDebrisPressureGovernor(rawDelta, observedFps, debugPartialMeshStats.triangles);
+    // The pressure governor uses the just-finished frame to lower the effective
+    // Rapier body cap. Prune again after that update so hitch logs and the next
+    // frame both see the newly requested cap instead of carrying excess bodies
+    // until the following pre-render enforcement pass.
+    enforceRigidDebrisBudget();
 
     const performanceStats = {
       qualityLabel: qualityController.preset.label,
