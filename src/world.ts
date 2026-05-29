@@ -1458,6 +1458,10 @@ export class VoxelWorld implements CollisionWorld {
     return Array.from(this.partialBlocks.values());
   }
 
+  getPartialBlockCount(): number {
+    return this.partialBlocks.size;
+  }
+
   getPartialBlockGeometryRevision(): number {
     return this.partialBlockGeometryRevision;
   }

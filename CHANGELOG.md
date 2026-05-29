@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.8.3 - 2026-05-29
+
+### Fixed
+
+- Coalesced dense partial-block mesh rebuilds so crater spam does not rebuild
+  hundreds of faceted damaged cells on every impact frame.
+- Coalesced dirty rigid-debris static-collider refreshes so rapid terrain
+  carving no longer rebuilds Rapier support colliders every frame.
+
 ## 0.8.2 - 2026-05-28
 
 ### Changed

@@ -126,6 +126,7 @@ import { NovaChatPanel } from "./novaChatPanel";
 import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
+import { shouldDeferPartialBlockMeshUpdate } from "./partialBlockMeshBudget";
 import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
 import {
   LOW_FPS_LOG_THRESHOLD,
@@ -496,6 +497,7 @@ let debrisPerformancePressure = createDebrisPerformancePressureState(
   getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget)
 );
 let renderedPartialBlockRevision = -1;
+let lastPartialBlockMeshUpdateMs = 0;
 let leftMouseButtonDown = false;
 let rightMouseButtonDown = false;
 let miningToolState: MiningToolState | null = null;
@@ -2407,11 +2409,26 @@ function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
   const revision = activeWorld.getPartialBlockGeometryRevision();
   if (revision === renderedPartialBlockRevision) return;
 
+  const partialBlockCount = activeWorld.getPartialBlockCount();
+  if (shouldDeferPartialBlockMeshUpdate({
+    cellCount: partialBlockCount,
+    lastUpdateMs: lastPartialBlockMeshUpdateMs,
+    nowMs: performance.now(),
+    hasRenderedMesh: renderedPartialBlockRevision >= 0
+  })) {
+    return;
+  }
+
+  // Partial terrain can become hundreds of faceted cells during core spam.
+  // Rebuilding the whole stitched field every single impact frame was showing
+  // up as 20-30ms mesh hitches; coalescing those rebuilds keeps the visuals
+  // fresh enough while letting multiple bite updates land in one geometry pass.
   partialBlockMeshField.update(
     activeWorld.getPartialBlocks(),
     (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
   );
   renderedPartialBlockRevision = revision;
+  lastPartialBlockMeshUpdateMs = performance.now();
 }
 
 function handlePhysicsImpact(
@@ -3470,6 +3487,7 @@ async function loadWorld(worldId: string): Promise<void> {
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     partialBlockMeshField.clear();
     renderedPartialBlockRevision = -1;
+    lastPartialBlockMeshUpdateMs = 0;
     await activeWorld.preloadSavedChunksAround(
       loadOrigin.x,
       loadOrigin.z,
@@ -3577,6 +3595,7 @@ async function exitToHome(): Promise<void> {
     activeWorld.disposeLoadedChunks(scene);
     partialBlockMeshField.clear();
     renderedPartialBlockRevision = -1;
+    lastPartialBlockMeshUpdateMs = 0;
     inWorld = false;
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");

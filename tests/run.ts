@@ -192,6 +192,10 @@ import {
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
 } from "../src/partialBlocks";
+import {
+  PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
+  shouldDeferPartialBlockMeshUpdate
+} from "../src/partialBlockMeshBudget";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
@@ -2198,6 +2202,36 @@ test("debris pressure can shed below the smallest normal slider step", () => {
   assert(
     pressuredSmallCap < 32,
     "a stressed 32-body cap should still have room to shed active Rapier debris"
+  );
+});
+
+test("partial block mesh updates coalesce dense damage bursts", () => {
+  assert(
+    shouldDeferPartialBlockMeshUpdate({
+      cellCount: 400,
+      lastUpdateMs: 1000,
+      nowMs: 1000 + PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS - 1,
+      hasRenderedMesh: true
+    }),
+    "dense partial terrain should defer immediate repeated whole-field mesh rebuilds"
+  );
+  assert(
+    !shouldDeferPartialBlockMeshUpdate({
+      cellCount: 400,
+      lastUpdateMs: 1000,
+      nowMs: 1000 + PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
+      hasRenderedMesh: true
+    }),
+    "the coalescing window should still allow periodic visual refreshes"
+  );
+  assert(
+    !shouldDeferPartialBlockMeshUpdate({
+      cellCount: 12,
+      lastUpdateMs: 1000,
+      nowMs: 1001,
+      hasRenderedMesh: true
+    }),
+    "small edits should stay immediate so normal mining/building feels responsive"
   );
 });
 

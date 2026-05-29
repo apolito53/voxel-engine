@@ -16,6 +16,7 @@ const RIGID_DEBRIS_FIXED_STEP = 1 / 60;
 const RIGID_DEBRIS_MAX_FRAME_DELTA = 1 / 12;
 const RIGID_DEBRIS_MAX_SUBSTEPS = 4;
 const RIGID_DEBRIS_STATIC_REFRESH_SECONDS = 0.12;
+const RIGID_DEBRIS_DIRTY_STATIC_REFRESH_MIN_SECONDS = 0.08;
 const RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS = RIGID_DEBRIS_STATIC_REFRESH_SECONDS + RIGID_DEBRIS_FIXED_STEP;
 const RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES = 2;
 const RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS = 1;
@@ -432,13 +433,17 @@ export class RigidDebrisSimulation {
 
   private refreshStaticCollidersIfNeeded(delta: number, collisionWorld: CollisionWorld): void {
     this.staticRefreshSeconds += delta;
-    if (
-      !this.staticCollidersDirty &&
-      this.staticRefreshSeconds < RIGID_DEBRIS_STATIC_REFRESH_SECONDS
-    ) {
+    const scheduledRefreshDue = this.staticRefreshSeconds >= RIGID_DEBRIS_STATIC_REFRESH_SECONDS;
+    const dirtyRefreshDue = this.staticCollidersDirty &&
+      this.staticRefreshSeconds >= RIGID_DEBRIS_DIRTY_STATIC_REFRESH_MIN_SECONDS;
+    if (!scheduledRefreshDue && !dirtyRefreshDue) {
       return;
     }
 
+    // Terrain damage invalidates support colliders rapidly while a bouncing core
+    // is chewing a crater. Rebuilding Rapier static colliders every impact frame
+    // made the solver spike even after the debris body cap dropped, so dirty
+    // refreshes are coalesced into the same short cadence as normal lookahead.
     this.staticRefreshSeconds = 0;
     this.staticCollidersDirty = false;
     this.collectActiveColliderCells(collisionWorld);
