@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.8.4 - 2026-05-29
+
+### Changed
+
+- Split partial-block terrain visuals into spatial region meshes, so repeated
+  terrain bites rebuild only nearby damaged regions instead of the old global
+  partial mesh.
+- Cached sparse partial-block chunk masks by chunk and separated visual dirty
+  regions from normal chunk-mask invalidation, so repeated damage to an
+  already-chipped block no longer forces normal chunk remeshing.
+- Expanded partial-terrain HUD and hitch-log stats with dirty/rebuilt region
+  counts and max-region triangle pressure.
+
 ## 0.8.3.2 - 2026-05-29
 
 ### Fixed

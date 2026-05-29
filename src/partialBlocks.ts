@@ -32,6 +32,10 @@ const PARTIAL_BLOCK_SURFACE_SAMPLE_FALLOFF = 0.5;
 const PARTIAL_BLOCK_SURFACE_SAMPLE_NOISE = 0.09;
 const PARTIAL_BLOCK_SURFACE_EPSILON = 0.000001;
 
+export const PARTIAL_BLOCK_MESH_REGION_SIZE_XZ = 4;
+export const PARTIAL_BLOCK_MESH_REGION_SIZE_Y = 8;
+export const PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS = 1;
+
 export type PartialBlockPosition = {
   readonly x: number;
   readonly y: number;
@@ -93,6 +97,27 @@ type PartialBlockSurfaceGrid = {
   readonly heights: readonly number[];
 };
 
+export type PartialBlockMeshRegionCoords = {
+  readonly rx: number;
+  readonly ry: number;
+  readonly rz: number;
+};
+
+export type PartialBlockMeshRegionBounds = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+};
+
+export type PartialBlockMeshRegionUpdate = {
+  readonly key: string;
+  readonly cells: readonly PartialBlockCell[];
+  readonly contextCells: readonly PartialBlockCell[];
+};
+
 type PartialBlockSurfaceCellMap = ReadonlyMap<string, PartialBlockCell>;
 type PartialBlockLatticeCell = {
   readonly x: number;
@@ -111,6 +136,17 @@ type PartialBlockLatticeBox = {
 };
 type PartialBlockAxis = "x" | "y" | "z";
 
+type PartialBlockMeshRegionEntry = {
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  stats: PartialBlockMeshRegionStats;
+};
+
+type PartialBlockMeshRegionStats = {
+  readonly cells: number;
+  readonly vertices: number;
+  readonly triangles: number;
+};
+
 const PARTIAL_BLOCK_LATTICE_NEIGHBOR_OFFSETS: readonly PartialBlockPosition[] = [
   { x: 1, y: 0, z: 0 },
   { x: -1, y: 0, z: 0 },
@@ -121,25 +157,29 @@ const PARTIAL_BLOCK_LATTICE_NEIGHBOR_OFFSETS: readonly PartialBlockPosition[] = 
 ];
 
 export class PartialBlockMeshField {
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  readonly mesh: THREE.Group;
   private readonly scene: THREE.Scene;
+  private readonly material: THREE.MeshStandardMaterial;
+  private readonly regions: Map<string, PartialBlockMeshRegionEntry>;
   private stats: PartialBlockMeshStats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
+  private dirtyRegionCount = 0;
+  private rebuiltRegionCount = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
-    this.mesh = new THREE.Mesh(
-      new THREE.BufferGeometry(),
-      new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.92,
-        metalness: 0,
-        side: THREE.DoubleSide
-      })
-    );
+    this.material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.92,
+      metalness: 0,
+      side: THREE.DoubleSide
+    });
+    // The public `mesh` is now a root group instead of the old single geometry.
+    // Keeping the name lets callers treat the field as one render owner while
+    // the implementation swaps only dirty regional child meshes.
+    this.mesh = new THREE.Group();
     this.mesh.name = "Partial block field";
-    this.mesh.castShadow = false;
-    this.mesh.receiveShadow = true;
     this.mesh.visible = false;
+    this.regions = new Map();
     this.scene.add(this.mesh);
   }
 
@@ -147,7 +187,34 @@ export class PartialBlockMeshField {
     return this.stats;
   }
 
-  update(cells: readonly PartialBlockCell[], isFaceVisible: PartialBlockFaceVisibility): void {
+  getRegionMesh(key: string): THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null {
+    return this.regions.get(key)?.mesh ?? null;
+  }
+
+  getRegionKeys(): readonly string[] {
+    return [...this.regions.keys()];
+  }
+
+  beginUpdate(dirtyRegionCount: number): void {
+    this.dirtyRegionCount = Math.max(0, dirtyRegionCount);
+    this.rebuiltRegionCount = 0;
+    this.recomputeStats();
+  }
+
+  setDirtyRegionCount(dirtyRegionCount: number): void {
+    this.dirtyRegionCount = Math.max(0, dirtyRegionCount);
+    this.recomputeStats();
+  }
+
+  updateRegion(
+    update: PartialBlockMeshRegionUpdate,
+    isFaceVisible: PartialBlockFaceVisibility
+  ): void {
+    if (update.cells.length === 0) {
+      this.removeRegion(update.key);
+      return;
+    }
+
     const geometryData: MutablePartialBlockGeometry = {
       positions: [],
       normals: [],
@@ -156,12 +223,12 @@ export class PartialBlockMeshField {
     };
 
     const surfaceCells = new Map(
-      cells
+      update.contextCells
         .filter(isPartialBlockSurfaceCell)
         .map((cell) => [createPartialBlockKey(cell.position), cell])
     );
 
-    for (const cell of cells) {
+    for (const cell of update.cells) {
       if (isPartialBlockSurfaceCell(cell)) {
         addPartialBlockSurfaceGeometry(geometryData, cell, surfaceCells);
       } else {
@@ -180,27 +247,88 @@ export class PartialBlockMeshField {
       geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 0);
     }
 
-    this.mesh.geometry.dispose();
-    this.mesh.geometry = geometry;
-    this.mesh.visible = cells.length > 0;
-    this.stats = {
-      cells: cells.length,
+    const entry = this.getOrCreateRegionEntry(update.key);
+    entry.mesh.geometry.dispose();
+    entry.mesh.geometry = geometry;
+    entry.mesh.visible = true;
+    entry.stats = {
+      cells: update.cells.length,
       vertices: geometryData.positions.length / 3,
       triangles: geometryData.indices.length / 3
     };
+    this.rebuiltRegionCount += 1;
+    this.recomputeStats();
   }
 
   clear(): void {
-    this.mesh.geometry.dispose();
-    this.mesh.geometry = new THREE.BufferGeometry();
+    for (const [key] of this.regions) {
+      this.removeRegion(key);
+    }
     this.mesh.visible = false;
+    this.dirtyRegionCount = 0;
+    this.rebuiltRegionCount = 0;
     this.stats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
   }
 
   dispose(): void {
+    this.clear();
     this.scene.remove(this.mesh);
-    this.mesh.geometry.dispose();
-    this.mesh.material.dispose();
+    this.material.dispose();
+  }
+
+  private getOrCreateRegionEntry(key: string): PartialBlockMeshRegionEntry {
+    const existing = this.regions.get(key);
+    if (existing) return existing;
+
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
+    mesh.name = `Partial block region ${key}`;
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.visible = false;
+    this.mesh.add(mesh);
+
+    const entry: PartialBlockMeshRegionEntry = {
+      mesh,
+      stats: { cells: 0, vertices: 0, triangles: 0 }
+    };
+    this.regions.set(key, entry);
+    return entry;
+  }
+
+  private removeRegion(key: string): void {
+    const entry = this.regions.get(key);
+    if (!entry) return;
+
+    this.mesh.remove(entry.mesh);
+    entry.mesh.geometry.dispose();
+    this.regions.delete(key);
+    this.rebuiltRegionCount += 1;
+    this.recomputeStats();
+  }
+
+  private recomputeStats(): void {
+    let cells = 0;
+    let vertices = 0;
+    let triangles = 0;
+    let maxRegionTriangles = 0;
+
+    for (const entry of this.regions.values()) {
+      cells += entry.stats.cells;
+      vertices += entry.stats.vertices;
+      triangles += entry.stats.triangles;
+      maxRegionTriangles = Math.max(maxRegionTriangles, entry.stats.triangles);
+    }
+
+    this.mesh.visible = this.regions.size > 0;
+    this.stats = {
+      cells,
+      vertices,
+      triangles,
+      regions: this.regions.size,
+      dirtyRegions: this.dirtyRegionCount,
+      rebuiltRegions: this.rebuiltRegionCount,
+      maxRegionTriangles
+    };
   }
 }
 
@@ -208,16 +336,100 @@ export type PartialBlockMeshStats = {
   readonly cells: number;
   readonly vertices: number;
   readonly triangles: number;
+  readonly regions: number;
+  readonly dirtyRegions: number;
+  readonly rebuiltRegions: number;
+  readonly maxRegionTriangles: number;
 };
 
 export const EMPTY_PARTIAL_BLOCK_MESH_STATS: PartialBlockMeshStats = {
   cells: 0,
   vertices: 0,
-  triangles: 0
+  triangles: 0,
+  regions: 0,
+  dirtyRegions: 0,
+  rebuiltRegions: 0,
+  maxRegionTriangles: 0
 };
 
 export function createPartialBlockKey(position: PartialBlockPosition): string {
   return `${Math.floor(position.x)},${Math.floor(position.y)},${Math.floor(position.z)}`;
+}
+
+export function createPartialBlockMeshRegionKey(position: PartialBlockPosition): string {
+  return createPartialBlockMeshRegionKeyFromCoords(createPartialBlockMeshRegionCoords(position));
+}
+
+export function createPartialBlockMeshRegionCoords(position: PartialBlockPosition): PartialBlockMeshRegionCoords {
+  return {
+    rx: Math.floor(Math.floor(position.x) / PARTIAL_BLOCK_MESH_REGION_SIZE_XZ),
+    ry: Math.floor(Math.floor(position.y) / PARTIAL_BLOCK_MESH_REGION_SIZE_Y),
+    rz: Math.floor(Math.floor(position.z) / PARTIAL_BLOCK_MESH_REGION_SIZE_XZ)
+  };
+}
+
+export function createPartialBlockMeshRegionKeyFromCoords(coords: PartialBlockMeshRegionCoords): string {
+  return `${coords.rx},${coords.ry},${coords.rz}`;
+}
+
+export function parsePartialBlockMeshRegionKey(key: string): PartialBlockMeshRegionCoords | null {
+  const [rx, ry, rz] = key.split(",").map(Number);
+  if (!Number.isInteger(rx) || !Number.isInteger(ry) || !Number.isInteger(rz)) return null;
+  return { rx, ry, rz };
+}
+
+export function getPartialBlockMeshRegionBounds(coords: PartialBlockMeshRegionCoords): PartialBlockMeshRegionBounds {
+  return {
+    minX: coords.rx * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ,
+    maxX: (coords.rx + 1) * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ - 1,
+    minY: coords.ry * PARTIAL_BLOCK_MESH_REGION_SIZE_Y,
+    maxY: (coords.ry + 1) * PARTIAL_BLOCK_MESH_REGION_SIZE_Y - 1,
+    minZ: coords.rz * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ,
+    maxZ: (coords.rz + 1) * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ - 1
+  };
+}
+
+export function getPartialBlockMeshDirtyRegionKeys(position: PartialBlockPosition): readonly string[] {
+  const blockX = Math.floor(position.x);
+  const blockY = Math.floor(position.y);
+  const blockZ = Math.floor(position.z);
+  const minCoords = createPartialBlockMeshRegionCoords({
+    x: blockX - PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS,
+    y: blockY - PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS,
+    z: blockZ - PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS
+  });
+  const maxCoords = createPartialBlockMeshRegionCoords({
+    x: blockX + PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS,
+    y: blockY + PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS,
+    z: blockZ + PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS
+  });
+  const keys: string[] = [];
+
+  for (let rx = minCoords.rx; rx <= maxCoords.rx; rx += 1) {
+    for (let ry = minCoords.ry; ry <= maxCoords.ry; ry += 1) {
+      for (let rz = minCoords.rz; rz <= maxCoords.rz; rz += 1) {
+        keys.push(createPartialBlockMeshRegionKeyFromCoords({ rx, ry, rz }));
+      }
+    }
+  }
+
+  return keys;
+}
+
+export function isPartialBlockInsideRegionHalo(
+  cell: PartialBlockCell,
+  coords: PartialBlockMeshRegionCoords,
+  haloBlocks = PARTIAL_BLOCK_MESH_REGION_HALO_BLOCKS
+): boolean {
+  const bounds = getPartialBlockMeshRegionBounds(coords);
+  return (
+    cell.position.x >= bounds.minX - haloBlocks &&
+    cell.position.x <= bounds.maxX + haloBlocks &&
+    cell.position.y >= bounds.minY - haloBlocks &&
+    cell.position.y <= bounds.maxY + haloBlocks &&
+    cell.position.z >= bounds.minZ - haloBlocks &&
+    cell.position.z <= bounds.maxZ + haloBlocks
+  );
 }
 
 export function isPartialBlockSurfaceCell(cell: PartialBlockCell): boolean {

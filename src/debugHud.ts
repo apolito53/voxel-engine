@@ -179,7 +179,13 @@ export class DebugHud {
           { label: "load", value: `q ${snapshot.stats.queuedChunks}, gen ${snapshot.stats.loadedThisFrame}/${snapshot.stats.pendingChunkLoads}` },
           { label: "mesh", value: `q ${snapshot.stats.dirtyChunks}, view ${snapshot.stats.visibleDirtyChunks}, done ${snapshot.stats.meshedThisFrame}/${snapshot.stats.pendingMeshBuilds}` },
           { label: "save", value: `${snapshot.stats.savedChunks} saved, ${snapshot.stats.modifiedChunks} edited, q ${snapshot.stats.pendingChunkSaves}` },
-          { label: "partial", value: `${snapshot.stats.partialDamageBlocks}/${snapshot.stats.partialBlocks} blk, cut ${snapshot.stats.partialRemovedSubvoxels}, tri ${snapshot.partialMeshStats.triangles}` }
+          {
+            label: "partial",
+            value: `${snapshot.stats.partialDamageBlocks}/${snapshot.stats.partialBlocks} blk, ` +
+              `r ${snapshot.partialMeshStats.regions} d ${snapshot.partialMeshStats.dirtyRegions} ` +
+              `reb ${snapshot.partialMeshStats.rebuiltRegions}, tri ${snapshot.partialMeshStats.triangles} ` +
+              `max ${snapshot.partialMeshStats.maxRegionTriangles}`
+          }
         ]
       },
       {

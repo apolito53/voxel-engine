@@ -93,11 +93,11 @@ function readNeighbors(neighbors: ChunkNeighborBuffers): ChunkNeighborBlocks {
 }
 
 function readPartialBlockMasks(partialBlockMasks: {
-  readonly current: ArrayBuffer;
+  readonly current: ArrayBuffer | null;
   readonly neighbors: ChunkNeighborBuffers;
 }): ChunkPartialBlockMasks {
   return {
-    current: new Uint8Array(partialBlockMasks.current),
+    current: partialBlockMasks.current ? new Uint8Array(partialBlockMasks.current) : null,
     neighbors: readNeighbors(partialBlockMasks.neighbors)
   };
 }
@@ -370,7 +370,7 @@ function getPartialBlockMaskAt(
   z: number
 ): number | null {
   if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
-    return partialBlockMasks.current[index(x, y, z)];
+    return partialBlockMasks.current ? partialBlockMasks.current[index(x, y, z)] : null;
   }
 
   if (x < 0 && z >= 0 && z < CHUNK_SIZE && partialBlockMasks.neighbors.negativeX) {

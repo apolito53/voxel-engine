@@ -416,7 +416,15 @@ function addMeshDetails(details: string[], stats: PerformanceHitchStatsSnapshot)
     details.push(`${stats.world.damagedBlocks} damaged blocks tracked without custom partial meshes`);
   }
   if (stats.partialMesh.triangles > 0) {
-    details.push(`${stats.partialMesh.triangles} partial-mesh tris across ${stats.partialMesh.cells} cells`);
+    details.push(
+      `${stats.partialMesh.triangles} partial-mesh tris across ${stats.partialMesh.cells} cells, ` +
+      `${stats.partialMesh.regions} regions, max ${stats.partialMesh.maxRegionTriangles} tris/region`
+    );
+  }
+  if (stats.partialMesh.dirtyRegions > 0 || stats.partialMesh.rebuiltRegions > 0) {
+    details.push(
+      `${stats.partialMesh.rebuiltRegions} partial regions rebuilt, ${stats.partialMesh.dirtyRegions} still dirty`
+    );
   }
   if (stats.world.visibleDirtyChunks > 0 || stats.world.dirtyChunks > 0) {
     details.push(`${stats.world.visibleDirtyChunks}/${stats.world.dirtyChunks} dirty chunks visible/total`);

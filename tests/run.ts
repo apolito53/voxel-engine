@@ -188,6 +188,7 @@ import {
   PartialBlockMeshField,
   arePartialBlockVisualCellIndexesConnected,
   createPartialBlockCollisionBoxes,
+  createPartialBlockMeshRegionKey,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
@@ -1973,7 +1974,11 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
       partialMesh: {
         cells: 4,
         vertices: 360,
-        triangles: 180
+        triangles: 180,
+        regions: 2,
+        dirtyRegions: 1,
+        rebuiltRegions: 1,
+        maxRegionTriangles: 120
       }
     }
   });
@@ -2237,7 +2242,7 @@ test("partial block mesh updates coalesce dense damage bursts", () => {
       nowMs: 1000 + PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS - 1,
       hasRenderedMesh: true
     }),
-    "dense partial terrain should defer immediate repeated whole-field mesh rebuilds"
+    "dense partial terrain should defer immediate repeated regional mesh rebuilds"
   );
   assert(
     !shouldDeferPartialBlockMeshUpdate({
@@ -2256,6 +2261,91 @@ test("partial block mesh updates coalesce dense damage bursts", () => {
       hasRenderedMesh: true
     }),
     "small edits should stay immediate so normal mining/building feels responsive"
+  );
+});
+
+test("partial terrain separates visual dirtiness from chunk-mask dirtiness", () => {
+  const world = new VoxelWorld({ seed: "partial-dirty-split-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  const chunk = world.getChunk(0, 0);
+  assert(chunk, "placing the fixture block should create its chunk");
+
+  const revisionBeforeFirstCut = chunk.revision;
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2.05, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  assert(
+    chunk.revision > revisionBeforeFirstCut,
+    "the first partial cut should dirty the normal chunk mesh because the worker mask changed"
+  );
+  assert(world.hasUrgentPartialBlockMeshRegions(), "new partial cells should get an urgent visual rebuild lane");
+
+  const mask = world.createPartialBlockMask(0, 0);
+  assert(mask, "a chunk containing partial terrain should expose a sparse worker render mask");
+  assertEqual(mask[2 + CHUNK_SIZE * (4 + CHUNK_SIZE * 3)], 1, "the worker mask should mark the carved macro voxel");
+
+  world.consumePartialBlockMeshRegionUpdates({ maxRegions: 64 });
+  const revisionBeforeSecondCut = chunk.revision;
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2.05, 3.55, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assertEqual(
+    chunk.revision,
+    revisionBeforeSecondCut,
+    "repeated damage to an existing partial cell should not remesh the normal chunk"
+  );
+  assert(
+    world.getDirtyPartialBlockMeshRegionCount() > 0,
+    "repeated damage should still dirty only the regional custom partial mesh"
+  );
+});
+
+test("partial terrain mesh region updates include halo context", () => {
+  const world = new VoxelWorld({ seed: "partial-region-halo-test" });
+  world.setBlock(3, 3, 3, BLOCK.stone);
+  world.setBlock(4, 3, 3, BLOCK.stone);
+
+  world.carveBlock({
+    x: 3,
+    y: 3,
+    z: 3,
+    point: new THREE.Vector3(3.95, 3.5, 3.5),
+    normal: new THREE.Vector3(1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  world.carveBlock({
+    x: 4,
+    y: 3,
+    z: 3,
+    point: new THREE.Vector3(4.05, 3.5, 3.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  const updates = world.consumePartialBlockMeshRegionUpdates({ maxRegions: 64 });
+  const boundaryUpdate = updates.find((update) =>
+    update.cells.some((cell) => cell.position.x === 3) &&
+    update.contextCells.some((cell) => cell.position.x === 4)
+  );
+
+  assert(
+    boundaryUpdate,
+    "dirty partial mesh regions should receive one-block halo cells for face visibility and stitching"
   );
 });
 
@@ -3402,14 +3492,19 @@ test("partial block field renders faceted custom terrain cells", () => {
       seed: 1234
     }]
   };
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
 
-  field.update([cell], () => true);
-  const positionAttribute = field.mesh.geometry.getAttribute("position");
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  const regionMesh = field.getRegionMesh(regionKey);
+  assert(regionMesh, "partial block field should create a mesh for the dirty region");
+  const positionAttribute = regionMesh.geometry.getAttribute("position");
   const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
 
-  assertEqual(scene.children[0], field.mesh, "partial block field should own one shared scene mesh");
+  assertEqual(scene.children[0], field.mesh, "partial block field should own one shared scene root");
   assert(field.mesh.visible, "custom partial terrain should become visible when cells exist");
   assertEqual(field.getStats().cells, 1, "one cell should be represented in the partial terrain mesh");
+  assertEqual(field.getStats().regions, 1, "one dirty region should be represented by one child mesh");
   assert(positionAttribute.count > 24, "carved cells should have more geometry than a plain six-face cube");
   assert(bounds.min.x >= 1 && bounds.max.x <= 2, "partial block geometry should stay inside its voxel x bounds");
   assert(bounds.min.y >= 2 && bounds.max.y <= 3, "partial block geometry should stay inside its voxel y bounds");
@@ -3417,6 +3512,79 @@ test("partial block field renders faceted custom terrain cells", () => {
 
   field.dispose();
   assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
+});
+
+test("partial block field rebuilds only the requested region", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const firstCell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.42,
+      depth: 0.5,
+      seed: 111
+    }]
+  };
+  const secondCell: PartialBlockCell = {
+    ...firstCell,
+    position: { x: 9, y: 2, z: 3 },
+    cuts: [{ ...firstCell.cuts[0]!, seed: 222 }]
+  };
+  const firstRegionKey = createPartialBlockMeshRegionKey(firstCell.position);
+  const secondRegionKey = createPartialBlockMeshRegionKey(secondCell.position);
+
+  field.beginUpdate(2);
+  field.updateRegion({ key: firstRegionKey, cells: [firstCell], contextCells: [firstCell] }, () => true);
+  field.updateRegion({ key: secondRegionKey, cells: [secondCell], contextCells: [secondCell] }, () => true);
+  const firstRegionGeometry = field.getRegionMesh(firstRegionKey)?.geometry;
+
+  field.beginUpdate(1);
+  field.updateRegion({ key: secondRegionKey, cells: [{ ...secondCell, damage: 2 }], contextCells: [secondCell] }, () => true);
+
+  assertEqual(
+    field.getRegionMesh(firstRegionKey)?.geometry,
+    firstRegionGeometry,
+    "updating one partial mesh region should not rebuild unrelated region geometry"
+  );
+  assertEqual(field.getStats().regions, 2, "both regional meshes should remain alive");
+
+  field.dispose();
+});
+
+test("partial block field disposes empty regions", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.42,
+      depth: 0.5,
+      seed: 333
+    }]
+  };
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  assert(field.getRegionMesh(regionKey), "setup should create a regional partial mesh");
+
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [], contextCells: [] }, () => true);
+
+  assertEqual(field.getRegionMesh(regionKey), null, "empty partial mesh regions should be removed");
+  assertEqual(field.getStats().regions, 0, "empty partial mesh regions should not count as live draw regions");
+
+  field.dispose();
 });
 
 test("partial block collision boxes represent remaining lattice cells", () => {
@@ -3756,9 +3924,13 @@ test("partial block bites open wrinkled interior faces at the impact point", () 
     }]
   };
 
-  field.update([cell], () => true);
-  const positions = field.mesh.geometry.getAttribute("position");
-  const normals = field.mesh.geometry.getAttribute("normal");
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  const regionMesh = field.getRegionMesh(regionKey);
+  assert(regionMesh, "partial bite test should create a regional mesh");
+  const positions = regionMesh.geometry.getAttribute("position");
+  const normals = regionMesh.geometry.getAttribute("normal");
   let interiorBiteVertices = 0;
   let wrinkledBiteVertices = 0;
 
@@ -3796,9 +3968,13 @@ test("partial block cuts chew into neighboring exposed faces near edges", () => 
     }]
   };
 
-  field.update([cell], () => true);
-  const positions = field.mesh.geometry.getAttribute("position");
-  const normals = field.mesh.geometry.getAttribute("normal");
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  const regionMesh = field.getRegionMesh(regionKey);
+  assert(regionMesh, "partial edge-cut test should create a regional mesh");
+  const positions = regionMesh.geometry.getAttribute("position");
+  const normals = regionMesh.geometry.getAttribute("normal");
   let pulledTopFaceVertices = 0;
 
   for (let index = 0; index < positions.count; index += 1) {
@@ -3832,8 +4008,12 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
     ]
   };
 
-  field.update([cell], () => true);
-  const positions = field.mesh.geometry.getAttribute("position");
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  const regionMesh = field.getRegionMesh(regionKey);
+  assert(regionMesh, "partial support-surface test should create a regional mesh");
+  const positions = regionMesh.geometry.getAttribute("position");
   const bounds = new THREE.Box3().setFromBufferAttribute(positions);
 
   assert(field.mesh.visible, "broken partial terrain should render as a visible surface patch");
@@ -8057,7 +8237,11 @@ function createTestHitchStats(
     partialMesh: {
       cells: 0,
       vertices: 0,
-      triangles: 0
+      triangles: 0,
+      regions: 0,
+      dirtyRegions: 0,
+      rebuiltRegions: 0,
+      maxRegionTriangles: 0
     },
     debrisSettler: {
       regions: 0,

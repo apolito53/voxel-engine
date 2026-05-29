@@ -15,12 +15,12 @@ export type ChunkNeighborBlocks = {
 };
 
 export type ChunkPartialBlockMaskBuffers = {
-  readonly current: ArrayBuffer;
+  readonly current: ArrayBuffer | null;
   readonly neighbors: ChunkNeighborBuffers;
 };
 
 export type ChunkPartialBlockMasks = {
-  readonly current: Uint8Array;
+  readonly current: Uint8Array | null;
   readonly neighbors: ChunkNeighborBlocks;
 };
 

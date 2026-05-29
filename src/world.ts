@@ -17,16 +17,24 @@ import type {
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
+  PARTIAL_BLOCK_MESH_REGION_SIZE_XZ,
+  PARTIAL_BLOCK_MESH_REGION_SIZE_Y,
+  createPartialBlockMeshRegionKey,
+  createPartialBlockMeshRegionKeyFromCoords,
   createPartialBlockCollisionBoxes,
   createPartialBlockCut,
   createPartialBlockKey,
   createPartialBlockRemovedVisualCellIndexes,
   createPartialBlockSurfaceSamples,
   createPartialBlockTrajectoryTunnelCellIndexes,
+  getPartialBlockMeshDirtyRegionKeys,
   getPartialBlockSupportHeight,
+  isPartialBlockInsideRegionHalo,
   isPartialBlockSurfaceCell,
+  parsePartialBlockMeshRegionKey,
   type PartialBlockCell,
   type PartialBlockCut,
+  type PartialBlockMeshRegionUpdate,
   type PartialBlockPosition,
   type PartialBlockSurfaceSample
 } from "./partialBlocks";
@@ -186,6 +194,17 @@ const PARTIAL_BLOCK_LATTICE_OPENING_OFFSETS: readonly VoxelVector[] = [
 type PartialBlockCutResult = {
   readonly cell: PartialBlockCell;
   readonly newlyRemovedVisualCellIndexes: readonly number[];
+};
+
+export type PartialBlockMeshUpdateBatchOptions = {
+  readonly maxRegions?: number;
+  readonly origin?: Pick<THREE.Vector3, "x" | "y" | "z">;
+};
+
+type PartialBlockIndexBucket = Map<string, PartialBlockCell>;
+
+type PartialBlockMaskCacheEntry = {
+  readonly mask: Uint8Array | null;
 };
 
 type BlockDamageBrushTarget = {
@@ -675,6 +694,11 @@ export class VoxelWorld implements CollisionWorld {
   lastRequestedMeshes: number;
   private readonly blockDamage: Map<string, number>;
   private readonly partialBlocks: Map<string, PartialBlockCell>;
+  private readonly partialBlocksByChunk: Map<string, PartialBlockIndexBucket>;
+  private readonly partialBlocksByRegion: Map<string, PartialBlockIndexBucket>;
+  private readonly dirtyPartialBlockRegionKeys: Set<string>;
+  private readonly urgentPartialBlockRegionKeys: Set<string>;
+  private readonly partialBlockMaskCache: Map<string, PartialBlockMaskCacheEntry>;
   private partialBlockGeometryRevision: number;
 
   constructor({ storage = createNullChunkStorage(), seed = "", terrainProfile }: WorldOptions = {}) {
@@ -725,6 +749,11 @@ export class VoxelWorld implements CollisionWorld {
     this.lastRequestedMeshes = 0;
     this.blockDamage = new Map();
     this.partialBlocks = new Map();
+    this.partialBlocksByChunk = new Map();
+    this.partialBlocksByRegion = new Map();
+    this.dirtyPartialBlockRegionKeys = new Set();
+    this.urgentPartialBlockRegionKeys = new Set();
+    this.partialBlockMaskCache = new Map();
     this.partialBlockGeometryRevision = 0;
   }
 
@@ -743,8 +772,7 @@ export class VoxelWorld implements CollisionWorld {
     this.terrainProfile = this.terrain.profile;
     this.savedChunks.clear();
     this.blockDamage.clear();
-    this.partialBlocks.clear();
-    this.partialBlockGeometryRevision += 1;
+    this.clearPartialBlockState();
     this.invalidateChunkQueueWindow();
     this.invalidateChunkUnloadWindow();
     await this.loadSavedChunkIndex();
@@ -795,8 +823,7 @@ export class VoxelWorld implements CollisionWorld {
     this.workerResults.length = 0;
     this.savedChunkResults.length = 0;
     this.blockDamage.clear();
-    this.partialBlocks.clear();
-    this.partialBlockGeometryRevision += 1;
+    this.clearPartialBlockState();
     this.dirtyChunkKeys.clear();
     this.modifiedChunkKeys.clear();
   }
@@ -1458,6 +1485,36 @@ export class VoxelWorld implements CollisionWorld {
     return Array.from(this.partialBlocks.values());
   }
 
+  getDirtyPartialBlockMeshRegionCount(): number {
+    return this.dirtyPartialBlockRegionKeys.size;
+  }
+
+  hasUrgentPartialBlockMeshRegions(): boolean {
+    return this.urgentPartialBlockRegionKeys.size > 0;
+  }
+
+  consumePartialBlockMeshRegionUpdates({
+    maxRegions = Number.POSITIVE_INFINITY,
+    origin
+  }: PartialBlockMeshUpdateBatchOptions = {}): readonly PartialBlockMeshRegionUpdate[] {
+    if (this.dirtyPartialBlockRegionKeys.size === 0 || maxRegions <= 0) return [];
+
+    const dirtyKeys = [...this.dirtyPartialBlockRegionKeys];
+    const urgentKeys = dirtyKeys.filter((key) => this.urgentPartialBlockRegionKeys.has(key));
+    const normalKeys = dirtyKeys.filter((key) => !this.urgentPartialBlockRegionKeys.has(key));
+    const sortedNormalKeys = origin
+      ? normalKeys.sort((a, b) => this.getPartialBlockRegionDistanceSq(a, origin) - this.getPartialBlockRegionDistanceSq(b, origin))
+      : normalKeys;
+    const selectedKeys = [...urgentKeys, ...sortedNormalKeys].slice(0, Math.floor(maxRegions));
+
+    for (const key of selectedKeys) {
+      this.dirtyPartialBlockRegionKeys.delete(key);
+      this.urgentPartialBlockRegionKeys.delete(key);
+    }
+
+    return selectedKeys.map((key) => this.createPartialBlockMeshRegionUpdate(key));
+  }
+
   getPartialBlockCount(): number {
     return this.partialBlocks.size;
   }
@@ -1821,8 +1878,7 @@ export class VoxelWorld implements CollisionWorld {
       damage,
       maxHealth
     };
-    this.partialBlocks.set(key, cell);
-    this.markPartialBlockDirty(position);
+    this.setPartialBlockCell(cell, { urgentVisual: !existing });
     return {
       cell,
       newlyRemovedVisualCellIndexes
@@ -1973,15 +2029,14 @@ export class VoxelWorld implements CollisionWorld {
       ...createPartialBlockSurfaceSamples(position, nextCuts)
     ]);
 
-    this.partialBlocks.set(createPartialBlockKey(position), {
+    this.setPartialBlockCell({
       block,
       position,
       cuts: nextCuts,
       surfaceSamples,
       damage: maxHealth,
       maxHealth
-    });
-    this.markPartialBlockDirty(position);
+    }, { urgentVisual: !existing });
   }
 
   private addPartialBlockSurfacePatch(
@@ -2088,13 +2143,80 @@ export class VoxelWorld implements CollisionWorld {
 
   private removePartialBlock(position: VoxelBlockPosition): void {
     const key = createPartialBlockKey(position);
-    if (!this.partialBlocks.delete(key)) return;
-    this.markPartialBlockDirty(position);
+    const existing = this.partialBlocks.get(key);
+    if (!existing) return;
+
+    this.partialBlocks.delete(key);
+    this.removePartialBlockFromIndexes(key, existing);
+    this.markPartialBlockVisualDirty(position, true);
+    this.markPartialBlockMaskDirty(position);
   }
 
-  private markPartialBlockDirty(position: VoxelBlockPosition): void {
+  private setPartialBlockCell(cell: PartialBlockCell, { urgentVisual = false }: {
+    readonly urgentVisual?: boolean;
+  } = {}): void {
+    const key = createPartialBlockKey(cell.position);
+    const existing = this.partialBlocks.get(key);
+
+    this.partialBlocks.set(key, cell);
+    if (existing) {
+      // A repeated bite changes only the custom partial mesh; the normal chunk
+      // mesh already knows this macro voxel is represented by partial geometry.
+      this.updatePartialBlockIndexes(key, cell);
+      this.markPartialBlockVisualDirty(cell.position, urgentVisual);
+      return;
+    }
+
+    this.addPartialBlockToIndexes(key, cell);
+    this.markPartialBlockVisualDirty(cell.position, true);
+    this.markPartialBlockMaskDirty(cell.position);
+  }
+
+  private clearPartialBlockState(): void {
+    if (this.partialBlocks.size === 0 && this.dirtyPartialBlockRegionKeys.size === 0) {
+      this.partialBlockMaskCache.clear();
+      return;
+    }
+
+    this.partialBlocks.clear();
+    this.partialBlocksByChunk.clear();
+    this.partialBlocksByRegion.clear();
+    this.partialBlockMaskCache.clear();
+    this.dirtyPartialBlockRegionKeys.clear();
+    this.urgentPartialBlockRegionKeys.clear();
+    this.partialBlockGeometryRevision += 1;
+  }
+
+  private addPartialBlockToIndexes(key: string, cell: PartialBlockCell): void {
+    getOrCreateMapBucket(this.partialBlocksByChunk, this.getPartialBlockChunkKey(cell.position)).set(key, cell);
+    getOrCreateMapBucket(this.partialBlocksByRegion, createPartialBlockMeshRegionKey(cell.position)).set(key, cell);
+  }
+
+  private updatePartialBlockIndexes(key: string, cell: PartialBlockCell): void {
+    getOrCreateMapBucket(this.partialBlocksByChunk, this.getPartialBlockChunkKey(cell.position)).set(key, cell);
+    getOrCreateMapBucket(this.partialBlocksByRegion, createPartialBlockMeshRegionKey(cell.position)).set(key, cell);
+  }
+
+  private removePartialBlockFromIndexes(key: string, cell: PartialBlockCell): void {
+    removeFromMapBucket(this.partialBlocksByChunk, this.getPartialBlockChunkKey(cell.position), key);
+    removeFromMapBucket(this.partialBlocksByRegion, createPartialBlockMeshRegionKey(cell.position), key);
+  }
+
+  private markPartialBlockVisualDirty(position: VoxelBlockPosition, urgent: boolean): void {
+    // The region halo is deliberately wider than the owned cell. Boundary faces
+    // and stitched partial-height surfaces both need adjacent regions to refresh
+    // when a neighboring damaged cell appears, changes, or disappears.
+    for (const key of getPartialBlockMeshDirtyRegionKeys(position)) {
+      this.dirtyPartialBlockRegionKeys.add(key);
+      if (urgent) this.urgentPartialBlockRegionKeys.add(key);
+    }
+    this.partialBlockGeometryRevision += 1;
+  }
+
+  private markPartialBlockMaskDirty(position: VoxelBlockPosition): void {
     const { cx, cz, lx, lz } = this.toChunkCoords(position.x, position.z);
     const chunk = this.getChunk(cx, cz);
+    this.partialBlockMaskCache.delete(this.key(cx, cz));
     if (chunk) {
       chunk.revision += 1;
       this.markChunkDirty(chunk);
@@ -2103,7 +2225,44 @@ export class VoxelWorld implements CollisionWorld {
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
     if (lz === 0) this.markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
-    this.partialBlockGeometryRevision += 1;
+  }
+
+  private getPartialBlockChunkKey(position: PartialBlockPosition): string {
+    const { cx, cz } = this.toChunkCoords(position.x, position.z);
+    return this.key(cx, cz);
+  }
+
+  private createPartialBlockMeshRegionUpdate(key: string): PartialBlockMeshRegionUpdate {
+    const coords = parsePartialBlockMeshRegionKey(key);
+    const cells = sortPartialBlockCells([...(this.partialBlocksByRegion.get(key)?.values() ?? [])]);
+    if (!coords) return { key, cells, contextCells: cells };
+
+    const contextCells: PartialBlockCell[] = [];
+    for (let rx = coords.rx - 1; rx <= coords.rx + 1; rx += 1) {
+      for (let ry = coords.ry - 1; ry <= coords.ry + 1; ry += 1) {
+        for (let rz = coords.rz - 1; rz <= coords.rz + 1; rz += 1) {
+          const regionKey = createPartialBlockMeshRegionKeyFromCoords({ rx, ry, rz });
+          for (const cell of this.partialBlocksByRegion.get(regionKey)?.values() ?? []) {
+            if (isPartialBlockInsideRegionHalo(cell, coords)) contextCells.push(cell);
+          }
+        }
+      }
+    }
+
+    return { key, cells, contextCells: sortPartialBlockCells(contextCells) };
+  }
+
+  private getPartialBlockRegionDistanceSq(key: string, origin: Pick<THREE.Vector3, "x" | "y" | "z">): number {
+    const coords = parsePartialBlockMeshRegionKey(key);
+    if (!coords) return 0;
+
+    const centerX = coords.rx * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ + PARTIAL_BLOCK_MESH_REGION_SIZE_XZ / 2;
+    const centerY = coords.ry * PARTIAL_BLOCK_MESH_REGION_SIZE_Y + PARTIAL_BLOCK_MESH_REGION_SIZE_Y / 2;
+    const centerZ = coords.rz * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ + PARTIAL_BLOCK_MESH_REGION_SIZE_XZ / 2;
+    const dx = centerX - origin.x;
+    const dy = centerY - origin.y;
+    const dz = centerZ - origin.z;
+    return dx * dx + dy * dy + dz * dz;
   }
 
   markDirty(cx: number, cz: number): void {
@@ -2617,9 +2776,9 @@ export class VoxelWorld implements CollisionWorld {
     const transfers: Transferable[] = [
       blocksBuffer,
       partialBlockMasks.current,
-      ...Object.values(neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer)),
-      ...Object.values(partialBlockMasks.neighbors).filter((buffer): buffer is ArrayBuffer => Boolean(buffer))
-    ];
+      ...Object.values(neighbors),
+      ...Object.values(partialBlockMasks.neighbors)
+    ].filter((buffer): buffer is ArrayBuffer => Boolean(buffer));
 
     this.pendingMeshKeys.add(key);
     this.pendingMeshBuilds.set(requestId, {
@@ -2649,11 +2808,11 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   snapshotPartialBlockMasks(cx: number, cz: number): {
-    readonly current: ArrayBuffer;
+    readonly current: ArrayBuffer | null;
     readonly neighbors: ChunkNeighborBuffers;
   } {
     return {
-      current: transferChunkBuffer(this.createPartialBlockMask(cx, cz)),
+      current: this.createPartialBlockMaskBuffer(cx, cz),
       neighbors: {
         negativeX: this.createPartialBlockMaskBufferForExistingChunk(cx - 1, cz),
         positiveX: this.createPartialBlockMaskBufferForExistingChunk(cx + 1, cz),
@@ -2665,17 +2824,34 @@ export class VoxelWorld implements CollisionWorld {
 
   createPartialBlockMaskBufferForExistingChunk(cx: number, cz: number): ArrayBuffer | null {
     if (!this.getChunk(cx, cz)) return null;
-    return transferChunkBuffer(this.createPartialBlockMask(cx, cz));
+    return this.createPartialBlockMaskBuffer(cx, cz);
   }
 
-  createPartialBlockMask(cx: number, cz: number): Uint8Array {
+  createPartialBlockMaskBuffer(cx: number, cz: number): ArrayBuffer | null {
+    const mask = this.createPartialBlockMask(cx, cz);
+    return mask ? transferChunkBuffer(mask) : null;
+  }
+
+  createPartialBlockMask(cx: number, cz: number): Uint8Array | null {
+    const key = this.key(cx, cz);
+    const cached = this.partialBlockMaskCache.get(key);
+    if (cached) return cached.mask ? cached.mask.slice() : null;
+
+    const cells = this.partialBlocksByChunk.get(key);
+    if (!cells || cells.size === 0) {
+      this.partialBlockMaskCache.set(key, { mask: null });
+      return null;
+    }
+
     const mask = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
     const minX = cx * CHUNK_SIZE;
     const maxX = minX + CHUNK_SIZE - 1;
     const minZ = cz * CHUNK_SIZE;
     const maxZ = minZ + CHUNK_SIZE - 1;
 
-    for (const cell of this.partialBlocks.values()) {
+    // The cache stores the canonical mask; snapshots return slices because
+    // worker transfer detaches ArrayBuffers. Cute, very fast foot-gun avoided.
+    for (const cell of cells.values()) {
       const { x, y, z } = cell.position;
       if (y < 0 || y >= WORLD_HEIGHT) continue;
       if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
@@ -2684,7 +2860,8 @@ export class VoxelWorld implements CollisionWorld {
       mask[localX + CHUNK_SIZE * (localZ + CHUNK_SIZE * y)] = 1;
     }
 
-    return mask;
+    this.partialBlockMaskCache.set(key, { mask });
+    return mask.slice();
   }
 
   getStats(): WorldStats {
@@ -2777,6 +2954,7 @@ export class VoxelWorld implements CollisionWorld {
       this.savedChunkResults.length > 0 ||
       this.pendingMeshBuilds.size > 0 ||
       this.dirtyChunkKeys.size > 0 ||
+      this.dirtyPartialBlockRegionKeys.size > 0 ||
       this.pendingSavedChunkWrites.size > 0 ||
       this.storageOperations.size > 0 ||
       this.chunkStorageChains.size > 0
@@ -2821,4 +2999,29 @@ function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {
 function transferChunkBuffer(blocks: Uint8Array): ArrayBuffer {
   // All chunk snapshots in this engine are plain Uint8Array instances, not shared buffers.
   return blocks.buffer as ArrayBuffer;
+}
+
+function getOrCreateMapBucket<K, V>(buckets: Map<string, Map<K, V>>, key: string): Map<K, V> {
+  const existing = buckets.get(key);
+  if (existing) return existing;
+
+  const bucket = new Map<K, V>();
+  buckets.set(key, bucket);
+  return bucket;
+}
+
+function removeFromMapBucket<K, V>(buckets: Map<string, Map<K, V>>, bucketKey: string, valueKey: K): void {
+  const bucket = buckets.get(bucketKey);
+  if (!bucket) return;
+
+  bucket.delete(valueKey);
+  if (bucket.size === 0) buckets.delete(bucketKey);
+}
+
+function sortPartialBlockCells(cells: readonly PartialBlockCell[]): readonly PartialBlockCell[] {
+  return [...cells].sort((a, b) =>
+    a.position.y - b.position.y ||
+    a.position.z - b.position.z ||
+    a.position.x - b.position.x
+  );
 }

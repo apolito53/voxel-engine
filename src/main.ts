@@ -498,6 +498,8 @@ let debrisPerformancePressure = createDebrisPerformancePressureState(
 );
 let renderedPartialBlockRevision = -1;
 let lastPartialBlockMeshUpdateMs = 0;
+const PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET = 8;
+const PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET = 24;
 let leftMouseButtonDown = false;
 let rightMouseButtonDown = false;
 let miningToolState: MiningToolState | null = null;
@@ -2412,10 +2414,17 @@ function createHitscanRubbleAimPreviewPrediction(
 
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
   const revision = activeWorld.getPartialBlockGeometryRevision();
-  if (revision === renderedPartialBlockRevision) return;
+  const dirtyRegionCount = activeWorld.getDirtyPartialBlockMeshRegionCount();
+  partialBlockMeshField.beginUpdate(dirtyRegionCount);
+  if (revision === renderedPartialBlockRevision && dirtyRegionCount === 0) return;
+  if (dirtyRegionCount === 0) {
+    renderedPartialBlockRevision = revision;
+    return;
+  }
 
   const partialBlockCount = activeWorld.getPartialBlockCount();
-  if (shouldDeferPartialBlockMeshUpdate({
+  const hasUrgentRegions = activeWorld.hasUrgentPartialBlockMeshRegions();
+  if (!hasUrgentRegions && shouldDeferPartialBlockMeshUpdate({
     cellCount: partialBlockCount,
     lastUpdateMs: lastPartialBlockMeshUpdateMs,
     nowMs: performance.now(),
@@ -2424,16 +2433,29 @@ function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
     return;
   }
 
-  // Partial terrain can become hundreds of faceted cells during core spam.
-  // Rebuilding the whole stitched field every single impact frame was showing
-  // up as 20-30ms mesh hitches; coalescing those rebuilds keeps the visuals
-  // fresh enough while letting multiple bite updates land in one geometry pass.
-  partialBlockMeshField.update(
-    activeWorld.getPartialBlocks(),
-    (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
-  );
-  renderedPartialBlockRevision = revision;
+  const updates = activeWorld.consumePartialBlockMeshRegionUpdates({
+    maxRegions: getPartialBlockMeshRegionBudget(hasUrgentRegions),
+    origin: camera.position
+  });
+  for (const update of updates) {
+    partialBlockMeshField.updateRegion(
+      update,
+      (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
+    );
+  }
+
+  partialBlockMeshField.setDirtyRegionCount(activeWorld.getDirtyPartialBlockMeshRegionCount());
+  if (activeWorld.getDirtyPartialBlockMeshRegionCount() === 0) renderedPartialBlockRevision = revision;
   lastPartialBlockMeshUpdateMs = performance.now();
+}
+
+function getPartialBlockMeshRegionBudget(hasUrgentRegions: boolean): number {
+  // New/cleared partial cells can briefly expose holes if their visual region
+  // waits behind non-urgent bite polish. Repeated cuts stay budgeted; urgent
+  // topology changes get a larger same-frame lane.
+  return hasUrgentRegions
+    ? PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET
+    : PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET;
 }
 
 function handlePhysicsImpact(
