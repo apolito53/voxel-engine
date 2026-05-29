@@ -58,6 +58,8 @@ export type ChunkMeshData = {
   readonly positions: Float32Array;
   readonly normals: Float32Array;
   readonly colors: Float32Array;
+  readonly uvs: Float32Array;
+  readonly textureTiles: Float32Array;
   readonly indices: Uint32Array;
 };
 

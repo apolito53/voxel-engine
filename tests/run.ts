@@ -36,6 +36,11 @@ import {
   getTintedBlockColor
 } from "../src/blockColors";
 import {
+  BLOCK_TEXTURE_TILE,
+  getBlockTextureBaseTileId,
+  getBlockTextureTileId
+} from "../src/blockTextureTiles";
+import {
   applyBuilderBrush,
   collectBuilderBrushCells,
   eraseBuilderBrush,
@@ -1498,6 +1503,52 @@ test("block color variants are deterministic and stay tied to block identity", (
     [...darkGrass, ...brightGrass].every((channel) => channel >= 0 && channel <= 1),
     "tinted vertex colors should remain valid normalized color channels"
   );
+});
+
+test("block texture tile mapping keeps material faces distinct", () => {
+  const grassKey = createBlockMeshKey(BLOCK.grass, 2, 5, 7);
+  const woodKey = createBlockMeshKey(BLOCK.wood, 2, 5, 7);
+
+  assertEqual(
+    getBlockTextureBaseTileId(grassKey, [0, 1, 0]),
+    BLOCK_TEXTURE_TILE.grassTop,
+    "grass tops should use their leafy texture tile"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(grassKey, [0, -1, 0]),
+    BLOCK_TEXTURE_TILE.dirt,
+    "grass undersides should read as dirt when exposed"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(grassKey, [1, 0, 0]),
+    BLOCK_TEXTURE_TILE.grassSide,
+    "grass sides should use the dirt-and-grass edge tile"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(woodKey, [0, 1, 0]),
+    BLOCK_TEXTURE_TILE.woodTop,
+    "wood caps should use end-grain rings"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(woodKey, [0, 0, 1]),
+    BLOCK_TEXTURE_TILE.woodSide,
+    "wood sides should use vertical grain"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(createBlockMeshKey(BLOCK.leaves, 0, 0, 0), [0, 1, 0]),
+    BLOCK_TEXTURE_TILE.leaves,
+    "leaves should keep their own noisy leaf tile"
+  );
+});
+
+test("block texture tile mapping varies repeated material surfaces", () => {
+  const sampledTiles = new Set<number>();
+
+  for (let x = 0; x < 24; x += 1) {
+    sampledTiles.add(getBlockTextureTileId(createBlockMeshKey(BLOCK.grass, x, 4, 0), [0, 1, 0]));
+  }
+
+  assert(sampledTiles.size > 1, "nearby repeated grass tops should sample multiple atlas variants");
 });
 
 test("raycast returns hit block and entry face", () => {
@@ -4085,9 +4136,17 @@ test("chunk meshing skips carved cells and exposes adjacent terrain faces", () =
   const material = new THREE.MeshStandardMaterial({ vertexColors: true });
   const mesh = chunk.rebuildMesh(meshWorld, material);
   const positions = mesh.geometry.getAttribute("position");
+  const uvs = mesh.geometry.getAttribute("uv");
+  const textureTiles = mesh.geometry.getAttribute("blockTextureTile");
   const bounds = new THREE.Box3().setFromBufferAttribute(positions);
 
   assert(positions.count > 0, "the neighbor of a carved cell should expose a visible terrain face");
+  assertEqual(uvs.count, positions.count, "chunk mesh UVs should match every terrain vertex");
+  assertEqual(
+    textureTiles.count,
+    positions.count,
+    "chunk mesh texture tile ids should match every terrain vertex"
+  );
   assert(
     bounds.min.x >= 2,
     "the carved block itself should be absent from normal chunk geometry so the custom mesh can own it"

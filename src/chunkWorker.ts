@@ -1,5 +1,6 @@
 import { BLOCK, BLOCKS } from "./blocks";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
+import { appendBlockTextureQuadAttributes } from "./blockTextureTiles";
 import type {
   ChunkGeneratedResult,
   ChunkMeshData,
@@ -59,12 +60,16 @@ workerScope.onmessage = (event: MessageEvent<ChunkWorkerRequest>) => {
         positions: meshData.positions,
         normals: meshData.normals,
         colors: meshData.colors,
+        uvs: meshData.uvs,
+        textureTiles: meshData.textureTiles,
         indices: meshData.indices
       } satisfies ChunkMeshedResult,
       [
         meshData.positions.buffer,
         meshData.normals.buffer,
         meshData.colors.buffer,
+        meshData.uvs.buffer,
+        meshData.textureTiles.buffer,
         meshData.indices.buffer
       ]
     );
@@ -118,18 +123,22 @@ function buildChunkMesh({
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
+  const uvs: number[] = [];
+  const textureTiles: number[] = [];
   const indices: number[] = [];
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
 
-  buildXFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, indices);
-  buildYFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, indices);
-  buildZFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, indices);
+  buildXFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+  buildYFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+  buildZFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
 
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     colors: new Float32Array(colors),
+    uvs: new Float32Array(uvs),
+    textureTiles: new Float32Array(textureTiles),
     indices: new Uint32Array(indices)
   };
 }
@@ -143,6 +152,8 @@ function buildXFaces(
   positions: number[],
   normals: number[],
   colors: number[],
+  uvs: number[],
+  textureTiles: number[],
   indices: number[]
 ): void {
   for (let x = 0; x < CHUNK_SIZE; x += 1) {
@@ -155,6 +166,8 @@ function buildXFaces(
           positions,
           normals,
           colors,
+          uvs,
+          textureTiles,
           indices,
           block,
           [1, 0, 0],
@@ -177,6 +190,8 @@ function buildXFaces(
           positions,
           normals,
           colors,
+          uvs,
+          textureTiles,
           indices,
           block,
           [-1, 0, 0],
@@ -201,6 +216,8 @@ function buildYFaces(
   positions: number[],
   normals: number[],
   colors: number[],
+  uvs: number[],
+  textureTiles: number[],
   indices: number[]
 ): void {
   for (let y = 0; y < WORLD_HEIGHT; y += 1) {
@@ -213,6 +230,8 @@ function buildYFaces(
           positions,
           normals,
           colors,
+          uvs,
+          textureTiles,
           indices,
           block,
           [0, 1, 0],
@@ -235,6 +254,8 @@ function buildYFaces(
           positions,
           normals,
           colors,
+          uvs,
+          textureTiles,
           indices,
           block,
           [0, -1, 0],
@@ -259,6 +280,8 @@ function buildZFaces(
   positions: number[],
   normals: number[],
   colors: number[],
+  uvs: number[],
+  textureTiles: number[],
   indices: number[]
 ): void {
   for (let z = 0; z < CHUNK_SIZE; z += 1) {
@@ -271,6 +294,8 @@ function buildZFaces(
           positions,
           normals,
           colors,
+          uvs,
+          textureTiles,
           indices,
           block,
           [0, 0, 1],
@@ -293,6 +318,8 @@ function buildZFaces(
           positions,
           normals,
           colors,
+          uvs,
+          textureTiles,
           indices,
           block,
           [0, 0, -1],
@@ -475,6 +502,8 @@ function addQuad(
   positions: number[],
   normals: number[],
   colors: number[],
+  uvs: number[],
+  textureTiles: number[],
   indices: number[],
   meshKey: number,
   normal: readonly [number, number, number],
@@ -490,6 +519,7 @@ function addQuad(
     colors.push(...color);
   }
 
+  appendBlockTextureQuadAttributes(uvs, textureTiles, meshKey, normal, corners);
   indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 

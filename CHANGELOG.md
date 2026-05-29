@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.8.5 - 2026-05-29
+
+### Added
+
+- Added a procedural block texture atlas for normal terrain chunks, giving
+  grass, dirt, stone, sand, ember, rubble, wood, and leaves distinct readable
+  surface patterns while preserving deterministic per-block tint variation.
+- Added deterministic atlas variants per material face, so repeated terrain
+  surfaces no longer stamp the exact same pixel pattern across every block.
+
+### Changed
+
+- Chunk worker and fallback meshes now emit tiled UVs and per-face texture tile
+  ids, so greedy-meshed faces repeat texture detail per block instead of
+  stretching one flat color across the whole run.
+- Increased deterministic tint variance slightly for terrain materials,
+  including Wood and Leaves, to make repeated blocks easier to distinguish.
+
 ## 0.8.4 - 2026-05-29
 
 ### Changed

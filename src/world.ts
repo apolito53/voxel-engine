@@ -2570,6 +2570,8 @@ export class VoxelWorld implements CollisionWorld {
           positions: result.positions,
           normals: result.normals,
           colors: result.colors,
+          uvs: result.uvs,
+          textureTiles: result.textureTiles,
           indices: result.indices
         },
         material

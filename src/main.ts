@@ -23,6 +23,7 @@ import {
   getMiningTickSeconds,
   type DebrisSpawnProfile
 } from "./blockMaterialRules";
+import { createWorldBlockMaterial, disposeWorldBlockMaterial } from "./blockTextureAtlas";
 import {
   BUILDER_BRUSH_MAX_SIZE,
   BUILDER_BRUSH_MIN_SIZE,
@@ -460,11 +461,7 @@ scene.add(skyLight);
 const skybox = createSkybox(SUN_OFFSET);
 scene.add(skybox.object);
 
-const worldMaterial = new THREE.MeshStandardMaterial({
-  vertexColors: true,
-  roughness: 0.9,
-  metalness: 0.0
-});
+const worldMaterial = createWorldBlockMaterial();
 
 const targetBlockHighlighter = new TargetBlockHighlighter();
 scene.add(targetBlockHighlighter.object);
@@ -3846,7 +3843,7 @@ function disposeRuntime(): void {
   damageIndicators.dispose();
   partialBlockMeshField.dispose();
   skybox.dispose();
-  worldMaterial.dispose();
+  disposeWorldBlockMaterial(worldMaterial);
   renderer.renderLists.dispose();
   renderer.dispose();
   renderer.forceContextLoss();
