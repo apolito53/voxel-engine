@@ -77,6 +77,10 @@ ignored by git.
 
 Gameplay settings include Physics Core size, velocity, terrain-damaging bounce
 count, color, and trail controls.
+The bottom hotbar shows the active Items or Blocks lane. The pause-menu
+`Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show
+or hide the quick-control hints. Debug and control overlays start hidden by
+default.
 
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).

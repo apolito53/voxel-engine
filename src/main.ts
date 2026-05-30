@@ -363,11 +363,19 @@ const changelogCloseButton = requireElement<HTMLButtonElement>("#changelog-close
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
+const loadoutButton = requireElement<HTMLButtonElement>("#loadout-button");
 const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
 const builderButton = requireElement<HTMLButtonElement>("#builder-button");
 const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
+const pauseLoadoutPanel = requireElement<HTMLElement>("#pause-loadout-panel");
 const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
 const pauseBuilderPanel = requireElement<HTMLElement>("#pause-builder-panel");
+const loadoutToolsTab = requireElement<HTMLButtonElement>("#loadout-tab-tools");
+const loadoutBlocksTab = requireElement<HTMLButtonElement>("#loadout-tab-blocks");
+const loadoutToolsPanel = requireElement<HTMLElement>("#loadout-tools-panel");
+const loadoutBlocksPanel = requireElement<HTMLElement>("#loadout-blocks-panel");
+const loadoutToolList = requireElement<HTMLElement>("#loadout-tool-list");
+const loadoutBlockList = requireElement<HTMLElement>("#loadout-block-list");
 const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
 const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
 const settingsExperimentalTab = requireElement<HTMLButtonElement>("#settings-tab-experimental");
@@ -401,6 +409,7 @@ const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-deb
 const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
+const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
 const builderModeToggleButton = requireElement<HTMLButtonElement>("#builder-mode-toggle-button");
 const builderBlockPalette = requireElement<HTMLElement>("#builder-block-palette");
 const builderSelectedBlockValue = requireElement<HTMLElement>("#builder-selected-block-value");
@@ -415,8 +424,8 @@ const builderSpawnPillarButton = requireElement<HTMLButtonElement>("#builder-spa
 const superUltraToggleRow = requireElement<HTMLElement>("#super-ultra-toggle-row");
 const superUltraToggle = requireElement<HTMLInputElement>("#super-ultra-toggle");
 const debugPanel = requireElement<HTMLElement>("#debug-panel");
+const hotbar = requireElement<HTMLElement>("#hotbar");
 const minimap = requireElement<HTMLCanvasElement>("#minimap");
-const hudTitle = requireElement<HTMLElement>("#hud .title");
 const novaMessage = requireElement<HTMLElement>("#nova-message");
 const novaChatRoot = requireElement<HTMLElement>("#nova-chat");
 const novaChatLog = requireElement<HTMLElement>("#nova-chat-log");
@@ -573,6 +582,8 @@ type MiningToolState = {
   elapsedSeconds: number;
 };
 type SettingsCategory = "graphics" | "gameplay" | "experimental";
+type LoadoutCategory = "tools" | "blocks";
+type PauseSubmenu = "loadout" | "settings" | "builder";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
@@ -587,6 +598,7 @@ const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
+const CONTROL_HINTS_STORAGE_KEY = "voxel-sandbox-control-hints-visible";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // Full terrain blocks still come from VoxelWorld. Damaged terrain also exposes
   // explicit sub-voxel collision boxes so loose debris can collide with the
@@ -705,6 +717,7 @@ let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
 let healthBarsEnabled = readHealthBarsEnabled();
+let controlHintsVisible = readControlHintsVisible();
 coreAimPreviewEnabled = readCoreAimPreviewEnabled();
 
 void rigidDebris.initialize().catch((error) => {
@@ -752,9 +765,12 @@ updatePhysicsBudgetControls();
 updatePhysicsCoreControls();
 updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
+syncControlHintsToggle();
 syncCoreAimPreviewToggle();
+renderLoadoutMenus();
 renderBuilderPalette();
 syncBuilderControls();
+renderHotbar();
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {
@@ -814,11 +830,14 @@ function wireMenuControls(): void {
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel, .builder-panel")) return;
+    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel, .loadout-panel, .builder-panel")) return;
     event.preventDefault();
     resumeFromPause();
   }, eventListenerOptions);
   resumeButton.addEventListener("click", resumeFromPause, eventListenerOptions);
+  loadoutButton.addEventListener("click", () => {
+    setLoadoutPanelOpen(pauseLoadoutPanel.hidden);
+  }, eventListenerOptions);
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
   }, eventListenerOptions);
@@ -833,6 +852,12 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   settingsExperimentalTab.addEventListener("click", () => {
     setSettingsCategory("experimental");
+  }, eventListenerOptions);
+  loadoutToolsTab.addEventListener("click", () => {
+    setLoadoutCategory("tools");
+  }, eventListenerOptions);
+  loadoutBlocksTab.addEventListener("click", () => {
+    setLoadoutCategory("blocks");
   }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
@@ -885,6 +910,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
+  }, eventListenerOptions);
+  controlHintsToggle.addEventListener("change", () => {
+    setControlHintsVisible(controlHintsToggle.checked);
   }, eventListenerOptions);
   builderModeToggleButton.addEventListener("click", () => {
     setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items", { resumeGameplay: true });
@@ -1056,6 +1084,10 @@ function closeNovaChatInputMode(): void {
   requirePlayer().resume();
 }
 
+function setLoadoutPanelOpen(open: boolean): void {
+  setPauseSubmenu(open ? "loadout" : null);
+}
+
 function setSettingsPanelOpen(open: boolean): void {
   setPauseSubmenu(open ? "settings" : null);
 }
@@ -1068,17 +1100,23 @@ function closePauseSubmenus(): void {
   setPauseSubmenu(null);
 }
 
-function setPauseSubmenu(submenu: "settings" | "builder" | null): void {
+function setPauseSubmenu(submenu: PauseSubmenu | null): void {
+  const loadoutOpen = submenu === "loadout";
   const settingsOpen = submenu === "settings";
   const builderOpen = submenu === "builder";
+  pauseLoadoutPanel.hidden = !loadoutOpen;
   pauseSettingsPanel.hidden = !settingsOpen;
   pauseBuilderPanel.hidden = !builderOpen;
+  loadoutButton.setAttribute("aria-expanded", String(loadoutOpen));
   settingsButton.setAttribute("aria-expanded", String(settingsOpen));
   builderButton.setAttribute("aria-expanded", String(builderOpen));
+  loadoutButton.classList.toggle("is-active", loadoutOpen);
   settingsButton.classList.toggle("is-active", settingsOpen);
   builderButton.classList.toggle("is-active", builderOpen);
-  settingsButton.classList.toggle("is-hidden", builderOpen);
-  builderButton.classList.toggle("is-hidden", settingsOpen);
+  loadoutButton.classList.toggle("is-hidden", settingsOpen || builderOpen);
+  settingsButton.classList.toggle("is-hidden", loadoutOpen || builderOpen);
+  builderButton.classList.toggle("is-hidden", loadoutOpen || settingsOpen);
+  loadoutButton.textContent = loadoutOpen ? "Back" : "Loadout";
   settingsButton.textContent = settingsOpen ? "Back" : "Settings";
   builderButton.textContent = builderOpen ? "Back" : "Builder";
 
@@ -1088,6 +1126,17 @@ function setPauseSubmenu(submenu: "settings" | "builder" | null): void {
   for (const action of document.querySelectorAll<HTMLElement>(".menu-main-action")) {
     action.classList.toggle("is-hidden", open);
   }
+}
+
+function setLoadoutCategory(category: LoadoutCategory): void {
+  const showTools = category === "tools";
+  const showBlocks = category === "blocks";
+  loadoutToolsPanel.hidden = !showTools;
+  loadoutBlocksPanel.hidden = !showBlocks;
+  loadoutToolsTab.classList.toggle("is-active", showTools);
+  loadoutBlocksTab.classList.toggle("is-active", showBlocks);
+  loadoutToolsTab.setAttribute("aria-selected", String(showTools));
+  loadoutBlocksTab.setAttribute("aria-selected", String(showBlocks));
 }
 
 function setSettingsCategory(category: SettingsCategory): void {
@@ -1116,6 +1165,17 @@ function syncHealthBarsToggle(): void {
   healthBarsToggle.checked = healthBarsEnabled;
 }
 
+function setControlHintsVisible(visible: boolean): void {
+  controlHintsVisible = visible;
+  syncControlHintsToggle();
+  writeControlHintsVisible(visible);
+}
+
+function syncControlHintsToggle(): void {
+  controlHintsToggle.checked = controlHintsVisible;
+  document.body.classList.toggle("controls-hidden", !controlHintsVisible);
+}
+
 function setCoreAimPreviewEnabled(enabled: boolean): void {
   coreAimPreviewEnabled = enabled;
   syncCoreAimPreviewToggle();
@@ -1140,6 +1200,23 @@ function writeHealthBarsEnabled(enabled: boolean): void {
     globalThis.localStorage?.setItem(HEALTH_BARS_STORAGE_KEY, String(enabled));
   } catch {
     // Local storage is only a convenience; the current session setting still applies.
+  }
+}
+
+function readControlHintsVisible(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(CONTROL_HINTS_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeControlHintsVisible(visible: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(CONTROL_HINTS_STORAGE_KEY, String(visible));
+  } catch {
+    // Control hints are a comfort preference; failure to persist should never
+    // block the current session from hiding/showing the overlay.
   }
 }
 
@@ -1904,13 +1981,7 @@ function updateChunkStreamFrustum(): void {
 }
 
 function updateHud(): void {
-  const activePlayer = requirePlayer();
-  const movementMode = activePlayer.movementMode;
-  const modeSuffix = movementMode === "walk" ? "" : ` | ${movementMode}`;
-  const novaSuffix = novaPilot.active ? " | Nova" : "";
-  const selectedLabel = getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry);
-  const laneLabel = activeBuilderLane === "blocks" ? "Blocks" : "Items";
-  hudTitle.textContent = `Voxel Sandbox Engine | ${laneLabel}: ${selectedLabel}${modeSuffix}${novaSuffix}`;
+  renderHotbar();
 }
 
 function processPhysicsImpacts(
@@ -2089,12 +2160,55 @@ function getSelectedBuilderBlockName(): string {
   return BLOCKS[getSelectedBuilderBlock()].name;
 }
 
+function renderHotbar(): void {
+  const activeItems = getActiveHotbarItems();
+  const activeIndex = getActiveHotbarIndex();
+  const laneLabel = activeBuilderLane === "blocks" ? "Blocks" : "Items";
+
+  const laneNode = document.createElement("div");
+  laneNode.className = "hotbar-lane";
+  laneNode.textContent = laneLabel;
+
+  const slotsNode = document.createElement("div");
+  slotsNode.className = "hotbar-slots";
+
+  activeItems.forEach((item, index) => {
+    const button = document.createElement("div");
+    button.className = "hotbar-slot";
+    const active = index === activeIndex;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-current", active ? "true" : "false");
+
+    const number = document.createElement("span");
+    number.className = "hotbar-slot-number";
+    number.textContent = index < 9 ? String(index + 1) : "";
+    button.appendChild(number);
+
+    const placeAction = getHotbarSecondaryAction(item, itemRegistry);
+    if (placeAction.kind === "terrain:place-block") {
+      const swatch = document.createElement("span");
+      swatch.className = "hotbar-slot-swatch";
+      swatch.style.background = getBlockCssColor(placeAction.block);
+      button.appendChild(swatch);
+    }
+
+    const label = document.createElement("span");
+    label.className = "hotbar-slot-label";
+    label.textContent = getHotbarItemLabel(item, itemRegistry);
+    button.appendChild(label);
+    slotsNode.appendChild(button);
+  });
+
+  hotbar.replaceChildren(laneNode, slotsNode);
+}
+
 function setBuilderLane(
   lane: BuilderLane,
   options: { readonly resumeGameplay?: boolean } = {}
 ): void {
   if (activeBuilderLane === lane) {
     syncBuilderControls();
+    syncLoadoutSelection();
     updateHud();
     if (options.resumeGameplay) resumeFromPause();
     return;
@@ -2103,12 +2217,117 @@ function setBuilderLane(
   activeBuilderLane = lane;
   if (lane !== "blocks") builderBrushPreview.hide();
   selectHotbarIndex(getActiveHotbarIndex());
+  syncLoadoutSelection();
   if (options.resumeGameplay) resumeFromPause();
 }
 
 function setBuilderBrushSize(value: unknown): void {
   builderBrushSize = normalizeBuilderBrushSize(value, builderBrushSize);
   syncBuilderControls();
+}
+
+function renderLoadoutMenus(): void {
+  renderLoadoutToolCards();
+  renderLoadoutBlockCards();
+  syncLoadoutSelection();
+}
+
+function renderLoadoutToolCards(): void {
+  const cards = toolHotbarItems.map((item, index) => {
+    const card = document.createElement("button");
+    card.className = "loadout-card";
+    card.type = "button";
+    card.dataset.hotbarIndex = String(index);
+
+    const title = document.createElement("span");
+    title.className = "loadout-card-title";
+    title.textContent = getHotbarItemLabel(item, itemRegistry);
+
+    const action = document.createElement("span");
+    action.className = "loadout-card-action";
+    action.textContent = describeHotbarItemActions(item);
+
+    card.append(title, action);
+    card.addEventListener("click", () => {
+      setBuilderLane("items");
+      selectHotbarIndex(index);
+      resumeFromPause();
+    }, eventListenerOptions);
+    return card;
+  });
+
+  loadoutToolList.replaceChildren(...cards);
+}
+
+function renderLoadoutBlockCards(): void {
+  const cards = blockHotbarItems.map((item, index) => {
+    const placeAction = getHotbarSecondaryAction(item, itemRegistry);
+    const block = placeAction.kind === "terrain:place-block" ? placeAction.block : BLOCK.grass;
+    const card = document.createElement("button");
+    card.className = "loadout-block-card";
+    card.type = "button";
+    card.dataset.hotbarIndex = String(index);
+    card.dataset.blockId = String(block);
+    card.title = getHotbarItemLabel(item, itemRegistry);
+
+    const swatch = document.createElement("span");
+    swatch.className = "loadout-block-swatch";
+    swatch.style.background = getBlockCssColor(block);
+
+    const label = document.createElement("span");
+    label.className = "loadout-block-name";
+    label.textContent = getHotbarItemLabel(item, itemRegistry);
+
+    card.append(swatch, label);
+    card.addEventListener("click", () => {
+      setBuilderLane("blocks");
+      selectHotbarIndex(index);
+      resumeFromPause();
+    }, eventListenerOptions);
+    return card;
+  });
+
+  loadoutBlockList.replaceChildren(...cards);
+}
+
+function describeHotbarItemActions(item: HotbarItem): string {
+  const primary = getHotbarPrimaryAction(item, itemRegistry);
+  const secondary = getHotbarSecondaryAction(item, itemRegistry);
+  const primaryLabel = describeItemAction(primary, "L");
+  const secondaryLabel = describeItemAction(secondary, "R");
+  return [primaryLabel, secondaryLabel].filter(Boolean).join(" | ") || "No action";
+}
+
+function describeItemAction(action: ItemAction, buttonLabel: "L" | "R"): string | null {
+  switch (action.kind) {
+    case "none":
+      return null;
+    case "terrain:mine-block":
+      return `${buttonLabel} hold mine`;
+    case "terrain:erase-block":
+      return `${buttonLabel} erase`;
+    case "terrain:place-block":
+      return `${buttonLabel} place`;
+    case "physics:throw-core":
+      return `${buttonLabel} throw`;
+    case "physics:fire-hitscan-core":
+      return `${buttonLabel} fire`;
+  }
+}
+
+function syncLoadoutSelection(): void {
+  const toolActive = activeBuilderLane === "items";
+  const selectedIndex = getActiveHotbarIndex();
+  syncLoadoutCardSelection(loadoutToolList, toolActive ? selectedIndex : -1);
+  syncLoadoutCardSelection(loadoutBlockList, toolActive ? -1 : selectedIndex);
+}
+
+function syncLoadoutCardSelection(container: HTMLElement, selectedIndex: number): void {
+  for (const card of container.querySelectorAll<HTMLButtonElement>("[data-hotbar-index]")) {
+    const active = Number(card.dataset.hotbarIndex) === selectedIndex;
+    card.classList.toggle("is-active", active);
+    card.setAttribute("aria-pressed", String(active));
+  }
 }
 
 function renderBuilderPalette(): void {
@@ -2190,6 +2409,7 @@ function selectHotbarIndex(index: number): void {
   }
 
   syncBuilderControls();
+  syncLoadoutSelection();
   updateHud();
 }
 

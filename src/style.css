@@ -265,13 +265,16 @@ body.playing canvas {
 }
 
 .settings-panel,
-.builder-panel {
+.builder-panel,
+.loadout-panel {
   display: grid;
   gap: 10px;
 }
 
 .settings-panel[hidden],
-.builder-panel[hidden] {
+.builder-panel[hidden],
+.loadout-panel[hidden],
+.loadout-tab-panel[hidden] {
   display: none;
 }
 
@@ -507,6 +510,21 @@ body.playing canvas {
   gap: 6px;
 }
 
+.builder-block-palette[hidden] {
+  display: none;
+}
+
+.builder-loadout-hint {
+  border: 1px solid rgba(143, 216, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(143, 216, 255, 0.07);
+  color: rgba(237, 244, 248, 0.68);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.3;
+  padding: 9px 10px;
+}
+
 .builder-block-button {
   display: grid;
   place-items: center;
@@ -546,6 +564,88 @@ body.playing canvas {
   overflow: hidden;
   padding: 0 8px;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadout-tab-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.loadout-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.loadout-card,
+.loadout-block-card {
+  display: grid;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(237, 244, 248, 0.07);
+  color: #edf4f8;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.loadout-card {
+  gap: 4px;
+  min-height: 62px;
+  padding: 10px 12px;
+}
+
+.loadout-card.is-active,
+.loadout-block-card.is-active {
+  border-color: rgba(241, 196, 83, 0.96);
+  background: rgba(241, 196, 83, 0.16);
+  box-shadow: inset 0 0 0 2px rgba(241, 196, 83, 0.28);
+}
+
+.loadout-card-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadout-card-action {
+  color: rgba(237, 244, 248, 0.66);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.loadout-block-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.loadout-block-card {
+  align-content: start;
+  gap: 7px;
+  min-height: 82px;
+  padding: 8px;
+}
+
+.loadout-block-swatch {
+  width: 100%;
+  aspect-ratio: 1.85;
+  border-radius: 5px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24),
+    inset 0 -16px 20px rgba(0, 0, 0, 0.22);
+}
+
+.loadout-block-name {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -924,6 +1024,8 @@ body.playing canvas {
 .range-input:focus-visible,
 .settings-tab:focus-visible,
 .stepper-button:focus-visible,
+.loadout-card:focus-visible,
+.loadout-block-card:focus-visible,
 .toggle-input:focus-visible,
 .nova-chat-input:focus-visible,
 .nova-chat-send:focus-visible,
@@ -933,6 +1035,7 @@ body.playing canvas {
 }
 
 body:not(.in-world) #hud,
+body:not(.in-world) #hotbar,
 body:not(.in-world) #nova-message,
 body:not(.in-world) #nova-chat,
 body:not(.in-world) #debug-panel,
@@ -940,6 +1043,10 @@ body:not(.in-world) #minimap,
 body:not(.in-world) #sprint-overlay,
 body:not(.in-world) #damage-indicators,
 body:not(.in-world) #crosshair {
+  display: none;
+}
+
+body.controls-hidden #hud {
   display: none;
 }
 
@@ -955,23 +1062,6 @@ body:not(.in-world) #crosshair {
   pointer-events: none;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.62);
   user-select: none;
-}
-
-.hud-status {
-  display: inline-grid;
-  justify-self: start;
-  padding: 9px 11px;
-  border: 1px solid rgba(237, 244, 248, 0.12);
-  border-radius: 8px;
-  background: rgba(9, 15, 21, 0.36);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(4px);
-}
-
-#hud .title {
-  font-weight: 800;
-  font-size: 18px;
-  line-height: 1.05;
 }
 
 .hud-hints {
@@ -1002,6 +1092,95 @@ body:not(.in-world) #crosshair {
   color: rgba(255, 226, 139, 0.9);
   font-weight: 950;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.74);
+}
+
+#hotbar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 12;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(860px, calc(100vw - 36px));
+  color: #edf4f8;
+  pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
+  transform: translateX(-50%);
+  user-select: none;
+}
+
+.hotbar-lane {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(9, 15, 21, 0.48);
+  color: rgba(237, 244, 248, 0.74);
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.hotbar-slots {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(82px, 1fr);
+  gap: 6px;
+  max-width: 100%;
+}
+
+.hotbar-slot {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 86px;
+  min-height: 62px;
+  border: 1px solid rgba(237, 244, 248, 0.16);
+  border-radius: 7px;
+  background: rgba(9, 15, 21, 0.48);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+  padding: 7px 6px 6px;
+  backdrop-filter: blur(4px);
+}
+
+.hotbar-slot.is-active {
+  border-color: rgba(241, 196, 83, 0.96);
+  background: rgba(241, 196, 83, 0.22);
+  box-shadow:
+    inset 0 0 0 2px rgba(241, 196, 83, 0.32),
+    0 12px 32px rgba(0, 0, 0, 0.26);
+}
+
+.hotbar-slot-number {
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  color: rgba(237, 244, 248, 0.56);
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.hotbar-slot-swatch {
+  width: 34px;
+  height: 20px;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 -8px 12px rgba(0, 0, 0, 0.2);
+}
+
+.hotbar-slot-label {
+  max-width: 100%;
+  min-height: 24px;
+  color: rgba(237, 244, 248, 0.82);
+  font-size: 10px;
+  font-weight: 880;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 #nova-message {
@@ -1263,6 +1442,30 @@ body:not(.in-world) #crosshair {
 @media (max-width: 820px) {
   .hud-hints {
     max-width: min(240px, calc(100vw - 36px));
+  }
+
+  .hotbar-slots {
+    grid-auto-columns: minmax(62px, 1fr);
+    gap: 4px;
+  }
+
+  .hotbar-slot {
+    width: 64px;
+    min-height: 58px;
+    padding-inline: 4px;
+  }
+
+  .hotbar-slot-swatch {
+    width: 28px;
+  }
+
+  .hotbar-slot-label {
+    font-size: 9px;
+    min-height: 21px;
+  }
+
+  .loadout-block-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   #debug-panel {

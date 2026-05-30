@@ -8,9 +8,6 @@
   <body>
     <div id="app"></div>
     <div id="hud">
-      <div class="hud-status">
-        <div class="title">Voxel Sandbox Engine</div>
-      </div>
       <div class="hud-hints" aria-label="Quick controls">
         <span class="hud-pill"><b>WASD</b> move</span>
         <span class="hud-pill"><b>Space/C</b> vertical</span>
@@ -23,6 +20,7 @@
         <span class="hud-pill"><b>Esc</b> pause</span>
       </div>
     </div>
+    <div id="hotbar" aria-label="Selected item hotbar"></div>
     <div id="nova-message" aria-live="polite"></div>
     <div
       id="nova-chat"
@@ -53,7 +51,7 @@
         </form>
       </div>
     </div>
-    <div id="debug-panel"></div>
+    <div id="debug-panel" class="is-hidden"></div>
     <canvas id="minimap" width="128" height="128"></canvas>
     <div id="sprint-overlay" aria-hidden="true"></div>
     <div id="damage-indicators" aria-hidden="true"></div>
@@ -154,6 +152,15 @@
         </div>
         <div class="menu-actions">
           <button id="resume-button" class="menu-button menu-main-action" type="button">Resume</button>
+          <button
+            id="loadout-button"
+            class="menu-button secondary"
+            type="button"
+            aria-expanded="false"
+            aria-controls="pause-loadout-panel"
+          >
+            Loadout
+          </button>
           <button
             id="settings-button"
             class="menu-button secondary"
@@ -353,6 +360,17 @@
                   checked
                 />
               </label>
+              <label class="settings-toggle" for="control-hints-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Control Hints</span>
+                  <span class="settings-toggle-hint">Show the left-side quick controls while playing</span>
+                </span>
+                <input
+                  id="control-hints-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                />
+              </label>
               <button
                 id="despawn-objects-button"
                 class="menu-button secondary settings-utility-button"
@@ -475,6 +493,47 @@
               </label>
             </div>
           </div>
+          <div id="pause-loadout-panel" class="loadout-panel" aria-label="Loadout selection" hidden>
+            <div class="settings-tabs" role="tablist" aria-label="Loadout categories">
+              <button
+                id="loadout-tab-tools"
+                class="settings-tab is-active"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="loadout-tools-panel"
+              >
+                Tools
+              </button>
+              <button
+                id="loadout-tab-blocks"
+                class="settings-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="loadout-blocks-panel"
+              >
+                Blocks
+              </button>
+            </div>
+            <div
+              id="loadout-tools-panel"
+              class="loadout-tab-panel"
+              role="tabpanel"
+              aria-labelledby="loadout-tab-tools"
+            >
+              <div id="loadout-tool-list" class="loadout-card-list" aria-label="Tool selection"></div>
+            </div>
+            <div
+              id="loadout-blocks-panel"
+              class="loadout-tab-panel"
+              role="tabpanel"
+              aria-labelledby="loadout-tab-blocks"
+              hidden
+            >
+              <div id="loadout-block-list" class="loadout-block-grid" aria-label="Block selection"></div>
+            </div>
+          </div>
           <div id="pause-builder-panel" class="builder-panel" aria-label="Builder tools" hidden>
             <div class="builder-status-row">
               <button id="builder-mode-toggle-button" class="menu-button secondary" type="button">
@@ -485,7 +544,8 @@
                 <span id="builder-selected-block-value" class="builder-selected-value">Grass</span>
               </div>
             </div>
-            <div id="builder-block-palette" class="builder-block-palette" aria-label="Block palette"></div>
+            <div class="builder-loadout-hint">Choose block material from Loadout > Blocks.</div>
+            <div id="builder-block-palette" class="builder-block-palette" aria-label="Block palette" hidden></div>
             <label class="settings-field" for="builder-brush-size-slider">
               <span class="settings-label-row">
                 <span class="settings-label">Brush Size</span>

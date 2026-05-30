@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.9 - 2026-05-30
+
+### Changed
+
+- Replaced the top-left selected-item title with a bottom-center hotbar that
+  shows the active Items or Blocks lane and selected slot.
+- Hid debug and quick-control overlays by default; `F3` still opens debug, and
+  Settings > Gameplay can persistently show the controls stack.
+- Added a pause-menu Loadout panel with separate Tools and Blocks tabs, leaving
+  the Builder panel focused on admin brush and fixture actions.
+
 ## 0.8.8 - 2026-05-30
 
 ### Changed

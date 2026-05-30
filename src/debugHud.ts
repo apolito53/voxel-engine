@@ -40,7 +40,7 @@ export class DebugHud {
   private readonly gpuInfo: GpuInfo;
   private readonly getQualityPreset: () => QualityPreset;
   private readonly frameRateMeter = new RollingFrameRateMeter();
-  private visible = true;
+  private visible = false;
   private accumulator = Infinity;
   private peakFrameMs = 0;
   private peakFrameHoldSeconds = 0;
@@ -50,6 +50,7 @@ export class DebugHud {
     this.renderer = options.renderer;
     this.gpuInfo = options.gpuInfo;
     this.getQualityPreset = options.getQualityPreset;
+    this.panel.classList.add("is-hidden");
   }
 
   toggle(): void {

@@ -30,9 +30,10 @@ the root README.
 
 ## HUD And Debug Keys
 
-- The HUD shows the selected lane/item, movement mode, and Nova state in a
-  compact status card.
-- Quick controls sit in a left-aligned vertical hint stack away from the reticle.
+- The bottom hotbar shows the selected lane and active item/block slot.
+- Quick controls are hidden by default. Enable `Control Hints` in
+  `Settings > Gameplay` to show the left-aligned hint stack.
+- The debug overlay starts hidden on every page load.
 - `F3` toggles the grouped debug overlay. It shows Perf, Player, World, Physics,
   Debris, and Render panels with smoothed FPS, frame time, player speed, signed
   X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block pressure,
@@ -50,6 +51,8 @@ the root README.
 - `G` toggles the active lane between `Items` and `Blocks`.
 - `Mouse wheel` selects within the active lane.
 - Number keys map to the current lane.
+- Pause menu `Loadout` opens selection cards for `Tools` and `Blocks`; choosing
+  a card switches to that lane, selects the item/block, and resumes gameplay.
 - The `Items` lane contains `Unarmed`, `Mining Tool`, `Physics Core`, and
   `Hitscan Core`.
 - `Unarmed` is intentionally inert on both clicks for now.
@@ -79,8 +82,7 @@ the root README.
 Pause menu `Builder` opens admin build controls:
 
 - Switch between item and block lanes.
-- Pick from the block palette. Choosing the block lane or a palette block also
-  resumes gameplay so movement stays live when entering placement mode.
+- Use the block currently selected in `Loadout > Blocks`.
 - Tune the odd-sized place/erase brush.
 - Run place/erase at the current target.
 - Spawn quick fixtures such as target, wall, platform, and pillar using the
