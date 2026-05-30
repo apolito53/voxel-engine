@@ -117,13 +117,16 @@ function paintTileVariants(ctx: CanvasRenderingContext2D, baseTileId: number, pa
 }
 
 function drawGrassTop(ctx: CanvasRenderingContext2D, variant: number): void {
-  fill(ctx, "#f4fff1");
+  // Grass is the visual baseline for most terrain, so keep the atlas color
+  // green enough to read as grass instead of relying on pale texture paper plus
+  // vertex tint alone.
+  fill(ctx, "#c6e4a0");
   drawSpeckles(ctx, 0x11a1 + variant * 0x101, 30 + variant * 3, "rgba(44, 105, 38, 0.30)", 1, 2);
   drawShortStrokes(ctx, 0x11a2 + variant * 0x103, 16 + variant * 2, "rgba(28, 86, 35, 0.24)", 1, 3);
 }
 
 function drawGrassSide(ctx: CanvasRenderingContext2D, variant: number): void {
-  fill(ctx, "#f5fff1");
+  fill(ctx, "#bfd59a");
   fillRect(ctx, 0, 9 + (variant % 2), 16, 7, "rgba(70, 50, 33, 0.32)");
   drawVerticalStrokes(ctx, 0x21b1 + variant * 0x101, 14 + variant * 2, "rgba(31, 95, 36, 0.30)", 1, 8);
   drawSpeckles(ctx, 0x21b2 + variant * 0x103, 12 + variant, "rgba(58, 40, 24, 0.24)", 1, 1);

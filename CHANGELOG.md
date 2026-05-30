@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.6 - 2026-05-30
+
+### Changed
+
+- Darkened the procedural grass top and side texture base colors so terrain
+  reads less washed out while keeping the new per-block texture variation.
+
 ## 0.8.5 - 2026-05-29
 
 ### Added
