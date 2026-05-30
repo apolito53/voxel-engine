@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.8.8 - 2026-05-30
+
+### Changed
+
+- Reduced quick-control HUD hints from boxed chips to a compact left-aligned
+  text stack, keeping the controls readable without turning the left side of
+  the screen into a second menu.
+
 ## 0.8.7 - 2026-05-30
 
 ### Fixed

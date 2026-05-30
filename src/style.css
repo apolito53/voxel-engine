@@ -977,30 +977,31 @@ body:not(.in-world) #crosshair {
 .hud-hints {
   display: grid;
   justify-items: start;
-  gap: 6px;
-  max-width: min(280px, calc(100vw - 36px));
+  gap: 4px;
+  max-width: min(300px, calc(100vw - 36px));
+  padding-left: 1px;
 }
 
 .hud-pill {
   box-sizing: border-box;
   width: fit-content;
   max-width: 100%;
-  padding: 5px 8px;
-  border: 1px solid rgba(237, 244, 248, 0.13);
-  border-radius: 6px;
-  background: rgba(9, 15, 21, 0.34);
-  color: rgba(237, 244, 248, 0.7);
-  font-size: 11px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(237, 244, 248, 0.62);
+  font-size: 12px;
   font-weight: 750;
-  line-height: 1.15;
+  line-height: 1.2;
   overflow-wrap: anywhere;
   text-align: left;
-  backdrop-filter: blur(3px);
 }
 
 .hud-pill b {
   color: rgba(255, 226, 139, 0.9);
   font-weight: 950;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.74);
 }
 
 #nova-message {
