@@ -40,8 +40,9 @@ partial-block state.
 
 ## Projectile And Hitscan Cores
 
-Mining Tool owns normal manual mining. Placeable block items are build-only:
-left click does nothing, and right click places the selected block brush.
+Mining Tool owns normal manual mining. Placeable block items are build controls:
+left click erases the targeted block brush, and right click places the selected
+block brush.
 
 Physics Core:
 

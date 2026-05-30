@@ -975,27 +975,26 @@ body:not(.in-world) #crosshair {
 }
 
 .hud-hints {
-  position: fixed;
-  left: 18px;
-  right: 200px;
-  bottom: 18px;
-  z-index: 10;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  justify-items: start;
   gap: 6px;
-  max-width: 720px;
+  max-width: min(280px, calc(100vw - 36px));
 }
 
 .hud-pill {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
   padding: 5px 8px;
   border: 1px solid rgba(237, 244, 248, 0.13);
-  border-radius: 999px;
+  border-radius: 6px;
   background: rgba(9, 15, 21, 0.34);
   color: rgba(237, 244, 248, 0.7);
   font-size: 11px;
   font-weight: 750;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-align: left;
   backdrop-filter: blur(3px);
 }
 
@@ -1262,8 +1261,7 @@ body:not(.in-world) #crosshair {
 
 @media (max-width: 820px) {
   .hud-hints {
-    right: 18px;
-    bottom: 188px;
+    max-width: min(240px, calc(100vw - 36px));
   }
 
   #debug-panel {

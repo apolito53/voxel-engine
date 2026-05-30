@@ -887,7 +887,7 @@ function wireMenuControls(): void {
     setHealthBarsEnabled(healthBarsToggle.checked);
   }, eventListenerOptions);
   builderModeToggleButton.addEventListener("click", () => {
-    setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items");
+    setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items", { resumeGameplay: true });
   }, eventListenerOptions);
   builderBrushSizeSlider.addEventListener("input", () => {
     setBuilderBrushSize(builderBrushSizeSlider.value);
@@ -1376,6 +1376,10 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
       return;
     case "terrain:mine-block":
       startOrContinueMiningTool(0, true);
+      return;
+    case "terrain:erase-block":
+      resetMiningToolState();
+      applyBuilderBrushAtTarget("erase");
       return;
     case "terrain:place-block":
       resetMiningToolState();
@@ -2085,16 +2089,21 @@ function getSelectedBuilderBlockName(): string {
   return BLOCKS[getSelectedBuilderBlock()].name;
 }
 
-function setBuilderLane(lane: BuilderLane): void {
+function setBuilderLane(
+  lane: BuilderLane,
+  options: { readonly resumeGameplay?: boolean } = {}
+): void {
   if (activeBuilderLane === lane) {
     syncBuilderControls();
     updateHud();
+    if (options.resumeGameplay) resumeFromPause();
     return;
   }
 
   activeBuilderLane = lane;
   if (lane !== "blocks") builderBrushPreview.hide();
   selectHotbarIndex(getActiveHotbarIndex());
+  if (options.resumeGameplay) resumeFromPause();
 }
 
 function setBuilderBrushSize(value: unknown): void {
@@ -2123,6 +2132,7 @@ function renderBuilderPalette(): void {
       } else {
         setBuilderLane("blocks");
       }
+      resumeFromPause();
     }, eventListenerOptions);
     return button;
   });

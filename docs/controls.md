@@ -32,7 +32,7 @@ the root README.
 
 - The HUD shows the selected lane/item, movement mode, and Nova state in a
   compact status card.
-- Quick controls sit in low-profile hint chips away from the reticle.
+- Quick controls sit in a left-aligned vertical hint stack away from the reticle.
 - `F3` toggles the grouped debug overlay. It shows Perf, Player, World, Physics,
   Debris, and Render panels with smoothed FPS, frame time, player speed, signed
   X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block pressure,
@@ -56,8 +56,8 @@ the root README.
 - `Mining Tool` uses held `Left click` to mine the targeted terrain block.
   Mining spends 1 damage per tick; material controls block HP, cadence, and chip
   debris flavor.
-- In the `Blocks` lane, `Left click` does nothing and `Right click` places the
-  selected block brush into adjacent space.
+- In the `Blocks` lane, `Left click` erases the targeted block brush and `Right
+  click` places the selected block brush into adjacent space.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
@@ -79,7 +79,8 @@ the root README.
 Pause menu `Builder` opens admin build controls:
 
 - Switch between item and block lanes.
-- Pick from the block palette.
+- Pick from the block palette. Choosing the block lane or a palette block also
+  resumes gameplay so movement stays live when entering placement mode.
 - Tune the odd-sized place/erase brush.
 - Run place/erase at the current target.
 - Spawn quick fixtures such as target, wall, platform, and pillar using the

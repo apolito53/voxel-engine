@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.8.7 - 2026-05-30
+
+### Fixed
+
+- Fixed block placement mode leaving block primary clicks inert: selected blocks
+  now left-click erase the targeted brush and right-click place, matching the
+  HUD/control hints.
+- Fixed pause-menu block-lane and palette selection feeling like movement died
+  by resuming gameplay when those controls are used to enter placement mode.
+- Moved the quick-control HUD hints into a left-aligned vertical stack and
+  updated the block hint to show left-click erase plus right-click place.
+
 ## 0.8.6 - 2026-05-30
 
 ### Changed

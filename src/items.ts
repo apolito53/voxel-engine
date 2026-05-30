@@ -25,6 +25,10 @@ export type MineBlockItemAction = {
   readonly kind: "terrain:mine-block";
 };
 
+export type EraseBlockItemAction = {
+  readonly kind: "terrain:erase-block";
+};
+
 export type PlaceBlockItemAction = {
   readonly kind: "terrain:place-block";
   readonly block: BlockId;
@@ -41,6 +45,7 @@ export type FireHitscanCoreItemAction = {
 export type ItemAction =
   | NoItemAction
   | MineBlockItemAction
+  | EraseBlockItemAction
   | PlaceBlockItemAction
   | ThrowPhysicsCoreItemAction
   | FireHitscanCoreItemAction;
@@ -136,9 +141,9 @@ export function createPlaceableBlockItemDefinition(
     maxStack: 99,
     tags: ["voxel", "placeable", definition.solid ? "solid" : "non-solid"],
     actions: {
-      // Blocks are build-only inventory entries: right click places the
-      // selected material, while mining/destruction belongs to dedicated tools.
-      primary: NO_ITEM_ACTION,
+      // Block entries are direct build controls, not mining tools: primary
+      // erases the targeted build brush while secondary places the material.
+      primary: { kind: "terrain:erase-block" },
       secondary: { kind: "terrain:place-block", block }
     }
   };

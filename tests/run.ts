@@ -850,8 +850,8 @@ test("item registry describes reusable held-item actions", () => {
   );
   assertEqual(
     grassPrimaryAction.kind,
-    "none",
-    "placeable block primary action should be a build-only no-op"
+    "terrain:erase-block",
+    "placeable block primary action should erase the targeted build brush"
   );
   assertEqual(
     grassSecondaryAction.kind,
@@ -952,7 +952,7 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   );
   assert(
     !canMineBlockWithHotbarItem(grassItem, itemRegistry),
-    "selected blocks should not mine terrain on left click"
+    "selected blocks should erase build targets rather than using material mining cadence"
   );
   assert(
     !canMineBlockWithHotbarItem(createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
@@ -976,8 +976,8 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   );
   assertEqual(
     getHotbarPrimaryAction(grassItem, itemRegistry).kind,
-    "none",
-    "block hotbar primary action should resolve as a build-only no-op"
+    "terrain:erase-block",
+    "block hotbar primary action should resolve as build erase"
   );
   assertEqual(
     getHotbarSecondaryAction(grassItem, itemRegistry).kind,
