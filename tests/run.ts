@@ -3203,7 +3203,7 @@ test("Terraformer edits exact sub-cells on the shared terrain damage path", () =
     x: 2,
     y: 3,
     z: 4,
-    point: new THREE.Vector3(2.5, 3.5, 4.5),
+    point: new THREE.Vector3(2, 3.5, 4.5),
     normal: new THREE.Vector3(-1, 0, 0),
     incomingDirection: new THREE.Vector3(1, 0, 0),
     speed: 6,
@@ -3238,13 +3238,18 @@ test("Terraformer brush sizes operate on the global sub-cell grid", () => {
     x: 2,
     y: 3,
     z: 4,
-    point: new THREE.Vector3(2.5, 3.5, 4.5),
+    point: new THREE.Vector3(2, 3.5, 4.5),
     normal: new THREE.Vector3(-1, 0, 0),
     incomingDirection: new THREE.Vector3(1, 0, 0),
     speed: 6,
     size: 2
   };
-  assertEqual(size2World.previewTerraformerEdit(size2Input)?.cells.length, 8, "size 2 should target 2x2x2 sub-cells");
+  const size2Preview = size2World.previewTerraformerEdit(size2Input);
+  assertEqual(size2Preview?.cells.length, 8, "size 2 should target 2x2x2 sub-cells");
+  assert(
+    size2Preview?.cells.every((cell) => cell.position.x === 2),
+    "size 2 from a face should grow inward before spilling through the back side"
+  );
   size2World.applyTerraformerEdit(size2Input);
   assertEqual(
     size2World.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length,
@@ -3255,7 +3260,13 @@ test("Terraformer brush sizes operate on the global sub-cell grid", () => {
   const size3World = new VoxelWorld({ seed: "terraformer-size-3-test" });
   size3World.setBlock(2, 3, 4, BLOCK.grass);
   const size3Input = { ...size2Input, size: 3 };
-  assertEqual(size3World.previewTerraformerEdit(size3Input)?.cells.length, 27, "size 3 should target one full block");
+  const size3Preview = size3World.previewTerraformerEdit(size3Input);
+  assertEqual(size3Preview?.cells.length, 27, "size 3 should target one full block from a face");
+  assertEqual(
+    new Set(size3Preview?.cells.map((cell) => cell.cellIndex % 3) ?? []).size,
+    3,
+    "size 3 from a face should include all three depth layers instead of only the outer shell"
+  );
   const size3Result = size3World.applyTerraformerEdit(size3Input);
   assert(size3Result?.results[0]?.destroyed, "size 3 should be able to delete one entire main block");
   assertEqual(size3World.getBlock(2, 3, 4), BLOCK.air, "all 27 removed sub-cells should clear the main block");
@@ -3276,6 +3287,41 @@ test("Terraformer brush sizes operate on the global sub-cell grid", () => {
 
   assertEqual(size4Preview?.cells.length, 64, "size 4 should target 4x4x4 sub-cells when enough blocks exist");
   assert(size4BlockKeys.size > 1, "size 4 should spill across neighboring main blocks on the global grid");
+});
+
+test("Terraformer face brushes grow inward along the targeted normal", () => {
+  const leftFaceWorld = new VoxelWorld({ seed: "terraformer-left-face-depth-test" });
+  leftFaceWorld.setBlock(2, 3, 4, BLOCK.stone);
+  const leftFacePreview = leftFaceWorld.previewTerraformerEdit({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    size: 3
+  });
+  assertEqual(leftFacePreview?.cells.length, 27, "left-face size 3 should stay inside the target block");
+
+  const rightFaceWorld = new VoxelWorld({ seed: "terraformer-right-face-depth-test" });
+  rightFaceWorld.setBlock(2, 3, 4, BLOCK.stone);
+  const rightFacePreview = rightFaceWorld.previewTerraformerEdit({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(3, 3.5, 4.5),
+    normal: new THREE.Vector3(1, 0, 0),
+    incomingDirection: new THREE.Vector3(-1, 0, 0),
+    speed: 6,
+    size: 3
+  });
+  assertEqual(rightFacePreview?.cells.length, 27, "right-face size 3 should also stay inside the target block");
+  assertEqual(
+    new Set(rightFacePreview?.cells.map((cell) => cell.cellIndex % 3) ?? []).size,
+    3,
+    "right-face size 3 should grow inward through every local x depth layer"
+  );
 });
 
 test("partial block carve results expose material poof positions for newly destroyed bite cells", () => {

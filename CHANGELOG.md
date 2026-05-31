@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.9.1 - 2026-05-31
+
+### Fixed
+
+- Changed Terraformer brushes to grow inward from the targeted face along the
+  face normal, so larger brush sizes carve real depth instead of wasting part
+  of the selection outside the block.
+
 ## 0.9.0 - 2026-05-31
 
 Minor milestone: the old Mining Tool is now the Terraformer, a deterministic

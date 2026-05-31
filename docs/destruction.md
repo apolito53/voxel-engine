@@ -12,10 +12,12 @@ sub-cell lattice: a full macro block is old HP times `270`, and one Terraformer
 sub-cell is old HP times `10`.
 
 The Terraformer is an editor tool, not a weapon: it targets exact highlighted
-sub-cells and spends exactly the remaining HP for those cells. Physics Core and
-Hitscan Core still damage terrain through the core impact path, with terrain
-impact damage scaled from `1` to `270` so their practical hits-to-break feel
-matches the old compact-HP model.
+sub-cells and spends exactly the remaining HP for those cells. Its cubic brush
+stays centered on the reticle across the two tangent axes, but grows inward
+along the targeted face normal so larger brush sizes carve depth instead of
+spilling out into air. Physics Core and Hitscan Core still damage terrain
+through the core impact path, with terrain impact damage scaled from `1` to
+`270` so their practical hits-to-break feel matches the old compact-HP model.
 
 Core impacts above 2 m/s carve one health step by removing hidden cells from a
 3x3x3 bite lattice inside the macro block. That lattice is presentation and

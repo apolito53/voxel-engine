@@ -529,6 +529,23 @@ function createTerraformerGlobalSubCellCenter(input: TerraformerEditInput): Voxe
   };
 }
 
+function createTerraformerBrushAxisValues(
+  center: number,
+  size: number,
+  normalComponent: number
+): number[] {
+  if (Math.abs(normalComponent) > 0.5) {
+    const inwardStep = -Math.sign(normalComponent);
+    // The reticle-selected cell is the face cell. Grow the brush inward from
+    // that face so larger Terraformer sizes have real depth instead of wasting
+    // half the brush outside the targeted block.
+    return Array.from({ length: size }, (_, index) => center + inwardStep * index);
+  }
+
+  const start = center - Math.floor((size - 1) / 2);
+  return Array.from({ length: size }, (_, index) => start + index);
+}
+
 function createBlockPositionFromGlobalSubCell(
   globalX: number,
   globalY: number,
@@ -1764,20 +1781,15 @@ export class VoxelWorld implements CollisionWorld {
     size: number
   ): readonly TerraformerTargetSubCell[] {
     const center = createTerraformerGlobalSubCellCenter(input);
-    // Even-sized brushes cannot have a perfect center cell. Biasing positive
-    // from the reticle keeps the targeted sub-cell inside the selection and is
-    // deterministic on the global sub-cell grid.
-    const startX = center.x - Math.floor((size - 1) / 2);
-    const startY = center.y - Math.floor((size - 1) / 2);
-    const startZ = center.z - Math.floor((size - 1) / 2);
+    const normal = normalizeVoxelVector(input.normal) ?? { x: 0, y: 0, z: 0 };
+    const xValues = createTerraformerBrushAxisValues(center.x, size, normal.x);
+    const yValues = createTerraformerBrushAxisValues(center.y, size, normal.y);
+    const zValues = createTerraformerBrushAxisValues(center.z, size, normal.z);
     const targets: TerraformerTargetSubCell[] = [];
 
-    for (let localY = 0; localY < size; localY += 1) {
-      for (let localZ = 0; localZ < size; localZ += 1) {
-        for (let localX = 0; localX < size; localX += 1) {
-          const globalX = startX + localX;
-          const globalY = startY + localY;
-          const globalZ = startZ + localZ;
+    for (const globalY of yValues) {
+      for (const globalZ of zValues) {
+        for (const globalX of xValues) {
           const position = createBlockPositionFromGlobalSubCell(globalX, globalY, globalZ);
           if (position.y < 0 || position.y >= WORLD_HEIGHT) continue;
 
