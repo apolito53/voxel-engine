@@ -22,10 +22,14 @@ import {
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "../src/blocks";
 import {
   BLOCK_MATERIAL_RULES,
+  TERRAFORMER_SUBCELL_DAMAGE_SCALE,
+  TERRAIN_DAMAGE_SCALE,
   getBlockMaterialRule,
   getDebrisSpawnProfile,
   getMiningDamageAmount,
-  getMiningTickSeconds
+  getMiningTickSeconds,
+  getTerrainMaxHealth,
+  getTerraformerSubCellHealth
 } from "../src/blockMaterialRules";
 import {
   BLOCK_COLOR_VARIANT_COUNT,
@@ -361,6 +365,13 @@ import { NovaContextJournal } from "../src/novaContext";
 import { NovaPilot, createNovaPilotCoreLaunch, getNovaPilotDesiredPosition } from "../src/novaPilot";
 import { NovaPilotReactions, type NovaPilotMessageTarget } from "../src/novaPilotReactions";
 import { TargetBlockHighlighter } from "../src/targetHighlighter";
+import {
+  TERRAFORMER_SIZE_MAX,
+  TERRAFORMER_SIZE_MIN,
+  formatTerraformerSize,
+  normalizeTerraformerSize,
+  stepTerraformerSize
+} from "../src/terraformerSettings";
 import {
   SUPERFLAT_TERRAIN_HEIGHT,
   SUPERFLAT_WORLD_SEED,
@@ -820,33 +831,33 @@ test("item registry describes reusable held-item actions", () => {
   );
   assertEqual(
     getItemLabel(itemRegistry, MINING_TOOL_ITEM_ID),
-    "Mining Tool",
-    "mining tool should have a readable item label"
+    "Terraformer",
+    "Terraformer should have a readable item label"
   );
   assertEqual(
     miningToolDefinition.category,
     "tool",
-    "mining tool should be described as a tool item"
+    "Terraformer should be described as a tool item"
   );
   assertEqual(
     miningToolDefinition.maxStack,
     1,
-    "mining tool should be a single held tool instead of a stackable block"
+    "Terraformer should be a single held tool instead of a stackable block"
   );
   assertDeepEqual(
     miningToolDefinition.tags,
-    ["tool", "terrain", "mining"],
-    "mining tool should advertise tool, terrain, and mining tags"
+    ["tool", "terrain", "terraforming"],
+    "Terraformer should advertise tool, terrain, and terraforming tags"
   );
   assertEqual(
     getItemAction(itemRegistry, MINING_TOOL_ITEM_ID, "primary").kind,
     "terrain:mine-block",
-    "mining tool primary action should describe terrain mining"
+    "Terraformer primary action should describe terrain editing"
   );
   assertEqual(
     getItemAction(itemRegistry, MINING_TOOL_ITEM_ID, "secondary").kind,
     "none",
-    "mining tool secondary action should be inert"
+    "Terraformer secondary action should be inert"
   );
   assertEqual(
     grassPrimaryAction.kind,
@@ -894,19 +905,19 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   assertEqual(
     miningToolItem?.itemId,
     MINING_TOOL_ITEM_ID,
-    "tool lane should put the mining tool immediately after unarmed"
+    "tool lane should put the Terraformer immediately after unarmed"
   );
   assertEqual(
     projectileCoreItem?.itemId,
     PHYSICS_CORE_ITEM_ID,
-    "tool lane should keep the projectile physics core after the mining tool"
+    "tool lane should keep the projectile physics core after the Terraformer"
   );
   assertEqual(
     hitscanCoreItem?.itemId,
     HITSCAN_CORE_ITEM_ID,
     "tool lane should end with the hitscan core item"
   );
-  assertEqual(toolHotbarItems.length, 4, "tool lane should contain unarmed, mining, and core tools");
+  assertEqual(toolHotbarItems.length, 4, "tool lane should contain unarmed, Terraformer, and core tools");
   assertEqual(
     blockHotbarItems.length,
     PLACEABLE_BLOCKS.length,
@@ -929,8 +940,8 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   );
   assertEqual(
     getHotbarItemLabel(miningToolItem ?? createItemStack(MINING_TOOL_ITEM_ID), itemRegistry),
-    "Mining Tool",
-    "mining tool slot should have a readable HUD label"
+    "Terraformer",
+    "Terraformer slot should have a readable HUD label"
   );
   assertEqual(
     getHotbarItemLabel(projectileCoreItem ?? createItemStack(PHYSICS_CORE_ITEM_ID), itemRegistry),
@@ -948,7 +959,7 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   );
   assert(
     canMineBlockWithHotbarItem(createItemStack(MINING_TOOL_ITEM_ID), itemRegistry),
-    "selected mining tool should mine terrain on left click"
+    "selected Terraformer should edit terrain on left click"
   );
   assert(
     !canMineBlockWithHotbarItem(grassItem, itemRegistry),
@@ -2575,31 +2586,41 @@ test("pointer lock request detection supports promise and void browser APIs", ()
 
 test("target block highlighter follows targeted block positions", () => {
   const highlighter = new TargetBlockHighlighter();
+  const blockOutline = highlighter.object.children[0] as THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial>;
 
   assert(!highlighter.object.visible, "target highlighter should start hidden");
   highlighter.showBlock({ x: 4, y: 12, z: -3 });
   assert(highlighter.object.visible, "target highlighter should become visible when a block is targeted");
   assertEqual(
-    highlighter.object.material.color.getHex(),
+    blockOutline.material.color.getHex(),
     0x050505,
     "terrain block targets should use the normal dark outline"
   );
   assertVectorNearlyEqual(
-    highlighter.object.position,
+    blockOutline.position,
     new THREE.Vector3(4.5, 12.5, -2.5),
     "target highlighter should sit on the target block center"
   );
 
   highlighter.showBlock({ x: 1, y: 2, z: 3 }, "rubble");
   assertEqual(
-    highlighter.object.material.color.getHex(),
+    blockOutline.material.color.getHex(),
     0xffffff,
     "settled rubble targets should use the white object outline"
   );
   assertVectorNearlyEqual(
-    highlighter.object.position,
+    blockOutline.position,
     new THREE.Vector3(1.5, 2.5, 3.5),
     "rubble target outlines should still occupy the full cube space"
+  );
+
+  highlighter.showSubCells([{ minX: 1, maxX: 4 / 3, minY: 2, maxY: 7 / 3, minZ: 3, maxZ: 10 / 3 }]);
+  const subCellOutline = highlighter.object.children[1] as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  assert(subCellOutline.visible, "Terraformer sub-cell highlights should use the sub-cell outline layer");
+  assertEqual(
+    subCellOutline.geometry.getAttribute("position").count,
+    24,
+    "one highlighted sub-cell should render twelve line segments"
   );
 
   highlighter.hide();
@@ -3034,8 +3055,8 @@ test("changelog parser skips an empty Unreleased placeholder", () => {
 test("block damage tracks health before removing voxels", () => {
   const world = new VoxelWorld({ seed: "damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
-  const maxHealth = BLOCKS[BLOCK.stone].health;
-  assert(maxHealth >= 8, "ordinary terrain blocks should have room for repeated chip hits");
+  const maxHealth = getTerrainMaxHealth(BLOCK.stone);
+  assert(maxHealth >= 270, "ordinary terrain blocks should have room for sub-cell edit hits");
 
   const firstHit = world.damageBlock(2, 3, 4, 1);
   assertDeepEqual(
@@ -3072,9 +3093,13 @@ test("block damage tracks health before removing voxels", () => {
 test("physics core carving chips ordinary terrain before fracture", () => {
   const world = new VoxelWorld({ seed: "core-damage-test" });
   world.setBlock(2, 3, 4, BLOCK.stone);
-  const maxHealth = BLOCKS[BLOCK.stone].health;
+  const maxHealth = getTerrainMaxHealth(BLOCK.stone);
 
-  assertEqual(PARTIAL_BLOCK_CORE_DAMAGE, 1, "terrain-core hits should carve one health step at a time");
+  assertEqual(
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    TERRAIN_DAMAGE_SCALE,
+    "terrain-core hits should spend one old material HP on the scaled terrain pool"
+  );
   assertEqual(PHYSICS_CORE_BLOCK_DAMAGE, 30, "full core damage stays available for rubble cover impacts");
 
   const firstHit = world.carveBlock({
@@ -3124,15 +3149,19 @@ test("physics core carving chips ordinary terrain before fracture", () => {
     "the first carve should report one bite poof position for each newly destroyed presentation cell"
   );
   world.clearDamageForChunk(0, 0);
-  assertEqual(world.getBlockDamage(2, 3, 4), 1, "partial terrain should keep its damage while chunks stream out");
+  assertEqual(
+    world.getBlockDamage(2, 3, 4),
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    "partial terrain should keep its scaled core damage while chunks stream out"
+  );
 
   let finalHit = firstHit;
-  for (let hit = 2; hit <= maxHealth; hit += 1) {
+  for (let hit = PARTIAL_BLOCK_CORE_DAMAGE * 2; hit <= maxHealth; hit += PARTIAL_BLOCK_CORE_DAMAGE) {
     finalHit = world.carveBlock({
       x: 2,
       y: 3,
       z: 4,
-      point: new THREE.Vector3(2, 3.45 + hit * 0.01, 4.45),
+      point: new THREE.Vector3(2, 3.45 + (hit / PARTIAL_BLOCK_CORE_DAMAGE) * 0.01, 4.45),
       normal: new THREE.Vector3(-1, 0, 0),
       speed: 18,
       amount: PARTIAL_BLOCK_CORE_DAMAGE
@@ -3165,6 +3194,88 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   const finalStats = world.getStats();
   assertEqual(finalStats.partialBlocks, 0, "final fracture should clear partial-cell debug pressure");
   assertEqual(finalStats.partialRemainingSubvoxels, 0, "final fracture should clear remaining subvoxel pressure");
+});
+
+test("Terraformer edits exact sub-cells on the shared terrain damage path", () => {
+  const world = new VoxelWorld({ seed: "terraformer-sub-cell-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  const input = {
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2.5, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    size: 1
+  };
+
+  const preview = world.previewTerraformerEdit(input);
+  assert(preview, "Terraformer should preview the targeted sub-cell before editing");
+  assertEqual(preview.cells.length, 1, "size 1 should target exactly one sub-cell");
+
+  const result = world.applyTerraformerEdit(input);
+  const subCellHp = getTerraformerSubCellHealth(BLOCK.stone);
+  assert(result, "Terraformer should edit the previewed sub-cell");
+  assertEqual(result.results.length, 1, "one macro block should receive the size-1 edit");
+  assertEqual(world.getBlockDamage(2, 3, 4), subCellHp, "Terraformer damage should spend exactly one sub-cell HP");
+  assertEqual(
+    world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length,
+    1,
+    "Terraformer should store the exact removed sub-cell"
+  );
+  assert(!world.isRenderableSolid(2, 3, 4), "Terraformer-edited blocks should use the partial mesh/mask path");
+
+  const repeatedPreview = world.previewTerraformerEdit(input);
+  assertEqual(repeatedPreview, null, "already removed Terraformer sub-cells should be skipped on retarget");
+  assertEqual(world.getBlockDamage(2, 3, 4), subCellHp, "retargeting an empty sub-cell should not add phantom damage");
+});
+
+test("Terraformer brush sizes operate on the global sub-cell grid", () => {
+  const size2World = new VoxelWorld({ seed: "terraformer-size-2-test" });
+  size2World.setBlock(2, 3, 4, BLOCK.grass);
+  const size2Input = {
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2.5, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    size: 2
+  };
+  assertEqual(size2World.previewTerraformerEdit(size2Input)?.cells.length, 8, "size 2 should target 2x2x2 sub-cells");
+  size2World.applyTerraformerEdit(size2Input);
+  assertEqual(
+    size2World.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length,
+    8,
+    "size 2 should remove the exact previewed eight sub-cells"
+  );
+
+  const size3World = new VoxelWorld({ seed: "terraformer-size-3-test" });
+  size3World.setBlock(2, 3, 4, BLOCK.grass);
+  const size3Input = { ...size2Input, size: 3 };
+  assertEqual(size3World.previewTerraformerEdit(size3Input)?.cells.length, 27, "size 3 should target one full block");
+  const size3Result = size3World.applyTerraformerEdit(size3Input);
+  assert(size3Result?.results[0]?.destroyed, "size 3 should be able to delete one entire main block");
+  assertEqual(size3World.getBlock(2, 3, 4), BLOCK.air, "all 27 removed sub-cells should clear the main block");
+  assertEqual(size3World.getPartialBlock(2, 3, 4), null, "full Terraformer deletion should clear partial state");
+
+  const size4World = new VoxelWorld({ seed: "terraformer-size-4-test" });
+  for (let y = 3; y <= 4; y += 1) {
+    for (let z = 4; z <= 5; z += 1) {
+      for (let x = 2; x <= 3; x += 1) {
+        size4World.setBlock(x, y, z, BLOCK.dirt);
+      }
+    }
+  }
+  const size4Preview = size4World.previewTerraformerEdit({ ...size2Input, size: 4 });
+  const size4BlockKeys = new Set(size4Preview?.cells.map((cell) =>
+    `${cell.position.x},${cell.position.y},${cell.position.z}`
+  ) ?? []);
+
+  assertEqual(size4Preview?.cells.length, 64, "size 4 should target 4x4x4 sub-cells when enough blocks exist");
+  assert(size4BlockKeys.size > 1, "size 4 should spill across neighboring main blocks on the global grid");
 });
 
 test("partial block carve results expose material poof positions for newly destroyed bite cells", () => {
@@ -3393,7 +3504,11 @@ test("damage brushes stay sparse when an impact is centered away from seams", ()
 
   assert(result, "a centered brush should still damage the target block");
   assertEqual(result.results.length, 1, "centered hits should not allocate neighboring micro lattices");
-  assertEqual(world.getBlockDamage(2, 3, 4), 1, "the centered target should be chipped");
+  assertEqual(
+    world.getBlockDamage(2, 3, 4),
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    "the centered target should be chipped by one scaled core step"
+  );
   assertEqual(world.getBlockDamage(2, 3, 5), 0, "the untouched neighbor should stay fully asleep");
   assertEqual(world.getPartialBlock(2, 3, 5), null, "the untouched neighbor should not get sparse partial state");
 });
@@ -3462,7 +3577,7 @@ test("damage brush previews include sparse seam neighbors", () => {
 
 test("damage brush previews keep affected micro-cells adjacent across seams", () => {
   const world = new VoxelWorld({ seed: "damage-brush-preview-connected-test" });
-  const connectedFootprintDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const connectedFootprintDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   for (let y = 2; y <= 3; y += 1) {
     for (let z = 1; z <= 2; z += 1) {
       for (let x = 0; x <= 1; x += 1) {
@@ -3495,7 +3610,7 @@ test("damage brush previews keep affected micro-cells adjacent across seams", ()
 
 test("damage brush carving keeps affected micro-cells adjacent across seams", () => {
   const world = new VoxelWorld({ seed: "damage-brush-carve-connected-test" });
-  const connectedFootprintDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const connectedFootprintDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   for (let y = 2; y <= 3; y += 1) {
     for (let z = 1; z <= 2; z += 1) {
       for (let x = 0; x <= 1; x += 1) {
@@ -3736,7 +3851,7 @@ test("partial block damage lattice approximates remaining material fraction", ()
 
 test("partial block bite footprint follows tiny core trajectory through the lattice", () => {
   const world = new VoxelWorld({ seed: "partial-bite-tiny-footprint-test" });
-  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const oneTenthStoneDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   world.setBlock(2, 3, 4, BLOCK.stone);
 
   world.carveBlock({
@@ -3772,7 +3887,7 @@ test("partial block bite footprint follows tiny core trajectory through the latt
 
 test("partial block bite footprint widens for large cores before drilling deep", () => {
   const world = new VoxelWorld({ seed: "partial-bite-large-footprint-test" });
-  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const oneTenthStoneDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   world.setBlock(2, 3, 4, BLOCK.stone);
 
   world.carveBlock({
@@ -3843,7 +3958,7 @@ test("partial block bite lattice keeps older damage from visually refilling", ()
 
 test("tiny fast partial-block bites can pierce through an open tunnel", () => {
   const world = new VoxelWorld({ seed: "partial-bite-pierce-test" });
-  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const oneTenthStoneDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   const impactSpeed = 24;
   world.setBlock(2, 3, 4, BLOCK.stone);
   world.setBlock(3, 3, 4, BLOCK.air);
@@ -3864,7 +3979,7 @@ test("tiny fast partial-block bites can pierce through an open tunnel", () => {
   assert(result.pierceContinuation.position.x > 3, "piercing should place the core just beyond the exit face");
   assertClose(
     result.pierceContinuation.speed,
-    impactSpeed - 3 * 2.8 * (BLOCKS[BLOCK.stone].health / 10),
+    impactSpeed - 3 * 2.8 * (getBlockMaterialRule(BLOCK.stone).health / 10),
     0.000001,
     "exit speed should pay tunnel material cost scaled by material HP"
   );
@@ -3873,7 +3988,7 @@ test("tiny fast partial-block bites can pierce through an open tunnel", () => {
 
 test("tiny fast off-center bites still reserve a continuous pierce tunnel", () => {
   const world = new VoxelWorld({ seed: "partial-bite-off-center-pierce-test" });
-  const oneTenthStoneDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const oneTenthStoneDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   world.setBlock(2, 3, 4, BLOCK.stone);
   world.setBlock(3, 3, 4, BLOCK.air);
 
@@ -4087,7 +4202,7 @@ test("fractured terrain does not stamp a break-time surface puddle", () => {
   }
   world.setBlock(target.x, target.y, target.z, BLOCK.stone);
 
-  for (let hit = 0; hit < BLOCKS[BLOCK.stone].health; hit += 1) {
+  for (let hit = 0; hit < getTerrainMaxHealth(BLOCK.stone); hit += PARTIAL_BLOCK_CORE_DAMAGE) {
     world.carveBlock({
       x: target.x,
       y: target.y,
@@ -4360,6 +4475,12 @@ test("block material rules keep HP, mining cadence, and debris flavor keyed by b
   const allKnownRuleKeys = Object.keys(BLOCK_MATERIAL_RULES).map(Number).sort((left, right) => left - right);
   const allBlockIds = Object.values(BLOCK).sort((left, right) => left - right);
   assertDeepEqual(allKnownRuleKeys, allBlockIds, "material rules should cover every declared BlockId");
+  assertEqual(TERRAIN_DAMAGE_SCALE, 270, "terrain HP should scale old material HP into editor-grade integer pools");
+  assertEqual(
+    TERRAFORMER_SUBCELL_DAMAGE_SCALE,
+    10,
+    "Terraformer sub-cell HP should be one twenty-seventh of the scaled block HP"
+  );
 
   const expectedRules = [
     {
@@ -4459,9 +4580,23 @@ test("block material rules keep HP, mining cadence, and debris flavor keyed by b
 
     assertEqual(BLOCKS[expected.block].health, expected.health, `${blockName} BLOCKS HP should match its material`);
     assertEqual(rule.health, expected.health, `${blockName} material HP should stay explicit`);
+    assertEqual(
+      getTerrainMaxHealth(expected.block),
+      expected.health * TERRAIN_DAMAGE_SCALE,
+      `${blockName} runtime terrain HP should be material-scaled`
+    );
+    assertEqual(
+      getTerraformerSubCellHealth(expected.block),
+      expected.health * TERRAFORMER_SUBCELL_DAMAGE_SCALE,
+      `${blockName} Terraformer sub-cell HP should be material-scaled`
+    );
     assertEqual(rule.miningCadence, expected.cadence, `${blockName} mining cadence should stay material-specific`);
     assertEqual(getMiningTickSeconds(expected.block), expected.tickSeconds, `${blockName} mining tick should be explicit`);
-    assertEqual(getMiningDamageAmount(expected.block), 1, `${blockName} mining damage should not be derived from HP`);
+    assertEqual(
+      getMiningDamageAmount(expected.block),
+      expected.health * TERRAFORMER_SUBCELL_DAMAGE_SCALE,
+      `${blockName} legacy mining damage helper should now alias Terraformer sub-cell HP`
+    );
     assertEqual(debrisProfile.flavor, expected.flavor, `${blockName} debris flavor should match the material`);
     assertDeepEqual(
       [...debrisProfile.preferredShapeIds],
@@ -4488,6 +4623,17 @@ test("block material rules keep HP, mining cadence, and debris flavor keyed by b
   assertEqual(getBlockMaterialRule(999).block, BLOCK.air, "unknown block ids should fall back to the inert rule");
   assertEqual(getMiningDamageAmount(BLOCK.air), 0, "air should not spend mining damage");
   assertEqual(getMiningTickSeconds(BLOCK.air), 0, "air should not schedule mining ticks");
+});
+
+test("Terraformer size helpers clamp, step, and format editor brush dimensions", () => {
+  assertEqual(TERRAFORMER_SIZE_MIN, 1, "Terraformer brush size should start at one sub-cell");
+  assertEqual(TERRAFORMER_SIZE_MAX, 4, "Terraformer brush size should stay intentionally small this pass");
+  assertEqual(normalizeTerraformerSize(-100), 1, "Terraformer size should clamp low values");
+  assertEqual(normalizeTerraformerSize(999), 4, "Terraformer size should clamp high values");
+  assertEqual(stepTerraformerSize(1, "decrease"), 1, "Terraformer size should not step below its minimum");
+  assertEqual(stepTerraformerSize(3, "increase"), 4, "Terraformer size should step upward by one sub-cell axis");
+  assertEqual(formatTerraformerSize(1), "1 sub-cell", "one-cell brushes should use singular copy");
+  assertEqual(formatTerraformerSize(3), "3x3x3 sub-cells", "larger brushes should display their full cubic size");
 });
 
 test("material debris profiles deterministically bias shard shape helpers", () => {
@@ -6661,11 +6807,14 @@ test("terrain impacts resolve before adjacent rubble can take same-frame damage"
   );
 
   for (const impact of terrainImpactsForCore) {
+    // This test is about same-frame ordering, so it deliberately spends a full
+    // scaled block of terrain HP instead of pretending the rubble damage number
+    // is still enough to break scaled terrain in one tap.
     const result = world.damageBlock(
       impact.block.x,
       impact.block.y,
       impact.block.z,
-      PHYSICS_CORE_BLOCK_DAMAGE
+      getTerrainMaxHealth(BLOCK.stone)
     );
     if (result?.destroyed) core.expire();
   }
@@ -7065,7 +7214,7 @@ test("physics core aim preview renders hidden bite cells as a separate soft over
 
 test("small fast physics cores pass through existing visual holes in partial blocks", () => {
   const world = new VoxelWorld({ seed: "small-core-existing-hole-test" });
-  const openTunnelDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const openTunnelDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   const tinyFastSettings = {
     sizePercent: PHYSICS_CORE_SIZE_MIN_PERCENT,
     velocityPercent: PHYSICS_CORE_VELOCITY_MAX_PERCENT
@@ -7183,7 +7332,7 @@ test("small fast physics cores hit visible partial-block material from inside th
 
 test("hitscan cores pass through existing visual holes in partial blocks", () => {
   const world = new VoxelWorld({ seed: "hitscan-existing-hole-test" });
-  const openTunnelDamage = BLOCKS[BLOCK.stone].health * 0.1;
+  const openTunnelDamage = getTerrainMaxHealth(BLOCK.stone) * 0.1;
   world.setBlock(1, 3, 4, BLOCK.air);
   world.setBlock(2, 3, 4, BLOCK.stone);
   world.setBlock(3, 3, 4, BLOCK.stone);
@@ -7415,8 +7564,16 @@ test("small fast physics cores can pierce a block and damage one behind an air g
     }
   }
 
-  assertEqual(world.getBlockDamage(2, 3, 4), 1, "front block should take the first piercing chip");
-  assertEqual(world.getBlockDamage(4, 3, 4), 1, "back block should be hit after the core crosses the air gap");
+  assertEqual(
+    world.getBlockDamage(2, 3, 4),
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    "front block should take the first scaled piercing chip"
+  );
+  assertEqual(
+    world.getBlockDamage(4, 3, 4),
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    "back block should be hit after the core crosses the air gap"
+  );
   assert(!core.isExpired, "a successfully piercing core should not be expired by the first terrain hit");
   assert(core.velocity.x > 0, "a successfully piercing core should keep forward velocity");
 });
@@ -7441,7 +7598,7 @@ test("destroying an impacted block can consume the source physics core", () => {
     impact.block.x,
     impact.block.y,
     impact.block.z,
-    PHYSICS_CORE_BLOCK_DAMAGE
+    getTerrainMaxHealth(BLOCK.stone)
   );
   if (result?.destroyed) impact.source.expire();
 

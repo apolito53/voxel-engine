@@ -12,7 +12,7 @@
         <span class="hud-pill"><b>WASD</b> move</span>
         <span class="hud-pill"><b>Space/C</b> vertical</span>
         <span class="hud-pill"><b>G</b> items/blocks</span>
-        <span class="hud-pill"><b>Tool</b> hold L mine</span>
+        <span class="hud-pill"><b>Terraformer</b> hold L edit</span>
         <span class="hud-pill"><b>Blocks</b> L erase / R place</span>
         <span class="hud-pill"><b>Cores</b> L fire / hold R ADS</span>
         <span class="hud-pill"><b>F3/F4/F6</b> debug</span>
@@ -265,6 +265,21 @@
               aria-labelledby="settings-tab-gameplay"
               hidden
             >
+              <label class="settings-field" for="terraformer-size-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Terraformer Size</span>
+                  <span id="terraformer-size-value" class="settings-value">1 sub-cell</span>
+                </span>
+                <input
+                  id="terraformer-size-slider"
+                  class="range-input"
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="1"
+                  value="1"
+                />
+              </label>
               <label class="settings-field" for="core-size-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Core Size</span>

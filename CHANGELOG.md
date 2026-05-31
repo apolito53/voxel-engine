@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-05-31
+
+Minor milestone: the old Mining Tool is now the Terraformer, a deterministic
+terrain editor that removes exact sub-block cells instead of pretending to be a
+weapon with vague chip damage.
+
+### Added
+
+- Added a Terraformer size setting in `Settings > Gameplay`, plus in-world
+  `ArrowUp`/`ArrowDown` controls while the Terraformer is selected.
+- Added thin sub-cell outlines so the Terraformer previews the exact `3x3x3`
+  lattice cells it will remove before editing terrain.
+
+### Changed
+
+- Renamed the player-facing `Mining Tool` to `Terraformer` across the hotbar,
+  Loadout menu, HUD hints, docs, and tests.
+- Scaled durable terrain HP from compact material values to a shared
+  `3x3x3` sub-cell pool: full block HP is old material HP times `270`, and one
+  Terraformer sub-cell is old material HP times `10`.
+- Kept Physics Core and Hitscan Core on the existing carve/brush path while
+  scaling their terrain damage to preserve the practical old hits-to-break
+  behavior against the larger HP pool.
+
 ## 0.8.10 - 2026-05-31
 
 ### Fixed

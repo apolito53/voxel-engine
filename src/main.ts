@@ -19,8 +19,6 @@ import {
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
   getDebrisSpawnProfile,
-  getMiningDamageAmount,
-  getMiningTickSeconds,
   type DebrisSpawnProfile
 } from "./blockMaterialRules";
 import { createWorldBlockMaterial, disposeWorldBlockMaterial } from "./blockTextureAtlas";
@@ -258,6 +256,15 @@ import {
 } from "./sprintFeedback";
 import { createSkybox } from "./skybox";
 import { TargetBlockHighlighter } from "./targetHighlighter";
+import {
+  TERRAFORMER_SIZE_DEFAULT,
+  TERRAFORMER_SIZE_MAX,
+  TERRAFORMER_SIZE_MIN,
+  TERRAFORMER_SIZE_STEP,
+  formatTerraformerSize,
+  normalizeTerraformerSize,
+  stepTerraformerSize
+} from "./terraformerSettings";
 import { SUPERFLAT_WORLD_SEED } from "./terrain";
 import {
   TEST_AVATAR_QUERY_PARAM,
@@ -285,6 +292,8 @@ import {
   type BlockPierceContinuation,
   type ChunkCoords,
   type DebrisEjectionHint,
+  type TerraformerEditInput,
+  type TerraformerEditPreview,
   type WorldStats
 } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
@@ -305,9 +314,9 @@ const FRAGMENT_SCATTER_SPEED_RANGE = 2.6;
 const FRAGMENT_JITTER_SPEED = 13.5;
 const FRAGMENT_UPWARD_SPEED_MIN = 1;
 const FRAGMENT_UPWARD_SPEED_RANGE = 1.75;
-// Held mining is intentionally slower and more "tool-like" than a core hit.
-// The speed feeds partial-block bite visuals, not block durability.
-const MINING_TOOL_IMPACT_SPEED = 6;
+// Terraformer edits are exact, but we still feed a gentle "impact speed" into
+// shared chip/poof helpers so edited cells get familiar terrain feedback.
+const TERRAFORMER_IMPACT_SPEED = 6;
 const FRAME_SPIKE_EVENT_MS = 45;
 const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
 const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
@@ -394,6 +403,8 @@ const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-sl
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
+const terraformerSizeSlider = requireElement<HTMLInputElement>("#terraformer-size-slider");
+const terraformerSizeValue = requireElement<HTMLElement>("#terraformer-size-value");
 const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
 const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
 const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
@@ -497,6 +508,7 @@ let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
+let terraformerSize = readTerraformerSizePreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
 let debrisPerformancePressure = createDebrisPerformancePressureState(
@@ -508,7 +520,7 @@ const PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET = 8;
 const PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET = 24;
 let leftMouseButtonDown = false;
 let rightMouseButtonDown = false;
-let miningToolState: MiningToolState | null = null;
+let terraformerState: TerraformerState | null = null;
 let coreAimPreviewEnabled = false;
 
 const engineEvents = createEngineEventBus();
@@ -576,10 +588,8 @@ type PlayerCoreFiringSolution = {
   readonly origin: THREE.Vector3;
   readonly direction: THREE.Vector3;
 };
-type MiningToolState = {
+type TerraformerState = {
   readonly targetKey: string;
-  readonly tickSeconds: number;
-  elapsedSeconds: number;
 };
 type SettingsCategory = "graphics" | "gameplay" | "experimental";
 type LoadoutCategory = "tools" | "blocks";
@@ -598,6 +608,7 @@ const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
+const TERRAFORMER_SIZE_STORAGE_KEY = "voxel-sandbox-terraformer-size";
 const CONTROL_HINTS_STORAGE_KEY = "voxel-sandbox-control-hints-visible";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // Full terrain blocks still come from VoxelWorld. Damaged terrain also exposes
@@ -762,6 +773,7 @@ qualityController = new QualityController({
 qualityController.initialize();
 updateSettingsControls();
 updatePhysicsBudgetControls();
+updateTerraformerControls();
 updatePhysicsCoreControls();
 updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
@@ -883,6 +895,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
+  }, eventListenerOptions);
+  terraformerSizeSlider.addEventListener("input", () => {
+    setTerraformerSize(terraformerSizeSlider.value);
   }, eventListenerOptions);
   coreSizeSlider.addEventListener("input", () => {
     setPhysicsCoreSizePercent(coreSizeSlider.value);
@@ -1187,6 +1202,56 @@ function syncCoreAimPreviewToggle(): void {
   coreAimPreviewToggle.checked = coreAimPreviewEnabled;
 }
 
+function canAdjustTerraformerSizeFromKeyboard(): boolean {
+  return inWorld && requirePlayer().isLooking() && isTerraformerSelected();
+}
+
+function isTerraformerSelected(): boolean {
+  return activeBuilderLane === "items" &&
+    getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry).kind === "terrain:mine-block";
+}
+
+function setTerraformerSize(value: unknown): void {
+  const nextSize = normalizeTerraformerSize(value, terraformerSize);
+  if (nextSize === terraformerSize) {
+    updateTerraformerControls();
+    return;
+  }
+
+  terraformerSize = nextSize;
+  writeTerraformerSizePreference(terraformerSize);
+  resetTerraformerState();
+  updateTerraformerControls();
+  if (inWorld) updateTargetBlockHighlighter();
+}
+
+function updateTerraformerControls(): void {
+  terraformerSizeSlider.min = String(TERRAFORMER_SIZE_MIN);
+  terraformerSizeSlider.max = String(TERRAFORMER_SIZE_MAX);
+  terraformerSizeSlider.step = String(TERRAFORMER_SIZE_STEP);
+  terraformerSizeSlider.value = String(terraformerSize);
+  terraformerSizeValue.textContent = formatTerraformerSize(terraformerSize);
+}
+
+function readTerraformerSizePreference(): number {
+  try {
+    return normalizeTerraformerSize(
+      globalThis.localStorage?.getItem(TERRAFORMER_SIZE_STORAGE_KEY),
+      TERRAFORMER_SIZE_DEFAULT
+    );
+  } catch {
+    return TERRAFORMER_SIZE_DEFAULT;
+  }
+}
+
+function writeTerraformerSizePreference(size: number): void {
+  try {
+    globalThis.localStorage?.setItem(TERRAFORMER_SIZE_STORAGE_KEY, String(normalizeTerraformerSize(size)));
+  } catch {
+    // The editor remains usable if storage is blocked; only the next launch forgets this size.
+  }
+}
+
 function readHealthBarsEnabled(): boolean {
   try {
     return globalThis.localStorage?.getItem(HEALTH_BARS_STORAGE_KEY) !== "false";
@@ -1321,6 +1386,15 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if ((event.code === "ArrowUp" || event.code === "ArrowDown") && canAdjustTerraformerSizeFromKeyboard()) {
+    event.preventDefault();
+    setTerraformerSize(stepTerraformerSize(
+      terraformerSize,
+      event.code === "ArrowUp" ? "increase" : "decrease"
+    ));
+    return;
+  }
+
   if (event.code === NOVA_PILOT_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
     camera.getWorldDirection(direction);
@@ -1405,7 +1479,7 @@ renderer.domElement.addEventListener("mousedown", (event) => {
 document.addEventListener("mouseup", (event) => {
   if (event.button === 0) {
     leftMouseButtonDown = false;
-    resetMiningToolState();
+    resetTerraformerState();
   }
   if (event.button === 2) {
     rightMouseButtonDown = false;
@@ -1429,11 +1503,11 @@ renderer.domElement.addEventListener("wheel", (event) => {
 function clearPointerHoldState(): void {
   leftMouseButtonDown = false;
   rightMouseButtonDown = false;
-  resetMiningToolState();
+  resetTerraformerState();
 }
 
-function resetMiningToolState(): void {
-  miningToolState = null;
+function resetTerraformerState(): void {
+  terraformerState = null;
 }
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
@@ -1449,17 +1523,17 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
   // is the seam future FPS weapons, dungeon tools, or RTS commands can share.
   switch (action.kind) {
     case "none":
-      resetMiningToolState();
+      resetTerraformerState();
       return;
     case "terrain:mine-block":
-      startOrContinueMiningTool(0, true);
+      startOrContinueTerraformer(true);
       return;
     case "terrain:erase-block":
-      resetMiningToolState();
+      resetTerraformerState();
       applyBuilderBrushAtTarget("erase");
       return;
     case "terrain:place-block":
-      resetMiningToolState();
+      resetTerraformerState();
       if (activeBuilderLane === "blocks") {
         applyBuilderBrushAtTarget("place");
       } else {
@@ -1467,11 +1541,11 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
       }
       return;
     case "physics:throw-core":
-      resetMiningToolState();
+      resetTerraformerState();
       if (activePlayer.isLooking()) throwPlayerCore(activePlayer);
       return;
     case "physics:fire-hitscan-core":
-      resetMiningToolState();
+      resetTerraformerState();
       if (activePlayer.isLooking()) firePlayerHitscanCore();
       return;
   }
@@ -1540,117 +1614,84 @@ function showBuilderStatus(message: string): void {
   novaMessage.textContent = message;
 }
 
-function updateMiningTool(delta: number): void {
+function updateTerraformer(): void {
   if (!leftMouseButtonDown) {
-    resetMiningToolState();
+    resetTerraformerState();
     return;
   }
 
   const action = getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry);
   if (action.kind !== "terrain:mine-block") {
-    resetMiningToolState();
+    resetTerraformerState();
     return;
   }
 
-  startOrContinueMiningTool(delta, false);
+  startOrContinueTerraformer(false);
 }
 
-function startOrContinueMiningTool(delta: number, immediate: boolean): void {
+function startOrContinueTerraformer(immediate: boolean): void {
   if (!inWorld || !requirePlayer().isLooking()) {
-    resetMiningToolState();
+    resetTerraformerState();
     return;
   }
 
+  const editInput = createTerraformerEditInput();
+  if (!editInput) {
+    resetTerraformerState();
+    return;
+  }
+
+  const preview = requireWorld().previewTerraformerEdit(editInput);
+  if (!preview) {
+    resetTerraformerState();
+    return;
+  }
+
+  if (terraformerState?.targetKey === preview.key && !immediate) {
+    return;
+  }
+
+  terraformerState = { targetKey: preview.key };
+  applyTerraformerEdit(editInput, preview.key);
+}
+
+function createTerraformerEditInput(): TerraformerEditInput | null {
   const hit = getTargetHit();
-  if (!hit) {
-    resetMiningToolState();
-    return;
-  }
+  if (!hit || hit.source !== "voxel" || hit.kind !== "block") return null;
 
-  const targetKey = createMiningTargetKey(hit);
-  const tickSeconds = getMiningTargetTickSeconds(hit);
-  if (tickSeconds <= 0) {
-    resetMiningToolState();
-    return;
-  }
-
-  if (!miningToolState || miningToolState.targetKey !== targetKey) {
-    miningToolState = {
-      targetKey,
-      tickSeconds,
-      elapsedSeconds: 0
-    };
-    applyMiningToolTick(targetKey);
-    return;
-  }
-
-  miningToolState.elapsedSeconds += Math.max(0, delta);
-  if (immediate) {
-    miningToolState.elapsedSeconds = Math.max(miningToolState.elapsedSeconds, tickSeconds);
-  }
-
-  // A hidden-tab resume or debug hitch should not chew an entire wall in one
-  // catch-up frame. Carry the leftover time, but cap actual terrain mutations.
-  let ticksThisFrame = 0;
-  while (miningToolState && miningToolState.elapsedSeconds >= miningToolState.tickSeconds && ticksThisFrame < 4) {
-    const currentTargetKey = miningToolState.targetKey;
-    miningToolState.elapsedSeconds -= miningToolState.tickSeconds;
-    ticksThisFrame += 1;
-
-    if (!applyMiningToolTick(currentTargetKey)) {
-      resetMiningToolState();
-      return;
-    }
-  }
-}
-
-function createMiningTargetKey(hit: TargetHit): string {
-  return `${hit.source}:${hit.block.x},${hit.block.y},${hit.block.z}`;
-}
-
-function getMiningTargetTickSeconds(hit: TargetHit): number {
-  if (hit.source === "rubble") return getMiningTickSeconds(BLOCK.rubble);
-  const block = requireWorld().getBlock(hit.block.x, hit.block.y, hit.block.z);
-  return getMiningTickSeconds(block);
-}
-
-function applyMiningToolTick(expectedTargetKey: string): boolean {
-  const hit = getTargetHit();
-  if (!hit || createMiningTargetKey(hit) !== expectedTargetKey) return false;
-
-  if (hit.source === "rubble") {
-    damageTargetedRubbleCell(hit.block, getMiningDamageAmount(BLOCK.rubble));
-    return true;
-  }
-
-  const activeWorld = requireWorld();
-  const block = activeWorld.getBlock(hit.block.x, hit.block.y, hit.block.z);
-  const damageAmount = getMiningDamageAmount(block);
-  if (damageAmount <= 0) return false;
-
-  const miningDirection = getCameraDirection();
-  const impactPoint = camera.position.clone().addScaledVector(miningDirection, hit.distance);
+  const terraformDirection = getCameraDirection();
+  const impactPoint = camera.position.clone().addScaledVector(terraformDirection, hit.distance);
   const impactNormal = new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z);
-  const impact: TerrainDamageFeedbackImpact = {
-    normal: impactNormal,
-    speed: MINING_TOOL_IMPACT_SPEED,
-    position: impactPoint,
-    incomingVelocity: miningDirection.clone().multiplyScalar(MINING_TOOL_IMPACT_SPEED)
-  };
-  const result = activeWorld.carveBlock({
+  return {
     x: hit.block.x,
     y: hit.block.y,
     z: hit.block.z,
     point: impactPoint,
     normal: impactNormal,
-    incomingDirection: miningDirection,
-    speed: MINING_TOOL_IMPACT_SPEED,
-    amount: damageAmount
-  });
-  if (!result) return false;
+    incomingDirection: terraformDirection,
+    speed: TERRAFORMER_IMPACT_SPEED,
+    size: terraformerSize
+  };
+}
 
-  applyTerrainDamageFeedback(activeWorld, [result], impact);
-  return !result.destroyed;
+function applyTerraformerEdit(input: TerraformerEditInput, expectedTargetKey: string): boolean {
+  const activeWorld = requireWorld();
+  const result = activeWorld.applyTerraformerEdit(input);
+  if (!result || result.preview.key !== expectedTargetKey) return false;
+
+  const impact: TerrainDamageFeedbackImpact = {
+    normal: new THREE.Vector3(input.normal.x, input.normal.y, input.normal.z),
+    speed: TERRAFORMER_IMPACT_SPEED,
+    position: new THREE.Vector3(input.point.x, input.point.y, input.point.z),
+    incomingVelocity: new THREE.Vector3(
+      input.incomingDirection?.x ?? 0,
+      input.incomingDirection?.y ?? 0,
+      input.incomingDirection?.z ?? 0
+    ).multiplyScalar(TERRAFORMER_IMPACT_SPEED)
+  };
+
+  applyTerrainDamageFeedback(activeWorld, result.results, impact);
+  return true;
 }
 
 function getCameraDirection(): THREE.Vector3 {
@@ -1703,7 +1744,7 @@ function animate(): void {
     debugPlayerVelocity = activePlayer.velocity;
 
     activePlayer.update(delta);
-    updateMiningTool(delta);
+    updateTerraformer();
     testAvatar.update(delta);
     maybeAutosavePlayerLocation(frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
@@ -1945,7 +1986,7 @@ function shouldSuspendAnimationLoop(now: number): boolean {
 
 function hasActiveEngineWork(): boolean {
   if (!inWorld || !world) return false;
-  if (leftMouseButtonDown && miningToolState) return true;
+  if (leftMouseButtonDown && terraformerState) return true;
   if (world.hasPendingRuntimeWork()) return true;
   if (debrisSettlerStats.activeFragments > 0) return true;
   if (physicsCoreTrail.getActiveTrailCount() > 0) return true;
@@ -2303,7 +2344,7 @@ function describeItemAction(action: ItemAction, buttonLabel: "L" | "R"): string 
     case "none":
       return null;
     case "terrain:mine-block":
-      return `${buttonLabel} hold mine`;
+      return `${buttonLabel} terraform`;
     case "terrain:erase-block":
       return `${buttonLabel} erase`;
     case "terrain:place-block":
@@ -2383,7 +2424,7 @@ function getBlockCssColor(block: BlockId): string {
 }
 
 function selectHotbarIndex(index: number): void {
-  resetMiningToolState();
+  resetTerraformerState();
   const activeHotbarItems = getActiveHotbarItems();
   if (activeBuilderLane === "blocks") {
     selectedBlockHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);
@@ -2481,6 +2522,16 @@ function getTargetHit(options: { readonly requireLook?: boolean } = {}): TargetH
 }
 
 function updateTargetBlockHighlighter(): void {
+  if (isTerraformerSelected() && requirePlayer().isLooking()) {
+    const preview = previewTerraformerTarget();
+    if (preview) {
+      targetBlockHighlighter.showSubCells(preview.cells.map((cell) => cell.bounds));
+    } else {
+      targetBlockHighlighter.hide();
+    }
+    return;
+  }
+
   const hit = getTargetHit();
 
   if (!hit) {
@@ -2489,6 +2540,11 @@ function updateTargetBlockHighlighter(): void {
   }
 
   targetBlockHighlighter.showBlock(hit.block, hit.kind);
+}
+
+function previewTerraformerTarget(): TerraformerEditPreview | null {
+  const input = createTerraformerEditInput();
+  return input ? requireWorld().previewTerraformerEdit(input) : null;
 }
 
 function updateBuilderBrushPreview(activePlayer: PlayerController): void {

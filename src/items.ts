@@ -152,10 +152,10 @@ export function createPlaceableBlockItemDefinition(
 export function createMiningToolItemDefinition(): ItemDefinition {
   return {
     id: MINING_TOOL_ITEM_ID,
-    name: "Mining Tool",
+    name: "Terraformer",
     category: "tool",
     maxStack: 1,
-    tags: ["tool", "terrain", "mining"],
+    tags: ["tool", "terrain", "terraforming"],
     actions: {
       primary: { kind: "terrain:mine-block" },
       secondary: NO_ITEM_ACTION

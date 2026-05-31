@@ -5,10 +5,17 @@ terrain state is owned by partial-block damage. Loose debris is visual feedback.
 
 ## Terrain Damage
 
-Terrain HP is material-specific: Leaves 3, Sand 5, Grass 6, Dirt 8, Ember 10,
-Wood 12, Stone 16, and Rubble 4. Mining Tool hits spend 1 damage per material
-cadence tick, while Physics Core and Hitscan Core still damage terrain through
-the core impact path.
+Terrain HP is material-specific, using compact toughness values as the authored
+source: Leaves 3, Sand 5, Grass 6, Dirt 8, Ember 10, Wood 12, Stone 16, and
+Rubble 4. Runtime terrain HP scales those values onto the shared `3x3x3`
+sub-cell lattice: a full macro block is old HP times `270`, and one Terraformer
+sub-cell is old HP times `10`.
+
+The Terraformer is an editor tool, not a weapon: it targets exact highlighted
+sub-cells and spends exactly the remaining HP for those cells. Physics Core and
+Hitscan Core still damage terrain through the core impact path, with terrain
+impact damage scaled from `1` to `270` so their practical hits-to-break feel
+matches the old compact-HP model.
 
 Core impacts above 2 m/s carve one health step by removing hidden cells from a
 3x3x3 bite lattice inside the macro block. That lattice is presentation and
@@ -40,9 +47,9 @@ partial-block state.
 
 ## Projectile And Hitscan Cores
 
-Mining Tool owns normal manual mining. Placeable block items are build controls:
-left click erases the targeted block brush, and right click places the selected
-block brush.
+Terraformer owns precision manual terrain editing. Placeable block items are
+build controls: left click erases the targeted block brush, and right click
+places the selected block brush.
 
 Physics Core:
 

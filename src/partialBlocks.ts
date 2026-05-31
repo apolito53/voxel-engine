@@ -1,10 +1,13 @@
 import * as THREE from "three";
 import { BLOCK_FRAGMENT_COUNT, BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
+import { TERRAIN_DAMAGE_SCALE } from "./blockMaterialRules";
 import type { CollisionBounds } from "./collision";
 import { getSunlitFaceShade } from "./voxelLighting";
 
-export const PARTIAL_BLOCK_CORE_DAMAGE = 1;
+// A single core hit used to spend one old material HP. Terrain HP is now scaled
+// by 270, so a core spends 270 HP and keeps the same damage ratio/bite feel.
+export const PARTIAL_BLOCK_CORE_DAMAGE = TERRAIN_DAMAGE_SCALE;
 export const PARTIAL_BLOCK_MAX_CUTS_PER_CELL = 4;
 // Damaged blocks borrow the fracture grid only as a visual presentation lattice.
 // Gameplay material stays normalized as block volume; the lattice just decides
@@ -606,8 +609,16 @@ export function addPartialBlockCellGeometry(
 }
 
 export function getPartialBlockRemovedVisualCellCount(
-  cell: Pick<PartialBlockCell, "damage" | "maxHealth">
+  cell: Pick<PartialBlockCell, "damage" | "maxHealth"> & {
+    readonly removedVisualCellIndexes?: readonly number[];
+  }
 ): number {
+  if (cell.removedVisualCellIndexes) {
+    return Math.max(
+      0,
+      Math.min(PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT, cell.removedVisualCellIndexes.length)
+    );
+  }
   if (cell.maxHealth <= 0 || cell.damage <= 0) return 0;
   const removedFraction = clamp01(cell.damage / cell.maxHealth);
   return Math.max(
@@ -620,7 +631,9 @@ export function getPartialBlockRemovedVisualCellCount(
 }
 
 export function getPartialBlockRemainingVisualCellCount(
-  cell: Pick<PartialBlockCell, "damage" | "maxHealth">
+  cell: Pick<PartialBlockCell, "damage" | "maxHealth"> & {
+    readonly removedVisualCellIndexes?: readonly number[];
+  }
 ): number {
   return Math.max(
     0,

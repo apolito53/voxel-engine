@@ -32,6 +32,9 @@ export type DebrisSpawnProfile = {
 
 export type BlockMaterialRule = {
   readonly block: BlockId;
+  // This is the compact material toughness value. Runtime terrain HP multiplies
+  // it by TERRAIN_DAMAGE_SCALE so the 3x3x3 sub-cell editor can spend integer
+  // HP without losing the old material identity.
   readonly health: number;
   readonly miningCadence: MiningCadence;
   readonly miningTickSeconds: number;
@@ -40,6 +43,8 @@ export type BlockMaterialRule = {
 };
 
 const MINING_DAMAGE_PER_TICK = 1;
+export const TERRAIN_DAMAGE_SCALE = 270;
+export const TERRAFORMER_SUBCELL_DAMAGE_SCALE = 10;
 
 // These are feel values, not durability values. Keep them separate so changing
 // a block's HP does not silently retune how often held mining spends damage.
@@ -131,11 +136,19 @@ export function getMiningTickSeconds(block: number): number {
 }
 
 export function getMiningDamageAmount(block: number): number {
-  return getBlockMaterialRule(block).miningDamageAmount;
+  return getTerraformerSubCellHealth(block);
 }
 
 export function getDebrisSpawnProfile(block: number): DebrisSpawnProfile {
   return getBlockMaterialRule(block).debris;
+}
+
+export function getTerrainMaxHealth(block: number): number {
+  return getBlockMaterialRule(block).health * TERRAIN_DAMAGE_SCALE;
+}
+
+export function getTerraformerSubCellHealth(block: number): number {
+  return getBlockMaterialRule(block).health * TERRAFORMER_SUBCELL_DAMAGE_SCALE;
 }
 
 function createBlockMaterialRule(

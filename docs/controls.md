@@ -53,12 +53,12 @@ the root README.
 - Number keys map to the current lane.
 - Pause menu `Loadout` opens selection cards for `Tools` and `Blocks`; choosing
   a card switches to that lane, selects the item/block, and resumes gameplay.
-- The `Items` lane contains `Unarmed`, `Mining Tool`, `Physics Core`, and
+- The `Items` lane contains `Unarmed`, `Terraformer`, `Physics Core`, and
   `Hitscan Core`.
 - `Unarmed` is intentionally inert on both clicks for now.
-- `Mining Tool` uses held `Left click` to mine the targeted terrain block.
-  Mining spends 1 damage per tick; material controls block HP, cadence, and chip
-  debris flavor.
+- `Terraformer` uses held `Left click` to delete the exact highlighted
+  sub-block cells from the targeted terrain. `ArrowUp` and `ArrowDown` adjust
+  its cubic sub-cell brush size while it is selected.
 - In the `Blocks` lane, `Left click` erases the targeted block brush and `Right
   click` places the selected block brush into adjacent space.
 - A translucent selected-block-color ghost previews the placement volume before
@@ -111,6 +111,7 @@ Pause menu `Settings` is split into three tabs.
 - Projectile core size
 - Projectile core velocity
 - Projectile core bounce count
+- Terraformer size
 - Projectile/hitscan core color
 - Projectile core trail toggle
 - Core Aim Preview toggle

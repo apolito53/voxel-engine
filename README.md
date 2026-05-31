@@ -63,8 +63,8 @@ ignored by git.
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - `G` toggles between `Items` and `Blocks`
 - `Mouse wheel` selects within the active lane
-- `Left click` fires selected cores, mines with the Mining Tool, or erases in
-  the Blocks lane
+- `Left click` fires selected cores, edits exact sub-cells with the Terraformer,
+  or erases in the Blocks lane
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
 - `F3` toggles the debug overlay
@@ -75,8 +75,8 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
-Gameplay settings include Physics Core size, velocity, terrain-damaging bounce
-count, color, and trail controls.
+Gameplay settings include Terraformer size plus Physics Core size, velocity,
+terrain-damaging bounce count, color, and trail controls.
 The bottom hotbar shows the active Items or Blocks lane. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show
 or hide the quick-control hints. Debug and control overlays start hidden by

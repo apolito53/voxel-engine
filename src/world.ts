@@ -1,5 +1,10 @@
 import type * as THREE from "three";
 import { BLOCK_FRAGMENT_GRID_SIZE, getEjectedBlockRubbleMaterialUnits } from "./blockFragments";
+import {
+  getBlockMaterialRule,
+  getTerrainMaxHealth,
+  getTerraformerSubCellHealth
+} from "./blockMaterialRules";
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
@@ -38,6 +43,7 @@ import {
   type PartialBlockPosition,
   type PartialBlockSurfaceSample
 } from "./partialBlocks";
+import { normalizeTerraformerSize } from "./terraformerSettings";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext, type TerrainProfile } from "./terrain";
 
 const LOAD_RADIUS = 4;
@@ -67,6 +73,7 @@ const PARTIAL_BLOCK_PIERCE_MIN_IMPACT_SPEED = 14;
 const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
 const PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST = 2.8;
 const PARTIAL_BLOCK_PIERCE_EXIT_MARGIN = 0.02;
+const TERRAFORMER_TARGET_EPSILON = 0.0001;
 
 export type WorldStats = {
   readonly loadedChunks: number;
@@ -146,6 +153,50 @@ export type BlockDamageBrushPreviewTarget = {
   readonly maxHealth: number;
   readonly destroyed: boolean;
   readonly affectedVisualCellIndexes: readonly number[];
+};
+
+export type TerraformerEditInput = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly point: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly normal: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly incomingDirection?: Pick<THREE.Vector3, "x" | "y" | "z">;
+  readonly speed: number;
+  readonly size: number;
+};
+
+export type TerraformerSubCellBounds = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+};
+
+export type TerraformerTargetSubCell = {
+  readonly block: number;
+  readonly position: VoxelBlockPosition;
+  readonly cellIndex: number;
+  readonly globalX: number;
+  readonly globalY: number;
+  readonly globalZ: number;
+  readonly bounds: TerraformerSubCellBounds;
+  readonly remainingHealth: number;
+  readonly maxHealth: number;
+};
+
+export type TerraformerEditPreview = {
+  readonly key: string;
+  readonly size: number;
+  readonly cells: readonly TerraformerTargetSubCell[];
+};
+
+export type TerraformerEditResult = {
+  readonly preview: TerraformerEditPreview;
+  readonly results: readonly BlockDamageResult[];
+  readonly primaryResult?: BlockDamageResult;
 };
 
 export type BlockPierceContinuation = {
@@ -447,6 +498,95 @@ function createGlobalPartialBlockVisualCellKey(position: VoxelBlockPosition, cel
 
 function createGlobalMicroCellKey(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
+}
+
+function createTerraformerPreviewKey(
+  size: number,
+  cells: readonly TerraformerTargetSubCell[]
+): string {
+  return `${size}|${cells.map((cell) =>
+    `${cell.globalX},${cell.globalY},${cell.globalZ}`
+  ).join(";")}`;
+}
+
+function createTerraformerGlobalSubCellCenter(input: TerraformerEditInput): VoxelBlockPosition {
+  const normal = normalizeVoxelVector(input.normal) ?? { x: 0, y: 0, z: 0 };
+  const fallback = {
+    x: Math.floor(input.x) + 0.5,
+    y: Math.floor(input.y) + 0.5,
+    z: Math.floor(input.z) + 0.5
+  };
+  const point = {
+    x: Number.isFinite(input.point.x) ? input.point.x : fallback.x,
+    y: Number.isFinite(input.point.y) ? input.point.y : fallback.y,
+    z: Number.isFinite(input.point.z) ? input.point.z : fallback.z
+  };
+
+  return {
+    x: Math.floor((point.x - normal.x * TERRAFORMER_TARGET_EPSILON) * BLOCK_FRAGMENT_GRID_SIZE),
+    y: Math.floor((point.y - normal.y * TERRAFORMER_TARGET_EPSILON) * BLOCK_FRAGMENT_GRID_SIZE),
+    z: Math.floor((point.z - normal.z * TERRAFORMER_TARGET_EPSILON) * BLOCK_FRAGMENT_GRID_SIZE)
+  };
+}
+
+function createBlockPositionFromGlobalSubCell(
+  globalX: number,
+  globalY: number,
+  globalZ: number
+): VoxelBlockPosition {
+  return {
+    x: Math.floor(globalX / BLOCK_FRAGMENT_GRID_SIZE),
+    y: Math.floor(globalY / BLOCK_FRAGMENT_GRID_SIZE),
+    z: Math.floor(globalZ / BLOCK_FRAGMENT_GRID_SIZE)
+  };
+}
+
+function createLocalSubCellIndex(globalX: number, globalY: number, globalZ: number): number {
+  const x = positiveModulo(globalX, BLOCK_FRAGMENT_GRID_SIZE);
+  const y = positiveModulo(globalY, BLOCK_FRAGMENT_GRID_SIZE);
+  const z = positiveModulo(globalZ, BLOCK_FRAGMENT_GRID_SIZE);
+  return x + y * BLOCK_FRAGMENT_GRID_SIZE + z * BLOCK_FRAGMENT_GRID_SIZE ** 2;
+}
+
+function positiveModulo(value: number, modulus: number): number {
+  return ((value % modulus) + modulus) % modulus;
+}
+
+function createSubCellBounds(
+  globalX: number,
+  globalY: number,
+  globalZ: number
+): TerraformerSubCellBounds {
+  return {
+    minX: globalX / BLOCK_FRAGMENT_GRID_SIZE,
+    maxX: (globalX + 1) / BLOCK_FRAGMENT_GRID_SIZE,
+    minY: globalY / BLOCK_FRAGMENT_GRID_SIZE,
+    maxY: (globalY + 1) / BLOCK_FRAGMENT_GRID_SIZE,
+    minZ: globalZ / BLOCK_FRAGMENT_GRID_SIZE,
+    maxZ: (globalZ + 1) / BLOCK_FRAGMENT_GRID_SIZE
+  };
+}
+
+function createNextPartialBlockCuts(
+  block: number,
+  position: VoxelBlockPosition,
+  existingCuts: readonly PartialBlockCut[],
+  input: TerraformerEditInput
+): PartialBlockCut[] {
+  const cuts = [...existingCuts];
+  cuts.push(createPartialBlockCut({
+    block,
+    position,
+    point: input.point,
+    normal: input.normal,
+    incomingDirection: input.incomingDirection,
+    speed: input.speed,
+    cutIndex: cuts.length
+  }));
+  while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
+    cuts.shift();
+  }
+  return cuts;
 }
 
 function getAdjacentGlobalMicroCellKeys(key: string): readonly string[] {
@@ -1328,20 +1468,21 @@ export class VoxelWorld implements CollisionWorld {
     };
     const block = this.getBlock(position.x, position.y, position.z);
     const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
-    if (!definition.solid || definition.health <= 0) return null;
+    const maxHealth = getTerrainMaxHealth(block);
+    if (!definition.solid || maxHealth <= 0) return null;
 
     const key = this.damageKey(position.x, position.y, position.z);
     const nextDamage = (this.blockDamage.get(key) ?? 0) + Math.max(0, amount);
-    const remainingHealth = Math.max(0, definition.health - nextDamage);
+    const remainingHealth = Math.max(0, maxHealth - nextDamage);
 
     if (remainingHealth > 0) {
       this.blockDamage.set(key, nextDamage);
-      return { block, position, remainingHealth, maxHealth: definition.health, destroyed: false };
+      return { block, position, remainingHealth, maxHealth, destroyed: false };
     }
 
     this.blockDamage.delete(key);
     this.setBlock(position.x, position.y, position.z, BLOCK.air);
-    return { block, position, remainingHealth: 0, maxHealth: definition.health, destroyed: true };
+    return { block, position, remainingHealth: 0, maxHealth, destroyed: true };
   }
 
   carveBlockBrush(
@@ -1397,6 +1538,53 @@ export class VoxelWorld implements CollisionWorld {
     return previewTargets.length > 0 ? { targets: previewTargets } : null;
   }
 
+  previewTerraformerEdit(input: TerraformerEditInput): TerraformerEditPreview | null {
+    const size = normalizeTerraformerSize(input.size);
+    const cells = this.createTerraformerTargetSubCells(input, size);
+    if (cells.length === 0) return null;
+
+    return {
+      key: createTerraformerPreviewKey(size, cells),
+      size,
+      cells
+    };
+  }
+
+  applyTerraformerEdit(input: TerraformerEditInput): TerraformerEditResult | null {
+    const preview = this.previewTerraformerEdit(input);
+    if (!preview) return null;
+
+    const cellsByBlock = new Map<string, TerraformerTargetSubCell[]>();
+    for (const cell of preview.cells) {
+      getOrCreateArrayBucket(
+        cellsByBlock,
+        this.damageKey(cell.position.x, cell.position.y, cell.position.z)
+      ).push(cell);
+    }
+
+    const results: BlockDamageResult[] = [];
+    let primaryResult: BlockDamageResult | undefined;
+    const primaryKey = this.damageKey(Math.floor(input.x), Math.floor(input.y), Math.floor(input.z));
+
+    for (const [key, cells] of cellsByBlock) {
+      const position = cells[0]?.position;
+      if (!position) continue;
+
+      const result = this.applyTerraformerEditToBlock(position, cells, input);
+      if (!result) continue;
+
+      results.push(result);
+      if (key === primaryKey) primaryResult = result;
+    }
+
+    if (results.length === 0) return null;
+    return {
+      preview,
+      results,
+      primaryResult: primaryResult ?? results[0]
+    };
+  }
+
   carveBlock(input: BlockCarveInput): BlockDamageResult | null {
     const position = {
       x: Math.floor(input.x),
@@ -1405,22 +1593,23 @@ export class VoxelWorld implements CollisionWorld {
     };
     const block = this.getBlock(position.x, position.y, position.z);
     const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
-    if (!definition.solid || definition.health <= 0) return null;
+    const maxHealth = getTerrainMaxHealth(block);
+    if (!definition.solid || maxHealth <= 0) return null;
 
     const key = this.damageKey(position.x, position.y, position.z);
     const amount = Math.max(0, input.amount ?? 1);
     const previousDamage = this.blockDamage.get(key) ?? 0;
     const nextDamage = previousDamage + amount;
-    const remainingHealth = Math.max(0, definition.health - nextDamage);
+    const remainingHealth = Math.max(0, maxHealth - nextDamage);
     const ejectedRubbleMaterialUnits = getEjectedBlockRubbleMaterialUnits(
       previousDamage,
       nextDamage,
-      definition.health
+      maxHealth
     );
 
     if (remainingHealth > 0) {
       this.blockDamage.set(key, nextDamage);
-      const partialCutResult = this.addPartialBlockCut(block, position, definition.health, nextDamage, {
+      const partialCutResult = this.addPartialBlockCut(block, position, maxHealth, nextDamage, {
         point: input.point,
         normal: input.normal,
         incomingDirection: input.incomingDirection,
@@ -1448,7 +1637,7 @@ export class VoxelWorld implements CollisionWorld {
           ejectedRubbleMaterialUnits
         ),
         pierceContinuation: latestCut
-          ? this.createPartialBlockPierceContinuation(partialCell, latestCut, definition.health, input)
+          ? this.createPartialBlockPierceContinuation(partialCell, latestCut, input)
           : undefined
       };
     }
@@ -1462,7 +1651,7 @@ export class VoxelWorld implements CollisionWorld {
       block,
       position,
       remainingHealth: 0,
-      maxHealth: definition.health,
+      maxHealth,
       destroyed: true,
       ejectedRubbleMaterialUnits,
       debrisEjectionHint: createFallbackDebrisEjectionHint(position, input, ejectedRubbleMaterialUnits)
@@ -1568,6 +1757,141 @@ export class VoxelWorld implements CollisionWorld {
         this.blockDamage.delete(key);
       }
     }
+  }
+
+  private createTerraformerTargetSubCells(
+    input: TerraformerEditInput,
+    size: number
+  ): readonly TerraformerTargetSubCell[] {
+    const center = createTerraformerGlobalSubCellCenter(input);
+    // Even-sized brushes cannot have a perfect center cell. Biasing positive
+    // from the reticle keeps the targeted sub-cell inside the selection and is
+    // deterministic on the global sub-cell grid.
+    const startX = center.x - Math.floor((size - 1) / 2);
+    const startY = center.y - Math.floor((size - 1) / 2);
+    const startZ = center.z - Math.floor((size - 1) / 2);
+    const targets: TerraformerTargetSubCell[] = [];
+
+    for (let localY = 0; localY < size; localY += 1) {
+      for (let localZ = 0; localZ < size; localZ += 1) {
+        for (let localX = 0; localX < size; localX += 1) {
+          const globalX = startX + localX;
+          const globalY = startY + localY;
+          const globalZ = startZ + localZ;
+          const position = createBlockPositionFromGlobalSubCell(globalX, globalY, globalZ);
+          if (position.y < 0 || position.y >= WORLD_HEIGHT) continue;
+
+          const block = this.getBlock(position.x, position.y, position.z);
+          const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
+          const maxHealth = getTerrainMaxHealth(block);
+          if (!definition.solid || maxHealth <= 0 || block === BLOCK.rubble) continue;
+
+          const cellIndex = createLocalSubCellIndex(globalX, globalY, globalZ);
+          if (this.getRemovedPartialBlockVisualCellIndexes(position).has(cellIndex)) continue;
+
+          targets.push({
+            block,
+            position,
+            cellIndex,
+            globalX,
+            globalY,
+            globalZ,
+            bounds: createSubCellBounds(globalX, globalY, globalZ),
+            remainingHealth: Math.max(0, maxHealth - (this.blockDamage.get(createPartialBlockKey(position)) ?? 0)),
+            maxHealth
+          });
+        }
+      }
+    }
+
+    return targets;
+  }
+
+  private applyTerraformerEditToBlock(
+    position: VoxelBlockPosition,
+    cells: readonly TerraformerTargetSubCell[],
+    input: TerraformerEditInput
+  ): BlockDamageResult | null {
+    const block = this.getBlock(position.x, position.y, position.z);
+    const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
+    const maxHealth = getTerrainMaxHealth(block);
+    const subCellHealth = getTerraformerSubCellHealth(block);
+    if (!definition.solid || maxHealth <= 0 || subCellHealth <= 0 || block === BLOCK.rubble) return null;
+
+    const key = createPartialBlockKey(position);
+    const existing = this.partialBlocks.get(key);
+    const removedCells = this.getRemovedPartialBlockVisualCellIndexes(position);
+    const newlyRemovedCellIndexes = cells
+      .map((cell) => cell.cellIndex)
+      .filter((cellIndex) => !removedCells.has(cellIndex));
+    if (newlyRemovedCellIndexes.length === 0) return null;
+
+    for (const cellIndex of newlyRemovedCellIndexes) {
+      removedCells.add(cellIndex);
+    }
+
+    const previousDamage = this.blockDamage.get(key) ?? 0;
+    const nextDamage = Math.min(maxHealth, previousDamage + newlyRemovedCellIndexes.length * subCellHealth);
+    const ejectedRubbleMaterialUnits = getEjectedBlockRubbleMaterialUnits(
+      previousDamage,
+      nextDamage,
+      maxHealth
+    );
+    const cuts = createNextPartialBlockCuts(block, position, existing?.cuts ?? [], input);
+    const cell: PartialBlockCell = {
+      block,
+      position,
+      cuts,
+      removedVisualCellIndexes: [...removedCells].sort((left, right) => left - right),
+      damage: nextDamage,
+      maxHealth
+    };
+    const destroyed = nextDamage >= maxHealth || removedCells.size >= BLOCK_FRAGMENT_GRID_SIZE ** 3;
+    const bitePoofPositions = createPartialBlockBitePoofPositions(
+      position,
+      newlyRemovedCellIndexes,
+      input.normal
+    );
+    const debrisEjectionHint = this.createPartialBlockDebrisEjectionHint(
+      cell,
+      newlyRemovedCellIndexes,
+      input,
+      ejectedRubbleMaterialUnits
+    );
+
+    if (destroyed) {
+      this.blockDamage.delete(key);
+      this.setBlock(position.x, position.y, position.z, BLOCK.air);
+      return {
+        block,
+        position,
+        remainingHealth: 0,
+        maxHealth,
+        destroyed: true,
+        bitePoofPositions,
+        ejectedRubbleMaterialUnits,
+        debrisEjectionHint
+      };
+    }
+
+    this.blockDamage.set(key, nextDamage);
+    this.setPartialBlockCell(cell, { urgentVisual: !existing });
+    return {
+      block,
+      position,
+      remainingHealth: Math.max(0, maxHealth - nextDamage),
+      maxHealth,
+      destroyed: false,
+      bitePoofPositions,
+      ejectedRubbleMaterialUnits,
+      debrisEjectionHint
+    };
+  }
+
+  private getRemovedPartialBlockVisualCellIndexes(position: VoxelBlockPosition): Set<number> {
+    const existing = this.partialBlocks.get(createPartialBlockKey(position));
+    if (!existing) return new Set();
+    return new Set(existing.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(existing));
   }
 
   private createBlockDamageBrushTargets(input: BlockCarveInput): BlockDamageBrushTarget[] {
@@ -1750,14 +2074,15 @@ export class VoxelWorld implements CollisionWorld {
     const position = target.position;
     const block = this.getBlock(position.x, position.y, position.z);
     const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
-    if (!definition.solid || definition.health <= 0) return null;
+    const maxHealth = getTerrainMaxHealth(block);
+    if (!definition.solid || maxHealth <= 0) return null;
 
     const amount = Math.max(0, input.amount ?? 1);
     const previousDamage = this.blockDamage.get(this.damageKey(position.x, position.y, position.z)) ?? 0;
     const nextDamage = previousDamage + amount;
-    const remainingHealth = Math.max(0, definition.health - nextDamage);
+    const remainingHealth = Math.max(0, maxHealth - nextDamage);
     const affectedVisualCellIndexes = remainingHealth > 0
-      ? this.previewPartialBlockCut(block, position, definition.health, nextDamage, {
+      ? this.previewPartialBlockCut(block, position, maxHealth, nextDamage, {
         point: input.point,
         normal: input.normal,
         incomingDirection: input.incomingDirection,
@@ -1773,7 +2098,7 @@ export class VoxelWorld implements CollisionWorld {
       normal: target.normal,
       primary: target.primary,
       remainingHealth,
-      maxHealth: definition.health,
+      maxHealth,
       destroyed: remainingHealth <= 0,
       affectedVisualCellIndexes
     };
@@ -1970,7 +2295,6 @@ export class VoxelWorld implements CollisionWorld {
   private createPartialBlockPierceContinuation(
     cell: PartialBlockCell,
     cut: PartialBlockCut,
-    maxHealth: number,
     input: BlockCarveInput
   ): BlockPierceContinuation | undefined {
     const coreRadius = input.coreRadius;
@@ -1991,8 +2315,12 @@ export class VoxelWorld implements CollisionWorld {
     const tunnelCellCount = getPartialBlockPierceTunnelCellCount(cell, cut, trajectory);
     if (tunnelCellCount < BLOCK_FRAGMENT_GRID_SIZE) return undefined;
 
+    // Terrain HP is scaled for sub-cell editing, but piercing feel should still
+    // charge the old compact material toughness so fast tiny cores behave as
+    // they did before the editor-grade HP expansion.
+    const materialHealth = getBlockMaterialRule(cell.block).health;
     const exitSpeed = input.speed -
-      tunnelCellCount * PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST * (maxHealth / 10);
+      tunnelCellCount * PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST * (materialHealth / 10);
     if (exitSpeed < PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED) return undefined;
 
     const exitPosition = createPartialBlockPierceExitPosition(cell.position, cut.localPoint, trajectory, coreRadius);
@@ -3008,6 +3336,15 @@ function getOrCreateMapBucket<K, V>(buckets: Map<string, Map<K, V>>, key: string
   if (existing) return existing;
 
   const bucket = new Map<K, V>();
+  buckets.set(key, bucket);
+  return bucket;
+}
+
+function getOrCreateArrayBucket<K, V>(buckets: Map<K, V[]>, key: K): V[] {
+  const existing = buckets.get(key);
+  if (existing) return existing;
+
+  const bucket: V[] = [];
   buckets.set(key, bucket);
   return bucket;
 }
