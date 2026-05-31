@@ -50,6 +50,12 @@ export type PartialBlockCut = {
   readonly localPoint: PartialBlockPosition;
   readonly trajectory?: PartialBlockPosition;
   readonly coreRadius?: number;
+  /**
+   * Precision tools such as the Terraformer choose exact lattice cells instead
+   * of asking the impact-ranking path to grow a connected bite. Keeping that
+   * intent on the cut makes fallback reconstruction deterministic too.
+   */
+  readonly exactRemovedVisualCellIndexes?: readonly number[];
   readonly radius: number;
   readonly depth: number;
   readonly seed: number;
@@ -469,7 +475,8 @@ export function createPartialBlockCut({
   incomingDirection,
   coreRadius,
   speed,
-  cutIndex
+  cutIndex,
+  exactRemovedVisualCellIndexes
 }: {
   readonly block: number;
   readonly position: PartialBlockPosition;
@@ -479,6 +486,7 @@ export function createPartialBlockCut({
   readonly coreRadius?: number;
   readonly speed: number;
   readonly cutIndex: number;
+  readonly exactRemovedVisualCellIndexes?: readonly number[];
 }): PartialBlockCut {
   const localPoint = {
     x: clamp01(point.x - Math.floor(position.x)),
@@ -496,12 +504,14 @@ export function createPartialBlockCut({
   const safeCoreRadius = typeof coreRadius === "number" && Number.isFinite(coreRadius) && coreRadius > 0
     ? coreRadius
     : undefined;
+  const exactIndexes = normalizePartialBlockExactRemovedVisualCellIndexes(exactRemovedVisualCellIndexes);
 
   return {
     normal: normalizedNormal,
     localPoint,
     trajectory,
     coreRadius: safeCoreRadius,
+    ...(exactIndexes.length > 0 ? { exactRemovedVisualCellIndexes: exactIndexes } : {}),
     radius: lerp(PARTIAL_BLOCK_MIN_RADIUS, PARTIAL_BLOCK_MAX_RADIUS, speedT) *
       (0.88 + hashUnit(seed ^ 0x9e3779b9) * 0.24),
     depth: lerp(PARTIAL_BLOCK_MIN_DEPTH, PARTIAL_BLOCK_MAX_DEPTH, speedT) *
@@ -659,14 +669,17 @@ export function createPartialBlockRemovedVisualCellIndexes(
     if (!Number.isInteger(index) || index < 0 || index >= PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT) continue;
     removed.add(index);
   }
+  addExactRemovedVisualCellIndexes(removed, cell.cuts, targetRemovedCount);
   if (removed.size >= targetRemovedCount) return [...removed];
 
-  const rankedCells = createPartialBlockRemovalRanking(cell);
+  const rankedCells = createPartialBlockRemovalRanking({
+    cuts: cell.cuts.filter((cut) => !isExactPartialBlockCut(cut))
+  });
 
   if (targetRemovedCount - removed.size >= PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE) {
     for (let cutIndex = cell.cuts.length - 1; cutIndex >= 0; cutIndex -= 1) {
       const cut = cell.cuts[cutIndex];
-      if (!cut || !isTinyCoreCut(cut)) continue;
+      if (!cut || isExactPartialBlockCut(cut) || !isTinyCoreCut(cut)) continue;
 
       for (const tunnelIndex of createPartialBlockTrajectoryTunnelCellIndexes(
         cut.localPoint,
@@ -965,6 +978,35 @@ function scorePartialBlockLatticeCellForRemoval(
     bestScore = Math.min(bestScore, score);
   }
   return bestScore;
+}
+
+function normalizePartialBlockExactRemovedVisualCellIndexes(
+  indexes: readonly number[] | undefined
+): readonly number[] {
+  if (!indexes) return [];
+
+  const uniqueIndexes = new Set<number>();
+  for (const index of indexes) {
+    if (isValidPartialBlockLatticeCellIndex(index)) uniqueIndexes.add(index);
+  }
+  return [...uniqueIndexes].sort((left, right) => left - right);
+}
+
+function addExactRemovedVisualCellIndexes(
+  removed: Set<number>,
+  cuts: readonly PartialBlockCut[],
+  targetRemovedCount: number
+): void {
+  for (const cut of cuts) {
+    for (const index of cut.exactRemovedVisualCellIndexes ?? []) {
+      if (removed.size >= targetRemovedCount) return;
+      if (isValidPartialBlockLatticeCellIndex(index)) removed.add(index);
+    }
+  }
+}
+
+function isExactPartialBlockCut(cut: PartialBlockCut): boolean {
+  return (cut.exactRemovedVisualCellIndexes?.length ?? 0) > 0;
 }
 
 function isTinyCoreCut(cut: PartialBlockCut): boolean {

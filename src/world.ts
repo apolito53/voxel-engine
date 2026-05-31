@@ -650,7 +650,8 @@ function createNextPartialBlockCuts(
   block: number,
   position: VoxelBlockPosition,
   existingCuts: readonly PartialBlockCut[],
-  input: TerraformerEditInput
+  input: TerraformerEditInput,
+  exactRemovedVisualCellIndexes: readonly number[]
 ): PartialBlockCut[] {
   const cuts = [...existingCuts];
   cuts.push(createPartialBlockCut({
@@ -660,7 +661,8 @@ function createNextPartialBlockCuts(
     normal: input.normal,
     incomingDirection: input.incomingDirection,
     speed: input.speed,
-    cutIndex: cuts.length
+    cutIndex: cuts.length,
+    exactRemovedVisualCellIndexes
   }));
   while (cuts.length > PARTIAL_BLOCK_MAX_CUTS_PER_CELL) {
     cuts.shift();
@@ -1911,7 +1913,13 @@ export class VoxelWorld implements CollisionWorld {
       nextDamage,
       maxHealth
     );
-    const cuts = createNextPartialBlockCuts(block, position, existing?.cuts ?? [], input);
+    const cuts = createNextPartialBlockCuts(
+      block,
+      position,
+      existing?.cuts ?? [],
+      input,
+      newlyRemovedCellIndexes
+    );
     const cell: PartialBlockCell = {
       block,
       position,

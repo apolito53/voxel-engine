@@ -198,6 +198,7 @@ import {
   arePartialBlockVisualCellIndexesConnected,
   createPartialBlockCollisionBoxes,
   createPartialBlockMeshRegionKey,
+  createPartialBlockRemovedVisualCellIndexes,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
@@ -3213,16 +3214,34 @@ test("Terraformer edits exact sub-cells on the shared terrain damage path", () =
   const preview = world.previewTerraformerEdit(input);
   assert(preview, "Terraformer should preview the targeted sub-cell before editing");
   assertEqual(preview.cells.length, 1, "size 1 should target exactly one sub-cell");
+  const previewedCellIndex = preview.cells[0]?.cellIndex;
+  assert(typeof previewedCellIndex === "number", "Terraformer size-1 preview should expose its exact cell index");
 
   const result = world.applyTerraformerEdit(input);
   const subCellHp = getTerraformerSubCellHealth(BLOCK.stone);
+  const partialCell = world.getPartialBlock(2, 3, 4);
   assert(result, "Terraformer should edit the previewed sub-cell");
   assertEqual(result.results.length, 1, "one macro block should receive the size-1 edit");
   assertEqual(world.getBlockDamage(2, 3, 4), subCellHp, "Terraformer damage should spend exactly one sub-cell HP");
   assertEqual(
-    world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes?.length,
+    partialCell?.removedVisualCellIndexes?.length,
     1,
     "Terraformer should store the exact removed sub-cell"
+  );
+  assert(partialCell, "Terraformer should leave a partial terrain cell after one sub-cell edit");
+  assertDeepEqual(
+    partialCell.cuts[0]?.exactRemovedVisualCellIndexes ?? [],
+    [previewedCellIndex],
+    "Terraformer cuts should carry exact cells instead of using ranked neighbor spreading"
+  );
+  assertDeepEqual(
+    createPartialBlockRemovedVisualCellIndexes({
+      cuts: partialCell.cuts,
+      damage: partialCell.damage,
+      maxHealth: partialCell.maxHealth
+    }),
+    [previewedCellIndex],
+    "Terraformer fallback reconstruction should not damage adjacent sub-cells"
   );
   assert(!world.isRenderableSolid(2, 3, 4), "Terraformer-edited blocks should use the partial mesh/mask path");
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.9.3 - 2026-05-31
+
+### Fixed
+
+- Fixed Terraformer sub-cell edits so precision cuts carry their exact targeted
+  lattice cells and bypass the normal neighbor-spreading bite reconstruction.
+  A size-1 Terraformer edit now reconstructs as exactly one sub-cell instead
+  of being eligible for adjacent-cell damage sharing.
+
 ## 0.9.2 - 2026-05-31
 
 ### Fixed
