@@ -294,6 +294,7 @@ import {
   type DebrisEjectionHint,
   type TerraformerEditInput,
   type TerraformerEditPreview,
+  type TerraformerTerrainRaycastHit,
   type WorldStats
 } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
@@ -1656,17 +1657,16 @@ function startOrContinueTerraformer(immediate: boolean): void {
 }
 
 function createTerraformerEditInput(): TerraformerEditInput | null {
-  const hit = getTargetHit();
-  if (!hit || hit.source !== "voxel" || hit.kind !== "block") return null;
+  const hit = getTerraformerTargetHit();
+  if (!hit) return null;
 
   const terraformDirection = getCameraDirection();
-  const impactPoint = camera.position.clone().addScaledVector(terraformDirection, hit.distance);
   const impactNormal = new THREE.Vector3(hit.normal.x, hit.normal.y, hit.normal.z);
   return {
     x: hit.block.x,
     y: hit.block.y,
     z: hit.block.z,
-    point: impactPoint,
+    point: hit.point,
     normal: impactNormal,
     incomingDirection: terraformDirection,
     speed: TERRAFORMER_IMPACT_SPEED,
@@ -2519,6 +2519,31 @@ function getTargetHit(options: { readonly requireLook?: boolean } = {}): TargetH
     normal: blockHit.normal,
     distance: blockHit.distance
   };
+}
+
+function getTerraformerTargetHit(): TerraformerTerrainRaycastHit | null {
+  if (!inWorld || !requirePlayer().isLooking()) return null;
+
+  const terraformDirection = getCameraDirection();
+  const activeWorld = requireWorld();
+  const blockHit = activeWorld.raycastTerraformerTarget(
+    camera.position,
+    terraformDirection,
+    BLOCK_INTERACTION_REACH
+  );
+  const rubbleHit = rubbleField.raycast(camera.position, terraformDirection, BLOCK_INTERACTION_REACH);
+
+  // Rubble is not part of this precision editor pass. If a rubble pile is
+  // visibly in front of the terrain ray, keep the Terraformer inert instead of
+  // letting it tunnel-edit terrain hidden behind cover.
+  if (rubbleHit && (!blockHit || rubbleHit.distance < blockHit.distance - TARGET_HIT_EPSILON)) {
+    return null;
+  }
+
+  if (!blockHit) return null;
+  return activeWorld.getBlock(blockHit.block.x, blockHit.block.y, blockHit.block.z) === BLOCK.rubble
+    ? null
+    : blockHit;
 }
 
 function updateTargetBlockHighlighter(): void {

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.9.2 - 2026-05-31
+
+### Fixed
+
+- Fixed Terraformer targeting on partially destroyed blocks. The Terraformer
+  now raycasts against the remaining `3x3x3` bite-lattice cells, so repeated
+  edits retarget newly exposed inner sub-cells instead of getting stuck on the
+  old full-cube shell.
+
 ## 0.9.1 - 2026-05-31
 
 ### Fixed

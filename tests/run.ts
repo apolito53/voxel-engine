@@ -3231,6 +3231,63 @@ test("Terraformer edits exact sub-cells on the shared terrain damage path", () =
   assertEqual(world.getBlockDamage(2, 3, 4), subCellHp, "retargeting an empty sub-cell should not add phantom damage");
 });
 
+test("Terraformer raycasts retarget exposed partial sub-cells", () => {
+  const world = new VoxelWorld({ seed: "terraformer-partial-retarget-test" });
+  world.setBlock(1, 3, 4, BLOCK.air);
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  const origin = new THREE.Vector3(1.5, 3.5, 4.5);
+  const direction = new THREE.Vector3(1, 0, 0);
+  const reachThroughTargetBlock = 1.49;
+  for (const expectedLocalX of [0, 1, 2]) {
+    const hit = world.raycastTerraformerTarget(origin, direction, reachThroughTargetBlock);
+    assert(hit, "Terraformer raycast should find the next visible partial sub-cell");
+    assertDeepEqual(hit.block, { x: 2, y: 3, z: 4 }, "retargeted sub-cell should stay in the chipped block");
+    assertClose(
+      hit.point.x,
+      2 + expectedLocalX / BLOCK_FRAGMENT_GRID_SIZE,
+      0.00001,
+      "partial-aware Terraformer hit should move inward to the exposed sub-cell face"
+    );
+
+    const preview = world.previewTerraformerEdit({
+      x: hit.block.x,
+      y: hit.block.y,
+      z: hit.block.z,
+      point: hit.point,
+      normal: hit.normal,
+      incomingDirection: direction,
+      speed: 6,
+      size: 1
+    });
+    assert(preview, "retargeted partial-cell hit should produce an editable Terraformer preview");
+    assertEqual(preview.cells.length, 1, "size 1 should keep targeting one visible sub-cell at a time");
+    assertEqual(
+      decodeTestLatticeIndex(preview.cells[0]?.cellIndex ?? -1).x,
+      expectedLocalX,
+      "retargeted preview should advance through the opened tunnel instead of anchoring to the old cube shell"
+    );
+
+    const result = world.applyTerraformerEdit({
+      x: hit.block.x,
+      y: hit.block.y,
+      z: hit.block.z,
+      point: hit.point,
+      normal: hit.normal,
+      incomingDirection: direction,
+      speed: 6,
+      size: 1
+    });
+    assert(result, "retargeted Terraformer edit should remove the highlighted sub-cell");
+  }
+
+  assertEqual(
+    world.raycastTerraformerTarget(origin, direction, reachThroughTargetBlock),
+    null,
+    "Terraformer raycast should pass through a fully opened sub-cell tunnel instead of hitting the old full cube"
+  );
+});
+
 test("Terraformer brush sizes operate on the global sub-cell grid", () => {
   const size2World = new VoxelWorld({ seed: "terraformer-size-2-test" });
   size2World.setBlock(2, 3, 4, BLOCK.grass);

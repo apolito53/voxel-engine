@@ -166,6 +166,13 @@ export type TerraformerEditInput = {
   readonly size: number;
 };
 
+export type TerraformerTerrainRaycastHit = {
+  readonly block: VoxelBlockPosition;
+  readonly normal: VoxelBlockPosition;
+  readonly point: VoxelVector;
+  readonly distance: number;
+};
+
 export type TerraformerSubCellBounds = {
   readonly minX: number;
   readonly maxX: number;
@@ -428,6 +435,61 @@ function getProjectileSweepHitAgainstAabb(
   }
 
   return entryTime <= 1 ? { t: entryTime, normal } : null;
+}
+
+function createRayPoint(
+  origin: Pick<THREE.Vector3, "x" | "y" | "z">,
+  direction: VoxelVector,
+  distance: number
+): VoxelVector {
+  return {
+    x: origin.x + direction.x * distance,
+    y: origin.y + direction.y * distance,
+    z: origin.z + direction.z * distance
+  };
+}
+
+function getRayStartingVoxel(value: number, direction: number): number {
+  // Match the normal block raycaster at integer boundaries: a negative-facing
+  // ray beginning exactly on a grid line is touching the voxel on the negative
+  // side first, not the positive-side voxel that Math.floor would choose.
+  if (direction < 0 && Number.isInteger(value)) return value - 1;
+  return Math.floor(value);
+}
+
+function getRayIntBound(value: number, direction: number): number {
+  if (direction === 0) return Number.POSITIVE_INFINITY;
+  const next = direction > 0 ? Math.floor(value) + 1 : Math.ceil(value) - 1;
+  return (next - value) / direction;
+}
+
+function chooseRayEntryFace(
+  crossesX: boolean,
+  crossesY: boolean,
+  crossesZ: boolean,
+  direction: VoxelVector,
+  stepX: number,
+  stepY: number,
+  stepZ: number
+): VoxelBlockPosition {
+  let axis: "x" | "y" | "z" = "x";
+  let strength = -1;
+
+  if (crossesX) {
+    axis = "x";
+    strength = Math.abs(direction.x);
+  }
+  if (crossesY && Math.abs(direction.y) > strength) {
+    axis = "y";
+    strength = Math.abs(direction.y);
+  }
+  if (crossesZ && Math.abs(direction.z) > strength) {
+    axis = "z";
+  }
+
+  if (axis === "x") return { x: -stepX, y: 0, z: 0 };
+  if (axis === "y") return { x: 0, y: -stepY, z: 0 };
+  return { x: 0, y: 0, z: -stepZ };
 }
 
 function getAxisProjectileSweepTimes(
@@ -2771,6 +2833,82 @@ export class VoxelWorld implements CollisionWorld {
     return block !== BLOCK.air;
   }
 
+  raycastTerraformerTarget(
+    origin: Pick<THREE.Vector3, "x" | "y" | "z">,
+    direction: Pick<THREE.Vector3, "x" | "y" | "z">,
+    maxDistance: number
+  ): TerraformerTerrainRaycastHit | null {
+    const normalizedDirection = normalizeVoxelVector(direction);
+    const reach = Number.isFinite(maxDistance) ? Math.max(0, maxDistance) : 0;
+    if (!normalizedDirection || reach <= 0) return null;
+
+    let x = getRayStartingVoxel(origin.x, normalizedDirection.x);
+    let y = getRayStartingVoxel(origin.y, normalizedDirection.y);
+    let z = getRayStartingVoxel(origin.z, normalizedDirection.z);
+
+    const stepX = normalizedDirection.x > 0 ? 1 : -1;
+    const stepY = normalizedDirection.y > 0 ? 1 : -1;
+    const stepZ = normalizedDirection.z > 0 ? 1 : -1;
+
+    const tDeltaX = Math.abs(1 / (normalizedDirection.x || 0.000001));
+    const tDeltaY = Math.abs(1 / (normalizedDirection.y || 0.000001));
+    const tDeltaZ = Math.abs(1 / (normalizedDirection.z || 0.000001));
+
+    let tMaxX = getRayIntBound(origin.x, normalizedDirection.x);
+    let tMaxY = getRayIntBound(origin.y, normalizedDirection.y);
+    let tMaxZ = getRayIntBound(origin.z, normalizedDirection.z);
+    let face: VoxelBlockPosition = { x: 0, y: 0, z: 0 };
+
+    for (let distance = 0; distance <= reach;) {
+      if (y >= 0 && this.isSolid(x, y, z)) {
+        const position = { x, y, z };
+        const partialHit = this.raycastTerraformerPartialBlockTarget(
+          position,
+          origin,
+          normalizedDirection,
+          reach
+        );
+        if (partialHit) return partialHit;
+
+        if (!this.getPartialBlock(x, y, z)) {
+          return {
+            block: position,
+            normal: face,
+            point: createRayPoint(origin, normalizedDirection, distance),
+            distance
+          };
+        }
+      }
+
+      const nextDistance = Math.min(tMaxX, tMaxY, tMaxZ);
+      if (!Number.isFinite(nextDistance) || nextDistance > reach) break;
+
+      const crossesX = tMaxX === nextDistance;
+      const crossesY = tMaxY === nextDistance;
+      const crossesZ = tMaxZ === nextDistance;
+      face = chooseRayEntryFace(crossesX, crossesY, crossesZ, normalizedDirection, stepX, stepY, stepZ);
+
+      // Advance every crossed axis together so exact edge/corner rays do not
+      // briefly test a side-neighbor that the reticle merely grazed.
+      if (crossesX) {
+        x += stepX;
+        tMaxX += tDeltaX;
+      }
+      if (crossesY) {
+        y += stepY;
+        tMaxY += tDeltaY;
+      }
+      if (crossesZ) {
+        z += stepZ;
+        tMaxZ += tDeltaZ;
+      }
+
+      distance = nextDistance;
+    }
+
+    return null;
+  }
+
   getProjectileBlockSweepHit(
     x: number,
     y: number,
@@ -2826,6 +2964,67 @@ export class VoxelWorld implements CollisionWorld {
       );
       if (!hit || (bestHit && hit.t >= bestHit.t)) continue;
       bestHit = hit;
+    }
+
+    return bestHit;
+  }
+
+  private raycastTerraformerPartialBlockTarget(
+    position: VoxelBlockPosition,
+    origin: Pick<THREE.Vector3, "x" | "y" | "z">,
+    direction: VoxelVector,
+    maxDistance: number
+  ): TerraformerTerrainRaycastHit | null {
+    const cell = this.getPartialBlock(position.x, position.y, position.z);
+    if (!cell) return null;
+
+    const removedCells = new Set(
+      cell.removedVisualCellIndexes ?? createPartialBlockRemovedVisualCellIndexes(cell)
+    );
+    const movement = {
+      x: direction.x * maxDistance,
+      y: direction.y * maxDistance,
+      z: direction.z * maxDistance
+    };
+    const cellSize = 1 / BLOCK_FRAGMENT_GRID_SIZE;
+    let bestHit: TerraformerTerrainRaycastHit | null = null;
+
+    for (let index = 0; index < BLOCK_FRAGMENT_GRID_SIZE ** 3; index += 1) {
+      if (removedCells.has(index)) continue;
+
+      const visualCell = decodePartialBlockVisualCell(index);
+      const minX = position.x + visualCell.x * cellSize;
+      const maxX = position.x + (visualCell.x + 1) * cellSize;
+      const minY = position.y + visualCell.y * cellSize;
+      const maxY = position.y + (visualCell.y + 1) * cellSize;
+      const minZ = position.z + visualCell.z * cellSize;
+      const maxZ = position.z + (visualCell.z + 1) * cellSize;
+      const hit = getProjectileSweepHitAgainstAabb(
+        origin,
+        movement,
+        minX,
+        maxX,
+        minY,
+        maxY,
+        minZ,
+        maxZ,
+        true
+      );
+      if (!hit) continue;
+
+      const distance = hit.t * maxDistance;
+      if (bestHit && distance >= bestHit.distance) continue;
+
+      bestHit = {
+        block: position,
+        normal: {
+          x: Math.round(hit.normal.x),
+          y: Math.round(hit.normal.y),
+          z: Math.round(hit.normal.z)
+        },
+        point: createRayPoint(origin, direction, distance),
+        distance
+      };
     }
 
     return bestHit;
