@@ -1186,7 +1186,7 @@ body.controls-hidden #hud {
 #nova-message {
   position: fixed;
   left: 50%;
-  bottom: 30px;
+  bottom: 112px;
   z-index: 13;
   max-width: min(620px, calc(100vw - 36px));
   padding: 10px 14px;
@@ -1462,6 +1462,10 @@ body.controls-hidden #hud {
   .hotbar-slot-label {
     font-size: 9px;
     min-height: 21px;
+  }
+
+  #nova-message {
+    bottom: 102px;
   }
 
   .loadout-block-grid {

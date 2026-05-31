@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.8.10 - 2026-05-31
+
+### Fixed
+
+- Moved Nova chatter pop-ups above the bottom hotbar so messages no longer
+  cover item/tool selection.
+
 ## 0.8.9 - 2026-05-30
 
 ### Changed
