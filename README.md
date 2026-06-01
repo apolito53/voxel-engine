@@ -40,7 +40,9 @@ chmod +x ./start.sh
 Open `http://127.0.0.1:5173`.
 
 Run `npm.cmd run debug:logs` in a second terminal when you want the local
-hitch-log receiver on `127.0.0.1:5174`.
+hitch/combat-log receiver on `127.0.0.1:5174`. Normal Vite dev sessions also
+write combat damage JSONL through the same-origin `/__voxel_combat_log`
+endpoint.
 
 Pass a different base-server port as the first argument only for temporary
 one-off runs, for example `.\start.ps1 5193` or `./start.sh 5193`. Do not use
@@ -49,7 +51,7 @@ one-off runs, for example `.\start.ps1 5193` or `./start.sh 5193`. Do not use
 ## Ports
 
 - Base Vite server: `5173`
-- Hitch-log receiver: `5174`
+- Hitch/combat-log receiver: `5174`
 - Preview server: `4173`
 
 The deployed Vercel site writes 45ms+ hitch records to the private
@@ -67,7 +69,8 @@ ignored by git.
   or erases in the Blocks lane
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
-- `F3` toggles the debug overlay, including the recent combat/damage log
+- `F3` toggles the debug overlay, including the recent combat/damage log and
+  local disk-write status
 - `F4` cycles quality presets
 - `F6` toggles Core Aim Preview
 - `F8` toggles the scripted test avatar
@@ -94,7 +97,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 - [docs/nova-companion.md](docs/nova-companion.md): Nova Pilot, Nova Terminal,
   local reactions, and the future model-hook direction.
 - [docs/performance-hitch-logging.md](docs/performance-hitch-logging.md): local
-  and deployed hitch logs, debug metrics, server markers, and visual recordings.
+  and deployed hitch logs, persistent combat damage logs, debug metrics, server
+  markers, and visual recordings.
 - [docs/automation.md](docs/automation.md): F8 avatar, Codex pilot bridge,
   visual scenario recorder, and Chrome/playtest automation notes.
 

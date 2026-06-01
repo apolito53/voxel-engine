@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-05-31
+Last reviewed: 2026-06-01
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -19,7 +19,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Start on Windows: `.\start.ps1`
 - Start on Linux/Ubuntu: `chmod +x ./start.sh && ./start.sh`
 - Dev server: `npm.cmd run dev -- --port 5173`; `scripts/dev-server.mjs` writes a `logs/server-starts-YYYY-MM-DD.jsonl` repo-state marker before launching Vite.
-- Hitch-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5174`.
+- Hitch/combat-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5174`; normal Vite dev sessions also expose same-origin `POST /__voxel_combat_log` for persistent damage JSONL under `logs/combat/`.
 - Remote hitch-log inspection: `vercel blob list --prefix hitches --limit 20` then `vercel blob get <pathname> --access private`; local `.env.local` supplies the Blob token and must stay untracked.
 - GitHub Actions CI: `.github/workflows/ci.yml` runs `npm run validate` on pushes and pull requests to `main`, supports manual dispatch, and cancels stale in-progress runs on the same ref.
 - Strict type check: `npm.cmd run typecheck`
@@ -49,8 +49,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
-- Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, rubble cover stats, recent tool/core damage entries, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
-- Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`
+- Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
+- Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, persistent local `logs/combat/` damage JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`, `vite.config.ts`
 - Frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation: `src/frameLoop.ts`
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Reusable held-item registry, stack metadata, categories, tags, and primary/secondary action descriptors, including Unarmed, Terraformer, Physics Core, Hitscan Core, and build-only block items: `src/items.ts`

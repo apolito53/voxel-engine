@@ -9,7 +9,9 @@ const HOST = "127.0.0.1";
 const PORT = Number(process.env.VOXEL_HITCH_LOG_PORT ?? 5174);
 const HITCH_ENDPOINT = "/__voxel_hitch_log";
 const VISUAL_TEST_ENDPOINT = "/__voxel_visual_test";
+const COMBAT_LOG_ENDPOINT = "/__voxel_combat_log";
 const HITCH_BODY_LIMIT_BYTES = 256 * 1024;
+const COMBAT_LOG_BODY_LIMIT_BYTES = 512 * 1024;
 const VISUAL_TEST_BODY_LIMIT_BYTES = Number(process.env.VOXEL_VISUAL_TEST_BODY_LIMIT_BYTES ?? 96 * 1024 * 1024);
 const ROOT_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOGS_DIRECTORY = resolve(ROOT_DIRECTORY, "logs");
@@ -30,7 +32,8 @@ const server = createServer(async (request, response) => {
       ok: true,
       endpoints: {
         hitches: HITCH_ENDPOINT,
-        visualTests: VISUAL_TEST_ENDPOINT
+        visualTests: VISUAL_TEST_ENDPOINT,
+        combat: COMBAT_LOG_ENDPOINT
       }
     });
     return;
@@ -45,6 +48,19 @@ const server = createServer(async (request, response) => {
       writeJson(response, 400, {
         ok: false,
         error: error instanceof Error ? error.message : "Unable to write hitch log."
+      });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && request.url === COMBAT_LOG_ENDPOINT) {
+    try {
+      const payload = await readJsonRequestBody(request, COMBAT_LOG_BODY_LIMIT_BYTES);
+      writeJson(response, 200, await appendCombatLog(payload));
+    } catch (error) {
+      writeJson(response, 400, {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unable to write combat log."
       });
     }
     return;
@@ -73,6 +89,7 @@ const server = createServer(async (request, response) => {
 server.listen(PORT, HOST, () => {
   console.log(`Voxel hitch log server listening on http://${HOST}:${PORT}`);
   console.log(`POST ${HITCH_ENDPOINT} -> ${LOGS_DIRECTORY}`);
+  console.log(`POST ${COMBAT_LOG_ENDPOINT} -> ${resolve(LOGS_DIRECTORY, "combat")}`);
   console.log(`POST ${VISUAL_TEST_ENDPOINT} -> ${VISUAL_RUNS_DIRECTORY}`);
 });
 
@@ -112,6 +129,47 @@ async function appendHitchLog(payload) {
     "utf8"
   );
   return logPath;
+}
+
+async function appendCombatLog(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Combat log payload must be a JSON object.");
+  }
+
+  const entries = Array.isArray(payload.entries) ? payload.entries : [];
+  if (entries.length === 0) throw new Error("Combat log payload has no entries.");
+
+  const receivedAt = new Date().toISOString();
+  const dateStamp = typeof payload.sentAtIso === "string" && payload.sentAtIso.length >= 10
+    ? payload.sentAtIso.slice(0, 10)
+    : receivedAt.slice(0, 10);
+  const sessionToken = sanitizeLogToken(
+    typeof payload.sessionId === "string" ? payload.sessionId : "",
+    "combat-session"
+  );
+  const combatDirectory = resolve(LOGS_DIRECTORY, "combat");
+  const logPath = resolve(combatDirectory, `combat-${dateStamp}-${sessionToken}.jsonl`);
+  const batchId = typeof payload.batchId === "number" && Number.isFinite(payload.batchId)
+    ? payload.batchId
+    : null;
+
+  await mkdir(combatDirectory, { recursive: true });
+  const lines = entries.map((entry, index) => JSON.stringify({
+    type: "voxel.combat-log.entry",
+    receivedAt,
+    sessionId: sessionToken,
+    batchId,
+    batchIndex: index,
+    context: payload.context && typeof payload.context === "object" ? payload.context : {},
+    entry
+  }));
+  await appendFile(logPath, `${lines.join("\n")}\n`, "utf8");
+
+  return {
+    ok: true,
+    logPath,
+    count: entries.length
+  };
 }
 
 async function writeVisualTestRun(payload) {

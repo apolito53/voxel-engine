@@ -19,6 +19,7 @@ pnpm-debug.log*
 logs/*.log
 logs/*.jsonl
 logs/*.png
+logs/combat/
 logs/visual-runs/
 .tmp-chrome-visual-recorder/
 

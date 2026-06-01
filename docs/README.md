@@ -9,6 +9,7 @@ This folder keeps the living design notes out of the project front door.
 - [nova-companion.md](nova-companion.md): Nova Pilot, Nova Terminal, local
   reactions, and future model-hook notes.
 - [performance-hitch-logging.md](performance-hitch-logging.md): local/remote
-  hitch logging, debug HUD metrics, server markers, and visual recordings.
+  hitch logging, persistent combat damage logs, debug HUD metrics, server
+  markers, and visual recordings.
 - [automation.md](automation.md): F8 avatar, Codex pilot bridge, visual scenarios,
   and Chrome/playtest automation.

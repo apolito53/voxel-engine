@@ -6,7 +6,7 @@ fresh evidence instead of stale vibes.
 ## Local Ports
 
 - App server: `127.0.0.1:5173`
-- Hitch-log receiver: `127.0.0.1:5174`
+- Hitch/combat-log receiver: `127.0.0.1:5174`
 - Preview server: `127.0.0.1:4173`
 
 Run the app with:
@@ -15,7 +15,8 @@ Run the app with:
 .\start.ps1
 ```
 
-Run the local receiver in a second terminal when you want logs and visual runs:
+Run the local receiver in a second terminal when you want fallback logs and
+visual runs:
 
 ```powershell
 npm.cmd run debug:logs
@@ -60,6 +61,36 @@ globalThis.__VOXEL_HITCH_START_PASS__("label")
 
 When `npm.cmd run debug:logs` is listening, local records append as
 pass-versioned JSONL under `logs/`.
+
+## Runtime Combat Records
+
+The Combat panel in F3 keeps a short in-memory ring buffer for the latest damage
+events, and local browser sessions also persist those events as JSONL under
+`logs/combat/`.
+
+Each persistent combat line includes:
+
+- Source tool/core, such as Terraformer, Physics Core, Hitscan Core, Builder, or
+  rubble collision.
+- Terrain or rubble target coordinates.
+- Damage applied, remaining HP, max HP, and destruction state.
+- Affected `3x3x3` terrain sub-cell indexes, including global sub-cell
+  coordinates when the Terraformer supplies exact targets.
+- Repro context: app version, current URL, user agent, world id, selected item,
+  and quality preset.
+
+Normal Vite dev sessions write through the same-origin endpoint:
+
+```text
+POST /__voxel_combat_log -> logs/combat/
+```
+
+The `npm.cmd run debug:logs` receiver exposes the same endpoint on
+`127.0.0.1:5174` as a fallback for preview or automation sessions. The browser
+tries the Vite endpoint first, then the `5174` receiver. Failed batches are
+dropped instead of requeued forever, because a down log receiver should not turn
+a damage bug into a memory bug. The F3 Combat panel shows `disk sent`, `queued`,
+and `failed` counts so you can tell whether the current repro is reaching disk.
 
 ## Deployed Logs
 

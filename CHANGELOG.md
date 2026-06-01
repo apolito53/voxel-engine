@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.9.5.1 - 2026-06-01
+
+### Added
+
+- Added persistent local combat logging for Terraformer, Physics Core, Hitscan
+  Core, Builder, and rubble damage events. Local Vite dev sessions now accept
+  `POST /__voxel_combat_log` and append per-entry JSONL under `logs/combat/`.
+- Extended the `npm.cmd run debug:logs` receiver on `127.0.0.1:5174` with the
+  same combat-log endpoint so preview/automation sessions can still write
+  damage receipts.
+- Added a Combat-panel disk status line to F3 so repro sessions show queued,
+  written, and failed persistent combat-log batches.
+
+### Changed
+
+- Combat logs now flush queued disk writes when switching worlds or tearing down
+  the runtime, preserving recent damage evidence before the in-memory ring
+  buffer is cleared.
+
 ## 0.9.5 - 2026-05-31
 
 ### Added

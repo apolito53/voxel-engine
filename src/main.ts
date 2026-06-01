@@ -632,6 +632,8 @@ const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
 const TERRAFORMER_SIZE_STORAGE_KEY = "voxel-sandbox-terraformer-size";
 const CONTROL_HINTS_STORAGE_KEY = "voxel-sandbox-control-hints-visible";
+const LOCAL_COMBAT_LOG_ENDPOINT = "/__voxel_combat_log";
+const LOCAL_COMBAT_LOG_RECEIVER_ENDPOINT = "http://127.0.0.1:5174/__voxel_combat_log";
 const terrainAndRubbleCollisionWorld: CollisionWorld = {
   // Full terrain blocks still come from VoxelWorld. Damaged terrain also exposes
   // explicit sub-voxel collision boxes so loose debris can collide with the
@@ -763,7 +765,12 @@ const debugHud = new DebugHud({
   gpuInfo,
   getQualityPreset: () => qualityController.preset
 });
-const combatLog = new CombatLog(160);
+const combatLog = new CombatLog(160, {
+  persistence: {
+    endpoints: getCombatLogPersistenceEndpoints(),
+    getContext: createCombatLogPersistenceContext
+  }
+});
 voxelRuntimeGlobal.__VOXEL_COMBAT_LOG__ = combatLog;
 
 worldSaveOrigin.textContent = getWorldSaveOriginLabel();
@@ -1943,7 +1950,7 @@ function animate(): void {
       debugPartialMeshStats,
       debrisSettlerStats,
       debugRubbleStats,
-      combatLog.getRecentLines(5),
+      [combatLog.getPersistenceStatusLine(), ...combatLog.getRecentLines(5)],
       smoothedFrameTimings
     );
   }
@@ -3994,6 +4001,7 @@ async function loadWorld(worldId: string): Promise<void> {
       name: savedWorld.name,
       seed: savedWorld.seed
     });
+    await combatLog.flushPersistent();
     combatLog.clear();
     debugHud.reset();
     minimapRenderer.reset();
@@ -4283,6 +4291,7 @@ function disposeRuntime(): void {
   visualTestRecorder.dispose();
   player?.dispose();
   clearToys();
+  void combatLog.flushPersistent();
   coreAimPreview.dispose();
   builderBrushPreview.dispose();
   physicsCoreTrail.dispose();
@@ -4320,3 +4329,29 @@ voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = disposeRuntime;
 (import.meta as ImportMeta & { readonly hot?: ViteHotContext }).hot?.dispose(disposeRuntime);
 
 void startApp();
+
+function getCombatLogPersistenceEndpoints(): readonly string[] {
+  if (!isLocalBrowserRuntime()) return [];
+
+  // Prefer the same-origin Vite middleware so normal `start.ps1` sessions write
+  // combat JSONL without needing the separate 5174 receiver. Keep the receiver
+  // as a fallback for preview/automation flows that already have it running.
+  return [LOCAL_COMBAT_LOG_ENDPOINT, LOCAL_COMBAT_LOG_RECEIVER_ENDPOINT];
+}
+
+function createCombatLogPersistenceContext(): Record<string, unknown> {
+  return {
+    appVersion: APP_VERSION,
+    href: window.location.href,
+    userAgent: navigator.userAgent,
+    worldId: world?.storage.worldId ?? null,
+    inWorld,
+    selectedItem: inWorld ? getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry) : null,
+    quality: qualityController?.preset.label ?? null
+  };
+}
+
+function isLocalBrowserRuntime(): boolean {
+  const hostname = window.location.hostname;
+  return hostname === "127.0.0.1" || hostname === "localhost";
+}

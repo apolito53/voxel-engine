@@ -66,16 +66,56 @@ export type CombatLogEntryInput = Omit<CombatLogEntry, "id" | "atMs"> & {
   readonly atMs?: number;
 };
 
+export type CombatLogPersistenceContext = Record<string, unknown>;
+
+export type CombatLogPersistencePayload = {
+  readonly type: "voxel.combat-log.batch";
+  readonly schemaVersion: 1;
+  readonly sessionId: string;
+  readonly batchId: number;
+  readonly sentAtIso: string;
+  readonly context: CombatLogPersistenceContext;
+  readonly entries: readonly CombatLogEntry[];
+};
+
+export type CombatLogPersistenceOptions = {
+  readonly endpoints: readonly string[];
+  readonly getContext?: () => CombatLogPersistenceContext;
+  readonly flushDelayMs?: number;
+  readonly maxBatchEntries?: number;
+};
+
 const DEFAULT_COMBAT_LOG_CAPACITY = 120;
+const DEFAULT_PERSISTENCE_FLUSH_DELAY_MS = 250;
+const DEFAULT_PERSISTENCE_MAX_BATCH_ENTRIES = 24;
+const COMBAT_LOG_KEEPALIVE_MAX_BYTES = 48 * 1024;
 const SUB_CELL_GRID_SIZE = 3;
 
 export class CombatLog {
   private readonly capacity: number;
+  private readonly persistence: NormalizedCombatLogPersistenceOptions | null;
   private readonly entries: CombatLogEntry[] = [];
+  private readonly pendingPersistentEntries: CombatLogEntry[] = [];
   private nextId = 1;
+  private nextBatchId = 1;
+  private persistedEntryCount = 0;
+  private failedBatchCount = 0;
+  private lastPersistentError: string | null = null;
+  private lastPersistentWritePath: string | null = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushInFlight: Promise<void> | null = null;
 
-  constructor(capacity = DEFAULT_COMBAT_LOG_CAPACITY) {
+  constructor(
+    capacity = DEFAULT_COMBAT_LOG_CAPACITY,
+    options: {
+      readonly persistence?: CombatLogPersistenceOptions;
+    } = {}
+  ) {
     this.capacity = Math.max(1, Math.floor(capacity));
+    const persistence = options.persistence
+      ? normalizeCombatLogPersistenceOptions(options.persistence)
+      : null;
+    this.persistence = persistence && persistence.endpoints.length > 0 ? persistence : null;
   }
 
   record(input: CombatLogEntryInput): CombatLogEntry {
@@ -92,6 +132,7 @@ export class CombatLog {
     while (this.entries.length > this.capacity) {
       this.entries.shift();
     }
+    this.queuePersistentEntry(entry);
     return entry;
   }
 
@@ -110,6 +151,87 @@ export class CombatLog {
 
   getRecentLines(count: number): readonly string[] {
     return this.getRecentEntries(count).map(formatCombatLogEntry);
+  }
+
+  getPersistenceStatusLine(): string {
+    if (!this.persistence) return "disk disabled";
+
+    const base = `disk sent ${this.persistedEntryCount}, queued ${this.pendingPersistentEntries.length}, ` +
+      `failed ${this.failedBatchCount}`;
+    if (this.lastPersistentError) return `${base}, last ${this.lastPersistentError}`;
+    if (this.lastPersistentWritePath) return `${base}, ok`;
+    return base;
+  }
+
+  flushPersistent(): Promise<void> {
+    if (!this.persistence || this.pendingPersistentEntries.length === 0) return Promise.resolve();
+    if (this.flushTimer !== null) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.flushInFlight) return this.flushInFlight;
+
+    this.flushInFlight = this.flushPersistentQueue()
+      .finally(() => {
+        this.flushInFlight = null;
+        if (this.pendingPersistentEntries.length > 0) this.schedulePersistentFlush();
+      });
+    return this.flushInFlight;
+  }
+
+  private queuePersistentEntry(entry: CombatLogEntry): void {
+    if (!this.persistence || !canWritePersistentCombatLog()) return;
+
+    this.pendingPersistentEntries.push(entry);
+    if (this.pendingPersistentEntries.length >= this.persistence.maxBatchEntries) {
+      void this.flushPersistent();
+      return;
+    }
+    this.schedulePersistentFlush();
+  }
+
+  private schedulePersistentFlush(): void {
+    if (!this.persistence || this.flushTimer !== null || !canSchedulePersistentFlush()) return;
+
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flushPersistent();
+    }, this.persistence.flushDelayMs);
+  }
+
+  private async flushPersistentQueue(): Promise<void> {
+    while (this.pendingPersistentEntries.length > 0) {
+      await this.flushPersistentBatch();
+    }
+  }
+
+  private async flushPersistentBatch(): Promise<void> {
+    const persistence = this.persistence;
+    if (!persistence || this.pendingPersistentEntries.length === 0) return;
+
+    const entries = this.pendingPersistentEntries.splice(0, persistence.maxBatchEntries);
+    const payload: CombatLogPersistencePayload = {
+      type: "voxel.combat-log.batch",
+      schemaVersion: 1,
+      sessionId: persistence.sessionId,
+      batchId: this.nextBatchId,
+      sentAtIso: new Date().toISOString(),
+      context: persistence.getContext(),
+      entries
+    };
+    this.nextBatchId += 1;
+
+    try {
+      const result = await postCombatLogPayload(persistence.endpoints, payload);
+      this.persistedEntryCount += entries.length;
+      this.lastPersistentError = null;
+      this.lastPersistentWritePath = result.logPath ?? this.lastPersistentWritePath;
+    } catch (error) {
+      // Failed batches are intentionally not requeued. If the local receiver is
+      // down, retaining every damage event would quietly become a memory leak.
+      this.failedBatchCount += 1;
+      this.lastPersistentError = error instanceof Error ? error.message : "write failed";
+    }
   }
 }
 
@@ -179,4 +301,70 @@ function formatDamage(value: number): string {
 
 function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;
+}
+
+type NormalizedCombatLogPersistenceOptions = {
+  readonly endpoints: readonly string[];
+  readonly getContext: () => CombatLogPersistenceContext;
+  readonly flushDelayMs: number;
+  readonly maxBatchEntries: number;
+  readonly sessionId: string;
+};
+
+function normalizeCombatLogPersistenceOptions(
+  options: CombatLogPersistenceOptions
+): NormalizedCombatLogPersistenceOptions {
+  return {
+    endpoints: options.endpoints.filter((endpoint) => endpoint.trim().length > 0),
+    getContext: options.getContext ?? (() => ({})),
+    flushDelayMs: Math.max(0, Math.floor(options.flushDelayMs ?? DEFAULT_PERSISTENCE_FLUSH_DELAY_MS)),
+    maxBatchEntries: Math.max(1, Math.floor(options.maxBatchEntries ?? DEFAULT_PERSISTENCE_MAX_BATCH_ENTRIES)),
+    sessionId: createCombatLogSessionId()
+  };
+}
+
+async function postCombatLogPayload(
+  endpoints: readonly string[],
+  payload: CombatLogPersistencePayload
+): Promise<{ readonly logPath?: string }> {
+  if (endpoints.length === 0) throw new Error("no endpoint");
+
+  const body = JSON.stringify(payload);
+  let lastError = "all endpoints failed";
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body,
+        keepalive: body.length <= COMBAT_LOG_KEEPALIVE_MAX_BYTES
+      });
+      const responseBody = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        lastError = typeof responseBody.error === "string"
+          ? responseBody.error
+          : `HTTP ${response.status}`;
+        continue;
+      }
+      return typeof responseBody.logPath === "string" ? { logPath: responseBody.logPath } : {};
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  throw new Error(lastError);
+}
+
+function canWritePersistentCombatLog(): boolean {
+  return typeof fetch === "function" && typeof Date === "function";
+}
+
+function canSchedulePersistentFlush(): boolean {
+  return typeof setTimeout === "function" && typeof clearTimeout === "function";
+}
+
+function createCombatLogSessionId(): string {
+  return `combat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }

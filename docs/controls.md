@@ -38,7 +38,9 @@ the root README.
   Debris, Render, and Combat panels with smoothed FPS, frame time, player speed,
   signed X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block
   pressure, instanced debris counts, renderer stats, and the latest tool/core
-  damage events with affected terrain sub-cell indexes.
+  damage events with affected terrain sub-cell indexes. The Combat panel also
+  shows whether those events are queued, written, or failed for local disk
+  logging.
 - `F4` cycles the built-in quality presets.
 - `F6` toggles Core Aim Preview. Physics Core draws a dotted throw arc; Hitscan
   Core draws a straight dotted beam. Both show the predicted impact ring and

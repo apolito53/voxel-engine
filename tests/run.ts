@@ -523,6 +523,73 @@ test("combat log formats terrain sub-cell damage with local and global cells", (
   assert(line.includes("cells 111[13,16,19]"), "formatted combat event should include local/global sub-cell coordinates");
 });
 
+test("combat log persistent flushing batches damage events for disk logging", async () => {
+  const originalFetch = globalThis.fetch;
+  const payloads: unknown[] = [];
+
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    payloads.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+    return new Response(JSON.stringify({ logPath: "logs/combat/test.jsonl" }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  }) as typeof fetch;
+
+  try {
+    const combatLog = new CombatLog(4, {
+      persistence: {
+        endpoints: ["/__voxel_combat_log"],
+        flushDelayMs: 60_000,
+        maxBatchEntries: 1,
+        getContext: () => ({ worldId: "test-world", selectedItem: "Terraformer" })
+      }
+    });
+
+    combatLog.record({
+      atMs: 1,
+      source: { kind: "terraformer", label: "Terraformer" },
+      action: "edit size 1",
+      targets: [{
+        kind: "terrain",
+        block: BLOCK.grass,
+        blockName: "Grass",
+        x: 1,
+        y: 2,
+        z: 3,
+        damageApplied: 60,
+        remainingHealth: 1560,
+        maxHealth: 1620,
+        destroyed: false,
+        subCells: [createCombatLogSubCell(0, { x: 3, y: 6, z: 9 })]
+      }]
+    });
+    combatLog.record({
+      atMs: 2,
+      source: { kind: "physics-core", label: "Physics Core" },
+      action: "impact 10.0 m/s",
+      targets: []
+    });
+
+    await combatLog.flushPersistent();
+
+    assertEqual(payloads.length, 2, "manual combat log flush should drain every queued batch");
+    const firstPayload = payloads[0] as {
+      readonly type?: unknown;
+      readonly context?: { readonly worldId?: unknown };
+      readonly entries?: readonly { readonly targets?: readonly unknown[] }[];
+    };
+    assertEqual(firstPayload.type, "voxel.combat-log.batch", "persistent payloads should identify their schema");
+    assertEqual(firstPayload.context?.worldId, "test-world", "persistent payloads should include repro context");
+    assertEqual(firstPayload.entries?.[0]?.targets?.length, 1, "persistent payloads should include terrain damage targets");
+    assert(
+      combatLog.getPersistenceStatusLine().includes("disk sent 2"),
+      "debug HUD persistence status should report successful disk sends"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function decodeTestLatticeIndex(index: number): { readonly x: number; readonly y: number; readonly z: number } {
   return {
     x: index % BLOCK_FRAGMENT_GRID_SIZE,
