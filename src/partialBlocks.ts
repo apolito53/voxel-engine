@@ -1009,6 +1009,16 @@ function isExactPartialBlockCut(cut: PartialBlockCut): boolean {
   return (cut.exactRemovedVisualCellIndexes?.length ?? 0) > 0;
 }
 
+function createExactRemovedVisualCellSet(cuts: readonly PartialBlockCut[]): ReadonlySet<number> {
+  const exactIndexes = new Set<number>();
+  for (const cut of cuts) {
+    for (const index of cut.exactRemovedVisualCellIndexes ?? []) {
+      if (isValidPartialBlockLatticeCellIndex(index)) exactIndexes.add(index);
+    }
+  }
+  return exactIndexes;
+}
+
 function isTinyCoreCut(cut: PartialBlockCut): boolean {
   return typeof cut.coreRadius === "number" &&
     Number.isFinite(cut.coreRadius) &&
@@ -1047,6 +1057,8 @@ function addPartialBlockLatticeGeometry(
   isFaceVisible: PartialBlockFaceVisibility,
   removedCells: ReadonlySet<number>
 ): void {
+  const exactRemovedCells = createExactRemovedVisualCellSet(cell.cuts);
+
   for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
     if (removedCells.has(latticeCell.index)) continue;
 
@@ -1065,7 +1077,14 @@ function addPartialBlockLatticeGeometry(
 
       const corners = getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal);
       if (exposesBite) {
-        addWrinkledBiteFace(geometry, cell, latticeCell, face.normal, corners);
+        if (neighborIndex !== null && exactRemovedCells.has(neighborIndex)) {
+          // Terraformer edits are precision deletions, not impacts. Draw their
+          // newly exposed walls as clean cuboid cuts so neighboring sub-cells
+          // do not look damaged just because they border the removed cell.
+          addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
+        } else {
+          addWrinkledBiteFace(geometry, cell, latticeCell, face.normal, corners);
+        }
       } else {
         addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
       }

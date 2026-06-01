@@ -3802,6 +3802,56 @@ test("partial block field renders faceted custom terrain cells", () => {
   assertEqual(scene.children.length, 0, "disposing should remove the partial block mesh from the scene");
 });
 
+test("Terraformer exact cuts render clean sub-cell walls", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const exactRemovedCell = encodeTestLatticeIndex(0, 1, 1);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 27,
+    removedVisualCellIndexes: [exactRemovedCell],
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 1 / 6, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: [exactRemovedCell],
+      radius: 0.12,
+      depth: 0.12,
+      seed: 2468
+    }]
+  };
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+
+  field.beginUpdate(1);
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  const regionMesh = field.getRegionMesh(regionKey);
+  assert(regionMesh, "Terraformer exact-cut test should create a regional mesh");
+  const positions = regionMesh.geometry.getAttribute("position");
+  const normals = regionMesh.geometry.getAttribute("normal");
+  const expectedWallX = cell.position.x + 1 / BLOCK_FRAGMENT_GRID_SIZE;
+  let exactWallVertices = 0;
+  let wrinkledExactWallVertices = 0;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const normalX = normals.getX(index);
+    if (normalX < -0.35 && x > cell.position.x + 0.05 && x < cell.position.x + 0.5) {
+      exactWallVertices += 1;
+      if (Math.abs(x - expectedWallX) > 0.002) wrinkledExactWallVertices += 1;
+    }
+  }
+
+  assert(exactWallVertices > 0, "Terraformer should expose the clean wall of the deleted sub-cell");
+  assertEqual(
+    wrinkledExactWallVertices,
+    0,
+    "Terraformer exact cuts should not wrinkle neighboring sub-cells like impact damage"
+  );
+
+  field.dispose();
+});
+
 test("partial block field rebuilds only the requested region", () => {
   const scene = new THREE.Scene();
   const field = new PartialBlockMeshField(scene);

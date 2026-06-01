@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.9.4 - 2026-05-31
+
+### Fixed
+
+- Fixed Terraformer exact-cut rendering so exposed sub-cell walls stay clean
+  and cuboid instead of using the impact-damage wrinkle mesh that made adjacent
+  sub-cells look damaged.
+
 ## 0.9.3 - 2026-05-31
 
 ### Fixed
