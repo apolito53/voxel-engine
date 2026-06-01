@@ -398,6 +398,11 @@ import {
   normalizeCodexPilotWeapon
 } from "../src/codexPilot";
 import {
+  CombatLog,
+  createCombatLogSubCell,
+  formatCombatLogEntry
+} from "../src/combatLog";
+import {
   VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES,
   normalizeVisualPilotRecordOptions,
   normalizeVisualTestRecorderOptions,
@@ -459,6 +464,64 @@ function assertUint8ArraysEqual(actual: Uint8Array, expected: Uint8Array, messag
     }
   }
 }
+
+test("combat log caps entries and reports latest events first", () => {
+  const combatLog = new CombatLog(2);
+  combatLog.record({
+    atMs: 1,
+    source: { kind: "terraformer", label: "Terraformer" },
+    action: "edit size 1",
+    targets: []
+  });
+  combatLog.record({
+    atMs: 2,
+    source: { kind: "physics-core", label: "Physics Core" },
+    action: "impact 12.0 m/s",
+    targets: []
+  });
+  combatLog.record({
+    atMs: 3,
+    source: { kind: "hitscan-core", label: "Hitscan Core" },
+    action: "impact 20.0 m/s",
+    targets: []
+  });
+
+  const entries = combatLog.getRecentEntries(3);
+  assertEqual(entries.length, 2, "combat log should keep its configured ring-buffer cap");
+  assertEqual(entries[0]?.source.kind, "hitscan-core", "most recent combat event should be first in HUD reads");
+  assertEqual(entries[1]?.source.kind, "physics-core", "older capped event should still be available");
+});
+
+test("combat log formats terrain sub-cell damage with local and global cells", () => {
+  const line = formatCombatLogEntry({
+    id: 12,
+    atMs: 25,
+    source: { kind: "terraformer", label: "Terraformer" },
+    action: "edit size 1",
+    targets: [{
+      kind: "terrain",
+      block: BLOCK.sand,
+      blockName: "Sand",
+      x: 4,
+      y: 5,
+      z: 6,
+      damageApplied: 50,
+      damageBefore: 100,
+      damageAfter: 150,
+      remainingHealth: 1200,
+      maxHealth: 1350,
+      destroyed: false,
+      subCells: [createCombatLogSubCell(13, { x: 13, y: 16, z: 19 })]
+    }]
+  });
+
+  assert(
+    line.includes("Terraformer edit size 1"),
+    "formatted combat event should include the source tool and action"
+  );
+  assert(line.includes("Sand@4,5,6 -50"), "formatted combat event should include block and damage");
+  assert(line.includes("cells 111[13,16,19]"), "formatted combat event should include local/global sub-cell coordinates");
+});
 
 function decodeTestLatticeIndex(index: number): { readonly x: number; readonly y: number; readonly z: number } {
   return {
@@ -3149,6 +3212,16 @@ test("physics core carving chips ordinary terrain before fracture", () => {
     firstRemovedVisualCellCount,
     "the first carve should report one bite poof position for each newly destroyed presentation cell"
   );
+  assertEqual(
+    firstHit.damageApplied,
+    PARTIAL_BLOCK_CORE_DAMAGE,
+    "core carve results should expose applied damage for the combat log"
+  );
+  assertDeepEqual(
+    firstHit.affectedVisualCellIndexes,
+    world.getPartialBlock(2, 3, 4)?.removedVisualCellIndexes ?? [],
+    "core carve results should expose the exact newly removed lattice cells for the combat log"
+  );
   world.clearDamageForChunk(0, 0);
   assertEqual(
     world.getBlockDamage(2, 3, 4),
@@ -3222,6 +3295,16 @@ test("Terraformer edits exact sub-cells on the shared terrain damage path", () =
   const partialCell = world.getPartialBlock(2, 3, 4);
   assert(result, "Terraformer should edit the previewed sub-cell");
   assertEqual(result.results.length, 1, "one macro block should receive the size-1 edit");
+  assertEqual(
+    result.results[0]?.damageApplied,
+    subCellHp,
+    "Terraformer edit results should report the exact sub-cell HP spent"
+  );
+  assertDeepEqual(
+    result.results[0]?.affectedVisualCellIndexes,
+    [previewedCellIndex],
+    "Terraformer edit results should report only the exact affected sub-cell"
+  );
   assertEqual(world.getBlockDamage(2, 3, 4), subCellHp, "Terraformer damage should spend exactly one sub-cell HP");
   assertEqual(
     partialCell?.removedVisualCellIndexes?.length,

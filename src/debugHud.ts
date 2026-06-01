@@ -27,6 +27,7 @@ type DebugHudOptions = {
 type DebugHudSection = {
   readonly title: string;
   readonly rows: readonly DebugHudRow[];
+  readonly wide?: boolean;
 };
 
 type DebugHudRow = {
@@ -81,6 +82,7 @@ export class DebugHud {
     partialMeshStats: PartialBlockMeshStats,
     debrisSettlerStats: DebrisSettlerStats,
     rubbleStats: RubbleFieldStats,
+    combatLogLines: readonly string[],
     timings: FrameTimings
   ): void {
     if (!this.visible) return;
@@ -108,6 +110,7 @@ export class DebugHud {
       partialMeshStats,
       debrisSettlerStats,
       rubbleStats,
+      combatLogLines,
       timings,
       frameRate
     });
@@ -144,6 +147,7 @@ export class DebugHud {
     readonly partialMeshStats: PartialBlockMeshStats;
     readonly debrisSettlerStats: DebrisSettlerStats;
     readonly rubbleStats: RubbleFieldStats;
+    readonly combatLogLines: readonly string[];
     readonly timings: FrameTimings;
     readonly frameRate: FrameRateSample;
   }): void {
@@ -218,6 +222,13 @@ export class DebugHud {
           { label: "draw", value: `${render.calls} calls, ${render.triangles} tris` },
           { label: "mem", value: `${memory.geometries} geo, ${memory.textures} tex` }
         ]
+      },
+      {
+        title: "Combat",
+        wide: true,
+        rows: snapshot.combatLogLines.length > 0
+          ? snapshot.combatLogLines.map((line) => ({ label: "", value: line }))
+          : [{ label: "events", value: "none yet" }]
       }
     ];
 
@@ -247,7 +258,7 @@ function formatHudFps(fps: number): string {
 
 function createDebugSection(section: DebugHudSection): HTMLElement {
   const node = document.createElement("section");
-  node.className = "debug-hud-section";
+  node.className = section.wide ? "debug-hud-section debug-hud-section-wide" : "debug-hud-section";
   node.append(createTextNode("div", "debug-hud-section-title", section.title));
 
   for (const row of section.rows) {

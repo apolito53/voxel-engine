@@ -1411,6 +1411,10 @@ body.controls-hidden #hud {
   background: rgba(237, 244, 248, 0.045);
 }
 
+.debug-hud-section-wide {
+  grid-column: 1 / -1;
+}
+
 .debug-hud-section-title {
   color: rgba(143, 216, 255, 0.82);
   font-size: 10px;

@@ -67,7 +67,7 @@ ignored by git.
   or erases in the Blocks lane
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
-- `F3` toggles the debug overlay
+- `F3` toggles the debug overlay, including the recent combat/damage log
 - `F4` cycles quality presets
 - `F6` toggles Core Aim Preview
 - `F8` toggles the scripted test avatar

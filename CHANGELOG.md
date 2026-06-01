@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.9.5 - 2026-05-31
+
+### Added
+
+- Added an F3 combat log that records recent Terraformer, Physics Core,
+  Hitscan Core, Builder, and rubble damage events with source tool/core,
+  terrain block coordinates, affected `3x3x3` sub-cell indexes, damage amount,
+  remaining HP, and destruction state.
+- Exposed the in-browser `__VOXEL_COMBAT_LOG__` debug helper so bad damage
+  cases can be inspected from the console without relying only on screenshots.
+
+### Changed
+
+- Terrain carve results now carry explicit applied-damage and affected-sub-cell
+  metadata for debugging and future combat/entity damage plumbing.
+
 ## 0.9.4 - 2026-05-31
 
 ### Fixed

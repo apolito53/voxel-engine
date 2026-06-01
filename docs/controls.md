@@ -35,9 +35,10 @@ the root README.
   `Settings > Gameplay` to show the left-aligned hint stack.
 - The debug overlay starts hidden on every page load.
 - `F3` toggles the grouped debug overlay. It shows Perf, Player, World, Physics,
-  Debris, and Render panels with smoothed FPS, frame time, player speed, signed
-  X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block pressure,
-  instanced debris counts, and renderer stats.
+  Debris, Render, and Combat panels with smoothed FPS, frame time, player speed,
+  signed X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block
+  pressure, instanced debris counts, renderer stats, and the latest tool/core
+  damage events with affected terrain sub-cell indexes.
 - `F4` cycles the built-in quality presets.
 - `F6` toggles Core Aim Preview. Physics Core draws a dotted throw arc; Hitscan
   Core draws a straight dotted beam. Both show the predicted impact ring and

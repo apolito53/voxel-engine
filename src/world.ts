@@ -120,6 +120,10 @@ export type BlockDamageResult = {
   readonly remainingHealth: number;
   readonly maxHealth: number;
   readonly destroyed: boolean;
+  readonly damageApplied?: number;
+  readonly damageBefore?: number;
+  readonly damageAfter?: number;
+  readonly affectedVisualCellIndexes?: readonly number[];
   readonly bitePoofPositions?: readonly VoxelVector[];
   readonly ejectedRubbleMaterialUnits?: number;
   readonly debrisEjectionHint?: DebrisEjectionHint;
@@ -1682,6 +1686,8 @@ export class VoxelWorld implements CollisionWorld {
     const previousDamage = this.blockDamage.get(key) ?? 0;
     const nextDamage = previousDamage + amount;
     const remainingHealth = Math.max(0, maxHealth - nextDamage);
+    const appliedDamage = Math.max(0, Math.min(amount, maxHealth - previousDamage));
+    const cappedDamageAfter = Math.min(maxHealth, nextDamage);
     const ejectedRubbleMaterialUnits = getEjectedBlockRubbleMaterialUnits(
       previousDamage,
       nextDamage,
@@ -1703,8 +1709,12 @@ export class VoxelWorld implements CollisionWorld {
         block,
         position,
         remainingHealth,
-        maxHealth: definition.health,
+        maxHealth,
         destroyed: false,
+        damageApplied: appliedDamage,
+        damageBefore: previousDamage,
+        damageAfter: cappedDamageAfter,
+        affectedVisualCellIndexes: partialCutResult.newlyRemovedVisualCellIndexes,
         bitePoofPositions: createPartialBlockBitePoofPositions(
           position,
           partialCutResult.newlyRemovedVisualCellIndexes,
@@ -1724,6 +1734,7 @@ export class VoxelWorld implements CollisionWorld {
     }
 
     this.blockDamage.delete(key);
+    const remainingVisualCellIndexes = this.getRemainingPartialBlockVisualCellIndexes(position);
     // The damaged block has already shown its bite-lattice history while it was
     // alive. On the final health step, clear that custom mesh and leave normal
     // air instead of stamping a wrinkled support puddle into the terrain.
@@ -1734,6 +1745,10 @@ export class VoxelWorld implements CollisionWorld {
       remainingHealth: 0,
       maxHealth,
       destroyed: true,
+      damageApplied: appliedDamage,
+      damageBefore: previousDamage,
+      damageAfter: maxHealth,
+      affectedVisualCellIndexes: remainingVisualCellIndexes,
       ejectedRubbleMaterialUnits,
       debrisEjectionHint: createFallbackDebrisEjectionHint(position, input, ejectedRubbleMaterialUnits)
     };
@@ -1908,6 +1923,7 @@ export class VoxelWorld implements CollisionWorld {
 
     const previousDamage = this.blockDamage.get(key) ?? 0;
     const nextDamage = Math.min(maxHealth, previousDamage + newlyRemovedCellIndexes.length * subCellHealth);
+    const appliedDamage = Math.max(0, nextDamage - previousDamage);
     const ejectedRubbleMaterialUnits = getEjectedBlockRubbleMaterialUnits(
       previousDamage,
       nextDamage,
@@ -1950,6 +1966,10 @@ export class VoxelWorld implements CollisionWorld {
         remainingHealth: 0,
         maxHealth,
         destroyed: true,
+        damageApplied: appliedDamage,
+        damageBefore: previousDamage,
+        damageAfter: nextDamage,
+        affectedVisualCellIndexes: newlyRemovedCellIndexes,
         bitePoofPositions,
         ejectedRubbleMaterialUnits,
         debrisEjectionHint
@@ -1964,6 +1984,10 @@ export class VoxelWorld implements CollisionWorld {
       remainingHealth: Math.max(0, maxHealth - nextDamage),
       maxHealth,
       destroyed: false,
+      damageApplied: appliedDamage,
+      damageBefore: previousDamage,
+      damageAfter: nextDamage,
+      affectedVisualCellIndexes: newlyRemovedCellIndexes,
       bitePoofPositions,
       ejectedRubbleMaterialUnits,
       debrisEjectionHint

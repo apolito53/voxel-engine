@@ -50,6 +50,13 @@ import {
   type CodexPilotApi,
   type CodexPilotWeapon
 } from "./codexPilot";
+import {
+  CombatLog,
+  createCombatLogSubCell,
+  type CombatLogRubbleTarget,
+  type CombatLogSource,
+  type CombatLogTerrainTarget
+} from "./combatLog";
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
 import {
@@ -294,7 +301,9 @@ import {
   type DebrisEjectionHint,
   type TerraformerEditInput,
   type TerraformerEditPreview,
+  type TerraformerTargetSubCell,
   type TerraformerTerrainRaycastHit,
+  type VoxelBlockPosition,
   type WorldStats
 } from "./world";
 import { createReadableSeed, renderHomeWorldList } from "./worldMenu";
@@ -335,6 +344,7 @@ type VoxelRuntimeGlobal = typeof globalThis & {
   __VOXEL_HITCH_PASS__?: () => PerformanceHitchLogPass;
   __VOXEL_HITCH_START_PASS__?: (label?: string) => PerformanceHitchLogPass;
   __VOXEL_VISUAL_TEST__?: VisualTestRecorderApi;
+  __VOXEL_COMBAT_LOG__?: CombatLog;
 };
 type ViteHotContext = {
   dispose(callback: () => void): void;
@@ -593,6 +603,17 @@ type TerraformerState = {
   readonly targetKey: string;
 };
 type SettingsCategory = "graphics" | "gameplay" | "experimental";
+
+const TERRAFORMER_COMBAT_SOURCE: CombatLogSource = { kind: "terraformer", label: "Terraformer" };
+const PHYSICS_CORE_COMBAT_SOURCE: CombatLogSource = { kind: "physics-core", label: "Physics Core" };
+const HITSCAN_CORE_COMBAT_SOURCE: CombatLogSource = { kind: "hitscan-core", label: "Hitscan Core" };
+const BUILDER_COMBAT_SOURCE: CombatLogSource = { kind: "builder", label: "Builder" };
+
+declare global {
+  interface Window {
+    __VOXEL_COMBAT_LOG__?: CombatLog;
+  }
+}
 type LoadoutCategory = "tools" | "blocks";
 type PauseSubmenu = "loadout" | "settings" | "builder";
 const physicsToyCollider = new PhysicsToyCollider();
@@ -742,6 +763,8 @@ const debugHud = new DebugHud({
   gpuInfo,
   getQualityPreset: () => qualityController.preset
 });
+const combatLog = new CombatLog(160);
+voxelRuntimeGlobal.__VOXEL_COMBAT_LOG__ = combatLog;
 
 worldSaveOrigin.textContent = getWorldSaveOriginLabel();
 
@@ -1691,6 +1714,12 @@ function applyTerraformerEdit(input: TerraformerEditInput, expectedTargetKey: st
   };
 
   applyTerrainDamageFeedback(activeWorld, result.results, impact);
+  recordTerrainCombatLog({
+    source: TERRAFORMER_COMBAT_SOURCE,
+    action: `edit size ${result.preview.size}`,
+    results: result.results,
+    terraformerCells: result.preview.cells
+  });
   return true;
 }
 
@@ -1700,14 +1729,19 @@ function getCameraDirection(): THREE.Vector3 {
   return direction.clone().normalize();
 }
 
-function damageTargetedRubbleCell(cell: VoxelRaycastHit["block"], amount = PHYSICS_CORE_BLOCK_DAMAGE): void {
+function damageTargetedRubbleCell(
+  cell: VoxelRaycastHit["block"],
+  amount = PHYSICS_CORE_BLOCK_DAMAGE,
+  source: CombatLogSource = BUILDER_COMBAT_SOURCE,
+  action = "rubble target"
+): void {
   // The rubble proxy is intentionally cheaper than real per-cube collision, but
   // once the player is targeting its occupied cell the normal destroy action
   // should hit that destructible cover instead of silently editing terrain
   // behind it.
   const cellCenter = new THREE.Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5);
   rubbleField.damageNearest(cellCenter, amount, 0.9);
-  emitRubbleDamageEvents();
+  emitRubbleDamageEvents(source, action);
 }
 
 function animate(): void {
@@ -1781,7 +1815,7 @@ function animate(): void {
         rubbleField.resolveCoreCollision(toy);
       }
     }
-    emitRubbleDamageEvents();
+    emitRubbleDamageEvents(PHYSICS_CORE_COMBAT_SOURCE, "rubble collision");
     rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld);
     debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
       activeCenter: camera.position,
@@ -1909,6 +1943,7 @@ function animate(): void {
       debugPartialMeshStats,
       debrisSettlerStats,
       debugRubbleStats,
+      combatLog.getRecentLines(5),
       smoothedFrameTimings
     );
   }
@@ -2772,7 +2807,12 @@ function handlePhysicsImpact(
   damagedBlocksThisFrame: Set<string>
 ): boolean {
   if (impact.source.isExpired) return false;
-  const result = applyCoreTerrainImpact(activeWorld, impact, damagedBlocksThisFrame);
+  const result = applyCoreTerrainImpact(
+    activeWorld,
+    impact,
+    damagedBlocksThisFrame,
+    PHYSICS_CORE_COMBAT_SOURCE
+  );
   if (!result) return false;
 
   const pierceContinuation = result.pierceContinuation;
@@ -2797,7 +2837,8 @@ function handlePhysicsImpact(
 function applyCoreTerrainImpact(
   activeWorld: VoxelWorld,
   impact: CoreTerrainImpact,
-  damagedBlocksThisFrame: Set<string>
+  damagedBlocksThisFrame: Set<string>,
+  source: CombatLogSource
 ): CoreTerrainImpactApplyResult | null {
   if (impact.speed <= BLOCK_DAMAGE_IMPACT_SPEED) return null;
 
@@ -2817,6 +2858,11 @@ function applyCoreTerrainImpact(
   if (!brushResult) return null;
 
   applyTerrainDamageFeedback(activeWorld, brushResult.results, impact, damagedBlocksThisFrame);
+  recordTerrainCombatLog({
+    source,
+    action: `impact ${impact.speed.toFixed(1)} m/s`,
+    results: brushResult.results
+  });
 
   return brushResult;
 }
@@ -2874,6 +2920,100 @@ function applyTerrainDamageFeedback(
   // candidates for active debris. Keep Rapier's temporary static collider cache
   // honest even when a very small chip produces no visible fragment.
   if (changedTerrainCollider) rigidDebris.invalidateStaticColliders();
+}
+
+function recordTerrainCombatLog(options: {
+  readonly source: CombatLogSource;
+  readonly action: string;
+  readonly results: readonly BlockDamageResult[];
+  readonly terraformerCells?: readonly TerraformerTargetSubCell[];
+}): void {
+  if (options.results.length === 0) return;
+
+  const terraformerCellLookup = createTerraformerCellLookup(options.terraformerCells);
+  const targets = options.results.map((result): CombatLogTerrainTarget => {
+    const damageBefore = result.damageBefore;
+    const damageAfter = result.damageAfter;
+    const derivedDamage = damageBefore !== undefined && damageAfter !== undefined
+      ? Math.max(0, damageAfter - damageBefore)
+      : Math.max(0, result.maxHealth - result.remainingHealth);
+    const affectedCellIndexes = result.affectedVisualCellIndexes ?? [];
+
+    return {
+      kind: "terrain",
+      block: result.block,
+      blockName: getBlockDisplayName(result.block),
+      x: result.position.x,
+      y: result.position.y,
+      z: result.position.z,
+      damageApplied: result.damageApplied ?? derivedDamage,
+      damageBefore,
+      damageAfter,
+      remainingHealth: result.remainingHealth,
+      maxHealth: result.maxHealth,
+      destroyed: result.destroyed,
+      subCells: affectedCellIndexes.map((cellIndex) => {
+        const terraformerCell = terraformerCellLookup.get(createCombatLogCellKey(result.position, cellIndex));
+        return createCombatLogSubCell(cellIndex, terraformerCell
+          ? {
+              x: terraformerCell.globalX,
+              y: terraformerCell.globalY,
+              z: terraformerCell.globalZ
+            }
+          : undefined);
+      })
+    };
+  });
+
+  combatLog.record({
+    source: options.source,
+    action: options.action,
+    targets
+  });
+}
+
+function recordRubbleCombatLog(
+  source: CombatLogSource,
+  action: string,
+  events: readonly RubbleDamageEvent[]
+): void {
+  if (events.length === 0) return;
+
+  combatLog.record({
+    source,
+    action,
+    targets: events.map((event): CombatLogRubbleTarget => ({
+      kind: "rubble",
+      block: event.block,
+      blockName: getBlockDisplayName(event.block),
+      x: event.cell.x,
+      y: event.cell.y,
+      z: event.cell.z,
+      damageApplied: Math.max(0, event.maxHealth - event.remainingHealth),
+      remainingHealth: event.remainingHealth,
+      maxHealth: event.maxHealth,
+      destroyed: event.destroyed,
+      collateral: event.collateral
+    }))
+  });
+}
+
+function createTerraformerCellLookup(
+  cells: readonly TerraformerTargetSubCell[] | undefined
+): ReadonlyMap<string, TerraformerTargetSubCell> {
+  const lookup = new Map<string, TerraformerTargetSubCell>();
+  for (const cell of cells ?? []) {
+    lookup.set(createCombatLogCellKey(cell.position, cell.cellIndex), cell);
+  }
+  return lookup;
+}
+
+function createCombatLogCellKey(position: VoxelBlockPosition, cellIndex: number): string {
+  return `${position.x},${position.y},${position.z}:${cellIndex}`;
+}
+
+function getBlockDisplayName(block: number): string {
+  return BLOCKS[block]?.name ?? `Block ${block}`;
 }
 
 function spawnPartialBlockBitePoofs(result: BlockDamageResult): void {
@@ -3119,7 +3259,7 @@ function firePlayerHitscanCore(): void {
 
     if (rubbleHit && (!terrainHit || rubbleHit.distance < terrainHit.distance - TARGET_HIT_EPSILON)) {
       visualEnd = rayOrigin.clone().addScaledVector(shotDirection, rubbleHit.distance);
-      damageTargetedRubbleCell(rubbleHit.cell);
+      damageTargetedRubbleCell(rubbleHit.cell, PHYSICS_CORE_BLOCK_DAMAGE, HITSCAN_CORE_COMBAT_SOURCE, "rubble hit");
       break;
     }
 
@@ -3140,7 +3280,7 @@ function firePlayerHitscanCore(): void {
       position: terrainHit.position,
       incomingVelocity,
       radius: HITSCAN_CORE_RADIUS
-    }, damagedBlocksForShot);
+    }, damagedBlocksForShot, HITSCAN_CORE_COMBAT_SOURCE);
 
     const pierceContinuation = result?.pierceContinuation;
     if (!pierceContinuation) break;
@@ -3669,9 +3809,13 @@ function emitRubbleBatchEvents(): void {
   }
 }
 
-function emitRubbleDamageEvents(): void {
+function emitRubbleDamageEvents(
+  source: CombatLogSource = PHYSICS_CORE_COMBAT_SOURCE,
+  action = "rubble damage"
+): void {
   const events = rubbleField.consumeDamageEvents();
   if (events.some((event) => event.destroyed)) rigidDebris.invalidateStaticColliders();
+  recordRubbleCombatLog(source, action, events);
 
   for (const event of events) {
     engineEvents.emit("rubble:damaged", {
@@ -3850,6 +3994,7 @@ async function loadWorld(worldId: string): Promise<void> {
       name: savedWorld.name,
       seed: savedWorld.seed
     });
+    combatLog.clear();
     debugHud.reset();
     minimapRenderer.reset();
     activePlayer.resume();
@@ -4168,6 +4313,7 @@ function disposeRuntime(): void {
   voxelRuntimeGlobal.__VOXEL_CODEX_PILOT__ = undefined;
   voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = undefined;
   voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = undefined;
+  voxelRuntimeGlobal.__VOXEL_COMBAT_LOG__ = undefined;
 }
 
 voxelRuntimeGlobal.__VOXEL_SANDBOX_DISPOSE__ = disposeRuntime;
