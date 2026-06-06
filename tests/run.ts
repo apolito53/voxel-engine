@@ -403,6 +403,13 @@ import {
   formatCombatLogEntry
 } from "../src/combatLog";
 import {
+  DEFAULT_CLICK_FIRE_MODE,
+  formatClickFireMode,
+  formatClickFireModeShort,
+  normalizeClickFireMode,
+  toggleClickFireMode
+} from "../src/clickFireMode";
+import {
   VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES,
   normalizeVisualPilotRecordOptions,
   normalizeVisualTestRecorderOptions,
@@ -1147,6 +1154,20 @@ test("hotbar scrolling wraps predictably", () => {
     0,
     "scrolling forward from last slot should wrap to the first slot"
   );
+});
+
+test("click fire mode toggles between semi and full auto", () => {
+  assertEqual(DEFAULT_CLICK_FIRE_MODE, "semi", "click actions should default to one action per press");
+  assertEqual(normalizeClickFireMode("full"), "full", "stored full-auto mode should normalize");
+  assertEqual(
+    normalizeClickFireMode("nonsense", "full"),
+    "full",
+    "invalid stored click mode should fall back without inventing a mode"
+  );
+  assertEqual(toggleClickFireMode("semi"), "full", "T should step semi-auto into full-auto");
+  assertEqual(toggleClickFireMode("full"), "semi", "T should step full-auto back into semi-auto");
+  assertEqual(formatClickFireMode("semi"), "Semi Auto", "Nova status copy should spell out semi-auto mode");
+  assertEqual(formatClickFireModeShort("full"), "FULL", "hotbar copy should keep full-auto compact");
 });
 
 test("builder brush sizing stays odd and centered", () => {

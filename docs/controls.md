@@ -52,29 +52,34 @@ the root README.
 ## Items And Blocks
 
 - `G` toggles the active lane between `Items` and `Blocks`.
+- `T` toggles click actions between `Semi Auto` and `Full Auto`.
 - `Mouse wheel` selects within the active lane.
 - Number keys map to the current lane.
+- The bottom hotbar shows the current lane and the active semi/full-auto click
+  mode.
 - Pause menu `Loadout` opens selection cards for `Tools` and `Blocks`; choosing
   a card switches to that lane, selects the item/block, and resumes gameplay.
 - The `Items` lane contains `Unarmed`, `Terraformer`, `Physics Core`, and
   `Hitscan Core`.
 - `Unarmed` is intentionally inert on both clicks for now.
-- `Terraformer` uses held `Left click` to delete the exact highlighted
-  sub-block cells from the targeted terrain. `ArrowUp` and `ArrowDown` adjust
-  its cubic sub-cell brush size while it is selected.
+- `Terraformer` uses `Left click` to delete the exact highlighted sub-block
+  cells from the targeted terrain. In full-auto mode, holding `Left click`
+  repeats the current edit at a bounded cadence. `ArrowUp` and `ArrowDown`
+  adjust its cubic sub-cell brush size while it is selected.
 - In the `Blocks` lane, `Left click` erases the targeted block brush and `Right
-  click` places the selected block brush into adjacent space.
+  click` places the selected block brush into adjacent space. Full-auto mode
+  repeats held erase/place actions.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
-  from the lowered right-side muzzle.
+  from the lowered right-side muzzle. Full-auto mode repeats held core throws.
 - Gameplay settings can raise the Physics Core bounce count. Each terrain hit
   that actually damages blocks spends one bounce, so higher values let a core
   ricochet through pits before self-destructing. Surviving damaging rebounds
   lose some speed, so the setting buys extra chaos without making the core
   ignore impact energy.
 - Selected Hitscan Core uses `Left click` to fire an instant core trace from the
-  lowered right-side muzzle.
+  lowered right-side muzzle. Full-auto mode repeats held hitscan shots.
 - Holding `Right click` while firing a core uses centered reticle ADS with a
   slight 15% zoom.
 - `X` despawns active physics cores while keeping loose debris and parked rubble

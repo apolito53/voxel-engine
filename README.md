@@ -64,9 +64,10 @@ ignored by git.
 - `WASD` move, `Mouse` look, `Esc` pause/release mouse
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - `G` toggles between `Items` and `Blocks`
+- `T` toggles click actions between `Semi Auto` and `Full Auto`
 - `Mouse wheel` selects within the active lane
 - `Left click` fires selected cores, edits exact sub-cells with the Terraformer,
-  or erases in the Blocks lane
+  or erases in the Blocks lane; full-auto mode repeats while held
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
 - `F3` toggles the debug overlay, including the recent combat/damage log and
@@ -80,7 +81,8 @@ ignored by git.
 
 Gameplay settings include Terraformer size plus Physics Core size, velocity,
 terrain-damaging bounce count, color, and trail controls.
-The bottom hotbar shows the active Items or Blocks lane. The pause-menu
+The bottom hotbar shows the active Items or Blocks lane plus the current
+semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show
 or hide the quick-control hints. Debug and control overlays start hidden by
 default.

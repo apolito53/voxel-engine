@@ -46,6 +46,14 @@ import {
 } from "./chunkStorage";
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
 import {
+  DEFAULT_CLICK_FIRE_MODE,
+  formatClickFireMode,
+  formatClickFireModeShort,
+  normalizeClickFireMode,
+  toggleClickFireMode,
+  type ClickFireMode
+} from "./clickFireMode";
+import {
   CodexPilot,
   type CodexPilotApi,
   type CodexPilotWeapon
@@ -123,7 +131,8 @@ import {
   EMPTY_HANDS_ITEM_ID,
   createItemStack,
   createVoxelSandboxItemRegistry,
-  type ItemAction
+  type ItemAction,
+  type ItemUseButton
 } from "./items";
 import { SUN_OFFSET } from "./lighting";
 import { MinimapRenderer } from "./minimap";
@@ -333,6 +342,8 @@ const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
 const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
 const PLAYER_LOCATION_SAVE_PRECISION = 1000;
 const CORE_AIM_PREVIEW_TOGGLE_KEY = "F6";
+const CLICK_FIRE_MODE_TOGGLE_KEY = "KeyT";
+const FULL_AUTO_CLICK_ACTION_INTERVAL_MS = 140;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 type VoxelRuntimeGlobal = typeof globalThis & {
@@ -520,6 +531,7 @@ let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastUserActivityAt = performance.now();
 let physicsCoreSettings: PhysicsCoreSettings = readPhysicsCoreSettingsPreference();
 let terraformerSize = readTerraformerSizePreference();
+let clickFireMode: ClickFireMode = readClickFireModePreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
 let debrisPerformancePressure = createDebrisPerformancePressureState(
@@ -531,6 +543,8 @@ const PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET = 8;
 const PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET = 24;
 let leftMouseButtonDown = false;
 let rightMouseButtonDown = false;
+let nextPrimaryClickActionAtMs = 0;
+let nextSecondaryClickActionAtMs = 0;
 let terraformerState: TerraformerState | null = null;
 let coreAimPreviewEnabled = false;
 
@@ -631,6 +645,7 @@ const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
 const TERRAFORMER_SIZE_STORAGE_KEY = "voxel-sandbox-terraformer-size";
+const CLICK_FIRE_MODE_STORAGE_KEY = "voxel-sandbox-click-fire-mode";
 const CONTROL_HINTS_STORAGE_KEY = "voxel-sandbox-control-hints-visible";
 const LOCAL_COMBAT_LOG_ENDPOINT = "/__voxel_combat_log";
 const LOCAL_COMBAT_LOG_RECEIVER_ENDPOINT = "http://127.0.0.1:5174/__voxel_combat_log";
@@ -1237,9 +1252,34 @@ function canAdjustTerraformerSizeFromKeyboard(): boolean {
   return inWorld && requirePlayer().isLooking() && isTerraformerSelected();
 }
 
+function canToggleClickFireModeFromKeyboard(): boolean {
+  return inWorld && requirePlayer().isLooking();
+}
+
 function isTerraformerSelected(): boolean {
   return activeBuilderLane === "items" &&
     getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry).kind === "terrain:mine-block";
+}
+
+function setClickFireMode(mode: ClickFireMode, options: { readonly announce?: boolean } = {}): void {
+  const nextMode = normalizeClickFireMode(mode, clickFireMode);
+  if (nextMode === clickFireMode) {
+    updateHud();
+    return;
+  }
+
+  clickFireMode = nextMode;
+  writeClickFireModePreference(clickFireMode);
+  resetHeldClickRepeatState();
+  if (clickFireMode === "semi") resetTerraformerState();
+  if (options.announce) {
+    novaMessage.textContent = `Fire mode: ${formatClickFireMode(clickFireMode)}.`;
+  }
+  updateHud();
+}
+
+function toggleSelectedClickFireMode(): void {
+  setClickFireMode(toggleClickFireMode(clickFireMode), { announce: true });
 }
 
 function setTerraformerSize(value: unknown): void {
@@ -1280,6 +1320,25 @@ function writeTerraformerSizePreference(size: number): void {
     globalThis.localStorage?.setItem(TERRAFORMER_SIZE_STORAGE_KEY, String(normalizeTerraformerSize(size)));
   } catch {
     // The editor remains usable if storage is blocked; only the next launch forgets this size.
+  }
+}
+
+function readClickFireModePreference(): ClickFireMode {
+  try {
+    return normalizeClickFireMode(
+      globalThis.localStorage?.getItem(CLICK_FIRE_MODE_STORAGE_KEY),
+      DEFAULT_CLICK_FIRE_MODE
+    );
+  } catch {
+    return DEFAULT_CLICK_FIRE_MODE;
+  }
+}
+
+function writeClickFireModePreference(mode: ClickFireMode): void {
+  try {
+    globalThis.localStorage?.setItem(CLICK_FIRE_MODE_STORAGE_KEY, normalizeClickFireMode(mode));
+  } catch {
+    // The current session still flips modes even if storage is unavailable.
   }
 }
 
@@ -1411,6 +1470,12 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.code === CLICK_FIRE_MODE_TOGGLE_KEY && !event.repeat && canToggleClickFireModeFromKeyboard()) {
+    event.preventDefault();
+    toggleSelectedClickFireMode();
+    return;
+  }
+
   if (event.code === BUILDER_MODE_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
     setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items");
@@ -1498,22 +1563,24 @@ renderer.domElement.addEventListener("mousedown", (event) => {
   if (event.button === 0) {
     leftMouseButtonDown = true;
     rightMouseButtonDown = (event.buttons & 2) !== 0;
-    useSelectedHotbarPrimaryAction(activePlayer);
+    handleClickActionPress("primary", activePlayer, performance.now());
     return;
   }
 
   if (event.button === 2) {
     rightMouseButtonDown = true;
-    useSelectedHotbarSecondaryAction(activePlayer);
+    handleClickActionPress("secondary", activePlayer, performance.now());
   }
 }, eventListenerOptions);
 document.addEventListener("mouseup", (event) => {
   if (event.button === 0) {
     leftMouseButtonDown = false;
+    nextPrimaryClickActionAtMs = 0;
     resetTerraformerState();
   }
   if (event.button === 2) {
     rightMouseButtonDown = false;
+    nextSecondaryClickActionAtMs = 0;
   }
 }, eventListenerOptions);
 document.addEventListener("pointercancel", () => {
@@ -1534,11 +1601,22 @@ renderer.domElement.addEventListener("wheel", (event) => {
 function clearPointerHoldState(): void {
   leftMouseButtonDown = false;
   rightMouseButtonDown = false;
+  resetHeldClickRepeatState();
   resetTerraformerState();
 }
 
 function resetTerraformerState(): void {
   terraformerState = null;
+}
+
+function resetHeldClickRepeatState(): void {
+  nextPrimaryClickActionAtMs = 0;
+  nextSecondaryClickActionAtMs = 0;
+}
+
+function handleClickActionPress(button: ItemUseButton, activePlayer: PlayerController, nowMs: number): void {
+  setNextClickActionTime(button, nowMs + FULL_AUTO_CLICK_ACTION_INTERVAL_MS);
+  useSelectedHotbarAction(activePlayer, getSelectedHotbarAction(button));
 }
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
@@ -1547,6 +1625,25 @@ function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
 
 function useSelectedHotbarSecondaryAction(activePlayer: PlayerController): void {
   useSelectedHotbarAction(activePlayer, getHotbarSecondaryAction(getSelectedHotbarItem(), itemRegistry));
+}
+
+function getSelectedHotbarAction(button: ItemUseButton): ItemAction {
+  const selectedItem = getSelectedHotbarItem();
+  return button === "primary"
+    ? getHotbarPrimaryAction(selectedItem, itemRegistry)
+    : getHotbarSecondaryAction(selectedItem, itemRegistry);
+}
+
+function getNextClickActionTime(button: ItemUseButton): number {
+  return button === "primary" ? nextPrimaryClickActionAtMs : nextSecondaryClickActionAtMs;
+}
+
+function setNextClickActionTime(button: ItemUseButton, nextAtMs: number): void {
+  if (button === "primary") {
+    nextPrimaryClickActionAtMs = nextAtMs;
+  } else {
+    nextSecondaryClickActionAtMs = nextAtMs;
+  }
 }
 
 function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAction): void {
@@ -1645,19 +1742,33 @@ function showBuilderStatus(message: string): void {
   novaMessage.textContent = message;
 }
 
-function updateTerraformer(): void {
+function updateHeldClickActions(nowMs: number): void {
   if (!leftMouseButtonDown) {
     resetTerraformerState();
-    return;
+  } else {
+    repeatHeldClickAction("primary", nowMs);
   }
 
-  const action = getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry);
-  if (action.kind !== "terrain:mine-block") {
+  if (rightMouseButtonDown) {
+    repeatHeldClickAction("secondary", nowMs);
+  }
+}
+
+function repeatHeldClickAction(button: ItemUseButton, nowMs: number): void {
+  const action = getSelectedHotbarAction(button);
+  if (button === "primary" && action.kind !== "terrain:mine-block") {
     resetTerraformerState();
+  }
+
+  if (clickFireMode !== "full") {
+    if (button === "primary" && action.kind === "terrain:mine-block") resetTerraformerState();
     return;
   }
 
-  startOrContinueTerraformer(false);
+  if (nowMs < getNextClickActionTime(button)) return;
+
+  setNextClickActionTime(button, nowMs + FULL_AUTO_CLICK_ACTION_INTERVAL_MS);
+  useSelectedHotbarAction(requirePlayer(), action);
 }
 
 function startOrContinueTerraformer(immediate: boolean): void {
@@ -1785,7 +1896,7 @@ function animate(): void {
     debugPlayerVelocity = activePlayer.velocity;
 
     activePlayer.update(delta);
-    updateTerraformer();
+    updateHeldClickActions(frameStartedAt);
     testAvatar.update(delta);
     maybeAutosavePlayerLocation(frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
@@ -2028,7 +2139,7 @@ function shouldSuspendAnimationLoop(now: number): boolean {
 
 function hasActiveEngineWork(): boolean {
   if (!inWorld || !world) return false;
-  if (leftMouseButtonDown && terraformerState) return true;
+  if (leftMouseButtonDown || rightMouseButtonDown) return true;
   if (world.hasPendingRuntimeWork()) return true;
   if (debrisSettlerStats.activeFragments > 0) return true;
   if (physicsCoreTrail.getActiveTrailCount() > 0) return true;
@@ -2246,7 +2357,7 @@ function getSelectedBuilderBlockName(): string {
 function renderHotbar(): void {
   const activeItems = getActiveHotbarItems();
   const activeIndex = getActiveHotbarIndex();
-  const laneLabel = activeBuilderLane === "blocks" ? "Blocks" : "Items";
+  const laneLabel = `${activeBuilderLane === "blocks" ? "Blocks" : "Items"} | ${formatClickFireModeShort(clickFireMode)}`;
 
   const laneNode = document.createElement("div");
   laneNode.className = "hotbar-lane";
@@ -2467,6 +2578,7 @@ function getBlockCssColor(block: BlockId): string {
 
 function selectHotbarIndex(index: number): void {
   resetTerraformerState();
+  resetHeldClickRepeatState();
   const activeHotbarItems = getActiveHotbarItems();
   if (activeBuilderLane === "blocks") {
     selectedBlockHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);

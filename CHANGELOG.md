@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.9.6 - 2026-06-06
+
+### Added
+
+- Added `T` as a gameplay toggle between semi-auto and full-auto click actions
+  for the active held item or block lane.
+- Added compact `SEMI`/`FULL` mode text to the bottom hotbar so the current
+  click cadence is visible without reopening menus.
+
+### Changed
+
+- Held left/right click actions now repeat only in full-auto mode at a bounded
+  cadence. Semi-auto remains the default one-action-per-press behavior.
+
 ## 0.9.5.1 - 2026-06-01
 
 ### Added
