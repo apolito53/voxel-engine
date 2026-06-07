@@ -24,8 +24,7 @@ import {
 } from "./qualitySettings";
 import { CHUNK_SIZE } from "./voxelConstants";
 
-const FOG_FAR_PER_LOADED_CHUNK = CHUNK_SIZE * 1.85;
-const CAMERA_FAR_PER_LOADED_CHUNK = CHUNK_SIZE * 3.2;
+const CAMERA_FAR_FOG_MARGIN_CHUNKS = 2;
 
 export type QualityChangeSource = "preset" | "settings";
 
@@ -83,13 +82,17 @@ export class QualityController {
     return this.settings.loadRadius;
   }
 
+  get streamLoadRadius(): number {
+    return this.preset.loadRadius;
+  }
+
   get initialLoadRadius(): number {
     // High and ultra should not freeze world entry by synchronously building every distant chunk.
-    return Math.min(this.loadRadius, QUALITY_PRESETS.low.loadRadius);
+    return Math.min(this.loadRadius, QUALITY_PRESETS.low.fogStartRadius);
   }
 
   get unloadRadius(): number {
-    return this.settings.loadRadius + 1;
+    return this.preset.unloadRadius;
   }
 
   get chunkLoadBudget(): number {
@@ -300,11 +303,16 @@ export class QualityController {
 
   private createEffectivePreset(): QualityPreset {
     const basePreset = this.getBasePreset();
-    const loadRadius = this.settings.loadRadius;
+    const fogStartRadius = this.settings.loadRadius;
+    const loadRadius = fogStartRadius + basePreset.fogFalloffRadius;
     const shadowMapSize = this.settings.shadowMapSize;
     const shadows = shadowMapSize > 0;
-    const fogFar = Math.max(basePreset.fogFar, loadRadius * FOG_FAR_PER_LOADED_CHUNK);
-    const cameraFar = Math.max(basePreset.cameraFar, loadRadius * CAMERA_FAR_PER_LOADED_CHUNK);
+    const fogNear = fogStartRadius * CHUNK_SIZE;
+    const fogFar = loadRadius * CHUNK_SIZE;
+    const cameraFar = Math.max(
+      basePreset.cameraFar,
+      fogFar + CAMERA_FAR_FOG_MARGIN_CHUNKS * CHUNK_SIZE
+    );
 
     return {
       ...basePreset,
@@ -312,8 +320,10 @@ export class QualityController {
       shadows,
       shadowMapSize: shadows ? shadowMapSize : basePreset.shadowMapSize,
       shadowIntensity: shadows ? basePreset.shadowIntensity : 0,
+      fogStartRadius,
       loadRadius,
       unloadRadius: loadRadius + 1,
+      fogNear,
       fogFar,
       cameraFar,
       blockFragmentCount: this.settings.blockFragmentCount

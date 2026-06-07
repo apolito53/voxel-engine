@@ -16,6 +16,8 @@ export const BLOCK_FRAGMENT_MIN_COUNT = BLOCK_DEBRIS_MIN_FRAGMENT_COUNT;
 export const BLOCK_FRAGMENT_MAX_COUNT = BLOCK_DEBRIS_MAX_FRAGMENT_COUNT;
 
 export type QualitySettings = {
+  // Historical name kept for localStorage compatibility. This value is now the
+  // clear-view chunk radius where fog begins, not the full streamed horizon.
   readonly loadRadius: number;
   readonly shadowMapSize: number;
   readonly blockFragmentCount: number;
@@ -23,7 +25,7 @@ export type QualitySettings = {
 
 export function createDefaultQualitySettings(preset: QualityPreset): QualitySettings {
   return {
-    loadRadius: normalizeRenderDistance(preset.loadRadius),
+    loadRadius: normalizeRenderDistance(preset.fogStartRadius),
     shadowMapSize: normalizeShadowMapSize(preset.shadows ? preset.shadowMapSize : 0),
     blockFragmentCount: normalizeBlockFragmentCountSetting(preset.blockFragmentCount)
   };
@@ -121,7 +123,7 @@ export function getShadowMapSizeForQualityLevel(level: unknown): number {
 
 export function formatRenderDistance(loadRadius: number): string {
   const normalizedDistance = normalizeRenderDistance(loadRadius);
-  return `${normalizedDistance} ${normalizedDistance === 1 ? "chunk" : "chunks"}`;
+  return `${normalizedDistance} clear ${normalizedDistance === 1 ? "chunk" : "chunks"}`;
 }
 
 export function formatShadowQuality(shadowMapSize: number): string {

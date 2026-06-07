@@ -1,3 +1,5 @@
+import { CHUNK_SIZE } from "./voxelConstants";
+
 export const QUALITY_STORAGE_KEY = "voxel-quality-preset";
 export const CUSTOM_QUALITY_BASE_STORAGE_KEY = "voxel-custom-quality-base";
 export const SUPER_ULTRA_STORAGE_KEY = "voxel-super-ultra-enabled";
@@ -22,6 +24,8 @@ export type QualityPreset = {
   readonly shadowBias: number;
   readonly shadowNormalBias: number;
   readonly shadowIntensity: number;
+  readonly fogStartRadius: number;
+  readonly fogFalloffRadius: number;
   readonly fogNear: number;
   readonly fogFar: number;
   readonly cameraFar: number;
@@ -38,11 +42,36 @@ export type QualityPreset = {
   readonly skyIntensity: number;
 };
 
+type QualityPresetRuntimeFields = "fogNear" | "fogFar" | "cameraFar" | "loadRadius" | "unloadRadius";
+type QualityPresetDefinition = Omit<QualityPreset, QualityPresetRuntimeFields> & {
+  readonly minCameraFar: number;
+};
+
+// The player-facing render distance is now the clear-view radius: fog starts
+// there, then the engine streams a small extra horizon behind it so chunks fade
+// out instead of disappearing at a hard square edge.
+function createQualityPreset(definition: QualityPresetDefinition): QualityPreset {
+  const { minCameraFar, ...preset } = definition;
+  const loadRadius = preset.fogStartRadius + preset.fogFalloffRadius;
+  const fogNear = preset.fogStartRadius * CHUNK_SIZE;
+  const fogFar = loadRadius * CHUNK_SIZE;
+  const cameraFar = Math.max(minCameraFar, fogFar + CHUNK_SIZE * 2);
+
+  return {
+    ...preset,
+    fogNear,
+    fogFar,
+    cameraFar,
+    loadRadius,
+    unloadRadius: loadRadius + 1
+  };
+}
+
 // Quality presets are intentionally plain data so render distance, lighting,
 // streaming budgets, minimap cost, and physics body defaults can be tuned
 // without spelunking the game loop.
 export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
-  potato: {
+  potato: createQualityPreset({
     label: "Potato",
     distanceScale: 0.5,
     pixelRatioLimit: 1,
@@ -53,11 +82,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00015,
     shadowNormalBias: 0.035,
     shadowIntensity: 0,
-    fogNear: 18,
-    fogFar: 44,
-    cameraFar: 120,
-    loadRadius: 2,
-    unloadRadius: 3,
+    fogStartRadius: 2,
+    fogFalloffRadius: 2,
+    minCameraFar: 120,
     chunkLoads: 1,
     chunkRebuilds: 1,
     physicsObjectBudget: 64,
@@ -67,8 +94,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 3,
     sunIntensity: 2.8,
     skyIntensity: 1.35
-  },
-  low: {
+  }),
+  low: createQualityPreset({
     label: "Low",
     distanceScale: 1,
     pixelRatioLimit: 1,
@@ -79,11 +106,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00015,
     shadowNormalBias: 0.035,
     shadowIntensity: 0,
-    fogNear: 35,
-    fogFar: 68,
-    cameraFar: 180,
-    loadRadius: 3,
-    unloadRadius: 4,
+    fogStartRadius: 3,
+    fogFalloffRadius: 2,
+    minCameraFar: 180,
     chunkLoads: 1,
     chunkRebuilds: 2,
     physicsObjectBudget: 128,
@@ -93,8 +118,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 4,
     sunIntensity: 3.2,
     skyIntensity: 1.65
-  },
-  normal: {
+  }),
+  normal: createQualityPreset({
     label: "Normal",
     distanceScale: 2,
     pixelRatioLimit: 2,
@@ -105,11 +130,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00012,
     shadowNormalBias: 0.055,
     shadowIntensity: 0.78,
-    fogNear: 55,
-    fogFar: 220,
-    cameraFar: 450,
-    loadRadius: 6,
-    unloadRadius: 7,
+    fogStartRadius: 6,
+    fogFalloffRadius: 3,
+    minCameraFar: 450,
     chunkLoads: 2,
     chunkRebuilds: 4,
     physicsObjectBudget: 192,
@@ -119,8 +142,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 8,
     sunIntensity: 3.45,
     skyIntensity: 1.45
-  },
-  custom: {
+  }),
+  custom: createQualityPreset({
     label: "Custom",
     distanceScale: 2,
     pixelRatioLimit: 2,
@@ -131,11 +154,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00012,
     shadowNormalBias: 0.055,
     shadowIntensity: 0.78,
-    fogNear: 55,
-    fogFar: 220,
-    cameraFar: 450,
-    loadRadius: 6,
-    unloadRadius: 7,
+    fogStartRadius: 6,
+    fogFalloffRadius: 3,
+    minCameraFar: 450,
     chunkLoads: 2,
     chunkRebuilds: 4,
     physicsObjectBudget: 192,
@@ -145,8 +166,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 8,
     sunIntensity: 3.45,
     skyIntensity: 1.45
-  },
-  high: {
+  }),
+  high: createQualityPreset({
     label: "High",
     distanceScale: 4,
     pixelRatioLimit: 2,
@@ -157,11 +178,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.0001,
     shadowNormalBias: 0.06,
     shadowIntensity: 0.8,
-    fogNear: 95,
-    fogFar: 440,
-    cameraFar: 900,
-    loadRadius: 12,
-    unloadRadius: 13,
+    fogStartRadius: 12,
+    fogFalloffRadius: 4,
+    minCameraFar: 900,
     chunkLoads: 4,
     chunkRebuilds: 6,
     physicsObjectBudget: 512,
@@ -171,8 +190,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 10,
     sunIntensity: 3.55,
     skyIntensity: 1.5
-  },
-  ultra: {
+  }),
+  ultra: createQualityPreset({
     label: "Ultra",
     distanceScale: 6,
     pixelRatioLimit: 2,
@@ -183,11 +202,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00008,
     shadowNormalBias: 0.065,
     shadowIntensity: 0.82,
-    fogNear: 135,
-    fogFar: 660,
-    cameraFar: 1300,
-    loadRadius: 18,
-    unloadRadius: 19,
+    fogStartRadius: 18,
+    fogFalloffRadius: 5,
+    minCameraFar: 1300,
     chunkLoads: 6,
     chunkRebuilds: 8,
     physicsObjectBudget: 1024,
@@ -197,8 +214,8 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 12,
     sunIntensity: 3.65,
     skyIntensity: 1.55
-  },
-  [SUPER_ULTRA_PRESET_ID]: {
+  }),
+  [SUPER_ULTRA_PRESET_ID]: createQualityPreset({
     label: "Super Ultra",
     distanceScale: 12,
     pixelRatioLimit: 2,
@@ -209,11 +226,9 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00008,
     shadowNormalBias: 0.07,
     shadowIntensity: 0.82,
-    fogNear: 270,
-    fogFar: 1320,
-    cameraFar: 2600,
-    loadRadius: 36,
-    unloadRadius: 37,
+    fogStartRadius: 36,
+    fogFalloffRadius: 6,
+    minCameraFar: 2600,
     chunkLoads: 10,
     chunkRebuilds: 10,
     physicsObjectBudget: 4096,
@@ -223,5 +238,5 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     minimapRowsPerFrame: 14,
     sunIntensity: 3.75,
     skyIntensity: 1.6
-  }
+  })
 };

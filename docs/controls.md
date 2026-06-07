@@ -113,7 +113,7 @@ Pause menu `Settings` is split into three tabs.
 `Graphics` owns:
 
 - Quality preset
-- Render distance
+- Fog start distance
 - Shadow quality
 
 `Gameplay` owns:
@@ -141,20 +141,23 @@ clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any
 visible bars when turned off. `Gameplay > Despawn All Objects` performs the
 drastic full cleanup: physics cores, loose debris VFX, and any existing rubble
 cover.
+The fog start distance is the clear chunk radius. The engine streams a small
+extra horizon behind it, then lets far terrain fade into opaque fog instead of
+vanishing at a hard cutoff.
 
 ## Quality Presets
 
-- `Potato`: 0.5x render distance, no shadows, 64 physics bodies, 54 max debris
-  shards/block, 8m active debris bubble.
+- `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
+  shards/block, 8m active debris bubble, short fog horizon.
 - `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris
-  shards/block, 12m active debris bubble.
-- `Normal`: 2x render distance, shadows, 192 physics bodies, 108 max debris
-  shards/block, 20m active debris bubble.
-- `High`: 4x render distance, sharper local shadows, 512 physics bodies, 144 max
-  debris shards/block, 32m active debris bubble.
-- `Ultra`: 6x render distance, sharper local shadows, 1024 physics bodies, 180
-  max debris shards/block, 48m active debris bubble.
-- `Super Ultra`: 12x render distance, highest local shadow resolution, 4096
+  shards/block, 12m active debris bubble, short fog horizon.
+- `Normal`: 2x clear distance, shadows, 192 physics bodies, 108 max debris
+  shards/block, 20m active debris bubble, medium fog horizon.
+- `High`: 4x clear distance, sharper local shadows, 512 physics bodies, 144 max
+  debris shards/block, 32m active debris bubble, extended fog horizon.
+- `Ultra`: 6x clear distance, sharper local shadows, 1024 physics bodies, 180
+  max debris shards/block, 48m active debris bubble, broad fog horizon.
+- `Super Ultra`: 12x clear distance, highest local shadow resolution, 4096
   physics bodies, 216 max debris shards/block, 72m active debris bubble. This is
   a stress-test mode and requires an opt-in from the pause menu once `Ultra` is
   selected.

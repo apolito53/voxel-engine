@@ -8178,7 +8178,11 @@ test("quality settings clamp custom menu overrides", () => {
     BLOCK_FRAGMENT_MAX_COUNT,
     "custom debris count should clamp to the visible VFX shard limit"
   );
-  assertEqual(formatRenderDistance(6), "6 chunks", "render distance label should stay human-readable");
+  assertEqual(
+    formatRenderDistance(6),
+    "6 clear chunks",
+    "render distance label should explain that the slider is the fog start"
+  );
   assertEqual(formatShadowQuality(0), "Off", "shadow quality label should call out disabled shadows");
   assertEqual(
     formatBlockFragmentCount(0),
@@ -8593,9 +8597,32 @@ test("quality presets keep scheduler and render-distance invariants", () => {
 
   for (const presetId of presetIds) {
     const preset = QUALITY_PRESETS[presetId];
+    assert(
+      preset.fogStartRadius > 0,
+      `${preset.label} should define where terrain starts fading into fog`
+    );
+    assert(
+      preset.fogFalloffRadius >= 1,
+      `${preset.label} should keep at least one chunk of fogged horizon`
+    );
+    assertEqual(
+      preset.loadRadius,
+      preset.fogStartRadius + preset.fogFalloffRadius,
+      `${preset.label} load radius should include the fogged horizon buffer`
+    );
     assert(preset.unloadRadius > preset.loadRadius, `${preset.label} unload radius should exceed load radius`);
     assert(preset.chunkLoads >= 1, `${preset.label} should request at least one chunk load`);
     assert(preset.chunkRebuilds >= 1, `${preset.label} should request at least one chunk rebuild`);
+    assertEqual(
+      preset.fogNear,
+      preset.fogStartRadius * CHUNK_SIZE,
+      `${preset.label} fog should begin at the player-facing render distance`
+    );
+    assertEqual(
+      preset.fogFar,
+      preset.loadRadius * CHUNK_SIZE,
+      `${preset.label} fog should become opaque at the streamed horizon`
+    );
     assert(preset.cameraFar > preset.fogNear, `${preset.label} camera far should exceed fog near`);
     assert(preset.fogFar > preset.fogNear, `${preset.label} fog far should exceed fog near`);
     assert(isPowerOfTwo(preset.shadowMapSize), `${preset.label} shadow map size should stay GPU-friendly`);
@@ -8651,7 +8678,10 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   }
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
+  assertEqual(QUALITY_PRESETS.potato.fogStartRadius, 2, "Potato should start fog after 2 clear chunks");
   assertEqual(QUALITY_PRESETS.normal.distanceScale, 2, "Normal should remain 2x distance");
+  assertEqual(QUALITY_PRESETS.normal.fogStartRadius, 6, "Normal should start fog after 6 clear chunks");
+  assertEqual(QUALITY_PRESETS.normal.loadRadius, 9, "Normal should stream a fogged horizon behind 6 clear chunks");
   assertEqual(QUALITY_PRESETS[CUSTOM_PRESET_ID].label, "Custom", "Custom preset should be available for slider edits");
   assertEqual(
     QUALITY_PRESETS[CUSTOM_PRESET_ID].physicsObjectBudget,

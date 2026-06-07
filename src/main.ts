@@ -1910,7 +1910,7 @@ function animate(): void {
       camera.position.x,
       camera.position.z,
       scene,
-      qualityController.loadRadius,
+      qualityController.streamLoadRadius,
       qualityController.unloadRadius,
       qualityController.chunkLoadBudget,
       chunkStreamDirection,

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.9.8 - 2026-06-06
+
+### Changed
+
+- Reworked the render-distance setting into a fog-start distance: terrain now
+  streams a small extra horizon behind the selected clear chunk radius, then
+  fades into an opaque fog curtain instead of ending at a hard chunk cutoff.
+- Updated the debug HUD and graphics settings copy to show the clear-distance
+  radius separately from the fogged streamed horizon.
+
 ## 0.9.7 - 2026-06-06
 
 ### Changed

@@ -102,9 +102,14 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Grounded debris lifetime slider bounds, persistence, forever mode, and label formatting: `src/debrisLifetime.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
-- Render quality controller, Custom preset for slider edits, persistence, and renderer/light/camera application: `src/qualityController.ts`
-- Custom quality settings storage, slider bounds, and menu label formatting: `src/qualitySettings.ts`
-- Render quality preset definitions, physics-body defaults, active debris bubble radii, Custom baseline, and tuning knobs: `src/qualityPresets.ts`
+- Render quality controller, fog-start-to-streamed-horizon policy, Custom preset
+  for slider edits, persistence, and renderer/light/camera application:
+  `src/qualityController.ts`
+- Custom quality settings storage, fog-start slider bounds, and menu label
+  formatting: `src/qualitySettings.ts`
+- Render quality preset definitions, fog curtain thickness, physics-body
+  defaults, active debris bubble radii, Custom baseline, and tuning knobs:
+  `src/qualityPresets.ts`
 - Generated sunlit skybox texture and camera-following sky dome: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
 - Generated hitscan energy-bolt texture for additive beam rendering: `src/assets/hitscan-energy-bolt.png`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
@@ -169,7 +174,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 - Change Nova's companion behavior or pilot-thrown cores: `src/novaPilot.ts`, `KeyN`/`KeyB` hooks in `src/main.ts`, and shared physics-core construction in `createPhysicsCore`.
 - Add Nova chat context or local reply behavior: event payloads in `src/engineEvents.ts`, journal rules in `src/novaContext.ts`, reply selection in `src/novaChat.ts`, panel behavior in `src/novaChatPanel.ts`, and input/pointer-lock wiring in `src/main.ts`.
 - Add gameplay/system reactions without coupling features together: define payloads in `src/engineEvents.ts`, emit from the owning runtime path, and subscribe from a focused consumer like `src/novaPilotReactions.ts` or `src/novaContext.ts`.
-- Tune render/performance modes, settings tabs, or builder/admin panels: quality preset constants in `src/qualityPresets.ts`, Custom slider bounds/storage in `src/qualitySettings.ts`, projectile physics-core tuning in `src/physicsCoreSettings.ts`, builder brush sizing in `src/builderTools.ts`, the Super Ultra opt-in toggle, pause-menu HTML/CSS in `index.html` and `src/style.css`, and application logic in `src/qualityController.ts`/`src/main.ts`.
+- Tune render/performance modes, fog curtain distance, settings tabs, or builder/admin panels: quality preset constants in `src/qualityPresets.ts`, Custom slider bounds/storage in `src/qualitySettings.ts`, projectile physics-core tuning in `src/physicsCoreSettings.ts`, builder brush sizing in `src/builderTools.ts`, the Super Ultra opt-in toggle, pause-menu HTML/CSS in `index.html` and `src/style.css`, and application logic in `src/qualityController.ts`/`src/main.ts`.
 - Tune baked voxel face shading or visible sun direction: update `src/voxelLighting.ts`, `src/lighting.ts`, `src/assets/skybox-sunlit-day.png`, and `src/skybox.ts` together so worker mesh colors, skybox alignment, and shadows agree.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change held item definitions, action mapping, Terraformer/place reach, hit behavior, item/block lane selection, builder brush behavior or placement preview, terrain/rubble target picking, or target outline: `src/items.ts`, `src/hotbar.ts`, `src/terraformerSettings.ts`, `src/builderTools.ts`, `src/builderPreview.ts`, `src/raycast.ts`, `src/targetHighlighter.ts`, `src/rubble.ts`, and pointer/highlight hooks in `src/main.ts`.
@@ -189,7 +194,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 - Block tint variation is part of the greedy mesh key. Keep worker and fallback meshing on the shared `src/blockColors.ts` helpers so tint buckets stay deterministic and chunks do not repaint between mesh paths.
 - Worker meshes treat missing neighbor chunks as temporarily solid so streaming does not draw chunk-edge walls before neighbors load and trigger a remesh.
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
-- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts, full chunk-radius queue refreshes, full unload sweeps, or all-loaded-chunk dirty scans on every frame. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work. If code loads or creates chunks directly, keep the unload-window and dirty/modified indexes in sync.
+- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts, full chunk-radius queue refreshes, full unload sweeps, or all-loaded-chunk dirty scans on every frame. The settings slider is the fog-start/clear-distance radius; `QualityController.streamLoadRadius` is the farther streamed horizon that hides the cutoff behind fog. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work. If code loads or creates chunks directly, keep the unload-window and dirty/modified indexes in sync.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in that only appears at `Ultra` or while `Super Ultra` is active.
 - Pause-menu tuning controls live behind the `Settings` button and admin build controls live behind the `Builder` button so normal pause/resume stays quick; opening a submenu hides `Resume` and the red `Exit to Home` action until the user backs out. The settings panel is viewport-constrained and split into `Graphics`, `Gameplay`, and `Experimental` tabs to keep smaller windows reachable while putting risky physics/debris stress controls behind a warning.
 - Slider edits intentionally fork into the single `Custom` preset instead of mutating built-in presets; named custom preset management is future UI work.

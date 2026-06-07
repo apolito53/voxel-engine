@@ -215,7 +215,12 @@ export class DebugHud {
       {
         title: "Render",
         rows: [
-          { label: "quality", value: `${qualityPreset.label} ${qualityPreset.distanceScale}x, debris ${qualityPreset.debrisActiveRadiusMeters}m, px ${this.renderer.getPixelRatio()}` },
+          {
+            label: "quality",
+            value: `${qualityPreset.label} ${qualityPreset.distanceScale}x, ` +
+              `fog ${qualityPreset.fogStartRadius}->${qualityPreset.loadRadius}c, ` +
+              `debris ${qualityPreset.debrisActiveRadiusMeters}m, px ${this.renderer.getPixelRatio()}`
+          },
           { label: "req", value: `gen ${snapshot.stats.requestedLoadsThisFrame}, mesh ${snapshot.stats.requestedMeshesThisFrame}, map ${snapshot.lastMinimapMs.toFixed(1)}ms` },
           { label: "gpu", value: compactText(this.gpuInfo.vendor, 30) },
           { label: "driver", value: compactText(this.gpuInfo.renderer, 34) },
