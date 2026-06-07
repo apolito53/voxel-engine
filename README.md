@@ -105,8 +105,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 - [docs/nova-companion.md](docs/nova-companion.md): Nova Pilot, Nova Terminal,
   local reactions, and the future model-hook direction.
 - [docs/performance-hitch-logging.md](docs/performance-hitch-logging.md): local
-  and deployed hitch logs, persistent combat damage logs, debug metrics, server
-  markers, and visual recordings.
+  and deployed hitch logs, browser-frame diagnostics, persistent combat damage
+  logs, debug metrics, server markers, and visual recordings.
 - [docs/automation.md](docs/automation.md): F8 avatar, Codex pilot bridge,
   visual scenario recorder, and Chrome/playtest automation notes.
 

@@ -97,6 +97,7 @@ import {
   shouldHibernateAnimationLoop,
   shouldSkipExpensiveFrame
 } from "./frameLoop";
+import { BrowserFrameDiagnostics } from "./frameDiagnostics";
 import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import {
@@ -561,6 +562,7 @@ const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
 const fallbackHotbarItem = createItemStack(EMPTY_HANDS_ITEM_ID);
 const novaContext = new NovaContextJournal(engineEvents);
 const performanceHitchLog = new PerformanceHitchLog();
+const frameDiagnostics = new BrowserFrameDiagnostics();
 const clock = new THREE.Clock();
 const direction = new THREE.Vector3();
 const chunkStreamDirection = new THREE.Vector3();
@@ -1994,8 +1996,17 @@ function animate(): void {
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
   renderer.render(scene, camera);
-  frameTimingSample.renderMs = performance.now() - renderStartedAt;
-  frameTimingSample.frameMs = performance.now() - frameStartedAt;
+  const renderEndedAt = performance.now();
+  frameTimingSample.renderMs = renderEndedAt - renderStartedAt;
+  const frameEndedAt = performance.now();
+  frameTimingSample.frameMs = frameEndedAt - frameStartedAt;
+  const frameDiagnosticSnapshot = frameDiagnostics.captureFrame({
+    frameStartedAtMs: frameStartedAt,
+    frameEndedAtMs: frameEndedAt,
+    rafGapMs: rawDelta * 1000,
+    timings: frameTimingSample,
+    rendererInfo: renderer.info
+  });
 
   if (inWorld) {
     const observedFps = 1 / Math.max(rawDelta, 1 / 240);
@@ -2025,6 +2036,7 @@ function animate(): void {
       const diagnosis = performanceHitchLog.record({
         frameMs: frameTimingSample.frameMs,
         timings: frameTimingSample,
+        diagnostics: frameDiagnosticSnapshot,
         stats: performanceStats
       });
       engineEvents.emit("performance:frame-spike", {
@@ -2039,6 +2051,7 @@ function animate(): void {
         frameMs: Math.max(frameTimingSample.frameMs, rawDelta * 1000),
         observedFps,
         timings: frameTimingSample,
+        diagnostics: frameDiagnosticSnapshot,
         stats: performanceStats
       });
     }
@@ -4413,6 +4426,7 @@ function disposeRuntime(): void {
   // Firefox's GPU process until the browser finally decides to clean house.
   codexPilot.dispose();
   visualTestRecorder.dispose();
+  frameDiagnostics.dispose();
   player?.dispose();
   clearToys();
   void combatLog.flushPersistent();

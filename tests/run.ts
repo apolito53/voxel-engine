@@ -303,6 +303,7 @@ import {
   shouldHibernateAnimationLoop,
   shouldSkipExpensiveFrame
 } from "../src/frameLoop";
+import type { FrameDiagnosticsSnapshot } from "../src/frameDiagnostics";
 import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
 import {
   LOW_FPS_LOG_INTERVAL_MS,
@@ -2229,6 +2230,83 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
   } finally {
     console.warn = originalWarn;
   }
+});
+
+test("performance hitch diagnosis calls out RAF gaps and browser frame clues", () => {
+  const timings = {
+    playerMs: 1,
+    chunkMs: 0.5,
+    physicsMs: 0.8,
+    meshMs: 0.3,
+    minimapMs: 0.2,
+    renderMs: 1.1,
+    otherMs: 0.6,
+    frameMs: 5
+  };
+  const diagnostics = createTestFrameDiagnostics({
+    rafGapMs: 220,
+    jsFrameMs: 5,
+    measuredBucketTotalMs: 4.5,
+    rafGapOverJsMs: 215,
+    renderer: {
+      calls: 42,
+      triangles: 12000,
+      points: 0,
+      lines: 0,
+      geometries: 18,
+      textures: 4
+    }
+  });
+  const record = createPerformanceHitchRecord(7, 700, {
+    kind: "low-fps",
+    frameMs: 220,
+    observedFps: 4.5,
+    timings,
+    diagnostics,
+    stats: createTestHitchStats()
+  });
+
+  assert(
+    record.details.some((detail) => detail.includes("RAF gap") && detail.includes("measured JS")),
+    "large RAF gaps with tiny measured JS should be called out as browser/GPU/GC suspects"
+  );
+  assertEqual(record.diagnostics?.renderer.calls, 42, "hitch records should preserve renderer diagnostics");
+  assert(
+    formatPerformanceHitchRecord(record).includes("RAF gap"),
+    "Nova-readable summaries should lead with the missing-frame-time clue"
+  );
+
+  const renderRecord = createPerformanceHitchRecord(8, 800, {
+    frameMs: 52,
+    timings: {
+      ...timings,
+      renderMs: 40,
+      frameMs: 52
+    },
+    diagnostics: createTestFrameDiagnostics({
+      jsFrameMs: 52,
+      measuredBucketTotalMs: 43.5,
+      unaccountedFrameMs: 8.5,
+      renderCallMs: 40,
+      renderer: {
+        calls: 1800,
+        triangles: 920000,
+        points: 0,
+        lines: 0,
+        geometries: 3200,
+        textures: 6
+      }
+    }),
+    stats: createTestHitchStats()
+  });
+  assert(
+    renderRecord.details.some((detail) => detail.includes("1800 draw calls")),
+    "render hitches should carry draw-call and triangle receipts"
+  );
+  assert(
+    renderRecord.details.some((detail) => detail.includes("outside measured buckets")),
+    "unaccounted JS-frame time should be visible in hitch details"
+  );
 });
 
 test("performance hitch log versions records by debugging pass", () => {
@@ -8916,6 +8994,43 @@ function createTestHitchStats(
       maxCoverHeight: 0,
       visualChunks: 0
     },
+    ...overrides
+  };
+}
+
+function createTestFrameDiagnostics(
+  overrides: Partial<FrameDiagnosticsSnapshot> = {}
+): FrameDiagnosticsSnapshot {
+  return {
+    frameStartedAtMs: 100,
+    frameEndedAtMs: 116,
+    rafGapMs: 16,
+    jsFrameMs: 16,
+    measuredBucketTotalMs: 16,
+    unaccountedFrameMs: 0,
+    rafGapOverJsMs: 0,
+    renderCallMs: 2,
+    renderCallShare: 0.125,
+    longTasks: {
+      observerSupported: true,
+      frameCount: 0,
+      frameTotalMs: 0,
+      frameMaxMs: 0,
+      recentCount: 0,
+      recentTotalMs: 0,
+      recentMaxMs: 0
+    },
+    renderer: {
+      calls: 0,
+      triangles: 0,
+      points: 0,
+      lines: 0,
+      geometries: 0,
+      textures: 0
+    },
+    memory: null,
+    documentHidden: false,
+    visibilityState: "visible",
     ...overrides
   };
 }

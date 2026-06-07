@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.9.10.1 - 2026-06-07
+
+### Added
+
+- Added browser-frame diagnostics to hitch records, including RAF gap time,
+  unaccounted JavaScript frame time, renderer draw/geometry counters, recent
+  browser long tasks when supported, and Chrome heap snapshots when available.
+  This makes vague low-FPS/render-led logs distinguish engine work from likely
+  browser, GPU-present, or GC stalls.
+
 ## 0.9.10 - 2026-06-07
 
 ### Fixed

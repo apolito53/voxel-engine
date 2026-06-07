@@ -46,6 +46,10 @@ The debug overlay and hitch logger capture:
 - Partial-block lattice/subvoxel pressure.
 - Partial-mesh triangle pressure.
 - Rubble cover stats when parked rubble exists.
+- Browser-frame clues that subsystem buckets cannot fully see: RAF gap time,
+  unaccounted JavaScript frame time, renderer draw/geometry counters, recent
+  long tasks when the browser exposes them, and Chrome heap snapshots when
+  available.
 
 ## Parked Optimization Dead End
 
@@ -71,6 +75,10 @@ globalThis.__VOXEL_HITCH_START_PASS__("label")
 
 When `npm.cmd run debug:logs` is listening, local records append as
 pass-versioned JSONL under `logs/`.
+
+If a log says a large RAF gap happened with only a tiny measured JavaScript
+frame, treat that as a sign to investigate browser scheduling, GC, GPU
+presentation, or driver stalls before blaming terrain, debris, or chunk code.
 
 ## Runtime Combat Records
 

@@ -1,5 +1,6 @@
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
+import type { FrameDiagnosticsSnapshot } from "./frameDiagnostics";
 import type { FrameTimings } from "./frameTimings";
 import type { PartialBlockMeshStats } from "./partialBlocks";
 import type { PhysicsToyCollisionStats } from "./physics";
@@ -60,6 +61,7 @@ export type PerformanceHitchRecord = {
   readonly summary: string;
   readonly details: readonly string[];
   readonly timings: FrameTimings;
+  readonly diagnostics: FrameDiagnosticsSnapshot | null;
   readonly stats: PerformanceHitchStatsSnapshot;
 };
 
@@ -68,6 +70,7 @@ export type PerformanceHitchInput = {
   readonly frameMs: number;
   readonly observedFps?: number;
   readonly timings: FrameTimings;
+  readonly diagnostics?: FrameDiagnosticsSnapshot | null;
   readonly stats: PerformanceHitchStatsSnapshot;
 };
 
@@ -191,6 +194,7 @@ export class PerformanceHitchLog {
     this.lastConsoleLogAt = now;
     console.warn(`[Voxel Hitch] ${record.summary}${suppressedSuffix}`, {
       timings: record.timings,
+      diagnostics: record.diagnostics,
       stats: record.stats,
       details: record.details
     });
@@ -319,6 +323,7 @@ export function createPerformanceHitchRecord(
     summary,
     details,
     timings: cloneFrameTimings(input.timings),
+    diagnostics: cloneDiagnosticsSnapshot(input.diagnostics ?? null),
     stats: cloneStatsSnapshot(input.stats)
   };
 }
@@ -358,6 +363,8 @@ function getPerformanceHitchDetails(
   const { stats } = input;
   const details: string[] = [];
 
+  addFrameDiagnosticsDetails(details, input);
+
   switch (primaryBucket) {
     case "physics":
       addPhysicsDetails(details, stats);
@@ -369,7 +376,7 @@ function getPerformanceHitchDetails(
       addChunkDetails(details, stats);
       break;
     case "render":
-      addRenderDetails(details, stats);
+      addRenderDetails(details, stats, input.diagnostics ?? null);
       break;
     case "minimap":
       details.push("minimap slice was the largest measured bucket");
@@ -383,7 +390,40 @@ function getPerformanceHitchDetails(
   }
 
   addCrossCuttingPressureDetails(details, stats);
-  return details.slice(0, 5);
+  return details.slice(0, 6);
+}
+
+function addFrameDiagnosticsDetails(details: string[], input: PerformanceHitchInput): void {
+  const diagnostics = input.diagnostics;
+  if (!diagnostics) return;
+
+  const rafGapMs = Math.max(input.frameMs, diagnostics.rafGapMs);
+  const measuredFrameMs = Math.max(diagnostics.jsFrameMs, input.timings.frameMs);
+  const rafGapOverJsMs = Math.max(diagnostics.rafGapOverJsMs, rafGapMs - measuredFrameMs);
+  if (rafGapOverJsMs >= 25 && rafGapMs >= measuredFrameMs * 1.75) {
+    details.push(
+      `${formatMs(rafGapMs)} RAF gap with only ${formatMs(measuredFrameMs)} measured JS; ` +
+      "browser, GPU present, or GC stall suspected"
+    );
+  }
+
+  if (diagnostics.unaccountedFrameMs >= 8) {
+    details.push(
+      `${formatMs(diagnostics.unaccountedFrameMs)} of JS frame time was outside measured buckets`
+    );
+  }
+
+  if (diagnostics.longTasks.frameCount > 0) {
+    details.push(
+      `${diagnostics.longTasks.frameCount} browser long task${diagnostics.longTasks.frameCount === 1 ? "" : "s"} ` +
+      `overlapped the frame, max ${formatMs(diagnostics.longTasks.frameMaxMs)}`
+    );
+  } else if (diagnostics.longTasks.recentCount > 0) {
+    details.push(
+      `${diagnostics.longTasks.recentCount} browser long task${diagnostics.longTasks.recentCount === 1 ? "" : "s"} ` +
+      `seen recently, max ${formatMs(diagnostics.longTasks.recentMaxMs)}`
+    );
+  }
 }
 
 function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapshot): void {
@@ -449,7 +489,17 @@ function addChunkDetails(details: string[], stats: PerformanceHitchStatsSnapshot
   }
 }
 
-function addRenderDetails(details: string[], stats: PerformanceHitchStatsSnapshot): void {
+function addRenderDetails(
+  details: string[],
+  stats: PerformanceHitchStatsSnapshot,
+  diagnostics: FrameDiagnosticsSnapshot | null
+): void {
+  if (diagnostics) {
+    details.push(
+      `${diagnostics.renderer.calls} draw calls, ${diagnostics.renderer.triangles} tris, ` +
+      `${diagnostics.renderer.geometries} geo, ${diagnostics.renderer.textures} tex`
+    );
+  }
   if (stats.fragmentRender.instances > 0) {
     details.push(`${stats.fragmentRender.instances} debris instances across ${stats.fragmentRender.batches} batches`);
   }
@@ -496,6 +546,26 @@ function cloneFrameTimings(timings: FrameTimings): FrameTimings {
     renderMs: timings.renderMs,
     otherMs: timings.otherMs,
     frameMs: timings.frameMs
+  };
+}
+
+function cloneDiagnosticsSnapshot(diagnostics: FrameDiagnosticsSnapshot | null): FrameDiagnosticsSnapshot | null {
+  if (!diagnostics) return null;
+  return {
+    frameStartedAtMs: diagnostics.frameStartedAtMs,
+    frameEndedAtMs: diagnostics.frameEndedAtMs,
+    rafGapMs: diagnostics.rafGapMs,
+    jsFrameMs: diagnostics.jsFrameMs,
+    measuredBucketTotalMs: diagnostics.measuredBucketTotalMs,
+    unaccountedFrameMs: diagnostics.unaccountedFrameMs,
+    rafGapOverJsMs: diagnostics.rafGapOverJsMs,
+    renderCallMs: diagnostics.renderCallMs,
+    renderCallShare: diagnostics.renderCallShare,
+    longTasks: { ...diagnostics.longTasks },
+    renderer: { ...diagnostics.renderer },
+    memory: diagnostics.memory ? { ...diagnostics.memory } : null,
+    documentHidden: diagnostics.documentHidden,
+    visibilityState: diagnostics.visibilityState
   };
 }
 
