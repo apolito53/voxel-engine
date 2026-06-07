@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.9.10 - 2026-06-07
+
+### Fixed
+
+- Restored block atlas texture sampling on damaged partial terrain, so carved
+  grass, sand, stone, and other materials keep their surface texture instead of
+  falling back to flat tinted geometry.
+
 ## 0.9.9 - 2026-06-07
 
 ### Changed

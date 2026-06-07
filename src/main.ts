@@ -509,6 +509,7 @@ const skybox = createSkybox(SUN_OFFSET);
 scene.add(skybox.object);
 
 const worldMaterial = createWorldBlockMaterial();
+const partialBlockMaterial = createWorldBlockMaterial({ side: THREE.DoubleSide });
 
 const targetBlockHighlighter = new TargetBlockHighlighter();
 scene.add(targetBlockHighlighter.object);
@@ -643,7 +644,7 @@ const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const physicsCoreTrail = new PhysicsCoreTrail(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
-const partialBlockMeshField = new PartialBlockMeshField(scene);
+const partialBlockMeshField = new PartialBlockMeshField(scene, partialBlockMaterial);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
@@ -4432,6 +4433,7 @@ function disposeRuntime(): void {
   partialBlockMeshField.dispose();
   skybox.dispose();
   disposeWorldBlockMaterial(worldMaterial);
+  disposeWorldBlockMaterial(partialBlockMaterial);
   renderer.renderLists.dispose();
   renderer.dispose();
   renderer.forceContextLoss();

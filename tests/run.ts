@@ -41,6 +41,7 @@ import {
 } from "../src/blockColors";
 import {
   BLOCK_TEXTURE_TILE,
+  BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE,
   getBlockTextureBaseTileId,
   getBlockTextureTileId
 } from "../src/blockTextureTiles";
@@ -3958,6 +3959,8 @@ test("partial block field renders faceted custom terrain cells", () => {
   const regionMesh = field.getRegionMesh(regionKey);
   assert(regionMesh, "partial block field should create a mesh for the dirty region");
   const positionAttribute = regionMesh.geometry.getAttribute("position");
+  const uvAttribute = regionMesh.geometry.getAttribute("uv");
+  const textureTileAttribute = regionMesh.geometry.getAttribute("blockTextureTile");
   const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
 
   assertEqual(scene.children[0], field.mesh, "partial block field should own one shared scene root");
@@ -3965,6 +3968,12 @@ test("partial block field renders faceted custom terrain cells", () => {
   assertEqual(field.getStats().cells, 1, "one cell should be represented in the partial terrain mesh");
   assertEqual(field.getStats().regions, 1, "one dirty region should be represented by one child mesh");
   assert(positionAttribute.count > 24, "carved cells should have more geometry than a plain six-face cube");
+  assertEqual(uvAttribute.count, positionAttribute.count, "partial terrain should emit atlas UVs for every vertex");
+  assertEqual(
+    textureTileAttribute.count,
+    positionAttribute.count,
+    "partial terrain should emit atlas tile ids for every vertex"
+  );
   assert(bounds.min.x >= 1 && bounds.max.x <= 2, "partial block geometry should stay inside its voxel x bounds");
   assert(bounds.min.y >= 2 && bounds.max.y <= 3, "partial block geometry should stay inside its voxel y bounds");
   assert(bounds.min.z >= 3 && bounds.max.z <= 4, "partial block geometry should stay inside its voxel z bounds");
@@ -4523,10 +4532,17 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   const regionMesh = field.getRegionMesh(regionKey);
   assert(regionMesh, "partial support-surface test should create a regional mesh");
   const positions = regionMesh.geometry.getAttribute("position");
+  const textureTiles = regionMesh.geometry.getAttribute("blockTextureTile");
   const bounds = new THREE.Box3().setFromBufferAttribute(positions);
+  const baseTiles = new Set<number>();
+  for (let index = 0; index < textureTiles.count; index += 1) {
+    baseTiles.add(Math.floor(textureTiles.getX(index) / BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE));
+  }
 
   assert(field.mesh.visible, "broken partial terrain should render as a visible surface patch");
   assert(positions.count > 40, "surface patches should use a low-poly heightfield instead of a single quad");
+  assert(baseTiles.has(BLOCK_TEXTURE_TILE.grassTop), "grass partial top surfaces should keep grass texture tiles");
+  assert(baseTiles.has(BLOCK_TEXTURE_TILE.grassSide), "grass partial side skirts should keep grass-side texture tiles");
   assert(bounds.min.y >= 5, "partial support surfaces should stay inside their source cell base");
   assert(bounds.max.y > 5.25 && bounds.max.y < 6, "surface samples should create a partial-height walkable patch");
 

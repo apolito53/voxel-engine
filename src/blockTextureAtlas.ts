@@ -12,13 +12,18 @@ type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
 
 const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
 
-export function createWorldBlockMaterial(): THREE.MeshStandardMaterial {
+export type WorldBlockMaterialOptions = {
+  readonly side?: THREE.Side;
+};
+
+export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}): THREE.MeshStandardMaterial {
   const atlasTexture = createBlockTextureAtlas();
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     map: atlasTexture,
     roughness: 0.92,
-    metalness: 0
+    metalness: 0,
+    side: options.side ?? THREE.FrontSide
   });
 
   material.onBeforeCompile = (shader: ShaderWithUniforms) => {

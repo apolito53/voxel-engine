@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { BLOCK_FRAGMENT_COUNT, BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import { TERRAIN_DAMAGE_SCALE } from "./blockMaterialRules";
+import { getBlockTextureTileId } from "./blockTextureTiles";
 import type { CollisionBounds } from "./collision";
 import { getSunlitFaceShade } from "./voxelLighting";
 
@@ -94,6 +95,8 @@ type MutablePartialBlockGeometry = {
   readonly positions: number[];
   readonly normals: number[];
   readonly colors: number[];
+  readonly uvs: number[];
+  readonly textureTiles: number[];
   readonly indices: number[];
 };
 
@@ -169,19 +172,21 @@ export class PartialBlockMeshField {
   readonly mesh: THREE.Group;
   private readonly scene: THREE.Scene;
   private readonly material: THREE.MeshStandardMaterial;
+  private readonly ownsMaterial: boolean;
   private readonly regions: Map<string, PartialBlockMeshRegionEntry>;
   private stats: PartialBlockMeshStats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
   private dirtyRegionCount = 0;
   private rebuiltRegionCount = 0;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, material?: THREE.MeshStandardMaterial) {
     this.scene = scene;
-    this.material = new THREE.MeshStandardMaterial({
+    this.material = material ?? new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.92,
       metalness: 0,
       side: THREE.DoubleSide
     });
+    this.ownsMaterial = !material;
     // The public `mesh` is now a root group instead of the old single geometry.
     // Keeping the name lets callers treat the field as one render owner while
     // the implementation swaps only dirty regional child meshes.
@@ -228,6 +233,8 @@ export class PartialBlockMeshField {
       positions: [],
       normals: [],
       colors: [],
+      uvs: [],
+      textureTiles: [],
       indices: []
     };
 
@@ -249,6 +256,8 @@ export class PartialBlockMeshField {
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(geometryData.positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(geometryData.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(geometryData.colors, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(geometryData.uvs, 2));
+    geometry.setAttribute("blockTextureTile", new THREE.Float32BufferAttribute(geometryData.textureTiles, 1));
     geometry.setIndex(geometryData.indices);
     if (geometryData.positions.length > 0) {
       geometry.computeBoundingSphere();
@@ -282,7 +291,7 @@ export class PartialBlockMeshField {
   dispose(): void {
     this.clear();
     this.scene.remove(this.mesh);
-    this.material.dispose();
+    if (this.ownsMaterial) this.material.dispose();
   }
 
   private getOrCreateRegionEntry(key: string): PartialBlockMeshRegionEntry {
@@ -1298,6 +1307,9 @@ function addCarvedFaceGeometry(
   cuts: readonly PartialBlockCut[]
 ): void {
   const firstVertex = geometry.positions.length / 3;
+  const meshKey = createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z);
+  const normalTuple: readonly [number, number, number] = [face.normal.x, face.normal.y, face.normal.z];
+  const textureTile = getBlockTextureTileId(meshKey, normalTuple);
 
   for (let v = 0; v <= PARTIAL_BLOCK_FACE_SEGMENTS; v += 1) {
     for (let u = 0; u <= PARTIAL_BLOCK_FACE_SEGMENTS; u += 1) {
@@ -1307,10 +1319,11 @@ function addCarvedFaceGeometry(
       geometry.positions.push(sample.x, sample.y, sample.z);
       geometry.normals.push(face.normal.x, face.normal.y, face.normal.z);
       const color = getTintedBlockColor(
-        createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z),
+        meshKey,
         getSunlitFaceShade([face.normal.x, face.normal.y, face.normal.z]) * sample.shade
       );
       geometry.colors.push(...color);
+      appendPartialBlockTextureVertex(geometry, textureTile, normalTuple, sample.x, sample.y, sample.z);
     }
   }
 
@@ -1337,11 +1350,16 @@ function addTriangle(
 ): void {
   const normal = getTriangleNormal(first, second, third);
   const shade = Math.max(0.24, getSunlitFaceShade(normal) * 0.95);
-  const color = getTintedBlockColor(createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z), shade);
+  const meshKey = createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z);
+  const color = getTintedBlockColor(meshKey, shade);
+  const textureTile = getBlockTextureTileId(meshKey, normal);
   const base = geometry.positions.length / 3;
   geometry.positions.push(...first, ...second, ...third);
   geometry.normals.push(...normal, ...normal, ...normal);
   geometry.colors.push(...color, ...color, ...color);
+  appendPartialBlockTextureVertex(geometry, textureTile, normal, first[0], first[1], first[2]);
+  appendPartialBlockTextureVertex(geometry, textureTile, normal, second[0], second[1], second[2]);
+  appendPartialBlockTextureVertex(geometry, textureTile, normal, third[0], third[1], third[2]);
   geometry.indices.push(base, base + 1, base + 2);
 }
 
@@ -1566,16 +1584,45 @@ function addQuad(
   shadeMultiplier: number
 ): void {
   const base = geometry.positions.length / 3;
-  const shade = getSunlitFaceShade([normal.x, normal.y, normal.z]) * shadeMultiplier;
-  const color = getTintedBlockColor(createBlockMeshKey(block, position.x, position.y, position.z), shade);
+  const normalTuple: readonly [number, number, number] = [normal.x, normal.y, normal.z];
+  const shade = getSunlitFaceShade(normalTuple) * shadeMultiplier;
+  const meshKey = createBlockMeshKey(block, position.x, position.y, position.z);
+  const color = getTintedBlockColor(meshKey, shade);
+  const textureTile = getBlockTextureTileId(meshKey, normalTuple);
 
   for (const corner of corners) {
     geometry.positions.push(corner.x, corner.y, corner.z);
     geometry.normals.push(normal.x, normal.y, normal.z);
     geometry.colors.push(...color);
+    appendPartialBlockTextureVertex(geometry, textureTile, normalTuple, corner.x, corner.y, corner.z);
   }
 
   geometry.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+}
+
+function appendPartialBlockTextureVertex(
+  geometry: MutablePartialBlockGeometry,
+  textureTile: number,
+  normal: readonly [number, number, number],
+  x: number,
+  y: number,
+  z: number
+): void {
+  const absX = Math.abs(normal[0]);
+  const absY = Math.abs(normal[1]);
+  const absZ = Math.abs(normal[2]);
+
+  // Partial terrain owns arbitrary bite and wrinkle faces instead of neat
+  // greedy-meshed quads. World-space UVs keep the atlas density aligned with
+  // normal chunk terrain even when a damaged surface is only a tiny sub-cell.
+  if (absY >= absX && absY >= absZ) {
+    geometry.uvs.push(x, z);
+  } else if (absX >= absZ) {
+    geometry.uvs.push(z, y);
+  } else {
+    geometry.uvs.push(x, y);
+  }
+  geometry.textureTiles.push(textureTile);
 }
 
 function facePoint(
