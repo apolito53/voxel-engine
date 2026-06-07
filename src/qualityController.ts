@@ -304,11 +304,12 @@ export class QualityController {
   private createEffectivePreset(): QualityPreset {
     const basePreset = this.getBasePreset();
     const fogStartRadius = this.settings.loadRadius;
-    const loadRadius = fogStartRadius + basePreset.fogFalloffRadius;
+    const fogOpaqueRadius = fogStartRadius + basePreset.fogFalloffRadius;
+    const loadRadius = fogOpaqueRadius + basePreset.fogHiddenRadius;
     const shadowMapSize = this.settings.shadowMapSize;
     const shadows = shadowMapSize > 0;
     const fogNear = fogStartRadius * CHUNK_SIZE;
-    const fogFar = loadRadius * CHUNK_SIZE;
+    const fogFar = fogOpaqueRadius * CHUNK_SIZE;
     const cameraFar = Math.max(
       basePreset.cameraFar,
       fogFar + CAMERA_FAR_FOG_MARGIN_CHUNKS * CHUNK_SIZE

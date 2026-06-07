@@ -26,6 +26,7 @@ export type QualityPreset = {
   readonly shadowIntensity: number;
   readonly fogStartRadius: number;
   readonly fogFalloffRadius: number;
+  readonly fogHiddenRadius: number;
   readonly fogNear: number;
   readonly fogFar: number;
   readonly cameraFar: number;
@@ -47,14 +48,15 @@ type QualityPresetDefinition = Omit<QualityPreset, QualityPresetRuntimeFields> &
   readonly minCameraFar: number;
 };
 
-// The player-facing render distance is now the clear-view radius: fog starts
-// there, then the engine streams a small extra horizon behind it so chunks fade
-// out instead of disappearing at a hard square edge.
+// The player-facing render distance is the clear-view radius. Fog reaches full
+// opacity before the actual streamed chunk edge, so the square load window hides
+// behind atmosphere instead of becoming a visible blue terrain wall.
 function createQualityPreset(definition: QualityPresetDefinition): QualityPreset {
   const { minCameraFar, ...preset } = definition;
-  const loadRadius = preset.fogStartRadius + preset.fogFalloffRadius;
+  const fogOpaqueRadius = preset.fogStartRadius + preset.fogFalloffRadius;
+  const loadRadius = fogOpaqueRadius + preset.fogHiddenRadius;
   const fogNear = preset.fogStartRadius * CHUNK_SIZE;
-  const fogFar = loadRadius * CHUNK_SIZE;
+  const fogFar = fogOpaqueRadius * CHUNK_SIZE;
   const cameraFar = Math.max(minCameraFar, fogFar + CHUNK_SIZE * 2);
 
   return {
@@ -84,6 +86,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0,
     fogStartRadius: 2,
     fogFalloffRadius: 2,
+    fogHiddenRadius: 2,
     minCameraFar: 120,
     chunkLoads: 1,
     chunkRebuilds: 1,
@@ -108,6 +111,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0,
     fogStartRadius: 3,
     fogFalloffRadius: 2,
+    fogHiddenRadius: 2,
     minCameraFar: 180,
     chunkLoads: 1,
     chunkRebuilds: 2,
@@ -132,6 +136,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0.78,
     fogStartRadius: 6,
     fogFalloffRadius: 3,
+    fogHiddenRadius: 2,
     minCameraFar: 450,
     chunkLoads: 2,
     chunkRebuilds: 4,
@@ -156,6 +161,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0.78,
     fogStartRadius: 6,
     fogFalloffRadius: 3,
+    fogHiddenRadius: 2,
     minCameraFar: 450,
     chunkLoads: 2,
     chunkRebuilds: 4,
@@ -180,6 +186,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0.8,
     fogStartRadius: 12,
     fogFalloffRadius: 4,
+    fogHiddenRadius: 3,
     minCameraFar: 900,
     chunkLoads: 4,
     chunkRebuilds: 6,
@@ -204,6 +211,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0.82,
     fogStartRadius: 18,
     fogFalloffRadius: 5,
+    fogHiddenRadius: 3,
     minCameraFar: 1300,
     chunkLoads: 6,
     chunkRebuilds: 8,
@@ -228,6 +236,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowIntensity: 0.82,
     fogStartRadius: 36,
     fogFalloffRadius: 6,
+    fogHiddenRadius: 3,
     minCameraFar: 2600,
     chunkLoads: 10,
     chunkRebuilds: 10,

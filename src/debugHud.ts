@@ -154,6 +154,7 @@ export class DebugHud {
     const render = this.renderer.info.render;
     const memory = this.renderer.info.memory;
     const qualityPreset = this.getQualityPreset();
+    const fogOpaqueRadius = qualityPreset.fogStartRadius + qualityPreset.fogFalloffRadius;
     const debrisPressureLabel = snapshot.debrisPressure.stress > 0.01
       ? `pressure ${Math.round(snapshot.debrisPressure.stress * 100)}%, base ${snapshot.debrisPressure.nominalRigidDebrisBodyBudget}`
       : "normal";
@@ -218,7 +219,7 @@ export class DebugHud {
           {
             label: "quality",
             value: `${qualityPreset.label} ${qualityPreset.distanceScale}x, ` +
-              `fog ${qualityPreset.fogStartRadius}->${qualityPreset.loadRadius}c, ` +
+              `fog ${qualityPreset.fogStartRadius}->${fogOpaqueRadius}c, stream ${qualityPreset.loadRadius}c, ` +
               `debris ${qualityPreset.debrisActiveRadiusMeters}m, px ${this.renderer.getPixelRatio()}`
           },
           { label: "req", value: `gen ${snapshot.stats.requestedLoadsThisFrame}, mesh ${snapshot.stats.requestedMeshesThisFrame}, map ${snapshot.lastMinimapMs.toFixed(1)}ms` },

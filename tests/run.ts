@@ -8605,10 +8605,14 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       preset.fogFalloffRadius >= 1,
       `${preset.label} should keep at least one chunk of fogged horizon`
     );
+    assert(
+      preset.fogHiddenRadius >= 1,
+      `${preset.label} should stream hidden chunks behind the opaque fog curtain`
+    );
     assertEqual(
       preset.loadRadius,
-      preset.fogStartRadius + preset.fogFalloffRadius,
-      `${preset.label} load radius should include the fogged horizon buffer`
+      preset.fogStartRadius + preset.fogFalloffRadius + preset.fogHiddenRadius,
+      `${preset.label} load radius should include fogged and hidden horizon buffers`
     );
     assert(preset.unloadRadius > preset.loadRadius, `${preset.label} unload radius should exceed load radius`);
     assert(preset.chunkLoads >= 1, `${preset.label} should request at least one chunk load`);
@@ -8620,8 +8624,12 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     );
     assertEqual(
       preset.fogFar,
-      preset.loadRadius * CHUNK_SIZE,
-      `${preset.label} fog should become opaque at the streamed horizon`
+      (preset.fogStartRadius + preset.fogFalloffRadius) * CHUNK_SIZE,
+      `${preset.label} fog should become opaque before the streamed horizon cutoff`
+    );
+    assert(
+      preset.loadRadius * CHUNK_SIZE > preset.fogFar,
+      `${preset.label} should keep the hard chunk edge behind opaque fog`
     );
     assert(preset.cameraFar > preset.fogNear, `${preset.label} camera far should exceed fog near`);
     assert(preset.fogFar > preset.fogNear, `${preset.label} fog far should exceed fog near`);
@@ -8681,7 +8689,7 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.potato.fogStartRadius, 2, "Potato should start fog after 2 clear chunks");
   assertEqual(QUALITY_PRESETS.normal.distanceScale, 2, "Normal should remain 2x distance");
   assertEqual(QUALITY_PRESETS.normal.fogStartRadius, 6, "Normal should start fog after 6 clear chunks");
-  assertEqual(QUALITY_PRESETS.normal.loadRadius, 9, "Normal should stream a fogged horizon behind 6 clear chunks");
+  assertEqual(QUALITY_PRESETS.normal.loadRadius, 11, "Normal should stream hidden chunks behind the opaque fog curtain");
   assertEqual(QUALITY_PRESETS[CUSTOM_PRESET_ID].label, "Custom", "Custom preset should be available for slider edits");
   assertEqual(
     QUALITY_PRESETS[CUSTOM_PRESET_ID].physicsObjectBudget,

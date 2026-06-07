@@ -141,9 +141,9 @@ clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any
 visible bars when turned off. `Gameplay > Despawn All Objects` performs the
 drastic full cleanup: physics cores, loose debris VFX, and any existing rubble
 cover.
-The fog start distance is the clear chunk radius. The engine streams a small
-extra horizon behind it, then lets far terrain fade into opaque fog instead of
-vanishing at a hard cutoff.
+The fog start distance is the clear chunk radius. Far terrain fades to opaque
+fog over the preset's falloff band, while the engine streams a hidden extra
+horizon behind that opacity so the hard chunk cutoff stays out of sight.
 
 ## Quality Presets
 

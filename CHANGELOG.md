@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.9.9 - 2026-06-07
+
+### Changed
+
+- Moved the actual streamed chunk edge behind the fully opaque part of the fog
+  curtain, so distant terrain no longer fades into a visible square blue wall at
+  the load boundary.
+- Lightened the world fog color to better match the generated skybox horizon.
+- Updated the F3 render debug line to show fog start, fog opacity, and the
+  hidden streamed horizon separately.
+
 ## 0.9.8 - 2026-06-06
 
 ### Changed

@@ -482,9 +482,11 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
+const WORLD_FOG_COLOR = 0xb6d8ee;
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x8fb9d8);
-const sceneFog = new THREE.Fog(0x8fb9d8, bootPreset.fogNear, bootPreset.fogFar);
+scene.background = new THREE.Color(WORLD_FOG_COLOR);
+const sceneFog = new THREE.Fog(WORLD_FOG_COLOR, bootPreset.fogNear, bootPreset.fogFar);
 scene.fog = sceneFog;
 
 const camera = new THREE.PerspectiveCamera(
