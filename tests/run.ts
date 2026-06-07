@@ -207,12 +207,6 @@ import {
   PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
   shouldDeferPartialBlockMeshUpdate
 } from "../src/partialBlockMeshBudget";
-import {
-  PARTIAL_MESH_RENDER_MIN_BUDGET,
-  createPartialMeshRenderPressureState,
-  getPartialMeshPressureEffectiveRegionBudget,
-  updatePartialMeshRenderPressureState
-} from "../src/partialMeshRenderBudget";
 import { RollingFrameRateMeter } from "../src/frameRateMeter";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
@@ -410,13 +404,8 @@ import {
 } from "../src/combatLog";
 import {
   DEFAULT_CLICK_FIRE_MODE,
-  FULL_AUTO_BUILD_INTERVAL_MS,
-  FULL_AUTO_HITSCAN_CORE_INTERVAL_MS,
-  FULL_AUTO_PHYSICS_CORE_INTERVAL_MS,
-  FULL_AUTO_TERRAFORMER_INTERVAL_MS,
   formatClickFireMode,
   formatClickFireModeShort,
-  getFullAutoClickActionIntervalMs,
   normalizeClickFireMode,
   toggleClickFireMode
 } from "../src/clickFireMode";
@@ -1179,26 +1168,6 @@ test("click fire mode toggles between semi and full auto", () => {
   assertEqual(toggleClickFireMode("full"), "semi", "T should step full-auto back into semi-auto");
   assertEqual(formatClickFireMode("semi"), "Semi Auto", "Nova status copy should spell out semi-auto mode");
   assertEqual(formatClickFireModeShort("full"), "FULL", "hotbar copy should keep full-auto compact");
-  assertEqual(
-    getFullAutoClickActionIntervalMs({ kind: "terrain:mine-block" }),
-    FULL_AUTO_TERRAFORMER_INTERVAL_MS,
-    "Terraformer full-auto edits should keep the quick precision-tool cadence"
-  );
-  assertEqual(
-    getFullAutoClickActionIntervalMs({ kind: "terrain:place-block", block: BLOCK.grass }),
-    FULL_AUTO_BUILD_INTERVAL_MS,
-    "build/place full-auto actions should use the build cadence"
-  );
-  assertEqual(
-    getFullAutoClickActionIntervalMs({ kind: "physics:throw-core" }),
-    FULL_AUTO_PHYSICS_CORE_INTERVAL_MS,
-    "projectile core full-auto should pace expensive thrown bodies"
-  );
-  assertEqual(
-    getFullAutoClickActionIntervalMs({ kind: "physics:fire-hitscan-core" }),
-    FULL_AUTO_HITSCAN_CORE_INTERVAL_MS,
-    "hitscan full-auto should be the slowest terrain-carving repeat action"
-  );
 });
 
 test("builder brush sizing stays odd and centered", () => {
@@ -2221,14 +2190,9 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
         vertices: 360,
         triangles: 180,
         regions: 2,
-        visibleRegions: 2,
-        culledRegions: 0,
         dirtyRegions: 1,
         rebuiltRegions: 1,
-        maxRegionTriangles: 120,
-        visibleTriangles: 180,
-        culledTriangles: 0,
-        maxVisibleRegionTriangles: 120
+        maxRegionTriangles: 120
       }
     }
   });
@@ -2239,44 +2203,6 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
   assert(
     meshRecord.details.some((detail) => detail.includes("partial-mesh tris")),
     "mesh hitches should include custom partial mesh triangle pressure"
-  );
-  const renderRecord = createPerformanceHitchRecord(3, 350, {
-    frameMs: 50,
-    timings: {
-      playerMs: 1,
-      chunkMs: 2,
-      physicsMs: 5,
-      meshMs: 8,
-      minimapMs: 0.5,
-      renderMs: 32,
-      otherMs: 1.5,
-      frameMs: 50
-    },
-    stats: {
-      ...baseMeshStats,
-      partialMesh: {
-        cells: 12,
-        vertices: 1200,
-        triangles: 600,
-        regions: 6,
-        visibleRegions: 3,
-        culledRegions: 3,
-        dirtyRegions: 0,
-        rebuiltRegions: 0,
-        maxRegionTriangles: 180,
-        visibleTriangles: 320,
-        culledTriangles: 280,
-        maxVisibleRegionTriangles: 160
-      }
-    }
-  });
-  assert(
-    renderRecord.details.some((detail) => detail.includes("visible partial-mesh tris")),
-    "render-led hitches should blame visible partial terrain when that draw pressure exists"
-  );
-  assert(
-    renderRecord.details.some((detail) => detail.includes("culled")),
-    "render-led hitches should report how much partial terrain was hidden by the draw cap"
   );
 
   const warnedMessages: string[] = [];
@@ -2491,50 +2417,6 @@ test("debris pressure governor ignores low FPS when loose debris is not loaded",
 
   assertEqual(state.stress, 0, "debris pressure should not blame empty debris systems for unrelated low FPS");
   assertEqual(state.effectiveRigidDebrisBodyBudget, 512, "the debris cap should stay untouched without debris load");
-});
-
-test("partial mesh render pressure lowers and restores visible-region budget", () => {
-  let state = createPartialMeshRenderPressureState(128);
-
-  for (let frame = 0; frame < 60; frame += 1) {
-    state = updatePartialMeshRenderPressureState(state, {
-      deltaSeconds: 1 / 30,
-      observedFps: 42,
-      nominalRegionBudget: 128,
-      visibleTriangles: 42000
-    });
-  }
-
-  assert(state.stress > 0.5, "sustained low FPS with heavy partial draws should build pressure");
-  assert(
-    state.effectiveRegionBudget < state.nominalRegionBudget,
-    "partial render pressure should lower the visible-region cap"
-  );
-  assert(
-    state.effectiveRegionBudget >= PARTIAL_MESH_RENDER_MIN_BUDGET,
-    "partial render pressure should keep enough regions visible to avoid vanishing nearby edits"
-  );
-  assertEqual(
-    getPartialMeshPressureEffectiveRegionBudget(8, 1),
-    8,
-    "tiny preset budgets should not be raised just to satisfy the pressure floor"
-  );
-
-  for (let frame = 0; frame < 140; frame += 1) {
-    state = updatePartialMeshRenderPressureState(state, {
-      deltaSeconds: 1 / 60,
-      observedFps: 75,
-      nominalRegionBudget: 128,
-      visibleTriangles: 1000
-    });
-  }
-
-  assertEqual(state.stress, 0, "healthy frames should fully recover partial render pressure");
-  assertEqual(
-    state.effectiveRegionBudget,
-    128,
-    "recovered partial render pressure should restore the preset cap"
-  );
 });
 
 test("debris pressure effective cap bottoms out at the conservative budget ratio", () => {
@@ -4179,84 +4061,6 @@ test("partial block field rebuilds only the requested region", () => {
     "updating one partial mesh region should not rebuild unrelated region geometry"
   );
   assertEqual(field.getStats().regions, 2, "both regional meshes should remain alive");
-
-  field.dispose();
-});
-
-test("partial block field visibility caps draw regions without disposing them", () => {
-  const scene = new THREE.Scene();
-  const field = new PartialBlockMeshField(scene);
-  const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 100);
-  const projection = new THREE.Matrix4();
-  const frustum = new THREE.Frustum();
-  const firstCell: PartialBlockCell = {
-    block: BLOCK.stone,
-    position: { x: 1, y: 2, z: 3 },
-    damage: 1,
-    maxHealth: 2,
-    cuts: [{
-      normal: { x: -1, y: 0, z: 0 },
-      localPoint: { x: 0, y: 0.5, z: 0.5 },
-      radius: 0.42,
-      depth: 0.5,
-      seed: 401
-    }]
-  };
-  const secondCell: PartialBlockCell = {
-    ...firstCell,
-    position: { x: 1, y: 2, z: -9 },
-    cuts: [{ ...firstCell.cuts[0]!, seed: 402 }]
-  };
-  const thirdCell: PartialBlockCell = {
-    ...firstCell,
-    position: { x: 1, y: 2, z: -21 },
-    cuts: [{ ...firstCell.cuts[0]!, seed: 403 }]
-  };
-  const firstRegionKey = createPartialBlockMeshRegionKey(firstCell.position);
-  const secondRegionKey = createPartialBlockMeshRegionKey(secondCell.position);
-  const thirdRegionKey = createPartialBlockMeshRegionKey(thirdCell.position);
-
-  field.beginUpdate(3);
-  field.updateRegion({ key: firstRegionKey, cells: [firstCell], contextCells: [firstCell] }, () => true);
-  field.updateRegion({ key: secondRegionKey, cells: [secondCell], contextCells: [secondCell] }, () => true);
-  field.updateRegion({ key: thirdRegionKey, cells: [thirdCell], contextCells: [thirdCell] }, () => true);
-
-  camera.position.set(1, 4, 12);
-  camera.lookAt(1, 4, 0);
-  camera.updateMatrixWorld();
-  camera.updateProjectionMatrix();
-  projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-  frustum.setFromProjectionMatrix(projection);
-
-  field.updateVisibility({
-    cameraPosition: camera.position,
-    frustum,
-    drawRadiusMeters: 100,
-    maxVisibleRegions: 1
-  });
-
-  assert(field.getRegionMesh(firstRegionKey)?.visible, "nearest partial region should stay visible under the cap");
-  assert(
-    !(field.getRegionMesh(secondRegionKey)?.visible ?? true),
-    "over-budget partial regions should hide instead of drawing"
-  );
-  assert(field.getRegionMesh(secondRegionKey), "hidden partial regions should remain allocated for later visibility");
-  assertEqual(field.getStats().visibleRegions, 1, "visibility stats should count the drawn region");
-  assertEqual(field.getStats().culledRegions, 2, "visibility stats should count capped regions as culled");
-  assert(field.getStats().visibleTriangles > 0, "visible triangle pressure should be tracked separately");
-  assert(field.getStats().culledTriangles > 0, "culled triangle pressure should remain observable");
-
-  field.updateVisibility({
-    cameraPosition: camera.position,
-    frustum,
-    drawRadiusMeters: 100,
-    maxVisibleRegions: 3
-  });
-
-  assert(field.getRegionMesh(secondRegionKey)?.visible, "hidden partial regions should restore when budget allows");
-  assert(field.getRegionMesh(thirdRegionKey)?.visible, "farther partial regions should restore without remeshing");
-  assertEqual(field.getStats().visibleRegions, 3, "all in-range regions should be visible under a roomy cap");
-  assertEqual(field.getStats().culledRegions, 0, "no regions should remain culled when the cap permits all");
 
   field.dispose();
 });
@@ -8744,8 +8548,6 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   const presetIds = [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID];
   let previousPhysicsBudget = 0;
   let previousDebrisActiveRadius = 0;
-  let previousPartialMeshRegionBudget = 0;
-  let previousPartialMeshDrawRadius = 0;
 
   for (const presetId of presetIds) {
     const preset = QUALITY_PRESETS[presetId];
@@ -8802,18 +8604,8 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       preset.debrisActiveRadiusMeters >= previousDebrisActiveRadius,
       `${preset.label} active debris bubble should not shrink as quality increases`
     );
-    assert(
-      preset.partialMeshRegionBudget >= previousPartialMeshRegionBudget,
-      `${preset.label} partial mesh draw budget should not shrink as quality increases`
-    );
-    assert(
-      preset.partialMeshDrawRadiusMeters >= previousPartialMeshDrawRadius,
-      `${preset.label} partial mesh draw radius should not shrink as quality increases`
-    );
     previousPhysicsBudget = preset.physicsObjectBudget;
     previousDebrisActiveRadius = preset.debrisActiveRadiusMeters;
-    previousPartialMeshRegionBudget = preset.partialMeshRegionBudget;
-    previousPartialMeshDrawRadius = preset.partialMeshDrawRadiusMeters;
   }
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
@@ -8846,31 +8638,6 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     QUALITY_PRESETS[CUSTOM_PRESET_ID].debrisActiveRadiusMeters,
     QUALITY_PRESETS.normal.debrisActiveRadiusMeters,
     "Custom should inherit Normal's active debris bubble baseline"
-  );
-  assertEqual(QUALITY_PRESETS.potato.partialMeshRegionBudget, 8, "Potato should draw the fewest partial regions");
-  assertEqual(QUALITY_PRESETS.low.partialMeshRegionBudget, 16, "Low should draw a small partial-region set");
-  assertEqual(QUALITY_PRESETS.normal.partialMeshRegionBudget, 32, "Normal should draw a practical partial-region set");
-  assertEqual(QUALITY_PRESETS.high.partialMeshRegionBudget, 64, "High should draw a broader partial-region set");
-  assertEqual(QUALITY_PRESETS.ultra.partialMeshRegionBudget, 96, "Ultra should draw many nearby partial regions");
-  assertEqual(
-    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].partialMeshRegionBudget,
-    128,
-    "Super Ultra should keep the largest partial-region draw cap"
-  );
-  assertEqual(
-    QUALITY_PRESETS[CUSTOM_PRESET_ID].partialMeshRegionBudget,
-    QUALITY_PRESETS.normal.partialMeshRegionBudget,
-    "Custom should inherit Normal's partial-region draw cap baseline"
-  );
-  assertEqual(QUALITY_PRESETS.potato.partialMeshDrawRadiusMeters, 48, "Potato should use a tight partial draw radius");
-  assertEqual(QUALITY_PRESETS.low.partialMeshDrawRadiusMeters, 72, "Low should draw partial terrain beyond close range");
-  assertEqual(QUALITY_PRESETS.normal.partialMeshDrawRadiusMeters, 128, "Normal should draw partial terrain across a practical radius");
-  assertEqual(QUALITY_PRESETS.high.partialMeshDrawRadiusMeters, 192, "High should extend partial terrain detail farther out");
-  assertEqual(QUALITY_PRESETS.ultra.partialMeshDrawRadiusMeters, 288, "Ultra should keep broad partial terrain detail");
-  assertEqual(
-    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].partialMeshDrawRadiusMeters,
-    384,
-    "Super Ultra should use the widest partial terrain detail radius"
   );
   assert(
     getShadowTexelSize(QUALITY_PRESETS.high) < getShadowTexelSize(QUALITY_PRESETS.normal),
@@ -9031,14 +8798,9 @@ function createTestHitchStats(
       vertices: 0,
       triangles: 0,
       regions: 0,
-      visibleRegions: 0,
-      culledRegions: 0,
       dirtyRegions: 0,
       rebuiltRegions: 0,
-      maxRegionTriangles: 0,
-      visibleTriangles: 0,
-      culledTriangles: 0,
-      maxVisibleRegionTriangles: 0
+      maxRegionTriangles: 0
     },
     debrisSettler: {
       regions: 0,

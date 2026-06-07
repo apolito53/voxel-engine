@@ -147,8 +147,6 @@ type PartialBlockAxis = "x" | "y" | "z";
 
 type PartialBlockMeshRegionEntry = {
   readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-  readonly center: THREE.Vector3;
-  readonly boundingRadius: number;
   stats: PartialBlockMeshRegionStats;
 };
 
@@ -156,13 +154,6 @@ type PartialBlockMeshRegionStats = {
   readonly cells: number;
   readonly vertices: number;
   readonly triangles: number;
-};
-
-export type PartialBlockMeshVisibilityPolicy = {
-  readonly cameraPosition: THREE.Vector3;
-  readonly frustum: THREE.Frustum;
-  readonly drawRadiusMeters: number;
-  readonly maxVisibleRegions: number;
 };
 
 const PARTIAL_BLOCK_LATTICE_NEIGHBOR_OFFSETS: readonly PartialBlockPosition[] = [
@@ -182,7 +173,6 @@ export class PartialBlockMeshField {
   private stats: PartialBlockMeshStats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
   private dirtyRegionCount = 0;
   private rebuiltRegionCount = 0;
-  private readonly visibilitySphere = new THREE.Sphere();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -279,40 +269,6 @@ export class PartialBlockMeshField {
     this.recomputeStats();
   }
 
-  updateVisibility(policy: PartialBlockMeshVisibilityPolicy): void {
-    const drawRadius = normalizePartialMeshVisibilityRadius(policy.drawRadiusMeters);
-    const visibleLimit = normalizePartialMeshVisibleRegionLimit(policy.maxVisibleRegions);
-    const candidates: Array<{ readonly key: string; readonly entry: PartialBlockMeshRegionEntry; readonly distanceSq: number }> = [];
-
-    for (const [key, entry] of this.regions) {
-      const drawDistanceWithRegionRadius = drawRadius + entry.boundingRadius;
-      const distanceSq = entry.center.distanceToSquared(policy.cameraPosition);
-      const insideDrawRadius =
-        drawRadius === Number.POSITIVE_INFINITY ||
-        distanceSq <= drawDistanceWithRegionRadius * drawDistanceWithRegionRadius;
-      if (!insideDrawRadius) {
-        entry.mesh.visible = false;
-        continue;
-      }
-
-      this.visibilitySphere.center.copy(entry.center);
-      this.visibilitySphere.radius = entry.boundingRadius;
-      if (!policy.frustum.intersectsSphere(this.visibilitySphere)) {
-        entry.mesh.visible = false;
-        continue;
-      }
-
-      candidates.push({ key, entry, distanceSq });
-    }
-
-    candidates.sort((left, right) => left.distanceSq - right.distanceSq || left.key.localeCompare(right.key));
-    const visibleKeys = new Set(candidates.slice(0, visibleLimit).map((candidate) => candidate.key));
-    for (const [key, entry] of this.regions) {
-      entry.mesh.visible = visibleKeys.has(key);
-    }
-    this.recomputeStats();
-  }
-
   clear(): void {
     for (const [key] of this.regions) {
       this.removeRegion(key);
@@ -342,8 +298,6 @@ export class PartialBlockMeshField {
 
     const entry: PartialBlockMeshRegionEntry = {
       mesh,
-      center: getPartialBlockMeshRegionCenter(key),
-      boundingRadius: getPartialBlockMeshRegionBoundingRadius(key),
       stats: { cells: 0, vertices: 0, triangles: 0 }
     };
     this.regions.set(key, entry);
@@ -366,36 +320,23 @@ export class PartialBlockMeshField {
     let vertices = 0;
     let triangles = 0;
     let maxRegionTriangles = 0;
-    let visibleRegions = 0;
-    let visibleTriangles = 0;
-    let maxVisibleRegionTriangles = 0;
 
     for (const entry of this.regions.values()) {
       cells += entry.stats.cells;
       vertices += entry.stats.vertices;
       triangles += entry.stats.triangles;
       maxRegionTriangles = Math.max(maxRegionTriangles, entry.stats.triangles);
-      if (entry.mesh.visible) {
-        visibleRegions += 1;
-        visibleTriangles += entry.stats.triangles;
-        maxVisibleRegionTriangles = Math.max(maxVisibleRegionTriangles, entry.stats.triangles);
-      }
     }
 
-    this.mesh.visible = visibleRegions > 0;
+    this.mesh.visible = this.regions.size > 0;
     this.stats = {
       cells,
       vertices,
       triangles,
       regions: this.regions.size,
-      visibleRegions,
-      culledRegions: this.regions.size - visibleRegions,
       dirtyRegions: this.dirtyRegionCount,
       rebuiltRegions: this.rebuiltRegionCount,
-      maxRegionTriangles,
-      visibleTriangles,
-      culledTriangles: triangles - visibleTriangles,
-      maxVisibleRegionTriangles
+      maxRegionTriangles
     };
   }
 }
@@ -405,14 +346,9 @@ export type PartialBlockMeshStats = {
   readonly vertices: number;
   readonly triangles: number;
   readonly regions: number;
-  readonly visibleRegions: number;
-  readonly culledRegions: number;
   readonly dirtyRegions: number;
   readonly rebuiltRegions: number;
   readonly maxRegionTriangles: number;
-  readonly visibleTriangles: number;
-  readonly culledTriangles: number;
-  readonly maxVisibleRegionTriangles: number;
 };
 
 export const EMPTY_PARTIAL_BLOCK_MESH_STATS: PartialBlockMeshStats = {
@@ -420,14 +356,9 @@ export const EMPTY_PARTIAL_BLOCK_MESH_STATS: PartialBlockMeshStats = {
   vertices: 0,
   triangles: 0,
   regions: 0,
-  visibleRegions: 0,
-  culledRegions: 0,
   dirtyRegions: 0,
   rebuiltRegions: 0,
-  maxRegionTriangles: 0,
-  visibleTriangles: 0,
-  culledTriangles: 0,
-  maxVisibleRegionTriangles: 0
+  maxRegionTriangles: 0
 };
 
 export function createPartialBlockKey(position: PartialBlockPosition): string {
@@ -465,43 +396,6 @@ export function getPartialBlockMeshRegionBounds(coords: PartialBlockMeshRegionCo
     minZ: coords.rz * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ,
     maxZ: (coords.rz + 1) * PARTIAL_BLOCK_MESH_REGION_SIZE_XZ - 1
   };
-}
-
-function getPartialBlockMeshRegionCenter(key: string): THREE.Vector3 {
-  const coords = parsePartialBlockMeshRegionKey(key);
-  if (!coords) return new THREE.Vector3();
-  const bounds = getPartialBlockMeshRegionBounds(coords);
-  return new THREE.Vector3(
-    getPartialBlockRegionAxisCenter(bounds.minX, bounds.maxX),
-    getPartialBlockRegionAxisCenter(bounds.minY, bounds.maxY),
-    getPartialBlockRegionAxisCenter(bounds.minZ, bounds.maxZ)
-  );
-}
-
-function getPartialBlockMeshRegionBoundingRadius(key: string): number {
-  const coords = parsePartialBlockMeshRegionKey(key);
-  if (!coords) return 0;
-  return Math.sqrt(
-    (PARTIAL_BLOCK_MESH_REGION_SIZE_XZ / 2) ** 2 +
-    (PARTIAL_BLOCK_MESH_REGION_SIZE_Y / 2) ** 2 +
-    (PARTIAL_BLOCK_MESH_REGION_SIZE_XZ / 2) ** 2
-  );
-}
-
-function getPartialBlockRegionAxisCenter(min: number, max: number): number {
-  // Region bounds are block-index inclusive. Add one to reach the real outer
-  // edge before taking the center in meter/world coordinates.
-  return (min + max + 1) / 2;
-}
-
-function normalizePartialMeshVisibilityRadius(radiusMeters: number): number {
-  if (!Number.isFinite(radiusMeters)) return Number.POSITIVE_INFINITY;
-  return Math.max(0, radiusMeters);
-}
-
-function normalizePartialMeshVisibleRegionLimit(maxVisibleRegions: number): number {
-  if (!Number.isFinite(maxVisibleRegions)) return Number.MAX_SAFE_INTEGER;
-  return Math.max(0, Math.floor(maxVisibleRegions));
 }
 
 export function getPartialBlockMeshDirtyRegionKeys(position: PartialBlockPosition): readonly string[] {

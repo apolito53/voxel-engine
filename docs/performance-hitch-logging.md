@@ -44,14 +44,18 @@ The debug overlay and hitch logger capture:
 - Adaptive debris pressure and effective cap state.
 - Instanced debris render counts.
 - Partial-block lattice/subvoxel pressure.
-- Partial-mesh triangle pressure split into total, visible, and culled draw
-  regions.
+- Partial-mesh triangle pressure.
 - Rubble cover stats when parked rubble exists.
 
-Partial terrain has its own quality-driven render cap. Hitch records preserve
-the total damaged-region pressure while also reporting how many partial meshes
-were actually visible, so a render-led record can distinguish "too much exists"
-from "too much is currently being drawn."
+## Parked Optimization Dead End
+
+Do not retry partial-mesh draw capping as the next performance fix unless we
+are deliberately doing exploratory cleanup work. The reverted v0.9.7 pass hid
+far/off-budget partial-region meshes, but playtesting made the damaged terrain
+read worse and the hitch logs showed negligible practical gain. The remaining
+stress was dominated by projectile/physics work, while partial terrain is also
+likely headed toward persistence. Future optimization should start from that
+data model instead of masking partial visuals at render time.
 
 Recent records are available in the browser at:
 

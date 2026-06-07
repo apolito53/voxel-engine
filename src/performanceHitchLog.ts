@@ -417,10 +417,8 @@ function addMeshDetails(details: string[], stats: PerformanceHitchStatsSnapshot)
   }
   if (stats.partialMesh.triangles > 0) {
     details.push(
-      `${stats.partialMesh.visibleTriangles}/${stats.partialMesh.triangles} visible/total partial-mesh tris ` +
-      `across ${stats.partialMesh.visibleRegions}/${stats.partialMesh.regions} visible/total regions, ` +
-      `${stats.partialMesh.culledRegions} culled, max ${stats.partialMesh.maxVisibleRegionTriangles}/` +
-      `${stats.partialMesh.maxRegionTriangles} tris/region`
+      `${stats.partialMesh.triangles} partial-mesh tris across ${stats.partialMesh.cells} cells, ` +
+      `${stats.partialMesh.regions} regions, max ${stats.partialMesh.maxRegionTriangles} tris/region`
     );
   }
   if (stats.partialMesh.dirtyRegions > 0 || stats.partialMesh.rebuiltRegions > 0) {
@@ -452,12 +450,6 @@ function addChunkDetails(details: string[], stats: PerformanceHitchStatsSnapshot
 }
 
 function addRenderDetails(details: string[], stats: PerformanceHitchStatsSnapshot): void {
-  if (stats.partialMesh.visibleTriangles > 0) {
-    details.push(
-      `${stats.partialMesh.visibleTriangles} visible partial-mesh tris across ` +
-      `${stats.partialMesh.visibleRegions} draw regions (${stats.partialMesh.culledRegions} culled)`
-    );
-  }
   if (stats.fragmentRender.instances > 0) {
     details.push(`${stats.fragmentRender.instances} debris instances across ${stats.fragmentRender.batches} batches`);
   }

@@ -80,19 +80,12 @@ ignored by git.
 - `X` despawns active physics cores
 
 Gameplay settings include Terraformer size plus Physics Core size, velocity,
-terrain-damaging bounce count, color, and trail controls. Full-auto repeats are
-action-aware: Terraformer/build actions stay quick, thrown Physics Cores pace
-new bodies, and Hitscan Core repeats slowest to protect partial-terrain render
-pressure.
+terrain-damaging bounce count, color, and trail controls.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show
 or hide the quick-control hints. Debug and control overlays start hidden by
 default.
-
-Quality presets also cap how many damaged-terrain partial regions draw near the
-camera. The underlying partial damage stays alive, but distant or over-budget
-partial meshes can hide until approached so stress craters degrade gracefully.
 
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).

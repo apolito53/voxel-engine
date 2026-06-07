@@ -32,8 +32,6 @@ export type QualityPreset = {
   readonly physicsObjectBudget: number;
   readonly blockFragmentCount: number;
   readonly debrisActiveRadiusMeters: number;
-  readonly partialMeshRegionBudget: number;
-  readonly partialMeshDrawRadiusMeters: number;
   readonly minimapInterval: number;
   readonly minimapRowsPerFrame: number;
   readonly sunIntensity: number;
@@ -65,8 +63,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 64,
     blockFragmentCount: 54,
     debrisActiveRadiusMeters: 8,
-    partialMeshRegionBudget: 8,
-    partialMeshDrawRadiusMeters: 48,
     minimapInterval: 0.45,
     minimapRowsPerFrame: 3,
     sunIntensity: 2.8,
@@ -93,8 +89,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 128,
     blockFragmentCount: 72,
     debrisActiveRadiusMeters: 12,
-    partialMeshRegionBudget: 16,
-    partialMeshDrawRadiusMeters: 72,
     minimapInterval: 0.35,
     minimapRowsPerFrame: 4,
     sunIntensity: 3.2,
@@ -121,8 +115,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 192,
     blockFragmentCount: 108,
     debrisActiveRadiusMeters: 20,
-    partialMeshRegionBudget: 32,
-    partialMeshDrawRadiusMeters: 128,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
     sunIntensity: 3.45,
@@ -149,8 +141,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 192,
     blockFragmentCount: 108,
     debrisActiveRadiusMeters: 20,
-    partialMeshRegionBudget: 32,
-    partialMeshDrawRadiusMeters: 128,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
     sunIntensity: 3.45,
@@ -177,8 +167,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 512,
     blockFragmentCount: 144,
     debrisActiveRadiusMeters: 32,
-    partialMeshRegionBudget: 64,
-    partialMeshDrawRadiusMeters: 192,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 10,
     sunIntensity: 3.55,
@@ -205,8 +193,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 1024,
     blockFragmentCount: 180,
     debrisActiveRadiusMeters: 48,
-    partialMeshRegionBudget: 96,
-    partialMeshDrawRadiusMeters: 288,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 12,
     sunIntensity: 3.65,
@@ -233,8 +219,6 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     physicsObjectBudget: 4096,
     blockFragmentCount: 216,
     debrisActiveRadiusMeters: 72,
-    partialMeshRegionBudget: 128,
-    partialMeshDrawRadiusMeters: 384,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,
     sunIntensity: 3.75,

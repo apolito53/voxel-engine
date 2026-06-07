@@ -79,9 +79,7 @@ the root README.
   lose some speed, so the setting buys extra chaos without making the core
   ignore impact energy.
 - Selected Hitscan Core uses `Left click` to fire an instant core trace from the
-  lowered right-side muzzle. Full-auto mode repeats held hitscan shots at a
-  slower action-aware cadence than Terraformer/build edits so instant carving
-  cannot flood partial terrain quite as aggressively.
+  lowered right-side muzzle. Full-auto mode repeats held hitscan shots.
 - Holding `Right click` while firing a core uses centered reticle ADS with a
   slight 15% zoom.
 - `X` despawns active physics cores while keeping loose debris and parked rubble
@@ -115,10 +113,6 @@ Pause menu `Settings` is split into three tabs.
 - Quality preset
 - Render distance
 - Shadow quality
-
-Quality presets also own the partial-terrain draw cap and draw radius. Damaged
-terrain state is preserved, but far or over-budget partial-region meshes may
-hide until the player approaches.
 
 `Gameplay` owns:
 
