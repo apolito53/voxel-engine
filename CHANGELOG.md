@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.9.7 - 2026-06-06
+
+### Added
+
+- Added quality-driven partial terrain draw budgets and radii so damaged terrain
+  can keep its state without forcing every partial-region mesh to draw at once.
+- Added visible/culled partial terrain region and triangle counters to F3 and
+  hitch logs so render pressure is easier to diagnose.
+
+### Changed
+
+- Render-led hitch diagnostics now call out visible partial terrain pressure
+  before falling back to generic render/debris guesses.
+- Full-auto click cadence is now action-aware: Terraformer and build actions
+  remain quick, Physics Core repeats more gently, and Hitscan Core repeats
+  slowest to avoid flooding partial terrain with instant carve work.
+
 ## 0.9.6 - 2026-06-06
 
 ### Added

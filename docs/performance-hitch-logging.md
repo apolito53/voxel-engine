@@ -44,8 +44,14 @@ The debug overlay and hitch logger capture:
 - Adaptive debris pressure and effective cap state.
 - Instanced debris render counts.
 - Partial-block lattice/subvoxel pressure.
-- Partial-mesh triangle pressure.
+- Partial-mesh triangle pressure split into total, visible, and culled draw
+  regions.
 - Rubble cover stats when parked rubble exists.
+
+Partial terrain has its own quality-driven render cap. Hitch records preserve
+the total damaged-region pressure while also reporting how many partial meshes
+were actually visible, so a render-led record can distinguish "too much exists"
+from "too much is currently being drawn."
 
 Recent records are available in the browser at:
 

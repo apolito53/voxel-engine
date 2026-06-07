@@ -187,9 +187,11 @@ export class DebugHud {
           {
             label: "partial",
             value: `${snapshot.stats.partialDamageBlocks}/${snapshot.stats.partialBlocks} blk, ` +
-              `r ${snapshot.partialMeshStats.regions} d ${snapshot.partialMeshStats.dirtyRegions} ` +
-              `reb ${snapshot.partialMeshStats.rebuiltRegions}, tri ${snapshot.partialMeshStats.triangles} ` +
-              `max ${snapshot.partialMeshStats.maxRegionTriangles}`
+              `r ${snapshot.partialMeshStats.visibleRegions}/${snapshot.partialMeshStats.regions} vis, ` +
+              `c ${snapshot.partialMeshStats.culledRegions}, d ${snapshot.partialMeshStats.dirtyRegions} ` +
+              `reb ${snapshot.partialMeshStats.rebuiltRegions}, ` +
+              `tri ${snapshot.partialMeshStats.visibleTriangles}/${snapshot.partialMeshStats.triangles} ` +
+              `max ${snapshot.partialMeshStats.maxVisibleRegionTriangles}/${snapshot.partialMeshStats.maxRegionTriangles}`
           }
         ]
       },

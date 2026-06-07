@@ -49,6 +49,7 @@ import {
   DEFAULT_CLICK_FIRE_MODE,
   formatClickFireMode,
   formatClickFireModeShort,
+  getFullAutoClickActionIntervalMs,
   normalizeClickFireMode,
   toggleClickFireMode,
   type ClickFireMode
@@ -142,6 +143,12 @@ import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { shouldDeferPartialBlockMeshUpdate } from "./partialBlockMeshBudget";
+import {
+  createPartialMeshRenderPressureState,
+  getPartialMeshPressureEffectiveRegionBudget,
+  updatePartialMeshRenderPressureState,
+  type PartialMeshRenderPressureState
+} from "./partialMeshRenderBudget";
 import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
 import {
   LOW_FPS_LOG_THRESHOLD,
@@ -343,7 +350,6 @@ const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
 const PLAYER_LOCATION_SAVE_PRECISION = 1000;
 const CORE_AIM_PREVIEW_TOGGLE_KEY = "F6";
 const CLICK_FIRE_MODE_TOGGLE_KEY = "KeyT";
-const FULL_AUTO_CLICK_ACTION_INTERVAL_MS = 140;
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 type VoxelRuntimeGlobal = typeof globalThis & {
@@ -536,6 +542,9 @@ let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
 let debrisPerformancePressure = createDebrisPerformancePressureState(
   getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget)
+);
+let partialMeshRenderPressure: PartialMeshRenderPressureState = createPartialMeshRenderPressureState(
+  bootPreset.partialMeshRegionBudget
 );
 let renderedPartialBlockRevision = -1;
 let lastPartialBlockMeshUpdateMs = 0;
@@ -811,6 +820,7 @@ qualityController = new QualityController({
   onQualityChanged: (source: QualityChangeSource) => {
     debugHud.reset();
     minimapRenderer.reset();
+    resetPartialMeshRenderPressure();
     if (source === "preset") syncPhysicsBudgetToQuality();
     updateSettingsControls();
     emitQualityChanged(source);
@@ -1615,8 +1625,9 @@ function resetHeldClickRepeatState(): void {
 }
 
 function handleClickActionPress(button: ItemUseButton, activePlayer: PlayerController, nowMs: number): void {
-  setNextClickActionTime(button, nowMs + FULL_AUTO_CLICK_ACTION_INTERVAL_MS);
-  useSelectedHotbarAction(activePlayer, getSelectedHotbarAction(button));
+  const action = getSelectedHotbarAction(button);
+  setNextClickActionTime(button, nowMs + getFullAutoClickActionIntervalMs(action));
+  useSelectedHotbarAction(activePlayer, action);
 }
 
 function useSelectedHotbarPrimaryAction(activePlayer: PlayerController): void {
@@ -1767,7 +1778,7 @@ function repeatHeldClickAction(button: ItemUseButton, nowMs: number): void {
 
   if (nowMs < getNextClickActionTime(button)) return;
 
-  setNextClickActionTime(button, nowMs + FULL_AUTO_CLICK_ACTION_INTERVAL_MS);
+  setNextClickActionTime(button, nowMs + getFullAutoClickActionIntervalMs(action));
   useSelectedHotbarAction(requirePlayer(), action);
 }
 
@@ -1958,6 +1969,7 @@ function animate(): void {
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
     updatePartialBlockMesh(activeWorld);
+    updatePartialBlockMeshVisibility();
     debugPartialMeshStats = partialBlockMeshField.getStats();
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
@@ -1994,6 +2006,7 @@ function animate(): void {
   if (inWorld) {
     const observedFps = 1 / Math.max(rawDelta, 1 / 240);
     updateDebrisPressureGovernor(rawDelta, observedFps, debugPartialMeshStats.triangles);
+    updatePartialMeshRenderPressureGovernor(rawDelta, observedFps, debugPartialMeshStats);
     // The pressure governor uses the just-finished frame to lower the effective
     // Rapier body cap. Prune again after that update so hitch logs and the next
     // frame both see the newly requested cap instead of carrying excess bodies
@@ -2911,6 +2924,18 @@ function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
   lastPartialBlockMeshUpdateMs = performance.now();
 }
 
+function updatePartialBlockMeshVisibility(): void {
+  const preset = qualityController.preset;
+
+  updateChunkStreamFrustum();
+  partialBlockMeshField.updateVisibility({
+    cameraPosition: camera.position,
+    frustum: chunkStreamFrustum,
+    drawRadiusMeters: preset.partialMeshDrawRadiusMeters,
+    maxVisibleRegions: getCurrentPartialMeshVisibleRegionBudget()
+  });
+}
+
 function getPartialBlockMeshRegionBudget(hasUrgentRegions: boolean): number {
   // New/cleared partial cells can briefly expose holes if their visual region
   // waits behind non-urgent bite polish. Repeated cuts stay budgeted; urgent
@@ -2918,6 +2943,18 @@ function getPartialBlockMeshRegionBudget(hasUrgentRegions: boolean): number {
   return hasUrgentRegions
     ? PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET
     : PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET;
+}
+
+function getCurrentPartialMeshVisibleRegionBudget(): number {
+  const nominalBudget = qualityController.preset.partialMeshRegionBudget;
+  if (partialMeshRenderPressure.nominalRegionBudget !== nominalBudget) {
+    return getPartialMeshPressureEffectiveRegionBudget(nominalBudget, partialMeshRenderPressure.stress);
+  }
+  return partialMeshRenderPressure.effectiveRegionBudget;
+}
+
+function resetPartialMeshRenderPressure(): void {
+  partialMeshRenderPressure = createPartialMeshRenderPressureState(qualityController.preset.partialMeshRegionBudget);
 }
 
 function handlePhysicsImpact(
@@ -3800,6 +3837,19 @@ function updateDebrisPressureGovernor(
   });
 }
 
+function updatePartialMeshRenderPressureGovernor(
+  rawDelta: number,
+  observedFps: number,
+  partialMeshStats: ReturnType<PartialBlockMeshField["getStats"]>
+): void {
+  partialMeshRenderPressure = updatePartialMeshRenderPressureState(partialMeshRenderPressure, {
+    deltaSeconds: rawDelta,
+    observedFps,
+    nominalRegionBudget: qualityController.preset.partialMeshRegionBudget,
+    visibleTriangles: partialMeshStats.visibleTriangles
+  });
+}
+
 function updateGroundDebrisCleanup(delta: number): void {
   const lifetimeSeconds = getEffectiveGroundDebrisLifetimeSeconds(groundDebrisLifetimeSeconds);
 
@@ -4117,6 +4167,7 @@ async function loadWorld(worldId: string): Promise<void> {
     combatLog.clear();
     debugHud.reset();
     minimapRenderer.reset();
+    resetPartialMeshRenderPressure();
     activePlayer.resume();
     maybeStartTestAvatarFromUrl();
   } finally {
@@ -4194,6 +4245,7 @@ async function exitToHome(): Promise<void> {
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
     partialBlockMeshField.clear();
+    resetPartialMeshRenderPressure();
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
     inWorld = false;

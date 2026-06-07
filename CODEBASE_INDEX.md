@@ -49,13 +49,13 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
-- Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
-- Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, persistent local `logs/combat/` damage JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`, `vite.config.ts`
+- Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, partial-region visible/culled draw pressure, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
+- Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, adaptive debris pressure snapshots, partial-block mesh/subvoxel visible/culled pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, persistent local `logs/combat/` damage JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`, `vite.config.ts`
 - Frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation: `src/frameLoop.ts`
 - Smoothed per-frame subsystem timing helpers for hitch profiling: `src/frameTimings.ts`
 - Reusable held-item registry, stack metadata, categories, tags, and primary/secondary action descriptors, including Unarmed, Terraformer, Physics Core, Hitscan Core, and build-only block items: `src/items.ts`
 - Scroll-selected item/block lanes, selection wrapping, number-key mapping, and action resolution helpers: `src/hotbar.ts`
-- Semi/full-auto click-mode normalization, persistence, display labels, and toggle helper used by the input loop: `src/clickFireMode.ts`
+- Semi/full-auto click-mode normalization, persistence, display labels, action-aware repeat intervals, and toggle helper used by the input loop: `src/clickFireMode.ts`
 - Builder brush sizing, centered brush cell collection, guarded block placement, and erase/place helpers used by the pause-menu Builder panel: `src/builderTools.ts`
 - Translucent block-color Builder placement ghost for the active build brush: `src/builderPreview.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
@@ -84,7 +84,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Event-driven Nova chatter, glow pulses, message throttling, and companion reactions: `src/novaPilotReactions.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin edge outline for the currently targeted block or settled-rubble cube cell, including style switching and geometry/material disposal: `src/targetHighlighter.ts`
-- In-memory partial-block terrain carving, one-health core carve constants, monotonic connected-growth core-footprint-ranked hidden 3x3x3 bite-lattice damage visuals, stitched wrinkled partial-height surface samples, support-height queries, merged explicit surviving-lattice collision boxes, dense-burst mesh rebuild coalescing, and the regional faceted custom-cell mesh owner: `src/partialBlocks.ts`, `src/partialBlockMeshBudget.ts`
+- In-memory partial-block terrain carving, one-health core carve constants, monotonic connected-growth core-footprint-ranked hidden 3x3x3 bite-lattice damage visuals, stitched wrinkled partial-height surface samples, support-height queries, merged explicit surviving-lattice collision boxes, dense-burst mesh rebuild coalescing, regional faceted custom-cell mesh ownership, and quality/adaptive partial draw capping: `src/partialBlocks.ts`, `src/partialBlockMeshBudget.ts`, `src/partialMeshRenderBudget.ts`
 - Parked capped static faceted crater/scar prototype from the earlier decal-like experiment; retained for later visual reuse but no longer wired into Physics Core terrain hits: `src/impactCraterField.ts`
 - Throwable bouncing swept physics core, fragment render/material/shape state, rigid-debris sync hooks, grounded-debris cleanup/expiration state, sleep-aware split core/debris broadphase collision, velocity/radius impact reporting, terrain-pierce continuation hooks, and shared-resource sleeping/expiring fragments: `src/physics.ts`
 - Shared player core launch helpers for projectile velocity, lowered right-side hip-fire muzzle offsets, reticle convergence, and centered ADS shots: `src/physicsCoreLaunch.ts`
@@ -104,7 +104,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
 - Render quality controller, Custom preset for slider edits, persistence, and renderer/light/camera application: `src/qualityController.ts`
 - Custom quality settings storage, slider bounds, and menu label formatting: `src/qualitySettings.ts`
-- Render quality preset definitions, physics-body defaults, active debris bubble radii, Custom baseline, and tuning knobs: `src/qualityPresets.ts`
+- Render quality preset definitions, physics-body defaults, active debris bubble radii, partial-terrain draw budgets/radii, Custom baseline, and tuning knobs: `src/qualityPresets.ts`
 - Generated sunlit skybox texture and camera-following sky dome: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
 - Generated hitscan energy-bolt texture for additive beam rendering: `src/assets/hitscan-energy-bolt.png`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
