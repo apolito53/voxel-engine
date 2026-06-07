@@ -3,6 +3,7 @@ import {
   CUSTOM_PRESET_ID,
   CUSTOM_QUALITY_BASE_STORAGE_KEY,
   DEFAULT_QUALITY_PRESET,
+  FOG_RENDER_SAFETY_CHUNKS,
   LEGACY_POTATO_STORAGE_KEY,
   QUALITY_PRESET_ORDER,
   QUALITY_PRESETS,
@@ -84,6 +85,10 @@ export class QualityController {
 
   get streamLoadRadius(): number {
     return this.preset.loadRadius;
+  }
+
+  get chunkRenderRadius(): number {
+    return this.preset.renderRadius;
   }
 
   get initialLoadRadius(): number {
@@ -322,6 +327,7 @@ export class QualityController {
       shadowMapSize: shadows ? shadowMapSize : basePreset.shadowMapSize,
       shadowIntensity: shadows ? basePreset.shadowIntensity : 0,
       fogStartRadius,
+      renderRadius: Math.min(loadRadius, fogOpaqueRadius + FOG_RENDER_SAFETY_CHUNKS),
       loadRadius,
       unloadRadius: loadRadius + 1,
       fogNear,

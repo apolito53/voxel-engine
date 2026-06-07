@@ -2,6 +2,25 @@
 
 Shortlist of ideas worth keeping visible without pretending they are committed scope yet.
 
+## v0.10 Worker Migration Roadmap
+
+- Current foundation: `WorkerPool` owns the shared job protocol shape with
+  clamped capacity, ids, stale revision rejection, cancellation, sync fallback,
+  transfer bookkeeping, and HUD/log telemetry.
+- Next likely slice: extract partial-region geometry building into a pure
+  sync-or-worker path that returns transferable typed mesh buffers while the
+  main thread keeps Three.js `BufferGeometry` ownership.
+- Then fold chunk generation/meshing into the shared pool without changing
+  terrain semantics, chunk revision rejection, atlas UV/tile attributes, or
+  near/fog priority.
+- Later, decouple loose debris simulation state from Three proxy objects so
+  rendering consumes plain arrays of transforms/material/shape ids instead of
+  owning the simulation state.
+- Only after that, prototype workerized loose-debris simulation with compact
+  nearby-support snapshots. Keep player movement, core firing, terrain damage,
+  gameplay decisions, SharedArrayBuffer, WASM threads, and OffscreenCanvas out
+  of scope until the simpler worker pipeline proves its value.
+
 ## Rigid Sub-Voxel Damage Objects
 
 - Current direction: loose block debris is VFX, while block HP and the sparse 3x3x3 partial-block bite lattice own durable terrain damage.

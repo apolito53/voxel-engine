@@ -212,6 +212,7 @@ import { RollingFrameRateMeter } from "../src/frameRateMeter";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
+  FOG_RENDER_SAFETY_CHUNKS,
   QUALITY_PRESET_ORDER,
   QUALITY_PRESETS,
   SUPER_ULTRA_PRESET_ID
@@ -426,6 +427,7 @@ import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar
 import { getSunlitFaceShade } from "../src/voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
 import { VoxelWorld, type BlockDamageBrushPreview } from "../src/world";
+import { WorkerPool, getDefaultWorkerPoolSize, normalizeWorkerPoolSize } from "../src/workerPool";
 import { getSkyboxAlignedSunDirection } from "../src/skybox";
 
 type TestCase = {
@@ -2123,6 +2125,63 @@ test("rolling frame rate meter reports elapsed-time FPS instead of pretty instan
   );
 });
 
+test("worker pool clamps capacity and runs sync fallback jobs with revision guards", async () => {
+  assertEqual(normalizeWorkerPoolSize(0), 1, "worker pool should always keep at least one fallback lane");
+  assertEqual(normalizeWorkerPoolSize(99), 4, "worker pool should cap default browser worker pressure");
+  assertEqual(getDefaultWorkerPoolSize(8), 4, "eight-core machines should reserve one core but clamp to four workers");
+  assertEqual(getDefaultWorkerPoolSize(2), 1, "two-core machines should keep one worker lane");
+
+  const pool = new WorkerPool({ maxWorkers: 1, getNow: () => 100 });
+  const first = pool.enqueue({
+    type: "double",
+    payload: 3,
+    run: (value: number) => value * 2
+  });
+  const second = pool.enqueue({
+    type: "double",
+    payload: 4,
+    run: (value: number) => value * 2
+  });
+  assert(pool.cancel(second.id), "queued worker jobs should be cancelable before fallback execution starts");
+
+  const firstResult = await first.promise;
+  const secondResult = await second.promise;
+  assertEqual(firstResult.status, "completed", "first queued job should complete normally");
+  if (firstResult.status === "completed") {
+    assertEqual(firstResult.result, 6, "sync fallback job should return its result");
+  }
+  assertEqual(secondResult.status, "canceled", "canceled queued job should resolve as canceled");
+
+  const stale = await pool.enqueue({
+    type: "revision",
+    payload: 1,
+    revision: 2,
+    isRevisionStale: (revision) => revision < 3,
+    run: (value: number) => value
+  }).promise;
+  assertEqual(stale.status, "stale", "stale revision results should be rejected before upload");
+
+  const transferBuffer = new ArrayBuffer(8);
+  const transferred = await pool.enqueue({
+    type: "transfer",
+    payload: 5,
+    transfer: [transferBuffer],
+    run: (value: number) => value
+  }).promise;
+  assertEqual(transferred.status, "completed", "jobs with transfer metadata should still run in sync fallback");
+
+  pool.recordMainThreadUpload(5);
+  pool.recordMainThreadUpload(15);
+  const stats = pool.getStats();
+  assertEqual(stats.mode, "sync-fallback", "v0.10.0 worker scaffold should report sync fallback mode");
+  assertEqual(stats.maxWorkers, 1, "pool stats should report effective worker capacity");
+  assertEqual(stats.completedJobs, 2, "pool should count completed non-stale jobs");
+  assertEqual(stats.canceledJobs, 1, "pool should count canceled jobs");
+  assertEqual(stats.staleJobs, 1, "pool should count stale revision rejections");
+  assertEqual(stats.transferredBuffers, 1, "pool should count transferable buffers scheduled for jobs");
+  assertEqual(stats.averageMainThreadUploadMs, 10, "pool should average main-thread upload timing samples");
+});
+
 test("performance hitch diagnosis names the dominant subsystem and pressure counters", () => {
   const timings = {
     playerMs: 1,
@@ -2273,7 +2332,7 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
   assertEqual(record.diagnostics?.renderer.calls, 42, "hitch records should preserve renderer diagnostics");
   assert(
     formatPerformanceHitchRecord(record).includes("RAF gap"),
-    "Nova-readable summaries should lead with the missing-frame-time clue"
+    "Nova-readable low-FPS summaries should still surface the missing-frame-time clue"
   );
 
   const renderRecord = createPerformanceHitchRecord(8, 800, {
@@ -2288,6 +2347,15 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
       measuredBucketTotalMs: 43.5,
       unaccountedFrameMs: 8.5,
       renderCallMs: 40,
+      longTasks: {
+        observerSupported: true,
+        frameCount: 0,
+        frameTotalMs: 0,
+        frameMaxMs: 0,
+        recentCount: 1,
+        recentTotalMs: 96,
+        recentMaxMs: 96
+      },
       renderer: {
         calls: 1800,
         triangles: 920000,
@@ -2302,6 +2370,14 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
   assert(
     renderRecord.details.some((detail) => detail.includes("1800 draw calls")),
     "render hitches should carry draw-call and triangle receipts"
+  );
+  assert(
+    renderRecord.details[0]?.includes("1800 draw calls") ?? false,
+    "render-led hitches should lead with current-frame renderer counters"
+  );
+  assert(
+    renderRecord.details.some((detail) => detail.includes("seen recently")),
+    "stale recent long-task context should remain available as supporting evidence"
   );
   assert(
     renderRecord.details.some((detail) => detail.includes("outside measured buckets")),
@@ -2904,6 +2980,28 @@ test("world fallback streaming loads and unloads bounded chunk windows", () => {
   const stats = world.getStats();
   assertEqual(stats.loadedChunks, 9, "unload radius should keep the new 3x3 window bounded");
   assertEqual(stats.pendingChunkLoads, 0, "fallback streaming should not leave pending worker loads");
+});
+
+test("world hides opaque-fog horizon chunks without unloading the stream window", () => {
+  const world = new VoxelWorld({ seed: "render-horizon-test" });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshBasicMaterial();
+
+  world.streamChunksAround(0, 0, scene, 2, 3, 32);
+  world.rebuildDirty(scene, material, 32);
+  world.updateChunkRenderVisibility(0, 0, 1);
+
+  const stats = world.getStats();
+  assertEqual(stats.loadedChunks, 25, "render culling should keep the loaded horizon available for streaming");
+  assertEqual(stats.frustumChunks, 25, "without a priority frustum, every loaded chunk should count as in-frustum");
+  assertEqual(stats.renderedChunks, 9, "radius-one render visibility should draw the nearest 3x3 chunk window");
+  assertEqual(stats.fogHiddenChunks, 16, "outer loaded chunks should be hidden behind opaque fog");
+  assertEqual(stats.visibleChunks, stats.frustumChunks, "legacy visible chunk stats should remain frustum-compatible");
+
+  world.updateChunkRenderVisibility(0, 0, 2);
+  const restoredStats = world.getStats();
+  assertEqual(restoredStats.renderedChunks, 25, "approaching or widening the horizon should restore hidden chunk meshes");
+  assertEqual(restoredStats.fogHiddenChunks, 0, "no chunks should remain fog-hidden inside the render radius");
 });
 
 test("world reuses queued chunk windows while player stays in the same chunk", () => {
@@ -8784,6 +8882,15 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.normal.distanceScale, 2, "Normal should remain 2x distance");
   assertEqual(QUALITY_PRESETS.normal.fogStartRadius, 6, "Normal should start fog after 6 clear chunks");
   assertEqual(QUALITY_PRESETS.normal.loadRadius, 11, "Normal should stream hidden chunks behind the opaque fog curtain");
+  assertEqual(
+    QUALITY_PRESETS.normal.renderRadius,
+    QUALITY_PRESETS.normal.fogStartRadius + QUALITY_PRESETS.normal.fogFalloffRadius + FOG_RENDER_SAFETY_CHUNKS,
+    "Normal should draw only the clear/fog curtain plus one safety ring"
+  );
+  assert(
+    QUALITY_PRESETS.normal.renderRadius < QUALITY_PRESETS.normal.loadRadius,
+    "Normal should keep hidden streamed horizon chunks outside the render radius"
+  );
   assertEqual(QUALITY_PRESETS[CUSTOM_PRESET_ID].label, "Custom", "Custom preset should be available for slider edits");
   assertEqual(
     QUALITY_PRESETS[CUSTOM_PRESET_ID].physicsObjectBudget,
@@ -8925,6 +9032,9 @@ function createTestHitchStats(
       loadedChunks: 0,
       visibleChunks: 0,
       culledChunks: 0,
+      frustumChunks: 0,
+      renderedChunks: 0,
+      fogHiddenChunks: 0,
       savedChunks: 0,
       queuedChunks: 0,
       loadedThisFrame: 0,
@@ -8993,6 +9103,19 @@ function createTestHitchStats(
       health: 0,
       maxCoverHeight: 0,
       visualChunks: 0
+    },
+    workerPool: {
+      mode: "sync-fallback",
+      maxWorkers: 1,
+      queuedJobs: 0,
+      runningJobs: 0,
+      completedJobs: 0,
+      canceledJobs: 0,
+      staleJobs: 0,
+      failedJobs: 0,
+      transferredBuffers: 0,
+      averageWorkerTimeMs: 0,
+      averageMainThreadUploadMs: 0
     },
     ...overrides
   };

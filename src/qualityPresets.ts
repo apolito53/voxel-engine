@@ -8,6 +8,7 @@ export const DEFAULT_QUALITY_PRESET = "normal";
 export const CUSTOM_PRESET_ID = "custom";
 export const SUPER_ULTRA_PRESET_ID = "superUltra";
 export const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"] as const;
+export const FOG_RENDER_SAFETY_CHUNKS = 1;
 
 export type StandardQualityPresetId = (typeof QUALITY_PRESET_ORDER)[number];
 export type BuiltInQualityPresetId = StandardQualityPresetId | typeof SUPER_ULTRA_PRESET_ID;
@@ -30,6 +31,7 @@ export type QualityPreset = {
   readonly fogNear: number;
   readonly fogFar: number;
   readonly cameraFar: number;
+  readonly renderRadius: number;
   readonly loadRadius: number;
   readonly unloadRadius: number;
   readonly chunkLoads: number;
@@ -43,7 +45,7 @@ export type QualityPreset = {
   readonly skyIntensity: number;
 };
 
-type QualityPresetRuntimeFields = "fogNear" | "fogFar" | "cameraFar" | "loadRadius" | "unloadRadius";
+type QualityPresetRuntimeFields = "fogNear" | "fogFar" | "cameraFar" | "renderRadius" | "loadRadius" | "unloadRadius";
 type QualityPresetDefinition = Omit<QualityPreset, QualityPresetRuntimeFields> & {
   readonly minCameraFar: number;
 };
@@ -55,6 +57,7 @@ function createQualityPreset(definition: QualityPresetDefinition): QualityPreset
   const { minCameraFar, ...preset } = definition;
   const fogOpaqueRadius = preset.fogStartRadius + preset.fogFalloffRadius;
   const loadRadius = fogOpaqueRadius + preset.fogHiddenRadius;
+  const renderRadius = Math.min(loadRadius, fogOpaqueRadius + FOG_RENDER_SAFETY_CHUNKS);
   const fogNear = preset.fogStartRadius * CHUNK_SIZE;
   const fogFar = fogOpaqueRadius * CHUNK_SIZE;
   const cameraFar = Math.max(minCameraFar, fogFar + CHUNK_SIZE * 2);
@@ -64,6 +67,7 @@ function createQualityPreset(definition: QualityPresetDefinition): QualityPreset
     fogNear,
     fogFar,
     cameraFar,
+    renderRadius,
     loadRadius,
     unloadRadius: loadRadius + 1
   };

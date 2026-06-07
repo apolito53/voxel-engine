@@ -40,8 +40,12 @@ The debug overlay and hitch logger capture:
 - 45ms+ frame spikes.
 - At most one sustained sub-60-FPS sample per second.
 - CPU buckets for player, chunk, physics, mesh, minimap, render, and other work.
+- Chunk visibility split into loaded chunks, frustum chunks, actually rendered
+  chunks, and chunks hidden behind the opaque fog curtain.
 - Rigid debris body/collider pressure.
 - Adaptive debris pressure and effective cap state.
+- Worker-pool scaffold pressure: mode, capacity, queued jobs, running jobs, and
+  average job/upload timing.
 - Instanced debris render counts.
 - Partial-block lattice/subvoxel pressure.
 - Partial-mesh triangle pressure.
@@ -79,6 +83,26 @@ pass-versioned JSONL under `logs/`.
 If a log says a large RAF gap happened with only a tiny measured JavaScript
 frame, treat that as a sign to investigate browser scheduling, GC, GPU
 presentation, or driver stalls before blaming terrain, debris, or chunk code.
+Render-led frame summaries lead with current-frame renderer counters before
+stale recent long-task context, while low-FPS records still prefer current RAF
+gap or overlapping long-task clues in the one-line summary.
+
+## Render Horizon
+
+Chunk streaming and chunk rendering are now separate policies. The engine keeps
+the hidden streamed horizon loaded behind the fog curtain, but chunk meshes stop
+drawing once their chunk-ring distance is beyond fully opaque fog plus one
+safety ring. This lowers far-horizon draw calls and triangles without reviving
+the reverted partial-damaged-region draw cap.
+
+The important F3/Hitch counters are:
+
+- `loadedChunks`: streamed and available in memory.
+- `frustumChunks`: loaded chunks that are currently inside the camera-priority
+  frustum, or all loaded chunks when no priority frustum is active.
+- `renderedChunks`: frustum chunks whose mesh is still visible to Three.js.
+- `fogHiddenChunks`: frustum chunks intentionally hidden by opaque-fog horizon
+  culling.
 
 ## Runtime Combat Records
 

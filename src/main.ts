@@ -303,6 +303,7 @@ import {
   type VisualTestScenario,
   type VisualTestScenarioSummary
 } from "./visualTestScenarios";
+import { WorkerPool } from "./workerPool";
 import {
   VoxelWorld,
   type BlockDamageResult,
@@ -646,6 +647,7 @@ const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const physicsCoreTrail = new PhysicsCoreTrail(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
+const workerPool = new WorkerPool();
 const partialBlockMeshField = new PartialBlockMeshField(scene, partialBlockMaterial);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
@@ -1966,6 +1968,11 @@ function animate(): void {
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
     updatePartialBlockMesh(activeWorld);
+    activeWorld.updateChunkRenderVisibility(
+      debugPlayerChunk.cx,
+      debugPlayerChunk.cz,
+      qualityController.chunkRenderRadius
+    );
     debugPartialMeshStats = partialBlockMeshField.getStats();
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
@@ -2029,7 +2036,8 @@ function animate(): void {
       fragmentRender: physicsFragmentInstancer.getStats(),
       partialMesh: debugPartialMeshStats,
       debrisSettler: debrisSettlerStats,
-      rubble: debugRubbleStats ?? rubbleField.getStats()
+      rubble: debugRubbleStats ?? rubbleField.getStats(),
+      workerPool: workerPool.getStats()
     };
 
     if (frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
@@ -2080,6 +2088,7 @@ function animate(): void {
       debugPartialMeshStats,
       debrisSettlerStats,
       debugRubbleStats,
+      workerPool.getStats(),
       [combatLog.getPersistenceStatusLine(), ...combatLog.getRecentLines(5)],
       smoothedFrameTimings
     );
@@ -2277,7 +2286,8 @@ function createCurrentPerformanceStatsSnapshot(
     fragmentRender: physicsFragmentInstancer.getStats(),
     partialMesh: overrides.partialMesh ?? partialBlockMeshField.getStats(),
     debrisSettler: debrisSettlerStats,
-    rubble: overrides.rubble ?? rubbleField.getStats()
+    rubble: overrides.rubble ?? rubbleField.getStats(),
+    workerPool: workerPool.getStats()
   };
 }
 

@@ -15,6 +15,7 @@ import {
 import type { QualityPreset } from "./qualityPresets";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
+import type { WorkerPoolStats } from "./workerPool";
 import type { ChunkCoords, WorldStats } from "./world";
 
 type DebugHudOptions = {
@@ -82,6 +83,7 @@ export class DebugHud {
     partialMeshStats: PartialBlockMeshStats,
     debrisSettlerStats: DebrisSettlerStats,
     rubbleStats: RubbleFieldStats,
+    workerPoolStats: WorkerPoolStats,
     combatLogLines: readonly string[],
     timings: FrameTimings
   ): void {
@@ -110,6 +112,7 @@ export class DebugHud {
       partialMeshStats,
       debrisSettlerStats,
       rubbleStats,
+      workerPoolStats,
       combatLogLines,
       timings,
       frameRate
@@ -147,6 +150,7 @@ export class DebugHud {
     readonly partialMeshStats: PartialBlockMeshStats;
     readonly debrisSettlerStats: DebrisSettlerStats;
     readonly rubbleStats: RubbleFieldStats;
+    readonly workerPoolStats: WorkerPoolStats;
     readonly combatLogLines: readonly string[];
     readonly timings: FrameTimings;
     readonly frameRate: FrameRateSample;
@@ -181,7 +185,11 @@ export class DebugHud {
         title: "World",
         rows: [
           { label: "chunk", value: `${snapshot.playerChunk.cx}, ${snapshot.playerChunk.cz}` },
-          { label: "view", value: `${snapshot.stats.visibleChunks}/${snapshot.stats.loadedChunks}, culled ${snapshot.stats.culledChunks}` },
+          {
+            label: "view",
+            value: `${snapshot.stats.renderedChunks}/${snapshot.stats.frustumChunks} draw, ` +
+              `fog ${snapshot.stats.fogHiddenChunks}, load ${snapshot.stats.loadedChunks}`
+          },
           { label: "load", value: `q ${snapshot.stats.queuedChunks}, gen ${snapshot.stats.loadedThisFrame}/${snapshot.stats.pendingChunkLoads}` },
           { label: "mesh", value: `q ${snapshot.stats.dirtyChunks}, view ${snapshot.stats.visibleDirtyChunks}, done ${snapshot.stats.meshedThisFrame}/${snapshot.stats.pendingMeshBuilds}` },
           { label: "save", value: `${snapshot.stats.savedChunks} saved, ${snapshot.stats.modifiedChunks} edited, q ${snapshot.stats.pendingChunkSaves}` },
@@ -219,12 +227,18 @@ export class DebugHud {
           {
             label: "quality",
             value: `${qualityPreset.label} ${qualityPreset.distanceScale}x, ` +
-              `fog ${qualityPreset.fogStartRadius}->${fogOpaqueRadius}c, stream ${qualityPreset.loadRadius}c, ` +
+              `fog ${qualityPreset.fogStartRadius}->${fogOpaqueRadius}c, draw ${qualityPreset.renderRadius}c, ` +
+              `stream ${qualityPreset.loadRadius}c, ` +
               `debris ${qualityPreset.debrisActiveRadiusMeters}m, px ${this.renderer.getPixelRatio()}`
           },
           { label: "req", value: `gen ${snapshot.stats.requestedLoadsThisFrame}, mesh ${snapshot.stats.requestedMeshesThisFrame}, map ${snapshot.lastMinimapMs.toFixed(1)}ms` },
           { label: "gpu", value: compactText(this.gpuInfo.vendor, 30) },
           { label: "driver", value: compactText(this.gpuInfo.renderer, 34) },
+          {
+            label: "worker",
+            value: `${snapshot.workerPoolStats.mode} ${snapshot.workerPoolStats.runningJobs}/${snapshot.workerPoolStats.maxWorkers} run, ` +
+              `q ${snapshot.workerPoolStats.queuedJobs}, avg ${snapshot.workerPoolStats.averageWorkerTimeMs.toFixed(1)}ms`
+          },
           { label: "draw", value: `${render.calls} calls, ${render.triangles} tris` },
           { label: "mem", value: `${memory.geometries} geo, ${memory.textures} tex` }
         ]

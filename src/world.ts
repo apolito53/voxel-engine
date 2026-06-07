@@ -79,6 +79,9 @@ export type WorldStats = {
   readonly loadedChunks: number;
   readonly visibleChunks: number;
   readonly culledChunks: number;
+  readonly frustumChunks: number;
+  readonly renderedChunks: number;
+  readonly fogHiddenChunks: number;
   readonly savedChunks: number;
   readonly queuedChunks: number;
   readonly loadedThisFrame: number;
@@ -905,6 +908,7 @@ export class VoxelWorld implements CollisionWorld {
   priorityFrustumActive: boolean;
   private chunkQueueWindow: ChunkQueueWindow | null;
   private chunkUnloadWindow: ChunkQueueWindow | null;
+  private readonly fogHiddenChunkKeys: Set<string>;
   private queueWindowRefreshes: number;
   private queueWindowSkips: number;
   private lastQueueCandidateChecks: number;
@@ -960,6 +964,7 @@ export class VoxelWorld implements CollisionWorld {
     this.priorityFrustumActive = false;
     this.chunkQueueWindow = null;
     this.chunkUnloadWindow = null;
+    this.fogHiddenChunkKeys = new Set();
     this.queueWindowRefreshes = 0;
     this.queueWindowSkips = 0;
     this.lastQueueCandidateChecks = 0;
@@ -1036,6 +1041,7 @@ export class VoxelWorld implements CollisionWorld {
       chunk.disposeMesh(scene);
     }
     this.chunks.clear();
+    this.fogHiddenChunkKeys.clear();
     this.chunkLoadQueue.clear();
     this.invalidateChunkQueueWindow();
     this.invalidateChunkUnloadWindow();
@@ -2844,6 +2850,7 @@ export class VoxelWorld implements CollisionWorld {
 
       chunk.disposeMesh(scene);
       this.chunks.delete(key);
+      this.fogHiddenChunkKeys.delete(key);
       this.chunkLoadQueue.delete(key);
       this.dirtyChunkKeys.delete(key);
       this.modifiedChunkKeys.delete(key);
@@ -3319,6 +3326,26 @@ export class VoxelWorld implements CollisionWorld {
     return true;
   }
 
+  updateChunkRenderVisibility(centerCx: number, centerCz: number, renderRadius: number): void {
+    const normalizedRadius = normalizeChunkRadius(renderRadius);
+    this.fogHiddenChunkKeys.clear();
+
+    for (const [key, chunk] of this.chunks) {
+      const mesh = chunk.mesh;
+      if (!mesh) continue;
+
+      const ringDistance = Math.max(
+        Math.abs(chunk.cx - centerCx),
+        Math.abs(chunk.cz - centerCz)
+      );
+      const hiddenByOpaqueFog = ringDistance > normalizedRadius;
+      mesh.visible = !hiddenByOpaqueFog;
+      if (hiddenByOpaqueFog) {
+        this.fogHiddenChunkKeys.add(key);
+      }
+    }
+  }
+
   priorityLane(ring: number, alignment: number, visible: boolean): number {
     // Lanes keep the immediate neighborhood complete, then spend the remaining
     // budget on chunks in the frustum before broader front-to-back catch-up work.
@@ -3438,10 +3465,19 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   getStats(): WorldStats {
-    let visibleChunks = 0;
-    for (const chunk of this.chunks.values()) {
+    let frustumChunks = 0;
+    let renderedChunks = 0;
+    let fogHiddenChunks = 0;
+    for (const [key, chunk] of this.chunks) {
       if (!this.chunkIntersectsFrustum(chunk.cx, chunk.cz)) continue;
-      visibleChunks += 1;
+      frustumChunks += 1;
+      if (this.fogHiddenChunkKeys.has(key)) {
+        fogHiddenChunks += 1;
+        continue;
+      }
+      if (chunk.mesh?.visible) {
+        renderedChunks += 1;
+      }
     }
 
     let visibleDirtyChunks = 0;
@@ -3476,8 +3512,11 @@ export class VoxelWorld implements CollisionWorld {
 
     return {
       loadedChunks: this.chunks.size,
-      visibleChunks,
-      culledChunks: this.chunks.size - visibleChunks,
+      visibleChunks: frustumChunks,
+      culledChunks: this.chunks.size - frustumChunks,
+      frustumChunks,
+      renderedChunks,
+      fogHiddenChunks,
       savedChunks: this.savedChunkKeys.size,
       queuedChunks: this.chunkLoadQueue.size,
       loadedThisFrame: this.lastLoadedChunks,

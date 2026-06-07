@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.10.0 - 2026-06-07
+
+### Added
+
+- Added a browser-native `WorkerPool` foundation with clamped default capacity,
+  job ids, cancellation, revision-stale result rejection, transferable-buffer
+  bookkeeping, sync fallback execution, and F3/hitch-log telemetry for queued
+  and running jobs.
+- Added fog-hidden chunk render stats for the F3 HUD and hitch records,
+  separating loaded chunks from frustum chunks, actually rendered chunks, and
+  chunks hidden behind the opaque fog curtain.
+
+### Changed
+
+- Added render-horizon culling so hidden-horizon chunks stay streamed but stop
+  drawing once they are safely behind fully opaque fog plus one safety ring.
+  This preserves the fog curtain while reducing far-horizon draw calls and
+  triangles.
+- Reordered hitch summaries so render-led frames lead with current renderer
+  counters, while low-FPS samples still surface current-frame RAF gaps or
+  overlapping browser long tasks prominently.
+
 ## 0.9.10.1 - 2026-06-07
 
 ### Added

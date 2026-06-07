@@ -8,6 +8,7 @@ import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
 import type { WorldStats } from "./world";
+import type { WorkerPoolStats } from "./workerPool";
 import packageManifest from "../package.json";
 import {
   REMOTE_HITCH_LOG_ENDPOINT,
@@ -38,6 +39,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly partialMesh: PartialBlockMeshStats;
   readonly debrisSettler: DebrisSettlerStats;
   readonly rubble: RubbleFieldStats;
+  readonly workerPool: WorkerPoolStats;
 };
 
 export type PerformanceHitchLogPass = {
@@ -329,7 +331,7 @@ export function createPerformanceHitchRecord(
 }
 
 export function formatPerformanceHitchRecord(record: PerformanceHitchRecord): string {
-  const detail = record.details[0] ?? "no obvious counter spike";
+  const detail = getSummaryDetail(record);
   if (record.kind === "low-fps") {
     return `${formatFps(record.observedFps ?? getFpsFromFrameMs(record.frameMs))} low FPS: ` +
       `${record.primaryBucket} led at ${formatMs(record.primaryBucketMs)} ` +
@@ -337,6 +339,17 @@ export function formatPerformanceHitchRecord(record: PerformanceHitchRecord): st
   }
   return `${formatMs(record.frameMs)} hitch: ${record.primaryBucket} led at ` +
     `${formatMs(record.primaryBucketMs)} (${Math.round(record.primaryBucketShare * 100)}%). ${detail}`;
+}
+
+function getSummaryDetail(record: PerformanceHitchRecord): string {
+  if (record.kind === "low-fps") {
+    const currentFrameBrowserClue = record.details.find((detail) =>
+      detail.includes("RAF gap") || detail.includes("overlapped the frame")
+    );
+    if (currentFrameBrowserClue) return currentFrameBrowserClue;
+  }
+
+  return record.details[0] ?? "no obvious counter spike";
 }
 
 function createPerformanceSummaryLead(kind: PerformanceHitchKind, input: PerformanceHitchInput): string {
@@ -363,8 +376,6 @@ function getPerformanceHitchDetails(
   const { stats } = input;
   const details: string[] = [];
 
-  addFrameDiagnosticsDetails(details, input);
-
   switch (primaryBucket) {
     case "physics":
       addPhysicsDetails(details, stats);
@@ -389,6 +400,7 @@ function getPerformanceHitchDetails(
       break;
   }
 
+  addFrameDiagnosticsDetails(details, input);
   addCrossCuttingPressureDetails(details, stats);
   return details.slice(0, 6);
 }
@@ -506,6 +518,12 @@ function addRenderDetails(
   if (stats.rubble.visualChunks > 0) {
     details.push(`${stats.rubble.visualChunks} baked rubble visual chunks`);
   }
+  if (stats.world.frustumChunks > 0) {
+    details.push(
+      `${stats.world.renderedChunks}/${stats.world.frustumChunks} frustum chunks rendered, ` +
+      `${stats.world.fogHiddenChunks} hidden behind opaque fog`
+    );
+  }
   if (details.length === 0) {
     details.push("render bucket led without obvious debris draw pressure");
   }
@@ -533,6 +551,12 @@ function addCrossCuttingPressureDetails(
   }
   if (stats.fragmentRender.instances >= 100) {
     details.push(`${stats.fragmentRender.instances} live fragment render instances`);
+  }
+  if (stats.workerPool.queuedJobs > 0 || stats.workerPool.runningJobs > 0) {
+    details.push(
+      `worker jobs q ${stats.workerPool.queuedJobs}, run ${stats.workerPool.runningJobs}, ` +
+      `avg ${formatMs(stats.workerPool.averageWorkerTimeMs)}`
+    );
   }
 }
 
@@ -582,7 +606,8 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     fragmentRender: { ...stats.fragmentRender },
     partialMesh: { ...stats.partialMesh },
     debrisSettler: { ...stats.debrisSettler },
-    rubble: { ...stats.rubble }
+    rubble: { ...stats.rubble },
+    workerPool: { ...stats.workerPool }
   };
 }
 

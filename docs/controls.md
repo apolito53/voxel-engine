@@ -144,6 +144,9 @@ cover.
 The fog start distance is the clear chunk radius. Far terrain fades to opaque
 fog over the preset's falloff band, while the engine streams a hidden extra
 horizon behind that opacity so the hard chunk cutoff stays out of sight.
+Chunks beyond the opaque fog plus one safety ring stay loaded but stop drawing,
+which keeps streaming continuity without paying draw calls for fully hidden
+terrain.
 
 ## Quality Presets
 

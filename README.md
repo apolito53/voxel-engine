@@ -83,7 +83,9 @@ Gameplay settings include Terraformer size plus Physics Core size, velocity,
 terrain-damaging bounce count, color, and trail controls.
 Graphics settings treat distance as the clear chunk radius where fog starts;
 the engine streams a hidden extra horizon behind the opaque part of that curtain
-so far chunks fade out instead of popping away at the edge.
+so far chunks fade out instead of popping away at the edge. Hidden-horizon
+chunks remain loaded for continuity, but stop drawing after the opaque fog
+curtain plus a safety ring to reduce far-distance draw pressure.
 Thrown Physics Cores have a hard lifetime and fade out once they stay below
 useful terrain-damage speed, so spent shots do not linger forever during stress
 tests.
