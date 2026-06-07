@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.9.7 - 2026-06-06
+
+### Changed
+
+- Physics Cores now have a 20 second hard lifetime and start a short fade-out
+  despawn countdown after staying below useful terrain-damage speed, keeping
+  spent projectile cores from piling up in crater stress tests.
+
 ## 0.9.6 - 2026-06-06
 
 ### Added

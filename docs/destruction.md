@@ -93,6 +93,10 @@ reaching deeper cells.
 
 The preview is a debug aid, not durable gameplay state.
 
+Thrown Physics Cores have a 20 second hard lifetime. Once a projectile stays
+below useful terrain-damage speed, it starts a short fade/despawn countdown so
+old spent shots stop accumulating as physics objects.
+
 ## Debris VFX
 
 Loose block debris is temporary VFX in the normal runtime.

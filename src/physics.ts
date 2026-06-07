@@ -69,6 +69,8 @@ type PhysicsToyOptions = {
   readonly maxAgeSeconds?: number | null;
   readonly sleepSpeed?: number;
   readonly sleepAfterSeconds?: number;
+  readonly lowSpeedExpireSpeed?: number;
+  readonly lowSpeedExpireAfterSeconds?: number;
   readonly disposeGeometry?: boolean;
   readonly disposeMaterial?: boolean;
 };
@@ -124,9 +126,14 @@ export class PhysicsToy {
   private readonly maxAgeSeconds: number | null;
   private readonly sleepSpeed: number;
   private readonly sleepAfterSeconds: number;
+  private readonly lowSpeedExpireSpeed: number;
+  private readonly lowSpeedExpireAfterSeconds: number;
+  private readonly baseMaterialOpacity: number;
+  private readonly baseMaterialTransparent: boolean;
   private terrainDamageBouncesRemaining: number;
   private ageSeconds = 0;
   private settledSeconds = 0;
+  private lowSpeedExpireSeconds = 0;
   private supportContactLastUpdate = false;
   private supportAnchoredSleep = false;
   private sleeping = false;
@@ -164,6 +171,10 @@ export class PhysicsToy {
     this.maxAgeSeconds = options.maxAgeSeconds ?? null;
     this.sleepSpeed = options.sleepSpeed ?? 0;
     this.sleepAfterSeconds = options.sleepAfterSeconds ?? 0;
+    this.lowSpeedExpireSpeed = Math.max(0, options.lowSpeedExpireSpeed ?? 0);
+    this.lowSpeedExpireAfterSeconds = Math.max(0, options.lowSpeedExpireAfterSeconds ?? 0);
+    this.baseMaterialOpacity = this.mesh.material.opacity;
+    this.baseMaterialTransparent = this.mesh.material.transparent;
     this.mesh.castShadow = options.castShadow ?? true;
     this.mesh.position.copy(position);
     if (this.debrisShape) {
@@ -233,6 +244,17 @@ export class PhysicsToy {
     return this.ageSeconds;
   }
 
+  get lowSpeedDespawnCountdownSeconds(): number | null {
+    if (this.lowSpeedExpireSpeed <= 0 || this.lowSpeedExpireAfterSeconds <= 0) return null;
+    if (this.lowSpeedExpireSeconds <= 0) return null;
+    return Math.max(0, this.lowSpeedExpireAfterSeconds - this.lowSpeedExpireSeconds);
+  }
+
+  get lowSpeedDespawnProgress(): number {
+    if (this.lowSpeedExpireAfterSeconds <= 0) return 0;
+    return Math.min(1, Math.max(0, this.lowSpeedExpireSeconds / this.lowSpeedExpireAfterSeconds));
+  }
+
   get rigidDebrisExternalMutationRevision(): number {
     return this.rigidDebrisExternalRevision;
   }
@@ -251,6 +273,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
     this.markRigidDebrisExternalMutation();
   }
@@ -262,6 +285,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
   }
 
@@ -284,6 +308,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.fragmentRenderVisible = false;
+    this.lowSpeedExpireSeconds = this.lowSpeedExpireAfterSeconds;
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
   }
@@ -297,6 +322,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.settledSeconds = 0;
+    this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
     this.mesh.position.copy(position);
     this.velocity.copy(velocity);
@@ -410,6 +436,9 @@ export class PhysicsToy {
     this.ageSeconds += delta;
     if (this.maxAgeSeconds !== null && this.ageSeconds >= this.maxAgeSeconds) {
       this.expire();
+      return impacts;
+    }
+    if (this.updateLowSpeedExpiration(delta)) {
       return impacts;
     }
 
@@ -649,6 +678,46 @@ export class PhysicsToy {
     this.spinStep.setFromAxisAngle(this.spinAxis, stepAngle);
     this.mesh.quaternion.premultiply(this.spinStep).normalize();
     this.angularVelocity.multiplyScalar(this.isInstancedFragment ? 0.992 : 0.997);
+  }
+
+  private updateLowSpeedExpiration(delta: number): boolean {
+    if (this.lowSpeedExpireSpeed <= 0 || this.lowSpeedExpireAfterSeconds <= 0) {
+      return false;
+    }
+
+    const expireSpeedSq = this.lowSpeedExpireSpeed * this.lowSpeedExpireSpeed;
+    if (this.velocity.lengthSq() > expireSpeedSq) {
+      this.resetLowSpeedDespawnCountdown();
+      return false;
+    }
+
+    this.lowSpeedExpireSeconds += delta;
+    this.updateLowSpeedDespawnMaterial();
+    if (this.lowSpeedExpireSeconds < this.lowSpeedExpireAfterSeconds) return false;
+
+    this.expire();
+    return true;
+  }
+
+  private resetLowSpeedDespawnCountdown(): void {
+    if (this.lowSpeedExpireSeconds <= 0) return;
+
+    this.lowSpeedExpireSeconds = 0;
+    this.mesh.material.opacity = this.baseMaterialOpacity;
+    this.mesh.material.transparent = this.baseMaterialTransparent;
+    this.mesh.material.needsUpdate = true;
+  }
+
+  private updateLowSpeedDespawnMaterial(): void {
+    const progress = this.lowSpeedDespawnProgress;
+    if (progress <= 0) return;
+
+    // Only projectile cores currently opt into this path. The fade is a small
+    // visual countdown so a spent core does not vanish with no warning once its
+    // speed has dropped below useful damage velocity.
+    this.mesh.material.transparent = true;
+    this.mesh.material.opacity = this.baseMaterialOpacity * Math.max(0.2, 1 - progress * 0.8);
+    this.mesh.material.needsUpdate = true;
   }
 
   private updateSleepState(delta: number, touchedSolidBlock: boolean): void {

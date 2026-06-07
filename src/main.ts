@@ -323,6 +323,9 @@ const CHANGELOG_ENTRIES = parseChangelogEntries(changelogMarkdown);
 const TARGET_HIT_EPSILON = 0.0001;
 const PHYSICS_CORE_SLEEP_SPEED = 0.12;
 const PHYSICS_CORE_SLEEP_AFTER_SECONDS = 0.9;
+const PHYSICS_CORE_HARD_TTL_SECONDS = 20;
+const PHYSICS_CORE_LOW_SPEED_DESPAWN_SPEED = BLOCK_DAMAGE_IMPACT_SPEED * 0.65;
+const PHYSICS_CORE_LOW_SPEED_DESPAWN_SECONDS = 3.5;
 // Fragment launch is tuned separately from the later sticky-settling pass.
 // The first few frames should read as a voxel shattering outward before the
 // short glue window turns the debris into a believable local heap.
@@ -3490,8 +3493,14 @@ function createPhysicsCore(position: THREE.Vector3, velocity: THREE.Vector3): Ph
     radius: getPhysicsCoreRadius(physicsCoreSettings),
     material: createPhysicsCoreMaterial(physicsCoreSettings),
     terrainDamageBounceCount: physicsCoreSettings.terrainBounceCount,
+    maxAgeSeconds: PHYSICS_CORE_HARD_TTL_SECONDS,
     sleepSpeed: PHYSICS_CORE_SLEEP_SPEED,
-    sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS
+    sleepAfterSeconds: PHYSICS_CORE_SLEEP_AFTER_SECONDS,
+    // Below this speed a core can no longer meaningfully chew terrain, so start
+    // a short fade/despawn countdown instead of letting old shots pile up in
+    // broadphase and hitch logs forever.
+    lowSpeedExpireSpeed: PHYSICS_CORE_LOW_SPEED_DESPAWN_SPEED,
+    lowSpeedExpireAfterSeconds: PHYSICS_CORE_LOW_SPEED_DESPAWN_SECONDS
   });
   if (physicsCoreSettings.trailEnabled) {
     physicsCoreTrail.track(core, createPhysicsCoreColor(physicsCoreSettings));

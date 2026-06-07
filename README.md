@@ -81,6 +81,9 @@ ignored by git.
 
 Gameplay settings include Terraformer size plus Physics Core size, velocity,
 terrain-damaging bounce count, color, and trail controls.
+Thrown Physics Cores have a hard lifetime and fade out once they stay below
+useful terrain-damage speed, so spent shots do not linger forever during stress
+tests.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show

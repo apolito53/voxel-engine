@@ -78,6 +78,8 @@ the root README.
   ricochet through pits before self-destructing. Surviving damaging rebounds
   lose some speed, so the setting buys extra chaos without making the core
   ignore impact energy.
+- Thrown Physics Cores also have a hard lifetime and start a short fade/despawn
+  countdown once they stay below useful terrain-damage speed.
 - Selected Hitscan Core uses `Left click` to fire an instant core trace from the
   lowered right-side muzzle. Full-auto mode repeats held hitscan shots.
 - Holding `Right click` while firing a core uses centered reticle ADS with a

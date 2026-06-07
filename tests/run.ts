@@ -8443,6 +8443,48 @@ test("surviving terrain damage bounces bleed core velocity", () => {
   );
 });
 
+test("physics cores expire by hard TTL and low-speed countdown", () => {
+  const emptyWorld: CollisionWorld = {
+    isSolid: () => false
+  };
+
+  const ttlCore = new PhysicsToy(new THREE.Vector3(0, 2, 0), new THREE.Vector3(6, 0, 0), {
+    maxAgeSeconds: 0.1
+  });
+  ttlCore.update(0.11, emptyWorld);
+  assert(ttlCore.isExpired, "hard TTL should expire a projectile core even if it is still moving");
+
+  const slowCore = new PhysicsToy(new THREE.Vector3(0, 2, 0), new THREE.Vector3(0.2, 0, 0), {
+    lowSpeedExpireSpeed: 0.5,
+    lowSpeedExpireAfterSeconds: 0.3
+  });
+  slowCore.update(0.1, emptyWorld);
+  assert(!slowCore.isExpired, "slow-speed countdown should not expire immediately");
+  assertNearlyEqual(
+    slowCore.lowSpeedDespawnCountdownSeconds ?? 0,
+    0.2,
+    0.000001,
+    "countdown should report remaining time once speed stays below the threshold"
+  );
+  slowCore.velocity.set(0.2, 0, 0);
+  slowCore.update(0.2, emptyWorld);
+  assert(slowCore.isExpired, "slow projectile cores should expire after the low-speed grace window");
+
+  const recoveredCore = new PhysicsToy(new THREE.Vector3(0, 2, 0), new THREE.Vector3(0.2, 0, 0), {
+    lowSpeedExpireSpeed: 0.5,
+    lowSpeedExpireAfterSeconds: 0.3
+  });
+  recoveredCore.update(0.1, emptyWorld);
+  recoveredCore.velocity.set(2, 0, 0);
+  recoveredCore.update(0.1, emptyWorld);
+  assertEqual(
+    recoveredCore.lowSpeedDespawnCountdownSeconds,
+    null,
+    "countdown should reset if a core becomes fast enough again"
+  );
+  assert(!recoveredCore.isExpired, "recovering above the threshold should keep the projectile alive");
+});
+
 test("physics core visuals use the selected hue and clean up trails", () => {
   const scene = new THREE.Scene();
   const color = createPhysicsCoreColor({ ...DEFAULT_PHYSICS_CORE_SETTINGS, hueDegrees: 210 });
