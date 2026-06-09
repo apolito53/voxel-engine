@@ -1,13 +1,13 @@
 # Voxel Sandbox Engine
 
 A strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering,
-Rapier handles active rigid-body debris VFX, and the engine owns chunk streaming,
-terrain meshing, first-person movement, block edits, partial-block damage,
-projectile and hitscan cores, Nova companion affordances, automation hooks, and
-performance logging. Chunk meshing and partial-terrain region mesh generation
-use browser workers with sync fallbacks, keeping the browser-first engine
-portable while opening the door for more CPU-heavy systems to move off the main
-thread.
+Rapier handles active rigid-body debris VFX on an adaptive visual-physics
+cadence, and the engine owns chunk streaming, terrain meshing, first-person
+movement, block edits, partial-block damage, projectile and hitscan cores, Nova
+companion affordances, automation hooks, and performance logging. Chunk meshing
+and partial-terrain region mesh generation use browser workers with sync
+fallbacks, keeping the browser-first engine portable while opening the door for
+more CPU-heavy systems to move off the main thread.
 
 World units are metric: `1 block = 1 meter`.
 
@@ -92,6 +92,9 @@ curtain plus a safety ring to reduce far-distance draw pressure.
 Thrown Physics Cores have a hard lifetime and fade out once they stay below
 useful terrain-damage speed, so spent shots do not linger forever during stress
 tests.
+Rigid debris uses a separate adaptive solver cadence, so heavy debris scenes can
+drop visual debris physics from 30Hz to 20Hz or 15Hz without throttling player
+controls, projectile impacts, terrain damage, or rendering.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show

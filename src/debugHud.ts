@@ -215,6 +215,13 @@ export class DebugHud {
         title: "Debris",
         rows: [
           { label: "rigid", value: `${snapshot.rigidDebrisStats.bodies}/${snapshot.rigidDebrisBodyBudget}, sleep ${snapshot.rigidDebrisStats.sleepingBodies}` },
+          {
+            label: "tick",
+            value: `${snapshot.rigidDebrisStats.targetTickHz}Hz, ` +
+              `${snapshot.rigidDebrisStats.simulatedTicksThisUpdate > 0 ? "step" : "skip"} ` +
+              `${snapshot.rigidDebrisStats.skippedRenderFramesSinceTick}, ` +
+              `r ${snapshot.rigidDebrisStats.lastRapierStepMs.toFixed(1)}ms`
+          },
           { label: "support", value: `col ${snapshot.rigidDebrisStats.terrainColliders}/${snapshot.rigidDebrisStats.rubbleSupportColliders}, ${debrisPressureLabel}` },
           { label: "render", value: `${snapshot.fragmentRenderStats.instances} inst, ${snapshot.fragmentRenderStats.batches} batches, cap ${snapshot.fragmentRenderStats.capacity}` },
           { label: "settle", value: `${snapshot.debrisSettlerStats.regions} rg, ${snapshot.debrisSettlerStats.activeFragments}/${snapshot.debrisSettlerStats.fragments} active` },

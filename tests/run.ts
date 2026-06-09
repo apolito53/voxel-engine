@@ -255,8 +255,12 @@ import {
   normalizeGroundDebrisLifetime
 } from "../src/debrisLifetime";
 import {
+  RIGID_DEBRIS_NOMINAL_TICK_HZ,
+  RIGID_DEBRIS_PANIC_TICK_HZ,
+  RIGID_DEBRIS_PRESSURE_TICK_HZ,
   RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET,
-  RigidDebrisSimulation
+  RigidDebrisSimulation,
+  getRigidDebrisTargetTickHz
 } from "../src/rigidDebris";
 import {
   createDirectionalShadowBasis,
@@ -2256,7 +2260,14 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
         bodies: 120,
         sleepingBodies: 20,
         terrainColliders: 600,
-        rubbleSupportColliders: 24
+        rubbleSupportColliders: 24,
+        targetTickHz: RIGID_DEBRIS_PRESSURE_TICK_HZ,
+        simulatedTicksThisUpdate: 1,
+        skippedRenderFramesSinceTick: 0,
+        tickAccumulatorMs: 0,
+        lastRapierStepMs: 17.5,
+        lastStaticColliderRefreshMs: 3.25,
+        lastSyncMs: 0.8
       },
       fragmentRender: {
         batches: 8,
@@ -2270,6 +2281,10 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
   assert(
     record.details.some((detail) => detail.includes("rigid debris bodies awake")),
     "physics hitches should call out awake rigid debris pressure"
+  );
+  assert(
+    record.details.some((detail) => detail.includes("debris solver 20Hz")),
+    "physics hitches should expose the separate rigid-debris solver cadence"
   );
   assert(
     formatPerformanceHitchRecord(record).includes("physics led"),
@@ -4166,6 +4181,24 @@ test("damage brush carving keeps affected micro-cells adjacent across seams", ()
   );
 });
 
+test("rigid debris tick governor maps pressure to solver cadence", () => {
+  assertEqual(
+    getRigidDebrisTargetTickHz(0),
+    RIGID_DEBRIS_NOMINAL_TICK_HZ,
+    "normal debris pressure should keep the solver at the default visual-physics cadence"
+  );
+  assertEqual(
+    getRigidDebrisTargetTickHz(0.3),
+    RIGID_DEBRIS_PRESSURE_TICK_HZ,
+    "moderate pressure should lower only the rigid-debris solver cadence"
+  );
+  assertEqual(
+    getRigidDebrisTargetTickHz(0.72),
+    RIGID_DEBRIS_PANIC_TICK_HZ,
+    "high pressure should enter the lowest debris solver cadence"
+  );
+});
+
 test("partial block mesh builder uses face visibility masks without world callbacks", () => {
   const cell: PartialBlockCell = {
     block: BLOCK.stone,
@@ -5889,6 +5922,94 @@ test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep
 
   rigidDebris.clear();
   assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
+});
+
+test("rigid debris adapter throttles debris ticks without catch-up substeps", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, -1, 0),
+    1
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  rigidDebris.update(1 / 60, floorWorld);
+  const firstStats = rigidDebris.getStats();
+  assertEqual(firstStats.simulatedTicksThisUpdate, 1, "fresh fragments should get one immediate debris solve");
+  assertEqual(firstStats.targetTickHz, RIGID_DEBRIS_NOMINAL_TICK_HZ, "normal pressure should target 30Hz debris ticks");
+
+  const positionAfterFirstStep = fragment.mesh.position.y;
+  rigidDebris.update(1 / 60, floorWorld);
+  const skippedStats = rigidDebris.getStats();
+  assertEqual(skippedStats.simulatedTicksThisUpdate, 0, "a 30Hz debris solver should skip alternating 60Hz render frames");
+  assertEqual(skippedStats.skippedRenderFramesSinceTick, 1, "skipped render frames should be counted for HUD/log evidence");
+  assertNearlyEqual(
+    fragment.mesh.position.y,
+    positionAfterFirstStep,
+    "skipping a debris tick should not move the render proxy until the next solver step"
+  );
+
+  rigidDebris.update(1 / 60, floorWorld);
+  assertEqual(
+    rigidDebris.getStats().simulatedTicksThisUpdate,
+    1,
+    "the next accumulated 30Hz interval should run exactly one debris tick"
+  );
+
+  rigidDebris.update(0.5, floorWorld);
+  assertEqual(
+    rigidDebris.getStats().simulatedTicksThisUpdate,
+    1,
+    "large frame gaps should not run catch-up debris substeps"
+  );
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter lowers tick cadence under pressure", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, -1, 0),
+    1
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  rigidDebris.registerFragment(fragment);
+  rigidDebris.update(1 / 60, floorWorld, { pressureStress: 1 });
+  assertEqual(
+    rigidDebris.getStats().targetTickHz,
+    RIGID_DEBRIS_PANIC_TICK_HZ,
+    "panic pressure should target the lowest debris-only solver cadence"
+  );
+
+  for (let frame = 0; frame < 3; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld, { pressureStress: 1 });
+    assertEqual(
+      rigidDebris.getStats().simulatedTicksThisUpdate,
+      0,
+      "15Hz debris pressure should skip the first three 60Hz render frames"
+    );
+  }
+  rigidDebris.update(1 / 60, floorWorld, { pressureStress: 1 });
+  assertEqual(
+    rigidDebris.getStats().simulatedTicksThisUpdate,
+    1,
+    "15Hz pressure cadence should run one debris tick on the fourth 60Hz frame"
+  );
+  rigidDebris.clear();
 });
 
 test("rigid debris adapter wakes sleeping shards when active debris hits them", async () => {
@@ -9153,7 +9274,14 @@ function createTestHitchStats(
       bodies: 0,
       sleepingBodies: 0,
       terrainColliders: 0,
-      rubbleSupportColliders: 0
+      rubbleSupportColliders: 0,
+      targetTickHz: RIGID_DEBRIS_NOMINAL_TICK_HZ,
+      simulatedTicksThisUpdate: 0,
+      skippedRenderFramesSinceTick: 0,
+      tickAccumulatorMs: 0,
+      lastRapierStepMs: 0,
+      lastStaticColliderRefreshMs: 0,
+      lastSyncMs: 0
     },
     fragmentRender: {
       batches: 0,

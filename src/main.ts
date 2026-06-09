@@ -1966,7 +1966,12 @@ function animate(): void {
       }
     }
     emitRubbleDamageEvents(PHYSICS_CORE_COMBAT_SOURCE, "rubble collision");
-    rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld);
+    rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld, {
+      // Rigid debris is eye-candy/game-feel physics, not player authority. Let
+      // the adaptive pressure governor lower only the debris solver cadence so
+      // controls, projectiles, terrain damage, and rendering stay responsive.
+      pressureStress: debrisPerformancePressure.stress
+    });
     debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
       activeCenter: camera.position,
       activeRadius: qualityController.preset.debrisActiveRadiusMeters,

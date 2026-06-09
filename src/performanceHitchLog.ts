@@ -444,6 +444,15 @@ function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapsh
   if (awakeRigidBodies > 0) {
     details.push(`${awakeRigidBodies}/${stats.rigidDebris.bodies} rigid debris bodies awake`);
   }
+  if (stats.rigidDebris.bodies > 0) {
+    const tickState = stats.rigidDebris.simulatedTicksThisUpdate > 0
+      ? `stepped, Rapier ${formatMs(stats.rigidDebris.lastRapierStepMs)}`
+      : `skipped ${stats.rigidDebris.skippedRenderFramesSinceTick} render frame${stats.rigidDebris.skippedRenderFramesSinceTick === 1 ? "" : "s"}`;
+    details.push(`debris solver ${stats.rigidDebris.targetTickHz}Hz ${tickState}`);
+    if (stats.rigidDebris.lastStaticColliderRefreshMs > 0) {
+      details.push(`debris support refresh ${formatMs(stats.rigidDebris.lastStaticColliderRefreshMs)}`);
+    }
+  }
   if (staticColliderCount > 0) {
     details.push(`${staticColliderCount} temporary debris support colliders active`);
   }
@@ -538,7 +547,7 @@ function addCrossCuttingPressureDetails(
   }
   if (stats.debrisPressure.stress > 0.01) {
     details.push(
-      `debris pressure ${Math.round(stats.debrisPressure.stress * 100)}%, cap ${stats.rigidDebrisBodyBudget}/${stats.debrisPressure.nominalRigidDebrisBodyBudget}`
+      `debris pressure ${Math.round(stats.debrisPressure.stress * 100)}%, cap ${stats.rigidDebrisBodyBudget}/${stats.debrisPressure.nominalRigidDebrisBodyBudget}, tick ${stats.rigidDebris.targetTickHz}Hz`
     );
   }
   if (stats.physicsObjectCount >= stats.physicsObjectBudget) {

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.10.2 - 2026-06-09
+
+### Added
+
+- Added F3 HUD and hitch-log telemetry for rigid-debris solver Hz, skipped
+  render frames, Rapier step time, and static support-collider refresh cost.
+
+### Changed
+
+- Added an adaptive rigid-debris solver cadence: active Rapier debris now steps
+  at 30Hz normally, 20Hz under debris pressure, and 15Hz under severe pressure
+  instead of trying to solve every rendered frame.
+- Stopped rigid debris from running catch-up substeps after long frames, keeping
+  controls, projectile cores, terrain damage, rendering, and other gameplay
+  systems on their normal frame loop while debris degrades separately.
+
 ## 0.10.1 - 2026-06-08
 
 ### Added

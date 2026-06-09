@@ -42,7 +42,8 @@ The debug overlay and hitch logger capture:
 - CPU buckets for player, chunk, physics, mesh, minimap, render, and other work.
 - Chunk visibility split into loaded chunks, frustum chunks, actually rendered
   chunks, and chunks hidden behind the opaque fog curtain.
-- Rigid debris body/collider pressure.
+- Rigid debris body/collider pressure, solver tick Hz, skipped render frames,
+  Rapier step cost, and static support-collider refresh cost.
 - Adaptive debris pressure and effective cap state.
 - Worker-pool pressure: mode, capacity, queued jobs, running jobs, partial-mesh
   jobs, and average job/upload timing.
@@ -64,6 +65,20 @@ read worse and the hitch logs showed negligible practical gain. The remaining
 stress was dominated by projectile/physics work, while partial terrain is also
 likely headed toward persistence. Future optimization should start from that
 data model instead of masking partial visuals at render time.
+
+## Rigid Debris Cadence
+
+Active loose debris is visual/game-feel physics, not player authority. The
+Rapier debris adapter therefore runs on its own adaptive solver cadence: 30Hz
+normally, 20Hz under debris pressure, and 15Hz under severe pressure. It also
+intentionally avoids catch-up substeps after a long render frame, so a hitch does
+not make the next frame spend extra time trying to replay every missed debris
+tick.
+
+Player controls, projectile and hitscan core impacts, terrain damage, rendering,
+chunk work, and UI still run on the normal frame loop. If a stress pass feels
+better while the F3 Debris section shows a lower `tick` value, that is the
+governor doing its job rather than the whole game running at that rate.
 
 Recent records are available in the browser at:
 
