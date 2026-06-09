@@ -20,6 +20,13 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   nearby-support snapshots. Keep player movement, core firing, terrain damage,
   gameplay decisions, SharedArrayBuffer, WASM threads, and OffscreenCanvas out
   of scope until the simpler worker pipeline proves its value.
+- Bigger architecture fork to consider later: run a dedicated local/backend
+  simulation host and treat the browser as the rendering/input interface. That
+  would unlock normal host-side multi-threading, process-level CPU/core
+  telemetry, richer profiling, heavier physics/world jobs, and cleaner log
+  capture than browser APIs allow. Keep it as a deliberate backend experiment,
+  not a panic rewrite, unless browser-native workers prove too cramped for the
+  engine vision.
 
 ## Rigid Sub-Voxel Damage Objects
 
