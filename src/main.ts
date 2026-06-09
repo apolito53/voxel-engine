@@ -143,7 +143,19 @@ import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { shouldDeferPartialBlockMeshUpdate } from "./partialBlockMeshBudget";
-import { PARTIAL_BLOCK_CORE_DAMAGE, PartialBlockMeshField } from "./partialBlocks";
+import { PartialBlockMeshField } from "./partialBlockMeshField";
+import {
+  PARTIAL_BLOCK_CORE_DAMAGE,
+  createPartialBlockFaceVisibilityMasks,
+  type PartialBlockMeshRegionUpdate
+} from "./partialBlocks";
+import {
+  PARTIAL_BLOCK_MESH_BUILD_JOB,
+  buildPartialBlockMeshBuildJob,
+  createPartialBlockMeshBuildJobPayload,
+  type PartialBlockMeshBuildJobPayload,
+  type PartialBlockMeshBuildJobResult
+} from "./partialBlockMeshWorkerProtocol";
 import {
   LOW_FPS_LOG_THRESHOLD,
   PerformanceHitchLog,
@@ -547,6 +559,7 @@ let debrisPerformancePressure = createDebrisPerformancePressureState(
 );
 let renderedPartialBlockRevision = -1;
 let lastPartialBlockMeshUpdateMs = 0;
+const pendingPartialBlockMeshJobs = new Map<string, PendingPartialBlockMeshJob>();
 const PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET = 8;
 const PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET = 24;
 let leftMouseButtonDown = false;
@@ -626,6 +639,10 @@ type TerraformerState = {
   readonly targetKey: string;
 };
 type SettingsCategory = "graphics" | "gameplay" | "experimental";
+type PendingPartialBlockMeshJob = {
+  readonly id: number;
+  readonly revision: number;
+};
 
 const TERRAFORMER_COMBAT_SOURCE: CombatLogSource = { kind: "terraformer", label: "Terraformer" };
 const PHYSICS_CORE_COMBAT_SOURCE: CombatLogSource = { kind: "physics-core", label: "Physics Core" };
@@ -647,7 +664,12 @@ const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const physicsCoreTrail = new PhysicsCoreTrail(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
-const workerPool = new WorkerPool();
+const workerPool = new WorkerPool({
+  createWorker: () => new Worker(new URL("./partialBlockMeshWorker.ts", import.meta.url), {
+    type: "module",
+    name: "voxel-engine-worker-pool"
+  })
+});
 const partialBlockMeshField = new PartialBlockMeshField(scene, partialBlockMaterial);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
@@ -2906,10 +2928,10 @@ function createHitscanRubbleAimPreviewPrediction(
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
   const revision = activeWorld.getPartialBlockGeometryRevision();
   const dirtyRegionCount = activeWorld.getDirtyPartialBlockMeshRegionCount();
-  partialBlockMeshField.beginUpdate(dirtyRegionCount);
-  if (revision === renderedPartialBlockRevision && dirtyRegionCount === 0) return;
+  partialBlockMeshField.beginUpdate(dirtyRegionCount + pendingPartialBlockMeshJobs.size);
+  if (revision === renderedPartialBlockRevision && dirtyRegionCount === 0 && pendingPartialBlockMeshJobs.size === 0) return;
   if (dirtyRegionCount === 0) {
-    renderedPartialBlockRevision = revision;
+    refreshRenderedPartialBlockRevision(activeWorld);
     return;
   }
 
@@ -2929,15 +2951,98 @@ function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
     origin: camera.position
   });
   for (const update of updates) {
-    partialBlockMeshField.updateRegion(
-      update,
-      (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
-    );
+    schedulePartialBlockMeshRegionBuild(activeWorld, update);
   }
 
-  partialBlockMeshField.setDirtyRegionCount(activeWorld.getDirtyPartialBlockMeshRegionCount());
-  if (activeWorld.getDirtyPartialBlockMeshRegionCount() === 0) renderedPartialBlockRevision = revision;
+  partialBlockMeshField.setDirtyRegionCount(
+    activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
+  );
+  refreshRenderedPartialBlockRevision(activeWorld);
   lastPartialBlockMeshUpdateMs = performance.now();
+}
+
+function schedulePartialBlockMeshRegionBuild(
+  activeWorld: VoxelWorld,
+  update: PartialBlockMeshRegionUpdate
+): void {
+  const existingJob = pendingPartialBlockMeshJobs.get(update.key);
+  if (existingJob) workerPool.cancel(existingJob.id);
+
+  if (update.cells.length === 0) {
+    pendingPartialBlockMeshJobs.delete(update.key);
+    partialBlockMeshField.updateRegionGeometry(update.key, 0, {
+      positions: new Float32Array(),
+      normals: new Float32Array(),
+      colors: new Float32Array(),
+      uvs: new Float32Array(),
+      textureTiles: new Float32Array(),
+      indices: new Uint32Array()
+    });
+    return;
+  }
+
+  const revision = update.revision ?? activeWorld.getPartialBlockGeometryRevision();
+  const faceVisibilityMasks = createPartialBlockFaceVisibilityMasks(
+    update,
+    (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
+  );
+  const payload = createPartialBlockMeshBuildJobPayload(update, faceVisibilityMasks);
+  const handle = workerPool.enqueue<PartialBlockMeshBuildJobPayload, PartialBlockMeshBuildJobResult>({
+    type: PARTIAL_BLOCK_MESH_BUILD_JOB,
+    payload,
+    revision,
+    isRevisionStale: (jobRevision) =>
+      activeWorld !== world || activeWorld.isPartialBlockMeshRegionRevisionStale(update.key, jobRevision),
+    run: buildPartialBlockMeshBuildJob
+  });
+  pendingPartialBlockMeshJobs.set(update.key, { id: handle.id, revision });
+
+  void handle.promise.then((result) => {
+    const pending = pendingPartialBlockMeshJobs.get(update.key);
+    if (!pending || pending.id !== result.id) return;
+    pendingPartialBlockMeshJobs.delete(update.key);
+
+    if (result.status !== "completed") {
+      if (result.status === "failed") {
+        console.warn("Partial block mesh worker job failed", result.error);
+      }
+      refreshRenderedPartialBlockRevision(activeWorld);
+      return;
+    }
+    if (activeWorld !== world) {
+      refreshRenderedPartialBlockRevision(activeWorld);
+      return;
+    }
+
+    const uploadStartedAt = performance.now();
+    partialBlockMeshField.updateRegionGeometry(
+      result.result.key,
+      result.result.cellCount,
+      result.result.geometry
+    );
+    workerPool.recordMainThreadUpload(performance.now() - uploadStartedAt);
+    partialBlockMeshField.setDirtyRegionCount(
+      activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
+    );
+    refreshRenderedPartialBlockRevision(activeWorld);
+  });
+}
+
+function refreshRenderedPartialBlockRevision(activeWorld: VoxelWorld): void {
+  if (
+    activeWorld === world &&
+    activeWorld.getDirtyPartialBlockMeshRegionCount() === 0 &&
+    pendingPartialBlockMeshJobs.size === 0
+  ) {
+    renderedPartialBlockRevision = activeWorld.getPartialBlockGeometryRevision();
+  }
+}
+
+function clearPendingPartialBlockMeshJobs(): void {
+  for (const pending of pendingPartialBlockMeshJobs.values()) {
+    workerPool.cancel(pending.id);
+  }
+  pendingPartialBlockMeshJobs.clear();
 }
 
 function getPartialBlockMeshRegionBudget(hasUrgentRegions: boolean): number {
@@ -4119,6 +4224,7 @@ async function loadWorld(worldId: string): Promise<void> {
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     partialBlockMeshField.clear();
+    clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
     await activeWorld.preloadSavedChunksAround(
@@ -4229,6 +4335,7 @@ async function exitToHome(): Promise<void> {
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
     partialBlockMeshField.clear();
+    clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
     inWorld = false;
@@ -4454,7 +4561,9 @@ function disposeRuntime(): void {
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();
+  clearPendingPartialBlockMeshJobs();
   partialBlockMeshField.dispose();
+  workerPool.dispose();
   skybox.dispose();
   disposeWorldBlockMaterial(worldMaterial);
   disposeWorldBlockMaterial(partialBlockMaterial);

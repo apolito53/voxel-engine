@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.10.1 - 2026-06-08
+
+### Added
+
+- Moved partial-terrain region mesh generation onto the shared browser-native
+  `WorkerPool`, with real Web Worker dispatch, transferable geometry buffers,
+  cancellation, revision-stale rejection, and sync fallback for tests or worker
+  failures.
+
+### Changed
+
+- Split partial-block mesh math from the Three.js mesh owner so worker-safe
+  geometry building lives in pure data helpers while main-thread code only owns
+  renderer resource upload and disposal.
+- Added per-region partial-mesh revisions and precomputed face-visibility masks
+  so asynchronous worker results cannot resurrect stale carved geometry or call
+  back into live world state from a worker.
+
 ## 0.10.0 - 2026-06-07
 
 ### Added

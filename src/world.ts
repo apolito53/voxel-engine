@@ -927,6 +927,7 @@ export class VoxelWorld implements CollisionWorld {
   private readonly partialBlocksByRegion: Map<string, PartialBlockIndexBucket>;
   private readonly dirtyPartialBlockRegionKeys: Set<string>;
   private readonly urgentPartialBlockRegionKeys: Set<string>;
+  private readonly partialBlockRegionRevisions: Map<string, number>;
   private readonly partialBlockMaskCache: Map<string, PartialBlockMaskCacheEntry>;
   private partialBlockGeometryRevision: number;
 
@@ -983,6 +984,7 @@ export class VoxelWorld implements CollisionWorld {
     this.partialBlocksByRegion = new Map();
     this.dirtyPartialBlockRegionKeys = new Set();
     this.urgentPartialBlockRegionKeys = new Set();
+    this.partialBlockRegionRevisions = new Map();
     this.partialBlockMaskCache = new Map();
     this.partialBlockGeometryRevision = 0;
   }
@@ -2624,6 +2626,7 @@ export class VoxelWorld implements CollisionWorld {
     this.partialBlockMaskCache.clear();
     this.dirtyPartialBlockRegionKeys.clear();
     this.urgentPartialBlockRegionKeys.clear();
+    this.partialBlockRegionRevisions.clear();
     this.partialBlockGeometryRevision += 1;
   }
 
@@ -2646,11 +2649,13 @@ export class VoxelWorld implements CollisionWorld {
     // The region halo is deliberately wider than the owned cell. Boundary faces
     // and stitched partial-height surfaces both need adjacent regions to refresh
     // when a neighboring damaged cell appears, changes, or disappears.
+    const nextRevision = this.partialBlockGeometryRevision + 1;
     for (const key of getPartialBlockMeshDirtyRegionKeys(position)) {
       this.dirtyPartialBlockRegionKeys.add(key);
+      this.partialBlockRegionRevisions.set(key, nextRevision);
       if (urgent) this.urgentPartialBlockRegionKeys.add(key);
     }
-    this.partialBlockGeometryRevision += 1;
+    this.partialBlockGeometryRevision = nextRevision;
   }
 
   private markPartialBlockMaskDirty(position: VoxelBlockPosition): void {
@@ -2675,7 +2680,8 @@ export class VoxelWorld implements CollisionWorld {
   private createPartialBlockMeshRegionUpdate(key: string): PartialBlockMeshRegionUpdate {
     const coords = parsePartialBlockMeshRegionKey(key);
     const cells = sortPartialBlockCells([...(this.partialBlocksByRegion.get(key)?.values() ?? [])]);
-    if (!coords) return { key, cells, contextCells: cells };
+    const revision = this.partialBlockRegionRevisions.get(key) ?? this.partialBlockGeometryRevision;
+    if (!coords) return { key, revision, cells, contextCells: cells };
 
     const contextCells: PartialBlockCell[] = [];
     for (let rx = coords.rx - 1; rx <= coords.rx + 1; rx += 1) {
@@ -2689,7 +2695,11 @@ export class VoxelWorld implements CollisionWorld {
       }
     }
 
-    return { key, cells, contextCells: sortPartialBlockCells(contextCells) };
+    return { key, revision, cells, contextCells: sortPartialBlockCells(contextCells) };
+  }
+
+  isPartialBlockMeshRegionRevisionStale(key: string, revision: number): boolean {
+    return (this.partialBlockRegionRevisions.get(key) ?? -1) !== revision;
   }
 
   private getPartialBlockRegionDistanceSq(key: string, origin: Pick<THREE.Vector3, "x" | "y" | "z">): number {

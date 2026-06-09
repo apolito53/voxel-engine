@@ -1,4 +1,4 @@
-export type WorkerPoolMode = "sync-fallback";
+export type WorkerPoolMode = "web-worker" | "sync-fallback";
 
 export type WorkerPoolStats = {
   readonly mode: WorkerPoolMode;
@@ -39,6 +39,31 @@ export type WorkerPoolJobResult<TResult> =
     readonly workerTimeMs: number;
   };
 
+export type WorkerPoolWorkerRequest<TPayload = unknown> = {
+  readonly id: number;
+  readonly type: string;
+  readonly revision: number;
+  readonly payload: TPayload;
+};
+
+export type WorkerPoolWorkerResponse<TResult = unknown> =
+  | {
+    readonly status: "completed";
+    readonly id: number;
+    readonly type: string;
+    readonly revision: number;
+    readonly result: TResult;
+    readonly workerTimeMs: number;
+  }
+  | {
+    readonly status: "failed";
+    readonly id: number;
+    readonly type: string;
+    readonly revision: number;
+    readonly error: unknown;
+    readonly workerTimeMs: number;
+  };
+
 export type WorkerPoolSyncHandler<TPayload, TResult> = (payload: TPayload) => TResult | Promise<TResult>;
 
 export type WorkerPoolJobRequest<TPayload, TResult> = {
@@ -60,6 +85,7 @@ type QueuedWorkerPoolJob<TPayload, TResult> = {
   readonly type: string;
   readonly payload: TPayload;
   readonly revision: number;
+  readonly transfer: readonly Transferable[];
   readonly isRevisionStale: (revision: number) => boolean;
   readonly run: WorkerPoolSyncHandler<TPayload, TResult>;
   readonly resolve: (result: WorkerPoolJobResult<TResult>) => void;
@@ -69,6 +95,7 @@ type WorkerPoolOptions = {
   readonly maxWorkers?: number;
   readonly hardwareConcurrency?: number;
   readonly getNow?: () => number;
+  readonly createWorker?: () => Worker;
 };
 
 export class WorkerPool {
@@ -77,6 +104,10 @@ export class WorkerPool {
   private readonly syncHandlers = new Map<string, WorkerPoolSyncHandler<unknown, unknown>>();
   private readonly queue: QueuedWorkerPoolJob<unknown, unknown>[] = [];
   private readonly canceledJobIds = new Set<number>();
+  private readonly workers: Worker[] = [];
+  private readonly idleWorkers: Worker[] = [];
+  private readonly runningWorkerJobs = new Map<Worker, QueuedWorkerPoolJob<unknown, unknown>>();
+  private mode: WorkerPoolMode = "sync-fallback";
   private nextJobId = 1;
   private runningJobs = 0;
   private completedJobs = 0;
@@ -93,6 +124,10 @@ export class WorkerPool {
       options.maxWorkers ?? getDefaultWorkerPoolSize(options.hardwareConcurrency)
     );
     this.getNow = options.getNow ?? readMonotonicTimeMs;
+
+    if (options.createWorker) {
+      this.tryCreateWorkers(options.createWorker);
+    }
   }
 
   registerSyncHandler<TPayload, TResult>(
@@ -120,6 +155,7 @@ export class WorkerPool {
         type: request.type,
         payload: request.payload,
         revision: request.revision ?? 0,
+        transfer: request.transfer ?? [],
         isRevisionStale: request.isRevisionStale ?? (() => false),
         run: handler as WorkerPoolSyncHandler<TPayload, TResult>,
         resolve
@@ -156,9 +192,19 @@ export class WorkerPool {
     this.uploadSamples += 1;
   }
 
+  dispose(): void {
+    for (const worker of this.workers) {
+      worker.terminate();
+    }
+    this.workers.length = 0;
+    this.idleWorkers.length = 0;
+    this.runningWorkerJobs.clear();
+    this.mode = "sync-fallback";
+  }
+
   getStats(): WorkerPoolStats {
     return {
-      mode: "sync-fallback",
+      mode: this.mode,
       maxWorkers: this.maxWorkers,
       queuedJobs: this.queue.length,
       runningJobs: this.runningJobs,
@@ -172,15 +218,57 @@ export class WorkerPool {
     };
   }
 
-  private drainQueue(): void {
-    while (this.runningJobs < this.maxWorkers && this.queue.length > 0) {
-      const job = this.queue.shift();
-      if (!job) return;
-      this.runJob(job);
+  private tryCreateWorkers(createWorker: () => Worker): void {
+    try {
+      for (let index = 0; index < this.maxWorkers; index += 1) {
+        const worker = createWorker();
+        worker.onmessage = (event: MessageEvent<WorkerPoolWorkerResponse>) => {
+          this.handleWorkerResponse(worker, event.data);
+        };
+        worker.onerror = (event: ErrorEvent) => {
+          this.handleWorkerFailure(worker, event.message || "Worker error");
+        };
+        this.workers.push(worker);
+        this.idleWorkers.push(worker);
+      }
+      if (this.workers.length > 0) this.mode = "web-worker";
+    } catch (error) {
+      console.warn("WorkerPool falling back to sync jobs", error);
+      this.dispose();
     }
   }
 
-  private runJob(job: QueuedWorkerPoolJob<unknown, unknown>): void {
+  private drainQueue(): void {
+    if (this.mode === "web-worker") {
+      this.drainWorkerQueue();
+      return;
+    }
+
+    while (this.runningJobs < this.maxWorkers && this.queue.length > 0) {
+      const job = this.queue.shift();
+      if (!job) return;
+      this.runSyncJob(job);
+    }
+  }
+
+  private drainWorkerQueue(): void {
+    while (this.idleWorkers.length > 0 && this.queue.length > 0) {
+      const worker = this.idleWorkers.shift();
+      const job = this.queue.shift();
+      if (!worker || !job) return;
+
+      this.runningJobs += 1;
+      this.runningWorkerJobs.set(worker, job);
+      worker.postMessage({
+        id: job.id,
+        type: job.type,
+        revision: job.revision,
+        payload: job.payload
+      } satisfies WorkerPoolWorkerRequest, [...job.transfer]);
+    }
+  }
+
+  private runSyncJob(job: QueuedWorkerPoolJob<unknown, unknown>): void {
     this.runningJobs += 1;
 
     Promise.resolve().then(async () => {
@@ -233,6 +321,91 @@ export class WorkerPool {
       job.resolve(result);
       this.drainQueue();
     });
+  }
+
+  private handleWorkerResponse(
+    worker: Worker,
+    response: WorkerPoolWorkerResponse
+  ): void {
+    const job = this.runningWorkerJobs.get(worker);
+    if (!job || job.id !== response.id) return;
+
+    this.runningWorkerJobs.delete(worker);
+    this.runningJobs -= 1;
+    this.idleWorkers.push(worker);
+
+    if (this.canceledJobIds.delete(job.id)) {
+      job.resolve(this.createCanceledResult(job, response.workerTimeMs));
+      this.drainQueue();
+      return;
+    }
+
+    if (response.status === "failed") {
+      this.failedJobs += 1;
+      job.resolve({
+        status: "failed",
+        id: response.id,
+        type: response.type,
+        revision: response.revision,
+        error: response.error,
+        workerTimeMs: response.workerTimeMs
+      });
+      this.drainQueue();
+      return;
+    }
+
+    if (job.isRevisionStale(job.revision)) {
+      this.staleJobs += 1;
+      job.resolve({
+        status: "stale",
+        id: response.id,
+        type: response.type,
+        revision: response.revision,
+        workerTimeMs: response.workerTimeMs
+      });
+      this.drainQueue();
+      return;
+    }
+
+    this.completedJobs += 1;
+    this.totalWorkerTimeMs += response.workerTimeMs;
+    job.resolve({
+      status: "completed",
+      id: response.id,
+      type: response.type,
+      revision: response.revision,
+      result: response.result,
+      workerTimeMs: response.workerTimeMs
+    });
+    this.drainQueue();
+  }
+
+  private handleWorkerFailure(worker: Worker, error: unknown): void {
+    const job = this.runningWorkerJobs.get(worker);
+    worker.terminate();
+    this.removeWorker(worker);
+    if (!job) return;
+
+    this.runningJobs -= 1;
+    this.failedJobs += 1;
+    job.resolve({
+      status: "failed",
+      id: job.id,
+      type: job.type,
+      revision: job.revision,
+      error,
+      workerTimeMs: 0
+    });
+    this.drainQueue();
+  }
+
+  private removeWorker(worker: Worker): void {
+    this.runningWorkerJobs.delete(worker);
+    const workerIndex = this.workers.indexOf(worker);
+    if (workerIndex >= 0) this.workers.splice(workerIndex, 1);
+    const idleIndex = this.idleWorkers.indexOf(worker);
+    if (idleIndex >= 0) this.idleWorkers.splice(idleIndex, 1);
+    if (this.workers.length === 0) this.mode = "sync-fallback";
   }
 
   private createCanceledResult(

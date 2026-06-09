@@ -4,7 +4,7 @@ import type { DebrisSettlerStats } from "./debrisSettler";
 import { RollingFrameRateMeter, type FrameRateSample } from "./frameRateMeter";
 import type { FrameTimings } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
-import type { PartialBlockMeshStats } from "./partialBlocks";
+import type { PartialBlockMeshStats } from "./partialBlockMeshField";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import {

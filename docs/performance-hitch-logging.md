@@ -44,8 +44,8 @@ The debug overlay and hitch logger capture:
   chunks, and chunks hidden behind the opaque fog curtain.
 - Rigid debris body/collider pressure.
 - Adaptive debris pressure and effective cap state.
-- Worker-pool scaffold pressure: mode, capacity, queued jobs, running jobs, and
-  average job/upload timing.
+- Worker-pool pressure: mode, capacity, queued jobs, running jobs, partial-mesh
+  jobs, and average job/upload timing.
 - Instanced debris render counts.
 - Partial-block lattice/subvoxel pressure.
 - Partial-mesh triangle pressure.
@@ -103,6 +103,20 @@ The important F3/Hitch counters are:
 - `renderedChunks`: frustum chunks whose mesh is still visible to Three.js.
 - `fogHiddenChunks`: frustum chunks intentionally hidden by opaque-fog horizon
   culling.
+
+## Worker Pool
+
+`src/workerPool.ts` is the shared browser-native CPU-job lane. It now runs real
+module Web Workers when available and keeps a sync fallback for tests,
+unsupported browsers, or worker startup failures. Partial terrain is the first
+runtime system on this lane: `src/partialBlockMeshWorker.ts` builds damaged
+terrain region geometry from transferable typed arrays, while
+`src/partialBlockMeshField.ts` stays on the main thread to upload and dispose
+Three.js resources.
+
+Worker results are checked against per-region revisions before upload. That
+guard matters because partial terrain can change several times while an older
+region build is still in flight.
 
 ## Runtime Combat Records
 

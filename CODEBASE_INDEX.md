@@ -1,12 +1,12 @@
 # Codebase Index
 
-Last reviewed: 2026-06-07
+Last reviewed: 2026-06-08
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
 ## Stack
 
-- Strict TypeScript Vite browser app using native ES modules, a module Web Worker for chunk CPU work, and a shared `WorkerPool` scaffold for browser-native CPU job migration.
+- Strict TypeScript Vite browser app using native ES modules, a module Web Worker for chunk CPU work, and a shared `WorkerPool` with real Web Worker dispatch plus sync fallback for browser-native CPU job migration. Partial-terrain region meshing is the first WorkerPool runtime job.
 - Three.js handles rendering, camera, materials, lights, and meshes.
 - Rapier (`@dimforge/rapier3d-compat`) handles active rigid-body cuboid-envelope debris inside the player bubble through the local `src/rigidDebris.ts` adapter.
 - Vercel Blob (`@vercel/blob`) stores deployed production hitch logs as private JSONL blobs through the Vercel function in `api/hitch-log.ts`.
@@ -51,7 +51,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
 - Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, worker-pool job stats, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
 - Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, browser-frame diagnostics for RAF gaps/unaccounted JS/long tasks/renderer counters, render-horizon/worker-pool stats, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, persistent local `logs/combat/` damage JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/frameDiagnostics.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`, `vite.config.ts`
-- Shared browser-native CPU job scaffold with clamped worker capacity, sync fallback, job ids, revision-stale rejection, cancellation, transfer bookkeeping, and upload/job timing stats; later partial/chunk/debris worker migrations should plug into this instead of inventing ad hoc queues: `src/workerPool.ts`
+- Shared browser-native CPU job lane with clamped worker capacity, real module-worker dispatch, sync fallback, job ids, revision-stale rejection, cancellation, transfer bookkeeping, and upload/job timing stats; later chunk/debris worker migrations should plug into this instead of inventing ad hoc queues: `src/workerPool.ts`
 - Frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation: `src/frameLoop.ts`
 - Smoothed per-frame subsystem timing helpers plus browser-frame clue capture for hitch profiling: `src/frameTimings.ts`, `src/frameDiagnostics.ts`
 - Reusable held-item registry, stack metadata, categories, tags, and primary/secondary action descriptors, including Unarmed, Terraformer, Physics Core, Hitscan Core, and build-only block items: `src/items.ts`
@@ -85,7 +85,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Event-driven Nova chatter, glow pulses, message throttling, and companion reactions: `src/novaPilotReactions.ts`
 - Block picking for break/place interactions: `src/raycast.ts`
 - Thin edge outline for the currently targeted block or settled-rubble cube cell, including style switching and geometry/material disposal: `src/targetHighlighter.ts`
-- In-memory partial-block terrain carving, one-health core carve constants, monotonic connected-growth core-footprint-ranked hidden 3x3x3 bite-lattice damage visuals, stitched wrinkled partial-height surface samples, support-height queries, merged explicit surviving-lattice collision boxes, dense-burst mesh rebuild coalescing, atlas UV/tile attributes for damaged terrain, and the regional faceted custom-cell mesh owner: `src/partialBlocks.ts`, `src/partialBlockMeshBudget.ts`
+- In-memory partial-block terrain carving, one-health core carve constants, monotonic connected-growth core-footprint-ranked hidden 3x3x3 bite-lattice damage visuals, stitched wrinkled partial-height surface samples, support-height queries, merged explicit surviving-lattice collision boxes, dense-burst mesh rebuild coalescing, atlas UV/tile attributes for damaged terrain, worker-safe regional geometry builders, the main-thread Three.js partial mesh owner, and the WorkerPool protocol/worker used to build partial-region geometry off the main thread: `src/partialBlocks.ts`, `src/partialBlockMeshField.ts`, `src/partialBlockMeshWorkerProtocol.ts`, `src/partialBlockMeshWorker.ts`, `src/partialBlockMeshBudget.ts`
 - Parked capped static faceted crater/scar prototype from the earlier decal-like experiment; retained for later visual reuse but no longer wired into Physics Core terrain hits: `src/impactCraterField.ts`
 - Throwable bouncing swept physics core, fragment render/material/shape state, rigid-debris sync hooks, grounded-debris cleanup/expiration state, sleep-aware split core/debris broadphase collision, velocity/radius impact reporting, terrain-pierce continuation hooks, and shared-resource sleeping/expiring fragments: `src/physics.ts`
 - Shared player core launch helpers for projectile velocity, lowered right-side hip-fire muzzle offsets, reticle convergence, and centered ADS shots: `src/physicsCoreLaunch.ts`
@@ -170,7 +170,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 - Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
 - Add or adjust repeatable runtime test/play/build tools: `src/adminCommands.ts`, `src/builderTools.ts`, `src/testAvatar.ts`, `src/codexPilot.ts`, `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`, Nova Terminal routing in `src/novaChat.ts`/`src/novaChatPanel.ts`, local visual recording upload in `scripts/hitch-log-server.mjs`, home/HUD/pause-menu markup in `index.html`, overlay styling in `src/style.css`, and the lifecycle hooks in `src/main.ts`.
 - Tune saved worlds, player resume location, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
-- Tune chunk streaming, render visibility, or worker budgets: update scheduling/render-visibility policy in `src/world.ts`, preset radii in `src/qualityPresets.ts`/`src/qualityController.ts`, shared job protocol in `src/workerPool.ts`, and debug display in `src/main.ts`/`src/debugHud.ts`.
+- Tune chunk streaming, render visibility, partial-region worker jobs, or worker budgets: update scheduling/render-visibility policy in `src/world.ts`, preset radii in `src/qualityPresets.ts`/`src/qualityController.ts`, shared job protocol in `src/workerPool.ts`, partial mesh worker contracts in `src/partialBlockMeshWorkerProtocol.ts`, and debug display in `src/main.ts`/`src/debugHud.ts`.
 - Tune movement feel: metric-scaled constants and committed slide/landing-slide/air-control/flight/crouch-view helpers in `src/playerMovement.ts`, sprint FOV feedback in `src/sprintFeedback.ts`, plus collision resolution, slide state, slide-jump momentum, and visual eye-height handling in `src/player.ts`.
 - Change Nova's companion behavior or pilot-thrown cores: `src/novaPilot.ts`, `KeyN`/`KeyB` hooks in `src/main.ts`, and shared physics-core construction in `createPhysicsCore`.
 - Add Nova chat context or local reply behavior: event payloads in `src/engineEvents.ts`, journal rules in `src/novaContext.ts`, reply selection in `src/novaChat.ts`, panel behavior in `src/novaChatPanel.ts`, and input/pointer-lock wiring in `src/main.ts`.

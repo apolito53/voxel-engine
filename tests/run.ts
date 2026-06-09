@@ -195,15 +195,17 @@ import {
 import {
   PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
   PARTIAL_BLOCK_CORE_DAMAGE,
-  PartialBlockMeshField,
   arePartialBlockVisualCellIndexesConnected,
+  buildPartialBlockMeshGeometryData,
   createPartialBlockCollisionBoxes,
+  createPartialBlockFaceVisibilityMasks,
   createPartialBlockMeshRegionKey,
   createPartialBlockRemovedVisualCellIndexes,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
   type PartialBlockCell
 } from "../src/partialBlocks";
+import { PartialBlockMeshField } from "../src/partialBlockMeshField";
 import {
   PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
   shouldDeferPartialBlockMeshUpdate
@@ -2182,6 +2184,58 @@ test("worker pool clamps capacity and runs sync fallback jobs with revision guar
   assertEqual(stats.averageMainThreadUploadMs, 10, "pool should average main-thread upload timing samples");
 });
 
+test("worker pool dispatches jobs through browser workers when available", async () => {
+  class FakeWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    postMessage(message: unknown): void {
+      const request = message as { readonly id: number; readonly type: string; readonly revision: number; readonly payload: number };
+      queueMicrotask(() => {
+        this.onmessage?.({
+          data: {
+            status: "completed",
+            id: request.id,
+            type: request.type,
+            revision: request.revision,
+            result: request.payload * 3,
+            workerTimeMs: 7
+          }
+        } as MessageEvent);
+      });
+    }
+
+    terminate(): void {
+      // The fake worker has no native resources; the method exists so WorkerPool
+      // can exercise the same lifecycle surface it uses for browser workers.
+    }
+  }
+
+  const pool = new WorkerPool({
+    maxWorkers: 1,
+    createWorker: () => new FakeWorker() as unknown as Worker
+  });
+
+  const result = await pool.enqueue({
+    type: "triple",
+    payload: 4,
+    revision: 2,
+    run: (value: number) => value
+  }).promise;
+
+  assertEqual(result.status, "completed", "worker-backed jobs should resolve through the worker response path");
+  if (result.status === "completed") {
+    assertEqual(result.result, 12, "worker response should provide the completed job result");
+  }
+
+  const stats = pool.getStats();
+  assertEqual(stats.mode, "web-worker", "pool should report web-worker mode when a worker factory succeeds");
+  assertEqual(stats.completedJobs, 1, "worker-backed completion should update completion stats");
+  assertEqual(stats.averageWorkerTimeMs, 7, "worker-backed completion should use worker-reported timing");
+  pool.dispose();
+  assertEqual(pool.getStats().mode, "sync-fallback", "disposed pools should not report live worker mode");
+});
+
 test("performance hitch diagnosis names the dominant subsystem and pressure counters", () => {
   const timings = {
     playerMs: 1,
@@ -4110,6 +4164,35 @@ test("damage brush carving keeps affected micro-cells adjacent across seams", ()
     areTestGlobalMicroCellsConnected(cellKeys),
     "actual removed micro-cells should form one face-connected footprint in world space"
   );
+});
+
+test("partial block mesh builder uses face visibility masks without world callbacks", () => {
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 0,
+    maxHealth: 2,
+    cuts: []
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 9,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(
+    update,
+    (_cell, normal) => normal.x === 1
+  );
+  const geometry = buildPartialBlockMeshGeometryData({ update, faceVisibilityMasks: masks });
+
+  assertEqual(geometry.positions.length / 3, 4, "one visible macro face should emit one quad");
+  assertEqual(geometry.indices.length / 3, 2, "one visible macro face should emit two triangles");
+  for (let index = 0; index < geometry.normals.length; index += 3) {
+    assertEqual(geometry.normals[index], 1, "visibility mask should emit only the positive-X face normal");
+    assertEqual(geometry.normals[index + 1], 0, "visibility mask should not leak Y normals");
+    assertEqual(geometry.normals[index + 2], 0, "visibility mask should not leak Z normals");
+  }
 });
 
 test("partial block field renders faceted custom terrain cells", () => {

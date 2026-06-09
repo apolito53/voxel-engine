@@ -2,7 +2,7 @@ import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameDiagnosticsSnapshot } from "./frameDiagnostics";
 import type { FrameTimings } from "./frameTimings";
-import type { PartialBlockMeshStats } from "./partialBlocks";
+import type { PartialBlockMeshStats } from "./partialBlockMeshField";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { RigidDebrisStats } from "./rigidDebris";
