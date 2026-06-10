@@ -42,8 +42,7 @@ The debug overlay and hitch logger capture:
 - CPU buckets for player, chunk, physics, mesh, minimap, render, and other work.
 - Chunk visibility split into loaded chunks, frustum chunks, actually rendered
   chunks, and chunks hidden behind the opaque fog curtain.
-- Rigid debris body/collider pressure, solver tick Hz, skipped render frames,
-  Rapier step cost, and static support-collider refresh cost.
+- Rigid debris body/collider pressure.
 - Adaptive debris pressure and effective cap state.
 - Worker-pool pressure: mode, capacity, queued jobs, running jobs, partial-mesh
   jobs, and average job/upload timing.
@@ -66,25 +65,13 @@ stress was dominated by projectile/physics work, while partial terrain is also
 likely headed toward persistence. Future optimization should start from that
 data model instead of masking partial visuals at render time.
 
-## Rigid Debris Cadence
-
-Active loose debris is visual/game-feel physics, not player authority. The
-Rapier debris adapter therefore runs on its own adaptive solver cadence: 30Hz
-normally, 20Hz under debris pressure, and 15Hz under severe pressure. It also
-intentionally avoids catch-up substeps after a long render frame, so a hitch does
-not make the next frame spend extra time trying to replay every missed debris
-tick.
-Skipped debris ticks are true skipped fixed `1/60s` Rapier slices, not larger
-stretched timesteps. Under heavy pressure, loose debris is allowed to become a
-slower visual layer rather than fast-forwarding through the same breakup motion.
-
-Player controls, projectile and hitscan core impacts, terrain damage, rendering,
-chunk work, and UI still run on the normal frame loop. If a stress pass feels
-better while the F3 Debris section shows a lower `tick` value, that is the
-governor doing its job rather than the whole game running at that rate.
-Active debris render proxies interpolate toward the latest Rapier body pose
-between lower-frequency ticks, while support-rescue corrections snap
-immediately so pieces do not visually linger inside terrain.
+Do not retry the reverted `v0.10.2` through `v0.10.4` rigid-debris cadence
+throttle as a quick optimization either. Lowering/skipping the active debris
+solver cadence made loose fragments feel wrong in playtesting even after visual
+interpolation and fixed-step tweaks. Future debris performance work should start
+from body count, sleep/island behavior, worker-compatible broadphase support, or
+different debris gameplay rules rather than simply lowering the visible physics
+rate.
 
 Recent records are available in the browser at:
 

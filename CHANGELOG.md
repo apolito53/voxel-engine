@@ -2,39 +2,13 @@
 
 ## Unreleased
 
-## 0.10.4 - 2026-06-09
+## 0.10.5 - 2026-06-09
 
-### Fixed
+### Removed
 
-- Changed the rigid-debris cadence governor to skip fixed `1/60s` Rapier steps
-  instead of stretching each step to the lower target Hz, preventing pressured
-  debris from fast-forwarding through breakup motion.
-
-## 0.10.3 - 2026-06-09
-
-### Fixed
-
-- Smoothed the visible transforms between lower-frequency rigid-debris solver
-  ticks so pressured debris no longer lunges through large Rapier steps in a
-  comically fast burst.
-- Kept terrain/support penetration corrections immediate, so smoothing cannot
-  leave shallowly embedded shards visually stuck in terrain.
-
-## 0.10.2 - 2026-06-09
-
-### Added
-
-- Added F3 HUD and hitch-log telemetry for rigid-debris solver Hz, skipped
-  render frames, Rapier step time, and static support-collider refresh cost.
-
-### Changed
-
-- Added an adaptive rigid-debris solver cadence: active Rapier debris now steps
-  at 30Hz normally, 20Hz under debris pressure, and 15Hz under severe pressure
-  instead of trying to solve every rendered frame.
-- Stopped rigid debris from running catch-up substeps after long frames, keeping
-  controls, projectile cores, terrain damage, rendering, and other gameplay
-  systems on their normal frame loop while debris degrades separately.
+- Rolled back the `v0.10.2` through `v0.10.4` rigid-debris cadence throttle
+  experiment because the debris feel was wrong in playtesting. Active Rapier
+  debris is back on the prior fixed-step/catch-up behavior from `v0.10.1`.
 
 ## 0.10.1 - 2026-06-08
 

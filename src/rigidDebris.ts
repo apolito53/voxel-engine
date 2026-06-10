@@ -12,17 +12,12 @@ import { createDefaultDebrisShape } from "./debrisShapes";
 import type { PhysicsToy } from "./physics";
 
 const RIGID_DEBRIS_GRAVITY = -18;
+const RIGID_DEBRIS_FIXED_STEP = 1 / 60;
 const RIGID_DEBRIS_MAX_FRAME_DELTA = 1 / 12;
-const RIGID_DEBRIS_SOLVER_STEP_SECONDS = 1 / 60;
-export const RIGID_DEBRIS_NOMINAL_TICK_HZ = 30;
-export const RIGID_DEBRIS_PRESSURE_TICK_HZ = 20;
-export const RIGID_DEBRIS_PANIC_TICK_HZ = 15;
-const RIGID_DEBRIS_PRESSURE_TICK_STRESS = 0.3;
-const RIGID_DEBRIS_PANIC_TICK_STRESS = 0.72;
+const RIGID_DEBRIS_MAX_SUBSTEPS = 4;
 const RIGID_DEBRIS_STATIC_REFRESH_SECONDS = 0.12;
 const RIGID_DEBRIS_DIRTY_STATIC_REFRESH_MIN_SECONDS = 0.08;
-const RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS =
-  RIGID_DEBRIS_STATIC_REFRESH_SECONDS + RIGID_DEBRIS_SOLVER_STEP_SECONDS;
+const RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS = RIGID_DEBRIS_STATIC_REFRESH_SECONDS + RIGID_DEBRIS_FIXED_STEP;
 const RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES = 2;
 const RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS = 1;
 export const RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET = 1536;
@@ -46,17 +41,8 @@ type RigidDebrisBody = {
   readonly toy: PhysicsToy;
   readonly body: RigidBody;
   readonly colliderHalfExtents: THREE.Vector3;
-  readonly visualStartPosition: THREE.Vector3;
-  readonly visualStartQuaternion: THREE.Quaternion;
-  readonly visualTargetPosition: THREE.Vector3;
-  readonly visualTargetQuaternion: THREE.Quaternion;
-  readonly visualLinearVelocity: THREE.Vector3;
-  readonly visualAngularVelocity: THREE.Vector3;
   quietSeconds: number;
   syncedExternalRevision: number;
-  visualBlendSeconds: number;
-  visualBlendDurationSeconds: number;
-  visualSleeping: boolean;
 };
 
 type StaticColliderRecord = {
@@ -74,23 +60,12 @@ type RigidDebrisSupport = {
   readonly penetrationDepth: number;
 };
 
-export type RigidDebrisUpdateOptions = {
-  readonly pressureStress?: number;
-};
-
 export type RigidDebrisStats = {
   readonly initialized: boolean;
   readonly bodies: number;
   readonly sleepingBodies: number;
   readonly terrainColliders: number;
   readonly rubbleSupportColliders: number;
-  readonly targetTickHz: number;
-  readonly simulatedTicksThisUpdate: number;
-  readonly skippedRenderFramesSinceTick: number;
-  readonly tickAccumulatorMs: number;
-  readonly lastRapierStepMs: number;
-  readonly lastStaticColliderRefreshMs: number;
-  readonly lastSyncMs: number;
 };
 
 export function createEmptyRigidDebrisStats(): RigidDebrisStats {
@@ -99,22 +74,8 @@ export function createEmptyRigidDebrisStats(): RigidDebrisStats {
     bodies: 0,
     sleepingBodies: 0,
     terrainColliders: 0,
-    rubbleSupportColliders: 0,
-    targetTickHz: RIGID_DEBRIS_NOMINAL_TICK_HZ,
-    simulatedTicksThisUpdate: 0,
-    skippedRenderFramesSinceTick: 0,
-    tickAccumulatorMs: 0,
-    lastRapierStepMs: 0,
-    lastStaticColliderRefreshMs: 0,
-    lastSyncMs: 0
+    rubbleSupportColliders: 0
   };
-}
-
-export function getRigidDebrisTargetTickHz(pressureStress: number): number {
-  const stress = clampNumber(pressureStress, 0, 1);
-  if (stress >= RIGID_DEBRIS_PANIC_TICK_STRESS) return RIGID_DEBRIS_PANIC_TICK_HZ;
-  if (stress >= RIGID_DEBRIS_PRESSURE_TICK_STRESS) return RIGID_DEBRIS_PRESSURE_TICK_HZ;
-  return RIGID_DEBRIS_NOMINAL_TICK_HZ;
 }
 
 export class RigidDebrisSimulation {
@@ -134,16 +95,9 @@ export class RigidDebrisSimulation {
   private readonly colliderScanCenter = new THREE.Vector3();
   private world: RapierWorld | null = null;
   private initializePromise: Promise<void> | null = null;
-  private tickAccumulatorSeconds = 0;
+  private accumulatorSeconds = 0;
   private staticRefreshSeconds = Infinity;
   private staticCollidersDirty = true;
-  private forceNextTickAfterFragmentRegistration = false;
-  private targetTickHz = RIGID_DEBRIS_NOMINAL_TICK_HZ;
-  private simulatedTicksThisUpdate = 0;
-  private skippedRenderFramesSinceTick = 0;
-  private lastRapierStepMs = 0;
-  private lastStaticColliderRefreshMs = 0;
-  private lastSyncMs = 0;
   private disposed = false;
   private stats: RigidDebrisStats = createEmptyRigidDebrisStats();
 
@@ -155,7 +109,7 @@ export class RigidDebrisSimulation {
       if (this.disposed) return;
 
       this.world = new RapierWorld({ x: 0, y: RIGID_DEBRIS_GRAVITY, z: 0 });
-      this.world.timestep = RIGID_DEBRIS_SOLVER_STEP_SECONDS;
+      this.world.timestep = RIGID_DEBRIS_FIXED_STEP;
       this.world.numSolverIterations = 6;
       this.world.maxCcdSubsteps = 1;
       this.flushPendingFragments();
@@ -169,7 +123,6 @@ export class RigidDebrisSimulation {
     if (this.bodiesByToy.has(toy)) return;
 
     this.pendingFragments.add(toy);
-    this.forceNextTickAfterFragmentRegistration = true;
     this.staticCollidersDirty = true;
     if (this.world) {
       this.flushPendingFragments();
@@ -178,75 +131,40 @@ export class RigidDebrisSimulation {
     }
   }
 
-  update(
-    delta: number,
-    collisionWorld: CollisionWorld,
-    options: RigidDebrisUpdateOptions = {}
-  ): RigidDebrisStats {
-    this.simulatedTicksThisUpdate = 0;
-    this.lastRapierStepMs = 0;
-    this.lastStaticColliderRefreshMs = 0;
-    this.lastSyncMs = 0;
-    this.targetTickHz = getRigidDebrisTargetTickHz(options.pressureStress ?? 0);
-
+  update(delta: number, collisionWorld: CollisionWorld): RigidDebrisStats {
     if (!this.world) {
       void this.initialize();
       this.refreshStats();
       return this.stats;
     }
 
-    const flushedFragments = this.flushPendingFragments();
+    this.flushPendingFragments();
     this.removeExpiredBodies();
     if (this.bodiesByToy.size === 0) {
-      this.forceNextTickAfterFragmentRegistration = false;
       this.clearStaticColliders();
       this.refreshStats();
       return this.stats;
     }
 
-    const tickIntervalSeconds = 1 / this.targetTickHz;
-    const clampedDelta = Math.min(Math.max(0, delta), RIGID_DEBRIS_MAX_FRAME_DELTA);
-    this.tickAccumulatorSeconds = Math.min(
-      this.tickAccumulatorSeconds + clampedDelta,
-      tickIntervalSeconds
-    );
+    this.refreshStaticCollidersIfNeeded(Math.max(0, delta), collisionWorld);
+    this.accumulatorSeconds += Math.min(Math.max(0, delta), RIGID_DEBRIS_MAX_FRAME_DELTA);
 
-    // Newly registered fragments get one immediate support/collision solve so
-    // their first visible frame is not a frozen mid-air card. After that, debris
-    // intentionally runs at its own Hz and never burns catch-up steps after a
-    // slow render frame.
-    const shouldTick = this.forceNextTickAfterFragmentRegistration ||
-      flushedFragments ||
-      this.tickAccumulatorSeconds + Number.EPSILON >= tickIntervalSeconds;
-    if (!shouldTick) {
-      this.skippedRenderFramesSinceTick += 1;
-      const syncStartedAt = getNowMs();
-      this.advanceVisualInterpolation(clampedDelta);
-      this.lastSyncMs = getNowMs() - syncStartedAt;
-      this.refreshStats();
-      return this.stats;
+    let substeps = 0;
+    while (
+      this.accumulatorSeconds >= RIGID_DEBRIS_FIXED_STEP &&
+      substeps < RIGID_DEBRIS_MAX_SUBSTEPS
+    ) {
+      this.world.timestep = RIGID_DEBRIS_FIXED_STEP;
+      this.world.step();
+      this.accumulatorSeconds -= RIGID_DEBRIS_FIXED_STEP;
+      substeps += 1;
     }
 
-    this.tickAccumulatorSeconds = 0;
-    this.forceNextTickAfterFragmentRegistration = false;
-    this.skippedRenderFramesSinceTick = 0;
-    this.lastStaticColliderRefreshMs = this.refreshStaticCollidersIfNeeded(tickIntervalSeconds, collisionWorld);
+    if (substeps === RIGID_DEBRIS_MAX_SUBSTEPS) {
+      this.accumulatorSeconds = Math.min(this.accumulatorSeconds, RIGID_DEBRIS_FIXED_STEP);
+    }
 
-    // The cadence governor skips debris solves under pressure instead of
-    // stretching each Rapier timestep. Large timesteps made fragments resolve an
-    // entire chunk of motion at once, which read as a fast-forwarded breakup.
-    // Keeping the solver slice fixed makes pressured debris degrade into a
-    // cheaper, slightly slow-motion VFX layer while gameplay stays responsive.
-    this.world.timestep = RIGID_DEBRIS_SOLVER_STEP_SECONDS;
-    const stepStartedAt = getNowMs();
-    this.world.step();
-    this.lastRapierStepMs = getNowMs() - stepStartedAt;
-    this.simulatedTicksThisUpdate = 1;
-
-    const syncStartedAt = getNowMs();
-    this.syncBodiesToToys(RIGID_DEBRIS_SOLVER_STEP_SECONDS, collisionWorld, tickIntervalSeconds);
-    this.advanceVisualInterpolation(clampedDelta);
-    this.lastSyncMs = getNowMs() - syncStartedAt;
+    this.syncBodiesToToys(substeps * RIGID_DEBRIS_FIXED_STEP, collisionWorld);
     this.refreshStats();
     return this.stats;
   }
@@ -294,7 +212,6 @@ export class RigidDebrisSimulation {
       record.body.wakeUp();
       record.syncedExternalRevision = externalRevision;
       record.quietSeconds = 0;
-      this.snapVisualTargetToToy(record);
       this.staticCollidersDirty = true;
     }
   }
@@ -322,13 +239,7 @@ export class RigidDebrisSimulation {
     }
     this.pendingFragments.clear();
     this.bodiesByToy.clear();
-    this.tickAccumulatorSeconds = 0;
-    this.simulatedTicksThisUpdate = 0;
-    this.skippedRenderFramesSinceTick = 0;
-    this.forceNextTickAfterFragmentRegistration = false;
-    this.lastRapierStepMs = 0;
-    this.lastStaticColliderRefreshMs = 0;
-    this.lastSyncMs = 0;
+    this.accumulatorSeconds = 0;
     this.clearStaticColliders();
     this.refreshStats();
   }
@@ -353,9 +264,8 @@ export class RigidDebrisSimulation {
     return this.bodiesByToy.get(toy)?.colliderHalfExtents.clone() ?? null;
   }
 
-  private flushPendingFragments(): boolean {
-    if (!this.world) return false;
-    let createdBody = false;
+  private flushPendingFragments(): void {
+    if (!this.world) return;
 
     for (const toy of this.pendingFragments) {
       if (!toy.isInstancedFragment || toy.isExpired || this.bodiesByToy.has(toy)) continue;
@@ -366,23 +276,12 @@ export class RigidDebrisSimulation {
         toy,
         body,
         colliderHalfExtents,
-        visualStartPosition: toy.mesh.position.clone(),
-        visualStartQuaternion: toy.mesh.quaternion.clone(),
-        visualTargetPosition: toy.mesh.position.clone(),
-        visualTargetQuaternion: toy.mesh.quaternion.clone(),
-        visualLinearVelocity: toy.velocity.clone(),
-        visualAngularVelocity: toy.angularVelocity.clone(),
         quietSeconds: 0,
-        syncedExternalRevision: toy.rigidDebrisExternalMutationRevision,
-        visualBlendSeconds: 0,
-        visualBlendDurationSeconds: 0,
-        visualSleeping: toy.isSleeping
+        syncedExternalRevision: toy.rigidDebrisExternalMutationRevision
       });
       toy.attachRigidDebrisBody();
-      createdBody = true;
     }
     this.pendingFragments.clear();
-    return createdBody;
   }
 
   private createBody(toy: PhysicsToy): RigidBody {
@@ -424,15 +323,11 @@ export class RigidDebrisSimulation {
     }
   }
 
-  private syncBodiesToToys(
-    delta: number,
-    collisionWorld: CollisionWorld,
-    visualBlendDurationSeconds: number
-  ): void {
+  private syncBodiesToToys(delta: number, collisionWorld: CollisionWorld): void {
     for (const record of this.bodiesByToy.values()) {
       const toyWasSleeping = record.toy.isSleeping;
       this.wakeSleepingBodyIfPartialSupportChanged(record, collisionWorld);
-      const supportCorrected = this.correctSupportPenetration(record, collisionWorld);
+      this.correctSupportPenetration(record, collisionWorld);
       this.applyAggressiveSleep(record, delta, collisionWorld);
       const translation = record.body.translation();
       const rotation = record.body.rotation();
@@ -444,86 +339,18 @@ export class RigidDebrisSimulation {
       this.syncQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w).normalize();
       this.syncLinearVelocity.set(linvel.x, linvel.y, linvel.z);
       this.syncAngularVelocity.set(angvel.x, angvel.y, angvel.z);
-      this.setVisualTarget(
-        record,
-        bodyIsSleeping || supportCorrected ? 0 : visualBlendDurationSeconds,
-        bodyIsSleeping
-      );
+      record.toy.syncRigidDebrisState({
+        position: this.syncPosition,
+        quaternion: this.syncQuaternion,
+        linearVelocity: this.syncLinearVelocity,
+        angularVelocity: this.syncAngularVelocity,
+        sleeping: bodyIsSleeping
+      });
       if (toyWasSleeping !== bodyIsSleeping) {
         record.quietSeconds = 0;
         this.staticCollidersDirty = true;
       }
     }
-  }
-
-  private setVisualTarget(
-    record: RigidDebrisBody,
-    durationSeconds: number,
-    sleeping: boolean
-  ): void {
-    record.visualStartPosition.copy(record.toy.mesh.position);
-    record.visualStartQuaternion.copy(record.toy.mesh.quaternion);
-    record.visualTargetPosition.copy(this.syncPosition);
-    record.visualTargetQuaternion.copy(this.syncQuaternion);
-    record.visualLinearVelocity.copy(this.syncLinearVelocity);
-    record.visualAngularVelocity.copy(this.syncAngularVelocity);
-    record.visualBlendSeconds = 0;
-    record.visualBlendDurationSeconds = Math.max(0, durationSeconds);
-    record.visualSleeping = sleeping;
-
-    if (sleeping || record.visualBlendDurationSeconds <= 0) {
-      this.applyVisualState(record, 1);
-    }
-  }
-
-  private advanceVisualInterpolation(delta: number): void {
-    const blendDelta = Math.max(0, delta);
-    for (const record of this.bodiesByToy.values()) {
-      if (record.toy.isExpired) continue;
-      if (record.visualBlendDurationSeconds <= 0) {
-        this.applyVisualState(record, 1);
-        continue;
-      }
-
-      record.visualBlendSeconds = Math.min(
-        record.visualBlendDurationSeconds,
-        record.visualBlendSeconds + blendDelta
-      );
-      const alpha = record.visualBlendSeconds / record.visualBlendDurationSeconds;
-      this.applyVisualState(record, alpha);
-    }
-  }
-
-  private applyVisualState(record: RigidDebrisBody, alpha: number): void {
-    const clampedAlpha = clampNumber(alpha, 0, 1);
-    this.syncPosition.lerpVectors(
-      record.visualStartPosition,
-      record.visualTargetPosition,
-      clampedAlpha
-    );
-    this.syncQuaternion
-      .copy(record.visualStartQuaternion)
-      .slerp(record.visualTargetQuaternion, clampedAlpha)
-      .normalize();
-    record.toy.syncRigidDebrisState({
-      position: this.syncPosition,
-      quaternion: this.syncQuaternion,
-      linearVelocity: record.visualLinearVelocity,
-      angularVelocity: record.visualAngularVelocity,
-      sleeping: record.visualSleeping
-    });
-  }
-
-  private snapVisualTargetToToy(record: RigidDebrisBody): void {
-    record.visualStartPosition.copy(record.toy.mesh.position);
-    record.visualStartQuaternion.copy(record.toy.mesh.quaternion);
-    record.visualTargetPosition.copy(record.toy.mesh.position);
-    record.visualTargetQuaternion.copy(record.toy.mesh.quaternion);
-    record.visualLinearVelocity.copy(record.toy.velocity);
-    record.visualAngularVelocity.copy(record.toy.angularVelocity);
-    record.visualBlendSeconds = 0;
-    record.visualBlendDurationSeconds = 0;
-    record.visualSleeping = record.toy.isSleeping;
   }
 
   private wakeSleepingBodyIfPartialSupportChanged(
@@ -578,17 +405,17 @@ export class RigidDebrisSimulation {
     this.staticCollidersDirty = true;
   }
 
-  private correctSupportPenetration(record: RigidDebrisBody, collisionWorld: CollisionWorld): boolean {
-    if (record.toy.isExpired) return false;
+  private correctSupportPenetration(record: RigidDebrisBody, collisionWorld: CollisionWorld): void {
+    if (record.toy.isExpired) return;
 
     const support = getRigidDebrisSupport(record, collisionWorld);
-    if (!support || support.penetrationDepth <= RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN) return false;
+    if (!support || support.penetrationDepth <= RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN) return;
 
     const translation = record.body.translation();
     const correctedY = support.height +
       record.colliderHalfExtents.y +
       RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN;
-    if (translation.y >= correctedY) return false;
+    if (translation.y >= correctedY) return;
 
     const wakeBody = !record.body.isSleeping();
     record.body.setTranslation({
@@ -602,30 +429,27 @@ export class RigidDebrisSimulation {
       record.body.setLinvel({ x: linvel.x, y: 0, z: linvel.z }, wakeBody);
     }
     this.staticCollidersDirty = true;
-    return true;
   }
 
-  private refreshStaticCollidersIfNeeded(delta: number, collisionWorld: CollisionWorld): number {
+  private refreshStaticCollidersIfNeeded(delta: number, collisionWorld: CollisionWorld): void {
     this.staticRefreshSeconds += delta;
     const scheduledRefreshDue = this.staticRefreshSeconds >= RIGID_DEBRIS_STATIC_REFRESH_SECONDS;
     const dirtyRefreshDue = this.staticCollidersDirty &&
       this.staticRefreshSeconds >= RIGID_DEBRIS_DIRTY_STATIC_REFRESH_MIN_SECONDS;
     if (!scheduledRefreshDue && !dirtyRefreshDue) {
-      return 0;
+      return;
     }
 
     // Terrain damage invalidates support colliders rapidly while a bouncing core
     // is chewing a crater. Rebuilding Rapier static colliders every impact frame
     // made the solver spike even after the debris body cap dropped, so dirty
     // refreshes are coalesced into the same short cadence as normal lookahead.
-    const startedAt = getNowMs();
     this.staticRefreshSeconds = 0;
     this.staticCollidersDirty = false;
     this.collectActiveColliderCells(collisionWorld);
     this.syncTerrainColliders(collisionWorld);
     this.syncSurfaceBoxColliders(collisionWorld);
     this.syncRubbleSupportColliders(collisionWorld);
-    return getNowMs() - startedAt;
   }
 
   private collectActiveColliderCells(collisionWorld: CollisionWorld): void {
@@ -920,25 +744,9 @@ export class RigidDebrisSimulation {
       bodies: this.bodiesByToy.size,
       sleepingBodies,
       terrainColliders: this.terrainColliders.size + this.surfaceBoxColliders.size,
-      rubbleSupportColliders: this.rubbleSupportColliders.size,
-      targetTickHz: this.targetTickHz,
-      simulatedTicksThisUpdate: this.simulatedTicksThisUpdate,
-      skippedRenderFramesSinceTick: this.skippedRenderFramesSinceTick,
-      tickAccumulatorMs: this.tickAccumulatorSeconds * 1000,
-      lastRapierStepMs: this.lastRapierStepMs,
-      lastStaticColliderRefreshMs: this.lastStaticColliderRefreshMs,
-      lastSyncMs: this.lastSyncMs
+      rubbleSupportColliders: this.rubbleSupportColliders.size
     };
   }
-}
-
-function getNowMs(): number {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(max, Math.max(min, value));
 }
 
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
