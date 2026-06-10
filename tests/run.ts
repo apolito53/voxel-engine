@@ -5995,8 +5995,8 @@ test("rigid debris adapter lowers tick cadence under pressure", async () => {
     "panic pressure should target the lowest debris-only solver cadence"
   );
   assert(
-    panicFirstDrop > 0 && panicFirstDrop < 0.08,
-    "panic-cadence debris should blend the large solver step instead of visually lunging through the first frame"
+    panicFirstDrop > 0 && panicFirstDrop < 0.03,
+    "panic-cadence debris should not scale a Rapier step up to the full skipped-frame interval"
   );
 
   for (let frame = 0; frame < 3; frame += 1) {

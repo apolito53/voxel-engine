@@ -13,6 +13,7 @@ import type { PhysicsToy } from "./physics";
 
 const RIGID_DEBRIS_GRAVITY = -18;
 const RIGID_DEBRIS_MAX_FRAME_DELTA = 1 / 12;
+const RIGID_DEBRIS_SOLVER_STEP_SECONDS = 1 / 60;
 export const RIGID_DEBRIS_NOMINAL_TICK_HZ = 30;
 export const RIGID_DEBRIS_PRESSURE_TICK_HZ = 20;
 export const RIGID_DEBRIS_PANIC_TICK_HZ = 15;
@@ -21,7 +22,7 @@ const RIGID_DEBRIS_PANIC_TICK_STRESS = 0.72;
 const RIGID_DEBRIS_STATIC_REFRESH_SECONDS = 0.12;
 const RIGID_DEBRIS_DIRTY_STATIC_REFRESH_MIN_SECONDS = 0.08;
 const RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS =
-  RIGID_DEBRIS_STATIC_REFRESH_SECONDS + 1 / RIGID_DEBRIS_NOMINAL_TICK_HZ;
+  RIGID_DEBRIS_STATIC_REFRESH_SECONDS + RIGID_DEBRIS_SOLVER_STEP_SECONDS;
 const RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES = 2;
 const RIGID_DEBRIS_STATIC_SCAN_RADIUS_BLOCKS = 1;
 export const RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET = 1536;
@@ -154,7 +155,7 @@ export class RigidDebrisSimulation {
       if (this.disposed) return;
 
       this.world = new RapierWorld({ x: 0, y: RIGID_DEBRIS_GRAVITY, z: 0 });
-      this.world.timestep = 1 / RIGID_DEBRIS_NOMINAL_TICK_HZ;
+      this.world.timestep = RIGID_DEBRIS_SOLVER_STEP_SECONDS;
       this.world.numSolverIterations = 6;
       this.world.maxCcdSubsteps = 1;
       this.flushPendingFragments();
@@ -231,14 +232,19 @@ export class RigidDebrisSimulation {
     this.skippedRenderFramesSinceTick = 0;
     this.lastStaticColliderRefreshMs = this.refreshStaticCollidersIfNeeded(tickIntervalSeconds, collisionWorld);
 
-    this.world.timestep = tickIntervalSeconds;
+    // The cadence governor skips debris solves under pressure instead of
+    // stretching each Rapier timestep. Large timesteps made fragments resolve an
+    // entire chunk of motion at once, which read as a fast-forwarded breakup.
+    // Keeping the solver slice fixed makes pressured debris degrade into a
+    // cheaper, slightly slow-motion VFX layer while gameplay stays responsive.
+    this.world.timestep = RIGID_DEBRIS_SOLVER_STEP_SECONDS;
     const stepStartedAt = getNowMs();
     this.world.step();
     this.lastRapierStepMs = getNowMs() - stepStartedAt;
     this.simulatedTicksThisUpdate = 1;
 
     const syncStartedAt = getNowMs();
-    this.syncBodiesToToys(tickIntervalSeconds, collisionWorld, tickIntervalSeconds);
+    this.syncBodiesToToys(RIGID_DEBRIS_SOLVER_STEP_SECONDS, collisionWorld, tickIntervalSeconds);
     this.advanceVisualInterpolation(clampedDelta);
     this.lastSyncMs = getNowMs() - syncStartedAt;
     this.refreshStats();

@@ -74,6 +74,9 @@ normally, 20Hz under debris pressure, and 15Hz under severe pressure. It also
 intentionally avoids catch-up substeps after a long render frame, so a hitch does
 not make the next frame spend extra time trying to replay every missed debris
 tick.
+Skipped debris ticks are true skipped fixed `1/60s` Rapier slices, not larger
+stretched timesteps. Under heavy pressure, loose debris is allowed to become a
+slower visual layer rather than fast-forwarding through the same breakup motion.
 
 Player controls, projectile and hitscan core impacts, terrain damage, rendering,
 chunk work, and UI still run on the normal frame loop. If a stress pass feels

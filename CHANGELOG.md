@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.10.4 - 2026-06-09
+
+### Fixed
+
+- Changed the rigid-debris cadence governor to skip fixed `1/60s` Rapier steps
+  instead of stretching each step to the lower target Hz, preventing pressured
+  debris from fast-forwarding through breakup motion.
+
 ## 0.10.3 - 2026-06-09
 
 ### Fixed
