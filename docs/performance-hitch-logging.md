@@ -79,6 +79,9 @@ Player controls, projectile and hitscan core impacts, terrain damage, rendering,
 chunk work, and UI still run on the normal frame loop. If a stress pass feels
 better while the F3 Debris section shows a lower `tick` value, that is the
 governor doing its job rather than the whole game running at that rate.
+Active debris render proxies interpolate toward the latest Rapier body pose
+between lower-frequency ticks, while support-rescue corrections snap
+immediately so pieces do not visually linger inside terrain.
 
 Recent records are available in the browser at:
 

@@ -45,8 +45,17 @@ type RigidDebrisBody = {
   readonly toy: PhysicsToy;
   readonly body: RigidBody;
   readonly colliderHalfExtents: THREE.Vector3;
+  readonly visualStartPosition: THREE.Vector3;
+  readonly visualStartQuaternion: THREE.Quaternion;
+  readonly visualTargetPosition: THREE.Vector3;
+  readonly visualTargetQuaternion: THREE.Quaternion;
+  readonly visualLinearVelocity: THREE.Vector3;
+  readonly visualAngularVelocity: THREE.Vector3;
   quietSeconds: number;
   syncedExternalRevision: number;
+  visualBlendSeconds: number;
+  visualBlendDurationSeconds: number;
+  visualSleeping: boolean;
 };
 
 type StaticColliderRecord = {
@@ -210,6 +219,9 @@ export class RigidDebrisSimulation {
       this.tickAccumulatorSeconds + Number.EPSILON >= tickIntervalSeconds;
     if (!shouldTick) {
       this.skippedRenderFramesSinceTick += 1;
+      const syncStartedAt = getNowMs();
+      this.advanceVisualInterpolation(clampedDelta);
+      this.lastSyncMs = getNowMs() - syncStartedAt;
       this.refreshStats();
       return this.stats;
     }
@@ -226,7 +238,8 @@ export class RigidDebrisSimulation {
     this.simulatedTicksThisUpdate = 1;
 
     const syncStartedAt = getNowMs();
-    this.syncBodiesToToys(tickIntervalSeconds, collisionWorld);
+    this.syncBodiesToToys(tickIntervalSeconds, collisionWorld, tickIntervalSeconds);
+    this.advanceVisualInterpolation(clampedDelta);
     this.lastSyncMs = getNowMs() - syncStartedAt;
     this.refreshStats();
     return this.stats;
@@ -275,6 +288,7 @@ export class RigidDebrisSimulation {
       record.body.wakeUp();
       record.syncedExternalRevision = externalRevision;
       record.quietSeconds = 0;
+      this.snapVisualTargetToToy(record);
       this.staticCollidersDirty = true;
     }
   }
@@ -346,8 +360,17 @@ export class RigidDebrisSimulation {
         toy,
         body,
         colliderHalfExtents,
+        visualStartPosition: toy.mesh.position.clone(),
+        visualStartQuaternion: toy.mesh.quaternion.clone(),
+        visualTargetPosition: toy.mesh.position.clone(),
+        visualTargetQuaternion: toy.mesh.quaternion.clone(),
+        visualLinearVelocity: toy.velocity.clone(),
+        visualAngularVelocity: toy.angularVelocity.clone(),
         quietSeconds: 0,
-        syncedExternalRevision: toy.rigidDebrisExternalMutationRevision
+        syncedExternalRevision: toy.rigidDebrisExternalMutationRevision,
+        visualBlendSeconds: 0,
+        visualBlendDurationSeconds: 0,
+        visualSleeping: toy.isSleeping
       });
       toy.attachRigidDebrisBody();
       createdBody = true;
@@ -395,11 +418,15 @@ export class RigidDebrisSimulation {
     }
   }
 
-  private syncBodiesToToys(delta: number, collisionWorld: CollisionWorld): void {
+  private syncBodiesToToys(
+    delta: number,
+    collisionWorld: CollisionWorld,
+    visualBlendDurationSeconds: number
+  ): void {
     for (const record of this.bodiesByToy.values()) {
       const toyWasSleeping = record.toy.isSleeping;
       this.wakeSleepingBodyIfPartialSupportChanged(record, collisionWorld);
-      this.correctSupportPenetration(record, collisionWorld);
+      const supportCorrected = this.correctSupportPenetration(record, collisionWorld);
       this.applyAggressiveSleep(record, delta, collisionWorld);
       const translation = record.body.translation();
       const rotation = record.body.rotation();
@@ -411,18 +438,86 @@ export class RigidDebrisSimulation {
       this.syncQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w).normalize();
       this.syncLinearVelocity.set(linvel.x, linvel.y, linvel.z);
       this.syncAngularVelocity.set(angvel.x, angvel.y, angvel.z);
-      record.toy.syncRigidDebrisState({
-        position: this.syncPosition,
-        quaternion: this.syncQuaternion,
-        linearVelocity: this.syncLinearVelocity,
-        angularVelocity: this.syncAngularVelocity,
-        sleeping: bodyIsSleeping
-      });
+      this.setVisualTarget(
+        record,
+        bodyIsSleeping || supportCorrected ? 0 : visualBlendDurationSeconds,
+        bodyIsSleeping
+      );
       if (toyWasSleeping !== bodyIsSleeping) {
         record.quietSeconds = 0;
         this.staticCollidersDirty = true;
       }
     }
+  }
+
+  private setVisualTarget(
+    record: RigidDebrisBody,
+    durationSeconds: number,
+    sleeping: boolean
+  ): void {
+    record.visualStartPosition.copy(record.toy.mesh.position);
+    record.visualStartQuaternion.copy(record.toy.mesh.quaternion);
+    record.visualTargetPosition.copy(this.syncPosition);
+    record.visualTargetQuaternion.copy(this.syncQuaternion);
+    record.visualLinearVelocity.copy(this.syncLinearVelocity);
+    record.visualAngularVelocity.copy(this.syncAngularVelocity);
+    record.visualBlendSeconds = 0;
+    record.visualBlendDurationSeconds = Math.max(0, durationSeconds);
+    record.visualSleeping = sleeping;
+
+    if (sleeping || record.visualBlendDurationSeconds <= 0) {
+      this.applyVisualState(record, 1);
+    }
+  }
+
+  private advanceVisualInterpolation(delta: number): void {
+    const blendDelta = Math.max(0, delta);
+    for (const record of this.bodiesByToy.values()) {
+      if (record.toy.isExpired) continue;
+      if (record.visualBlendDurationSeconds <= 0) {
+        this.applyVisualState(record, 1);
+        continue;
+      }
+
+      record.visualBlendSeconds = Math.min(
+        record.visualBlendDurationSeconds,
+        record.visualBlendSeconds + blendDelta
+      );
+      const alpha = record.visualBlendSeconds / record.visualBlendDurationSeconds;
+      this.applyVisualState(record, alpha);
+    }
+  }
+
+  private applyVisualState(record: RigidDebrisBody, alpha: number): void {
+    const clampedAlpha = clampNumber(alpha, 0, 1);
+    this.syncPosition.lerpVectors(
+      record.visualStartPosition,
+      record.visualTargetPosition,
+      clampedAlpha
+    );
+    this.syncQuaternion
+      .copy(record.visualStartQuaternion)
+      .slerp(record.visualTargetQuaternion, clampedAlpha)
+      .normalize();
+    record.toy.syncRigidDebrisState({
+      position: this.syncPosition,
+      quaternion: this.syncQuaternion,
+      linearVelocity: record.visualLinearVelocity,
+      angularVelocity: record.visualAngularVelocity,
+      sleeping: record.visualSleeping
+    });
+  }
+
+  private snapVisualTargetToToy(record: RigidDebrisBody): void {
+    record.visualStartPosition.copy(record.toy.mesh.position);
+    record.visualStartQuaternion.copy(record.toy.mesh.quaternion);
+    record.visualTargetPosition.copy(record.toy.mesh.position);
+    record.visualTargetQuaternion.copy(record.toy.mesh.quaternion);
+    record.visualLinearVelocity.copy(record.toy.velocity);
+    record.visualAngularVelocity.copy(record.toy.angularVelocity);
+    record.visualBlendSeconds = 0;
+    record.visualBlendDurationSeconds = 0;
+    record.visualSleeping = record.toy.isSleeping;
   }
 
   private wakeSleepingBodyIfPartialSupportChanged(
@@ -477,17 +572,17 @@ export class RigidDebrisSimulation {
     this.staticCollidersDirty = true;
   }
 
-  private correctSupportPenetration(record: RigidDebrisBody, collisionWorld: CollisionWorld): void {
-    if (record.toy.isExpired) return;
+  private correctSupportPenetration(record: RigidDebrisBody, collisionWorld: CollisionWorld): boolean {
+    if (record.toy.isExpired) return false;
 
     const support = getRigidDebrisSupport(record, collisionWorld);
-    if (!support || support.penetrationDepth <= RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN) return;
+    if (!support || support.penetrationDepth <= RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN) return false;
 
     const translation = record.body.translation();
     const correctedY = support.height +
       record.colliderHalfExtents.y +
       RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN;
-    if (translation.y >= correctedY) return;
+    if (translation.y >= correctedY) return false;
 
     const wakeBody = !record.body.isSleeping();
     record.body.setTranslation({
@@ -501,6 +596,7 @@ export class RigidDebrisSimulation {
       record.body.setLinvel({ x: linvel.x, y: 0, z: linvel.z }, wakeBody);
     }
     this.staticCollidersDirty = true;
+    return true;
   }
 
   private refreshStaticCollidersIfNeeded(delta: number, collisionWorld: CollisionWorld): number {

@@ -5950,10 +5950,9 @@ test("rigid debris adapter throttles debris ticks without catch-up substeps", as
   const skippedStats = rigidDebris.getStats();
   assertEqual(skippedStats.simulatedTicksThisUpdate, 0, "a 30Hz debris solver should skip alternating 60Hz render frames");
   assertEqual(skippedStats.skippedRenderFramesSinceTick, 1, "skipped render frames should be counted for HUD/log evidence");
-  assertNearlyEqual(
-    fragment.mesh.position.y,
-    positionAfterFirstStep,
-    "skipping a debris tick should not move the render proxy until the next solver step"
+  assert(
+    fragment.mesh.position.y < positionAfterFirstStep,
+    "skipped render frames should visually interpolate toward the latest debris body pose instead of freezing"
   );
 
   rigidDebris.update(1 / 60, floorWorld);
@@ -5989,10 +5988,15 @@ test("rigid debris adapter lowers tick cadence under pressure", async () => {
 
   rigidDebris.registerFragment(fragment);
   rigidDebris.update(1 / 60, floorWorld, { pressureStress: 1 });
+  const panicFirstDrop = 2.5 - fragment.mesh.position.y;
   assertEqual(
     rigidDebris.getStats().targetTickHz,
     RIGID_DEBRIS_PANIC_TICK_HZ,
     "panic pressure should target the lowest debris-only solver cadence"
+  );
+  assert(
+    panicFirstDrop > 0 && panicFirstDrop < 0.08,
+    "panic-cadence debris should blend the large solver step instead of visually lunging through the first frame"
   );
 
   for (let frame = 0; frame < 3; frame += 1) {

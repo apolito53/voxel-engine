@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.10.3 - 2026-06-09
+
+### Fixed
+
+- Smoothed the visible transforms between lower-frequency rigid-debris solver
+  ticks so pressured debris no longer lunges through large Rapier steps in a
+  comically fast burst.
+- Kept terrain/support penetration corrections immediate, so smoothing cannot
+  leave shallowly embedded shards visually stuck in terrain.
+
 ## 0.10.2 - 2026-06-09
 
 ### Added
