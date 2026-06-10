@@ -351,19 +351,31 @@ body.playing canvas {
   gap: 12px;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 3px;
   min-width: 0;
 }
 
 .settings-label {
+  min-width: 0;
   color: #edf4f8;
   font-size: 14px;
   font-weight: 900;
+}
+
+.settings-field-hint {
+  color: rgba(237, 244, 248, 0.58);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.28;
 }
 
 .settings-value {
   color: rgba(237, 244, 248, 0.68);
   font-size: 12px;
   font-weight: 800;
+  margin-left: auto;
+  text-align: right;
   white-space: nowrap;
 }
 

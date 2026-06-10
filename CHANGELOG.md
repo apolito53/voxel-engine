@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.10.5.1 - 2026-06-10
+
+### Changed
+
+- Renamed the overlapping experimental debris controls to `Break Burst Shards`
+  and `Active Ground Debris Cap`, then added inline hints so the initial spawn
+  ceiling and the post-impact active shard cap read as separate knobs.
+- Let settings label rows wrap cleanly so long labels and values do not collide
+  in the pause-menu panel.
+
 ## 0.10.5 - 2026-06-09
 
 ### Removed

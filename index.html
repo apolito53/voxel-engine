@@ -443,8 +443,11 @@
               </div>
               <label class="settings-field" for="debris-count-slider">
                 <span class="settings-label-row">
-                  <span class="settings-label">Max Break Debris</span>
+                  <span class="settings-label">Break Burst Shards</span>
                   <span id="debris-count-value" class="settings-value">108 max shards/block</span>
+                </span>
+                <span class="settings-field-hint">
+                  Per-break spawn ceiling. Higher values make each destroyed block spray denser, smaller pieces.
                 </span>
                 <input
                   id="debris-count-slider"
@@ -458,8 +461,11 @@
               </label>
               <label class="settings-field" for="ground-debris-budget-slider">
                 <span class="settings-label-row">
-                  <span class="settings-label">Max Ground Debris</span>
+                  <span class="settings-label">Active Ground Debris Cap</span>
                   <span id="ground-debris-budget-value" class="settings-value">128 shards</span>
+                </span>
+                <span class="settings-field-hint">
+                  Post-impact CPU cap for loose shards that stay active after the burst exists.
                 </span>
                 <input
                   id="ground-debris-budget-slider"

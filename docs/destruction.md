@@ -120,9 +120,9 @@ Debris presentation is material-budgeted:
 - The sum of conservative visual shard volume stays within the material removed
   by the hit.
 
-The `Max Break Debris` slider is a visible shard ceiling for full-block debris
-density and also scales ordinary chip bursts. It is not a promise that every
-tiny hit spawns the full value.
+The `Break Burst Shards` slider is a visible shard ceiling for full-block
+debris density and also scales ordinary chip bursts. It is not a promise that
+every tiny hit spawns the full value.
 
 Debris ejection prefers exposed bite openings or drilled tunnel exits so chips
 spray out of wounds instead of filling them. Stale never-grounded floaters and
@@ -130,7 +130,8 @@ trapped tunnel/partial-block clutter force-poof after a grace window.
 
 ## Debris Budgets And Cleanup
 
-The ground-debris settings govern aftermath:
+The `Active Ground Debris Cap` and `Ground Debris Lifetime` settings govern
+aftermath:
 
 - Full bursts can exceed the ground cap while airborne.
 - Excess sleeping regions are culled after they settle.

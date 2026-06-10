@@ -131,8 +131,8 @@ Pause menu `Settings` is split into three tabs.
 `Experimental` owns the controls most likely to create CPU/GPU stress:
 
 - Physics Object Budget
-- Max Break Debris
-- Max Ground Debris
+- Break Burst Shards, the per-block spawn ceiling for the initial destruction spray
+- Active Ground Debris Cap, the post-impact cap for loose shard bodies kept around
 - Ground Debris Lifetime
 - Allow Super Ultra Mode
 
