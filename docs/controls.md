@@ -132,7 +132,8 @@ Pause menu `Settings` is split into three tabs.
 
 - Physics Object Budget
 - Break Burst Shards, the per-block spawn ceiling for the initial destruction spray
-- Active Ground Debris Cap, the post-impact cap for loose shard bodies kept around
+- Active Ground Debris Cap, the post-impact cap for loose shard bodies kept
+  around after they touch support or sleep
 - Ground Debris Lifetime
 - Allow Super Ultra Mode
 

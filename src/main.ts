@@ -555,7 +555,7 @@ let clickFireMode: ClickFireMode = readClickFireModePreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
 let debrisPerformancePressure = createDebrisPerformancePressureState(
-  getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget)
+  getEffectiveRigidDebrisBodyBudget(physicsObjectBudget)
 );
 let renderedPartialBlockRevision = -1;
 let lastPartialBlockMeshUpdateMs = 0;
@@ -1975,6 +1975,7 @@ function animate(): void {
     enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
     updateGroundDebrisCleanup(delta);
+    enforceGroundDebrisBudget();
     updateStuckDebrisCleanup(delta, activeWorld);
     debrisSettlerStats = debrisSettler.getStats();
     emitRubbleBatchEvents();
@@ -2045,6 +2046,7 @@ function animate(): void {
     // frame both see the newly requested cap instead of carrying excess bodies
     // until the following pre-render enforcement pass.
     enforceRigidDebrisBudget();
+    enforceGroundDebrisBudget();
 
     const performanceStats = {
       qualityLabel: qualityController.preset.label,
@@ -3793,7 +3795,7 @@ function setGroundDebrisBudget(nextBudget: unknown): void {
   groundDebrisBudget = normalizeGroundDebrisBudget(nextBudget, groundDebrisBudget);
   writeGroundDebrisBudgetPreference(groundDebrisBudget);
   updateGroundDebrisBudgetControls();
-  enforceRigidDebrisBudget();
+  enforceGroundDebrisBudget();
 }
 
 function updateGroundDebrisBudgetControls(): void {
@@ -3877,10 +3879,9 @@ function enforceRigidDebrisBudget(): void {
   const overBudgetCount = candidates.length - rigidDebrisBodyBudget;
   if (overBudgetCount <= 0) return;
 
-  // The ground-debris slider is a visual/CPU pressure valve, not a gameplay
-  // material signal. Prefer dropping grounded clutter, but if a stress burst
-  // creates more Rapier bodies than the cap while debris is still airborne,
-  // expire the farthest active shards too instead of letting the solver melt.
+  // This rail protects the Rapier solver during extreme shard storms. It is
+  // deliberately independent from the "Active Ground Debris Cap" slider so
+  // break bursts can still spray outward before floor clutter is trimmed.
   const pressureCandidates = candidates
     .sort((left, right) => {
       if (left.grounded !== right.grounded) return left.grounded ? -1 : 1;
@@ -3889,6 +3890,28 @@ function enforceRigidDebrisBudget(): void {
     });
   for (let index = 0; index < overBudgetCount; index += 1) {
     const candidate = pressureCandidates[index]?.toy;
+    if (candidate) expireGroundDebrisWithPoof(candidate);
+  }
+  pruneExpiredToys();
+  rigidDebrisStats = rigidDebris.getStats();
+}
+
+function enforceGroundDebrisBudget(): void {
+  const candidates = getRigidDebrisBudgetCandidates()
+    .filter((candidate) => candidate.grounded);
+  const overBudgetCount = candidates.length - groundDebrisBudget;
+  if (overBudgetCount <= 0) return;
+
+  // The ground cap is an aftermath cleanup knob. Once shards touch support or
+  // sleep, trim the least useful floor clutter first without affecting airborne
+  // burst silhouettes or the active rigid-body safety budget.
+  const cleanupCandidates = candidates
+    .sort((left, right) => {
+      if (left.toy.isSleeping !== right.toy.isSleeping) return left.toy.isSleeping ? -1 : 1;
+      return right.distanceToCameraSq - left.distanceToCameraSq;
+    });
+  for (let index = 0; index < overBudgetCount; index += 1) {
+    const candidate = cleanupCandidates[index]?.toy;
     if (candidate) expireGroundDebrisWithPoof(candidate);
   }
   pruneExpiredToys();
@@ -3922,7 +3945,7 @@ function getCurrentRigidDebrisBodyBudget(): number {
 }
 
 function getNominalRigidDebrisBodyBudget(): number {
-  return getEffectiveRigidDebrisBodyBudget(physicsObjectBudget, groundDebrisBudget);
+  return getEffectiveRigidDebrisBodyBudget(physicsObjectBudget);
 }
 
 function updateDebrisPressureGovernor(

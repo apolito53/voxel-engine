@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.10.6 - 2026-06-11
+
+### Changed
+
+- Decoupled `Break Burst Shards` from `Active Ground Debris Cap` at runtime:
+  burst shards now control the initial outward spray, while the ground cap only
+  trims supported or sleeping aftermath debris after impact.
+- Kept the active Rapier rigid-body safety cap tied to the Physics Object Budget
+  and adaptive debris pressure governor, so extreme airborne shard storms can
+  still shed far-away bodies without making the ground cap feel like a hidden
+  burst limiter.
+
 ## 0.10.5.1 - 2026-06-10
 
 ### Changed

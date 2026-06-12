@@ -134,13 +134,16 @@ The `Active Ground Debris Cap` and `Ground Debris Lifetime` settings govern
 aftermath:
 
 - Full bursts can exceed the ground cap while airborne.
-- Excess sleeping regions are culled after they settle.
+- The ground cap only trims shards after they are supported or sleeping, so it
+  controls how much loose clutter remains on the floor rather than how many
+  pieces spray out of a break.
+- Excess supported/sleeping debris is culled after it settles.
 - Timed-out shards disappear in a material-tinted poof after first ground
   contact unless lifetime is set to `Forever`.
 - Distance and pressure cleanup can still remove shards even when lifetime is
   `Forever`.
-- Extreme airborne bursts can drop farthest active shards once they exceed the
-  rigid-body cap.
+- Extreme airborne bursts can still drop farthest active shards once they exceed
+  the separate rigid-body safety cap derived from the Physics Object Budget.
 - Sustained sub-60 FPS with heavy debris pressure can temporarily lower the
   effective rigid-debris cap until frames recover.
 

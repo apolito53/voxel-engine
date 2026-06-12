@@ -92,6 +92,9 @@ curtain plus a safety ring to reduce far-distance draw pressure.
 Thrown Physics Cores have a hard lifetime and fade out once they stay below
 useful terrain-damage speed, so spent shots do not linger forever during stress
 tests.
+`Break Burst Shards` controls the initial destruction spray, while `Active
+Ground Debris Cap` trims only supported or sleeping aftermath shards after they
+touch down.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show

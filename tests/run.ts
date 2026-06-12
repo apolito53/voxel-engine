@@ -8535,8 +8535,8 @@ test("physics object budget clamps and steps predictably", () => {
   );
   assertEqual(
     getEffectiveRigidDebrisBodyBudget(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget, 96),
-    96,
-    "ground debris slider should cap even a high physics object budget"
+    MAX_RIGID_DEBRIS_BODY_BUDGET,
+    "ground debris slider should not shrink the airborne rigid debris burst budget"
   );
   assertEqual(
     formatGroundDebrisBudget(0),

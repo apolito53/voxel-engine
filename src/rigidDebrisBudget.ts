@@ -30,12 +30,12 @@ export function getRigidDebrisBodyBudget(physicsObjectBudget: number): number {
 
 export function getEffectiveRigidDebrisBodyBudget(
   physicsObjectBudget: number,
-  groundDebrisBudget: number
+  _groundDebrisBudget?: number
 ): number {
-  return Math.min(
-    getRigidDebrisBodyBudget(physicsObjectBudget),
-    normalizeGroundDebrisBudget(groundDebrisBudget)
-  );
+  // Keep this compatibility helper focused on the active Rapier safety rail.
+  // The ground-debris setting is applied later, after shards are actually
+  // grounded, so it cannot silently shrink the initial break burst.
+  return getRigidDebrisBodyBudget(physicsObjectBudget);
 }
 
 export function normalizeGroundDebrisBudget(
