@@ -142,8 +142,12 @@ aftermath:
   contact unless lifetime is set to `Forever`.
 - Distance and pressure cleanup can still remove shards even when lifetime is
   `Forever`.
-- Extreme airborne bursts can still drop farthest active shards once they exceed
-  the separate rigid-body safety cap derived from the Physics Object Budget.
+- The rigid-body safety cap is enforced before Rapier admission. The full
+  visible spray still appears, but overflow shards remain cheap VFX, and later
+  pressure demotes rigid shards to VFX before expiring anything.
+- Extreme airborne bursts can still demote farthest active rigid shards once
+  they exceed the separate rigid-body safety cap derived from the Physics Object
+  Budget.
 - Sustained sub-60 FPS with heavy debris pressure can temporarily lower the
   effective rigid-debris cap until frames recover.
 

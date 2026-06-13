@@ -95,6 +95,9 @@ tests.
 `Break Burst Shards` controls the initial destruction spray, while `Active
 Ground Debris Cap` trims only supported or sleeping aftermath shards after they
 touch down and survive the short burst grace.
+When shard storms exceed the rigid-body safety cap, the full visible burst still
+spawns; overflow shards stay as cheap VFX and existing rigid shards are demoted
+to VFX before anything is removed.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show

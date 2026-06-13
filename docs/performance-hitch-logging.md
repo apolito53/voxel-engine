@@ -76,6 +76,11 @@ from body count, sleep/island behavior, worker-compatible broadphase support, or
 different debris gameplay rules rather than simply lowering the visible physics
 rate.
 
+Rigid-debris pressure relief starts at admission now: the full visual burst can
+spawn, but only the most useful representative shards become Rapier bodies
+before the first debris physics step. Overflow remains visible VFX, and
+over-budget rigid bodies demote back to VFX before any shard expires.
+
 Recent records are available in the browser at:
 
 ```js

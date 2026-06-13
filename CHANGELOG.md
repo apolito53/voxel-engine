@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.11.2 - 2026-06-13
+
+### Added
+
+- Added spawn-time rigid-debris admission scoring so the engine can choose which
+  visible shards become Rapier bodies based on player proximity, speed, support
+  usefulness, nearby core interaction, material volume, and burst spread.
+
+### Changed
+
+- Preserved the full visible `Break Burst Shards` spray while capping how many
+  newly spawned shards enter Rapier before the first debris physics step.
+- Changed rigid-body pressure relief to demote excess active debris back to
+  cheap visible VFX instead of expiring it with a poof.
+- Queued rigid-debris registration until the adapter update step so admission
+  telemetry lines up with the frame that actually creates and steps bodies.
+
 ## 0.11.1 - 2026-06-13
 
 ### Added

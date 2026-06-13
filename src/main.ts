@@ -11,6 +11,7 @@ import {
 } from "./adminCommands";
 import {
   BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
+  BLOCK_FRAGMENT_COLLISION_RADIUS,
   getBlockFragmentMaterialUnits,
   getBlockFragmentOffset,
   getDistributedBlockFragmentIndex,
@@ -274,6 +275,10 @@ import {
   createEmptyRigidDebrisStats,
   type RigidDebrisStats
 } from "./rigidDebris";
+import {
+  selectRigidDebrisAdmissionIndices,
+  type RigidDebrisAdmissionFragment
+} from "./rigidDebrisAdmission";
 import {
   RubbleField,
   type RubbleDamageEvent,
@@ -3439,16 +3444,70 @@ function spawnBlockFragments(
       debrisShape
     );
     addPhysicsToy(fragment);
-    rigidDebris.registerFragment(fragment);
     fragments.push(fragment);
     remainingVisualVolumeBudget = Math.max(0, remainingVisualVolumeBudget - debrisShape.estimatedVisualVolume);
   }
 
+  admitRigidDebrisFragments(fragments, blockCenter);
   rigidDebris.invalidateStaticColliders();
   if (fragments.length > 0) {
     debrisSettler.registerFracture(block, blockCenter, fragments);
   }
   return fragments.length;
+}
+
+function admitRigidDebrisFragments(fragments: readonly PhysicsToy[], burstCenter: THREE.Vector3): void {
+  if (fragments.length === 0) return;
+
+  const availableRigidSlots = getCurrentRigidDebrisBodyBudget() -
+    rigidDebris.getBodyCount() -
+    rigidDebris.getPendingFragmentCount();
+  const selectedIndices = selectRigidDebrisAdmissionIndices(
+    fragments.map(toRigidDebrisAdmissionFragment),
+    availableRigidSlots,
+    {
+      cameraPosition: camera.position,
+      burstCenter,
+      activeRadiusMeters: qualityController.preset.debrisActiveRadiusMeters,
+      supportHeightFor: getRigidDebrisAdmissionSupportHeight,
+      corePositions: toys
+        .filter((toy) => !toy.isInstancedFragment && !toy.isExpired)
+        .map((toy) => toy.mesh.position)
+    }
+  );
+
+  let deniedCount = 0;
+  fragments.forEach((fragment, index) => {
+    if (selectedIndices.has(index)) {
+      rigidDebris.registerFragment(fragment);
+    } else {
+      deniedCount += 1;
+    }
+  });
+  rigidDebris.recordAdmissionDenied(deniedCount);
+}
+
+function toRigidDebrisAdmissionFragment(fragment: PhysicsToy): RigidDebrisAdmissionFragment {
+  return {
+    position: fragment.mesh.position,
+    velocity: fragment.velocity,
+    materialUnits: fragment.rubbleMaterialUnits,
+    halfExtents: fragment.debrisShape?.colliderHalfExtents
+  };
+}
+
+function getRigidDebrisAdmissionSupportHeight(fragment: RigidDebrisAdmissionFragment): number | null {
+  const halfX = fragment.halfExtents?.x ?? BLOCK_FRAGMENT_COLLISION_RADIUS;
+  const halfY = fragment.halfExtents?.y ?? BLOCK_FRAGMENT_COLLISION_RADIUS;
+  const halfZ = fragment.halfExtents?.z ?? BLOCK_FRAGMENT_COLLISION_RADIUS;
+  return terrainAndRubbleCollisionWorld.getSupportHeight?.({
+    minX: fragment.position.x - halfX,
+    maxX: fragment.position.x + halfX,
+    minY: fragment.position.y - halfY,
+    maxY: fragment.position.y + halfY,
+    minZ: fragment.position.z - halfZ,
+    maxZ: fragment.position.z + halfZ
+  }) ?? null;
 }
 
 function createVectorFromVoxel(position: { readonly x: number; readonly y: number; readonly z: number } | undefined): THREE.Vector3 {
@@ -3944,9 +4003,8 @@ function enforceRigidDebrisBudget(): void {
     });
   for (let index = 0; index < overBudgetCount; index += 1) {
     const candidate = pressureCandidates[index]?.toy;
-    if (candidate) expireGroundDebrisWithPoof(candidate);
+    if (candidate) rigidDebris.demoteFragmentToVfx(candidate);
   }
-  pruneExpiredToys();
   rigidDebrisStats = rigidDebris.getStats();
 }
 

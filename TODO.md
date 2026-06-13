@@ -32,10 +32,10 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   application, Rapier debris flush/step/sync, support-collider collection/sync,
   cleanup, broadphase, rubble settling, and render-proxy sync without changing
   gameplay behavior.
-- Next optimization target: cap Rapier admission at spawn time while preserving
-  the full visible break burst as cheap VFX, then demote over-pressure debris to
-  VFX before expiring anything.
-- Then reduce temporary support-collider churn with better grounded/falling
+- Current optimization target completed: Rapier admission is capped at spawn
+  time while preserving the full visible break burst as cheap VFX, and
+  over-pressure rigid debris demotes to VFX before expiring anything.
+- Next reduce temporary support-collider churn with better grounded/falling
   prioritization and invalidation before considering parked sleepers.
 - Do not revive partial-mesh draw caps or rigid-debris cadence throttling; both
   were playtested and parked because the visual/feel cost was not worth it.

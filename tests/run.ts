@@ -268,6 +268,10 @@ import {
   RigidDebrisSimulation
 } from "../src/rigidDebris";
 import {
+  selectRigidDebrisAdmissionIndices,
+  type RigidDebrisAdmissionFragment
+} from "../src/rigidDebrisAdmission";
+import {
   createDirectionalShadowBasis,
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
@@ -6030,6 +6034,33 @@ test("block fragments lose ground speed and sleep near the fracture site", () =>
   assertEqual(fragment.velocity.lengthSq(), 0, "sleeping fragments should stop contributing motion");
 });
 
+test("rigid debris admission caps bodies while preserving representative burst shards", () => {
+  const fragments: RigidDebrisAdmissionFragment[] = [
+    { position: { x: -1, y: 0.4, z: -1 }, velocity: { x: 12, y: -3, z: 0 }, materialUnits: 1, halfExtents: { x: 0.1, y: 0.1, z: 0.1 } },
+    { position: { x: 1, y: 0.4, z: -1 }, velocity: { x: 11, y: -2, z: 0 }, materialUnits: 1, halfExtents: { x: 0.1, y: 0.1, z: 0.1 } },
+    { position: { x: -1, y: 0.4, z: 1 }, velocity: { x: 10, y: -1, z: 0 }, materialUnits: 1, halfExtents: { x: 0.1, y: 0.1, z: 0.1 } },
+    { position: { x: 1, y: 0.4, z: 1 }, velocity: { x: 9, y: -1, z: 0 }, materialUnits: 1, halfExtents: { x: 0.1, y: 0.1, z: 0.1 } },
+    { position: { x: -1, y: 1.8, z: -1 }, velocity: { x: 0, y: 1, z: 0 }, materialUnits: 1, halfExtents: { x: 0.1, y: 0.1, z: 0.1 } },
+    { position: { x: 1, y: 1.8, z: -1 }, velocity: { x: 0, y: 1, z: 0 }, materialUnits: 1, halfExtents: { x: 0.1, y: 0.1, z: 0.1 } }
+  ];
+
+  const selected = selectRigidDebrisAdmissionIndices(fragments, 3, {
+    cameraPosition: { x: 0, y: 1, z: 0 },
+    burstCenter: { x: 0, y: 1, z: 0 },
+    activeRadiusMeters: 8,
+    supportHeightFor: () => 0,
+    corePositions: [{ x: 0.8, y: 0.4, z: -1 }]
+  });
+
+  assertEqual(selected.size, 3, "admission should hard-cap selected Rapier bodies");
+  assert(selected.has(0), "fast falling support-adjacent shards should be admitted");
+  assert(selected.has(1), "core-adjacent shards should be admitted");
+  assert(
+    Array.from(selected).some((index) => fragments[index]?.position.z === 1),
+    "admission should keep the physical burst representative instead of choosing one dense corner"
+  );
+});
+
 test("expired quality-scaled fragments still graduate into rubble", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
@@ -6441,6 +6472,7 @@ test("rigid debris adapter registers per-fragment cuboid half extents", async ()
   );
 
   rigidDebris.registerFragment(fragment);
+  rigidDebris.update(1 / 60, { isSolid: () => false });
   const registeredHalfExtents = rigidDebris.getRegisteredColliderHalfExtents(fragment);
   assert(registeredHalfExtents, "registered rigid debris should expose its cuboid envelope");
   assertVectorNearlyEqual(
@@ -6449,6 +6481,38 @@ test("rigid debris adapter registers per-fragment cuboid half extents", async ()
     "rigid debris should use the fragment's own cuboid envelope instead of one global cuboid size"
   );
 
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter demotes overflow bodies to visible VFX", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(0.5, 1.5, 0.5),
+    new THREE.Vector3(2, 0, 0),
+    1
+  );
+
+  rigidDebris.registerFragment(fragment);
+  rigidDebris.recordAdmissionDenied(2);
+  rigidDebris.update(1 / 60, floorWorld);
+  assert(fragment.isRigidDebrisDriven, "test setup should first register the shard with Rapier");
+  assertEqual(rigidDebris.getStats().admittedBodiesThisFrame, 1, "admission telemetry should count registered bodies");
+  assertEqual(rigidDebris.getStats().deniedAdmissionThisFrame, 2, "admission telemetry should preserve overflow counts");
+
+  const demoted = rigidDebris.demoteFragmentToVfx(fragment);
+  const stats = rigidDebris.getStats();
+  assert(demoted, "demotion should report when a body was detached");
+  assert(!fragment.isExpired, "demoted overflow debris should remain visible instead of poofing");
+  assert(!fragment.isRigidDebrisDriven, "demoted overflow debris should leave the Rapier body set");
+  assertEqual(stats.bodies, 0, "demotion should remove the dynamic rigid body");
+  assertEqual(stats.convertedToVfxThisFrame, 1, "demotion telemetry should count VFX conversions");
   rigidDebris.clear();
 });
 

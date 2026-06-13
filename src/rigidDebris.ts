@@ -197,6 +197,7 @@ export class RigidDebrisSimulation {
   private staticColliderCreatedThisFrame = 0;
   private staticColliderRemovedThisFrame = 0;
   private staticColliderReusedThisFrame = 0;
+  private deniedAdmissionSinceLastUpdate = 0;
 
   initialize(): Promise<void> {
     if (this.world) return Promise.resolve();
@@ -221,11 +222,13 @@ export class RigidDebrisSimulation {
 
     this.pendingFragments.add(toy);
     this.staticCollidersDirty = true;
-    if (this.world) {
-      this.flushPendingFragments();
-    } else {
+    if (!this.world) {
       void this.initialize();
     }
+  }
+
+  recordAdmissionDenied(count: number): void {
+    this.deniedAdmissionSinceLastUpdate += Math.max(0, Math.floor(count));
   }
 
   update(delta: number, collisionWorld: CollisionWorld): RigidDebrisStats {
@@ -343,6 +346,22 @@ export class RigidDebrisSimulation {
     this.refreshStats();
   }
 
+  demoteFragmentToVfx(toy: PhysicsToy): boolean {
+    const hadPendingFragment = this.pendingFragments.delete(toy);
+    const record = this.bodiesByToy.get(toy);
+    if (!record && !hadPendingFragment) return false;
+
+    if (record) {
+      this.world?.removeRigidBody(record.body);
+      this.bodiesByToy.delete(toy);
+    }
+    toy.detachRigidDebrisBody();
+    this.convertedToVfxThisFrame += 1;
+    this.staticCollidersDirty = true;
+    this.refreshStats();
+    return true;
+  }
+
   invalidateStaticColliders(): void {
     this.staticCollidersDirty = true;
   }
@@ -377,6 +396,14 @@ export class RigidDebrisSimulation {
 
   getLastFrameTimings(): RigidDebrisFrameTimings {
     return { ...this.lastFrameTimings };
+  }
+
+  getBodyCount(): number {
+    return this.bodiesByToy.size;
+  }
+
+  getPendingFragmentCount(): number {
+    return this.pendingFragments.size;
   }
 
   getRegisteredColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 | null {
@@ -447,7 +474,8 @@ export class RigidDebrisSimulation {
   private resetFrameCounters(): void {
     this.lastFrameTimings = createEmptyRigidDebrisFrameTimings();
     this.admittedBodiesThisFrame = 0;
-    this.deniedAdmissionThisFrame = 0;
+    this.deniedAdmissionThisFrame = this.deniedAdmissionSinceLastUpdate;
+    this.deniedAdmissionSinceLastUpdate = 0;
     this.admissionQueueDepth = this.pendingFragments.size;
     this.convertedToVfxThisFrame = 0;
     this.substepsThisFrame = 0;
