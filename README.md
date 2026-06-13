@@ -100,7 +100,11 @@ spawns; overflow shards stay as cheap VFX and existing rigid shards are demoted
 to VFX before anything is removed.
 Rigid debris support scanning prioritizes sleeping, near-ground, falling, and
 fast shards so stress tests spend less CPU creating temporary colliders for
-calm unsupported airborne fragments.
+calm unsupported airborne fragments, and overlapping debris shares support-cell
+probe results during each refresh instead of repeating the same crater scan.
+Local hitch logs also receive runtime diagnostic breadcrumbs for WebGL context
+loss/restoration and uncaught browser errors, which helps separate a canvas-side
+render failure from a full engine freeze.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show

@@ -77,6 +77,13 @@ export type PerformanceHitchInput = {
   readonly stats: PerformanceHitchStatsSnapshot;
 };
 
+export type RuntimeDiagnosticEventInput = {
+  readonly type: string;
+  readonly logPass: PerformanceHitchLogPass;
+  readonly timestampMs?: number;
+  readonly details?: Readonly<Record<string, unknown>>;
+};
+
 const DEFAULT_MAX_RECORDS = 30;
 const DEFAULT_CONSOLE_LOG_INTERVAL_MS = 1000;
 export const LOW_FPS_LOG_THRESHOLD = 60;
@@ -281,6 +288,33 @@ export class PerformanceHitchLog {
       startedAtMs: this.getNow()
     };
   }
+}
+
+export function writeRuntimeDiagnosticEvent(input: RuntimeDiagnosticEventInput): void {
+  if (!canWriteLocalDevLog()) return;
+
+  const payload = {
+    kind: "runtime-diagnostic",
+    type: input.type,
+    timestampMs: input.timestampMs ?? performance.now(),
+    logPass: input.logPass,
+    appVersion: packageManifest.version,
+    href: window.location.href,
+    userAgent: navigator.userAgent,
+    details: input.details ?? {}
+  };
+
+  void fetch(LOCAL_DEV_HITCH_LOG_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(payload),
+    keepalive: true
+  }).catch(() => {
+    // Runtime diagnostics are best-effort breadcrumbs. Losing the debug log
+    // endpoint should never make a render/context failure worse.
+  });
 }
 
 function canWriteLocalDevLog(): boolean {

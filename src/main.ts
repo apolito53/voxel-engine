@@ -166,6 +166,7 @@ import {
 import {
   LOW_FPS_LOG_THRESHOLD,
   PerformanceHitchLog,
+  writeRuntimeDiagnosticEvent,
   type PerformanceHitchLogPass,
   type PerformanceHitchRecord,
   type PerformanceHitchStatsSnapshot
@@ -366,6 +367,7 @@ const FRAGMENT_UPWARD_SPEED_RANGE = 1.75;
 // shared chip/poof helpers so edited cells get familiar terrain feedback.
 const TERRAFORMER_IMPACT_SPEED = 6;
 const FRAME_SPIKE_EVENT_MS = 45;
+const RUNTIME_DIAGNOSTIC_EVENT_LIMIT = 24;
 const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
 const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
 const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
@@ -571,6 +573,7 @@ let debrisPerformancePressure = createDebrisPerformancePressureState(
 );
 let renderedPartialBlockRevision = -1;
 let lastPartialBlockMeshUpdateMs = 0;
+let runtimeDiagnosticEventsWritten = 0;
 const pendingPartialBlockMeshJobs = new Map<string, PendingPartialBlockMeshJob>();
 const PARTIAL_BLOCK_MESH_NORMAL_REGION_BUDGET = 8;
 const PARTIAL_BLOCK_MESH_URGENT_REGION_BUDGET = 24;
@@ -874,6 +877,92 @@ renderLoadoutMenus();
 renderBuilderPalette();
 syncBuilderControls();
 renderHotbar();
+installRuntimeRenderDiagnostics();
+
+function installRuntimeRenderDiagnostics(): void {
+  renderer.domElement.addEventListener("webglcontextlost", (event) => {
+    // If WebGL dies while the DOM menu still works, the normal frame/hitch
+    // path may stop giving us useful evidence. Keep this breadcrumb tiny and
+    // local so the next log review can distinguish a renderer context loss
+    // from an engine-wide main-thread freeze.
+    event.preventDefault();
+    recordRuntimeRenderDiagnostic("webgl-context-lost", {
+      canvasWidth: renderer.domElement.width,
+      canvasHeight: renderer.domElement.height
+    });
+    console.warn("Voxel renderer WebGL context lost; logged runtime diagnostic.");
+  }, eventListenerOptions);
+
+  renderer.domElement.addEventListener("webglcontextrestored", () => {
+    recordRuntimeRenderDiagnostic("webgl-context-restored", {
+      canvasWidth: renderer.domElement.width,
+      canvasHeight: renderer.domElement.height
+    });
+    console.warn("Voxel renderer WebGL context restored; logged runtime diagnostic.");
+  }, eventListenerOptions);
+
+  window.addEventListener("error", (event) => {
+    recordRuntimeRenderDiagnostic("window-error", {
+      message: event.message,
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+      error: serializeRuntimeError(event.error)
+    });
+  }, eventListenerOptions);
+
+  window.addEventListener("unhandledrejection", (event) => {
+    recordRuntimeRenderDiagnostic("unhandled-rejection", {
+      reason: serializeRuntimeError(event.reason)
+    });
+  }, eventListenerOptions);
+}
+
+function recordRuntimeRenderDiagnostic(
+  type: string,
+  details: Readonly<Record<string, unknown>>
+): void {
+  if (runtimeDiagnosticEventsWritten >= RUNTIME_DIAGNOSTIC_EVENT_LIMIT) return;
+  runtimeDiagnosticEventsWritten += 1;
+
+  writeRuntimeDiagnosticEvent({
+    type,
+    logPass: performanceHitchLog.getPass(),
+    details: {
+      appVersion: APP_VERSION,
+      inWorld,
+      qualityLabel: qualityController.preset.label,
+      physicsObjectCount: toys.length,
+      physicsObjectBudget,
+      rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
+      rigidDebris: rigidDebrisStats,
+      renderer: {
+        calls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles,
+        geometries: renderer.info.memory.geometries,
+        textures: renderer.info.memory.textures
+      },
+      gpu: gpuInfo,
+      documentHidden: document.hidden,
+      visibilityState: document.visibilityState,
+      ...details
+    }
+  });
+}
+
+function serializeRuntimeError(error: unknown): Readonly<Record<string, unknown>> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    };
+  }
+
+  return {
+    message: String(error)
+  };
+}
 
 function requireWorldRegistry(): WorldRegistry {
   if (!worldRegistry) {

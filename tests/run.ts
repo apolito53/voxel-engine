@@ -6287,6 +6287,39 @@ test("rigid debris adapter preserves ground colliders when many shards are high 
   rigidDebris.clear();
 });
 
+test("rigid debris adapter deduplicates overlapping support-cell probes", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  for (let index = 0; index < 32; index += 1) {
+    rigidDebris.registerFragment(PhysicsToy.createBlockFragment(
+      BLOCK.stone,
+      new THREE.Vector3(0.5, 0.28, 0.5),
+      new THREE.Vector3(0, -1, 0),
+      1
+    ));
+  }
+
+  rigidDebris.update(1 / 60, floorWorld);
+  const stats = rigidDebris.getStats();
+
+  assert(stats.staticRefreshRan, "test setup should perform a static support refresh");
+  assert(
+    stats.terrainColliders > 0,
+    "overlapping debris should still receive terrain support colliders"
+  );
+  assert(
+    stats.candidateCellsScanned < 120,
+    "overlapping debris should share per-cell support probes instead of repeating the same scan for every shard"
+  );
+  rigidDebris.clear();
+});
+
 test("rigid debris adapter nudges shallow terrain penetrations back onto support", async () => {
   const rigidDebris = new RigidDebrisSimulation();
   await rigidDebris.initialize();

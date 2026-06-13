@@ -83,7 +83,18 @@ over-budget rigid bodies demote back to VFX before any shard expires.
 Temporary rigid-debris support colliders are also prioritized: sleeping,
 near-supported, falling, fast, and moving shards get collider scans first, while
 calm unsupported airborne shards skip empty-air work until gravity, contact, or
-known rubble/partial support makes them relevant.
+known rubble/partial support makes them relevant. Each static refresh also
+deduplicates support-cell probes before consulting the collision world, so a
+dense crater pile cannot multiply the same terrain/partial/rubble query across
+dozens of overlapping shards.
+
+Runtime render failures use the same local JSONL path for small diagnostic
+breadcrumbs. WebGL context loss/restoration, uncaught window errors, and
+unhandled promise rejections are recorded with the current hitch pass, app
+version, GPU string, renderer counters, quality state, and rigid-debris
+snapshot. These records are intentionally not normal frame hitches; they exist
+to explain cases where the DOM menu still responds but the world canvas stops
+presenting.
 
 Recent records are available in the browser at:
 

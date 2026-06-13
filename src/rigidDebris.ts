@@ -177,6 +177,7 @@ export class RigidDebrisSimulation {
   private readonly surfaceBoxColliders = new Map<string, StaticColliderRecord>();
   private readonly rubbleSupportColliders = new Map<string, StaticColliderRecord>();
   private readonly activeColliderCells = new Set<string>();
+  private readonly probedColliderCells = new Set<string>();
   private readonly desiredTerrainColliderKeys = new Set<string>();
   private readonly desiredSurfaceBoxColliderKeys = new Set<string>();
   private readonly desiredRubbleSupportColliderKeys = new Set<string>();
@@ -653,6 +654,13 @@ export class RigidDebrisSimulation {
 
   private collectActiveColliderCells(collisionWorld: CollisionWorld): void {
     this.activeColliderCells.clear();
+    // Many debris shards cluster inside the same few crater cells. The old
+    // path deduped accepted support cells, but still re-ran the expensive
+    // terrain/partial/rubble suitability checks for every duplicate probe.
+    // Keep one probe per cell per refresh so overlapping shards share the
+    // answer instead of asking the collision world the same question hundreds
+    // of times in a stress crater.
+    this.probedColliderCells.clear();
     const candidates = this.collectSupportScanCandidates(collisionWorld);
     for (const candidate of candidates) {
       const { record } = candidate;
@@ -769,6 +777,10 @@ export class RigidDebrisSimulation {
       return;
     }
 
+    const key = getStaticColliderCellKey(x, y, z);
+    if (this.probedColliderCells.has(key)) return;
+    this.probedColliderCells.add(key);
+
     const cell = { x, y, z };
     this.candidateCellsScannedThisFrame += 1;
     // The collider budget is tiny compared with a loud debris burst. Spend it
@@ -780,7 +792,7 @@ export class RigidDebrisSimulation {
     }
 
     const beforeSize = this.activeColliderCells.size;
-    this.activeColliderCells.add(getStaticColliderCellKey(x, y, z));
+    this.activeColliderCells.add(key);
     if (this.activeColliderCells.size > beforeSize) {
       this.candidateCellsAcceptedThisFrame += 1;
     }
@@ -985,6 +997,7 @@ export class RigidDebrisSimulation {
     this.surfaceBoxColliders.clear();
     this.rubbleSupportColliders.clear();
     this.activeColliderCells.clear();
+    this.probedColliderCells.clear();
     this.desiredTerrainColliderKeys.clear();
     this.desiredSurfaceBoxColliderKeys.clear();
     this.desiredRubbleSupportColliderKeys.clear();

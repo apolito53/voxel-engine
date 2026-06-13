@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.11.4 - 2026-06-13
+
+### Added
+
+- Added local runtime diagnostic JSONL breadcrumbs for WebGL context loss,
+  context restore, uncaught window errors, and unhandled promise rejections so a
+  render-canvas failure can be distinguished from a total engine freeze.
+
+### Changed
+
+- Deduplicated rigid-debris support-cell probes during each static-collider
+  refresh, preventing overlapping crater debris from repeatedly asking the
+  collision world about the same terrain/partial/rubble cells.
+- Kept parked sleepers out of this patch after fresh logs showed the safer
+  immediate target was duplicate support scanning and render-crash evidence.
+
 ## 0.11.3 - 2026-06-13
 
 ### Changed

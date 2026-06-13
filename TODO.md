@@ -37,10 +37,11 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   over-pressure rigid debris demotes to VFX before expiring anything.
 - Current support target completed: temporary support-collider scans now
   prioritize sleeping, near-supported, falling, fast, and moving shards before
-  calm unsupported airborne shards, while still doing a narrow lookdown for
-  known rubble/partial support.
-- Next validate fresh `debris-pressure` logs before deciding whether parked
-  sleepers are worth the complexity.
+  calm unsupported airborne shards, still do a narrow lookdown for known
+  rubble/partial support, and deduplicate repeated support-cell probes inside
+  dense crater piles.
+- Next validate fresh `debris-pressure` and WebGL diagnostic logs before
+  deciding whether parked sleepers are worth the complexity.
 - Do not revive partial-mesh draw caps or rigid-debris cadence throttling; both
   were playtested and parked because the visual/feel cost was not worth it.
 
