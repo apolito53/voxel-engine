@@ -1,5 +1,18 @@
 export type WorkerPoolMode = "web-worker" | "sync-fallback";
 
+export type WorkerPoolJobTypeStats = {
+  readonly type: string;
+  readonly queuedJobs: number;
+  readonly runningJobs: number;
+  readonly completedJobs: number;
+  readonly canceledJobs: number;
+  readonly staleJobs: number;
+  readonly failedJobs: number;
+  readonly transferredBuffers: number;
+  readonly averageWorkerTimeMs: number;
+  readonly averageMainThreadUploadMs: number;
+};
+
 export type WorkerPoolStats = {
   readonly mode: WorkerPoolMode;
   readonly maxWorkers: number;
@@ -12,6 +25,7 @@ export type WorkerPoolStats = {
   readonly transferredBuffers: number;
   readonly averageWorkerTimeMs: number;
   readonly averageMainThreadUploadMs: number;
+  readonly jobsByType: readonly WorkerPoolJobTypeStats[];
 };
 
 export type WorkerPoolJobResult<TResult> =
@@ -70,6 +84,7 @@ export type WorkerPoolJobRequest<TPayload, TResult> = {
   readonly type: string;
   readonly payload: TPayload;
   readonly revision?: number;
+  readonly priority?: number;
   readonly transfer?: readonly Transferable[];
   readonly isRevisionStale?: (revision: number) => boolean;
   readonly run?: WorkerPoolSyncHandler<TPayload, TResult>;
@@ -85,10 +100,25 @@ type QueuedWorkerPoolJob<TPayload, TResult> = {
   readonly type: string;
   readonly payload: TPayload;
   readonly revision: number;
+  readonly priority: number;
+  readonly sequence: number;
   readonly transfer: readonly Transferable[];
   readonly isRevisionStale: (revision: number) => boolean;
   readonly run: WorkerPoolSyncHandler<TPayload, TResult>;
   readonly resolve: (result: WorkerPoolJobResult<TResult>) => void;
+};
+
+type MutableWorkerPoolJobTypeStats = {
+  queuedJobs: number;
+  runningJobs: number;
+  completedJobs: number;
+  canceledJobs: number;
+  staleJobs: number;
+  failedJobs: number;
+  transferredBuffers: number;
+  totalWorkerTimeMs: number;
+  totalUploadTimeMs: number;
+  uploadSamples: number;
 };
 
 type WorkerPoolOptions = {
@@ -107,8 +137,10 @@ export class WorkerPool {
   private readonly workers: Worker[] = [];
   private readonly idleWorkers: Worker[] = [];
   private readonly runningWorkerJobs = new Map<Worker, QueuedWorkerPoolJob<unknown, unknown>>();
+  private readonly jobTypeStats = new Map<string, MutableWorkerPoolJobTypeStats>();
   private mode: WorkerPoolMode = "sync-fallback";
   private nextJobId = 1;
+  private nextQueueSequence = 1;
   private runningJobs = 0;
   private completedJobs = 0;
   private canceledJobs = 0;
@@ -148,18 +180,22 @@ export class WorkerPool {
     const id = this.nextJobId;
     this.nextJobId += 1;
     this.transferredBuffers += request.transfer?.length ?? 0;
+    this.statsForType(request.type).transferredBuffers += request.transfer?.length ?? 0;
 
     const promise = new Promise<WorkerPoolJobResult<TResult>>((resolve) => {
-      this.queue.push({
+      this.insertQueuedJob({
         id,
         type: request.type,
         payload: request.payload,
         revision: request.revision ?? 0,
+        priority: normalizeWorkerPoolPriority(request.priority),
+        sequence: this.nextQueueSequence,
         transfer: request.transfer ?? [],
         isRevisionStale: request.isRevisionStale ?? (() => false),
         run: handler as WorkerPoolSyncHandler<TPayload, TResult>,
         resolve
       } as QueuedWorkerPoolJob<unknown, unknown>);
+      this.nextQueueSequence += 1;
     });
     this.drainQueue();
     return { id, promise };
@@ -172,6 +208,7 @@ export class WorkerPool {
     if (queuedIndex >= 0) {
       const [job] = this.queue.splice(queuedIndex, 1);
       this.canceledJobs += 1;
+      this.statsForType(job.type).canceledJobs += 1;
       job.resolve({
         status: "canceled",
         id: job.id,
@@ -186,10 +223,15 @@ export class WorkerPool {
     return true;
   }
 
-  recordMainThreadUpload(durationMs: number): void {
+  recordMainThreadUpload(durationMs: number, type?: string): void {
     const safeDuration = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
     this.totalUploadTimeMs += safeDuration;
     this.uploadSamples += 1;
+    if (type) {
+      const stats = this.statsForType(type);
+      stats.totalUploadTimeMs += safeDuration;
+      stats.uploadSamples += 1;
+    }
   }
 
   dispose(): void {
@@ -214,7 +256,8 @@ export class WorkerPool {
       failedJobs: this.failedJobs,
       transferredBuffers: this.transferredBuffers,
       averageWorkerTimeMs: this.completedJobs > 0 ? this.totalWorkerTimeMs / this.completedJobs : 0,
-      averageMainThreadUploadMs: this.uploadSamples > 0 ? this.totalUploadTimeMs / this.uploadSamples : 0
+      averageMainThreadUploadMs: this.uploadSamples > 0 ? this.totalUploadTimeMs / this.uploadSamples : 0,
+      jobsByType: this.getJobTypeStats()
     };
   }
 
@@ -257,7 +300,7 @@ export class WorkerPool {
       const job = this.queue.shift();
       if (!worker || !job) return;
 
-      this.runningJobs += 1;
+      this.startJob(job);
       this.runningWorkerJobs.set(worker, job);
       worker.postMessage({
         id: job.id,
@@ -269,7 +312,7 @@ export class WorkerPool {
   }
 
   private runSyncJob(job: QueuedWorkerPoolJob<unknown, unknown>): void {
-    this.runningJobs += 1;
+    this.startJob(job);
 
     Promise.resolve().then(async () => {
       const startedAt = this.getNow();
@@ -285,6 +328,7 @@ export class WorkerPool {
         }
         if (job.isRevisionStale(job.revision)) {
           this.staleJobs += 1;
+          this.statsForType(job.type).staleJobs += 1;
           return {
             status: "stale",
             id: job.id,
@@ -295,7 +339,9 @@ export class WorkerPool {
         }
 
         this.completedJobs += 1;
+        this.statsForType(job.type).completedJobs += 1;
         this.totalWorkerTimeMs += workerTimeMs;
+        this.statsForType(job.type).totalWorkerTimeMs += workerTimeMs;
         return {
           status: "completed",
           id: job.id,
@@ -307,6 +353,7 @@ export class WorkerPool {
       } catch (error) {
         const workerTimeMs = this.getNow() - startedAt;
         this.failedJobs += 1;
+        this.statsForType(job.type).failedJobs += 1;
         return {
           status: "failed",
           id: job.id,
@@ -317,7 +364,7 @@ export class WorkerPool {
         } satisfies WorkerPoolJobResult<unknown>;
       }
     }).then((result) => {
-      this.runningJobs -= 1;
+      this.finishJob(job);
       job.resolve(result);
       this.drainQueue();
     });
@@ -331,7 +378,7 @@ export class WorkerPool {
     if (!job || job.id !== response.id) return;
 
     this.runningWorkerJobs.delete(worker);
-    this.runningJobs -= 1;
+    this.finishJob(job);
     this.idleWorkers.push(worker);
 
     if (this.canceledJobIds.delete(job.id)) {
@@ -342,6 +389,7 @@ export class WorkerPool {
 
     if (response.status === "failed") {
       this.failedJobs += 1;
+      this.statsForType(job.type).failedJobs += 1;
       job.resolve({
         status: "failed",
         id: response.id,
@@ -356,6 +404,7 @@ export class WorkerPool {
 
     if (job.isRevisionStale(job.revision)) {
       this.staleJobs += 1;
+      this.statsForType(job.type).staleJobs += 1;
       job.resolve({
         status: "stale",
         id: response.id,
@@ -368,7 +417,9 @@ export class WorkerPool {
     }
 
     this.completedJobs += 1;
+    this.statsForType(job.type).completedJobs += 1;
     this.totalWorkerTimeMs += response.workerTimeMs;
+    this.statsForType(job.type).totalWorkerTimeMs += response.workerTimeMs;
     job.resolve({
       status: "completed",
       id: response.id,
@@ -386,8 +437,9 @@ export class WorkerPool {
     this.removeWorker(worker);
     if (!job) return;
 
-    this.runningJobs -= 1;
+    this.finishJob(job);
     this.failedJobs += 1;
+    this.statsForType(job.type).failedJobs += 1;
     job.resolve({
       status: "failed",
       id: job.id,
@@ -413,6 +465,7 @@ export class WorkerPool {
     workerTimeMs: number
   ): WorkerPoolJobResult<unknown> {
     this.canceledJobs += 1;
+    this.statsForType(job.type).canceledJobs += 1;
     return {
       status: "canceled",
       id: job.id,
@@ -420,6 +473,70 @@ export class WorkerPool {
       revision: job.revision,
       workerTimeMs
     };
+  }
+
+  private insertQueuedJob(job: QueuedWorkerPoolJob<unknown, unknown>): void {
+    // Lower numbers run first. Equal priorities stay FIFO, so broad background
+    // work cannot jump ahead of older visible work unless it has a deliberately
+    // higher scheduling lane.
+    let insertAt = this.queue.length;
+    while (insertAt > 0 && isQueuedJobHigherPriority(job, this.queue[insertAt - 1])) {
+      insertAt -= 1;
+    }
+    this.queue.splice(insertAt, 0, job);
+  }
+
+  private startJob(job: QueuedWorkerPoolJob<unknown, unknown>): void {
+    this.runningJobs += 1;
+    this.statsForType(job.type).runningJobs += 1;
+  }
+
+  private finishJob(job: QueuedWorkerPoolJob<unknown, unknown>): void {
+    this.runningJobs -= 1;
+    const stats = this.statsForType(job.type);
+    stats.runningJobs = Math.max(0, stats.runningJobs - 1);
+  }
+
+  private statsForType(type: string): MutableWorkerPoolJobTypeStats {
+    let stats = this.jobTypeStats.get(type);
+    if (!stats) {
+      stats = {
+        queuedJobs: 0,
+        runningJobs: 0,
+        completedJobs: 0,
+        canceledJobs: 0,
+        staleJobs: 0,
+        failedJobs: 0,
+        transferredBuffers: 0,
+        totalWorkerTimeMs: 0,
+        totalUploadTimeMs: 0,
+        uploadSamples: 0
+      };
+      this.jobTypeStats.set(type, stats);
+    }
+    return stats;
+  }
+
+  private getJobTypeStats(): readonly WorkerPoolJobTypeStats[] {
+    const queuedCounts = new Map<string, number>();
+    for (const job of this.queue) {
+      queuedCounts.set(job.type, (queuedCounts.get(job.type) ?? 0) + 1);
+    }
+
+    return [...this.jobTypeStats.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([type, stats]) => ({
+        type,
+        queuedJobs: queuedCounts.get(type) ?? 0,
+        runningJobs: stats.runningJobs,
+        completedJobs: stats.completedJobs,
+        canceledJobs: stats.canceledJobs,
+        staleJobs: stats.staleJobs,
+        failedJobs: stats.failedJobs,
+        transferredBuffers: stats.transferredBuffers,
+        averageWorkerTimeMs: stats.completedJobs > 0 ? stats.totalWorkerTimeMs / stats.completedJobs : 0,
+        averageMainThreadUploadMs: stats.uploadSamples > 0 ? stats.totalUploadTimeMs / stats.uploadSamples : 0
+      }));
   }
 }
 
@@ -443,4 +560,17 @@ function readHardwareConcurrency(): number {
 function readMonotonicTimeMs(): number {
   if (typeof performance === "undefined") return Date.now();
   return performance.now();
+}
+
+function normalizeWorkerPoolPriority(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 100;
+  return Math.max(-1000000, Math.min(1000000, value ?? 100));
+}
+
+function isQueuedJobHigherPriority(
+  candidate: QueuedWorkerPoolJob<unknown, unknown>,
+  existing: QueuedWorkerPoolJob<unknown, unknown>
+): boolean {
+  if (candidate.priority !== existing.priority) return candidate.priority < existing.priority;
+  return candidate.sequence < existing.sequence;
 }

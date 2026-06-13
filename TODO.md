@@ -2,17 +2,15 @@
 
 Shortlist of ideas worth keeping visible without pretending they are committed scope yet.
 
-## v0.10 Worker Migration Roadmap
+## Worker Migration Roadmap
 
 - Current foundation: `WorkerPool` owns the shared job protocol shape with
   clamped capacity, ids, stale revision rejection, cancellation, sync fallback,
-  transfer bookkeeping, and HUD/log telemetry.
-- Next likely slice: extract partial-region geometry building into a pure
-  sync-or-worker path that returns transferable typed mesh buffers while the
-  main thread keeps Three.js `BufferGeometry` ownership.
-- Then fold chunk generation/meshing into the shared pool without changing
-  terrain semantics, chunk revision rejection, atlas UV/tile attributes, or
-  near/fog priority.
+  transfer bookkeeping, priority lanes, per-job-type telemetry, and buffered
+  main-thread upload accounting.
+- Completed browser-worker slices: partial-region geometry building plus chunk
+  generation/meshing now run through the generic `engineWorker` and shared
+  WorkerPool while the main thread keeps Three.js `BufferGeometry` ownership.
 - Later, decouple loose debris simulation state from Three proxy objects so
   rendering consumes plain arrays of transforms/material/shape ids instead of
   owning the simulation state.

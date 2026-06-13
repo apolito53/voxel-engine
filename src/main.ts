@@ -666,7 +666,7 @@ const physicsCoreTrail = new PhysicsCoreTrail(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
 const workerPool = new WorkerPool({
-  createWorker: () => new Worker(new URL("./partialBlockMeshWorker.ts", import.meta.url), {
+  createWorker: () => new Worker(new URL("./engineWorker.ts", import.meta.url), {
     type: "module",
     name: "voxel-engine-worker-pool"
   })
@@ -891,7 +891,8 @@ async function startApp(): Promise<void> {
     world = new VoxelWorld({
       storage: await createChunkStorage(initialWorld.id),
       seed: initialWorld.seed,
-      terrainProfile: initialWorld.terrainProfile
+      terrainProfile: initialWorld.terrainProfile,
+      workerPool
     });
     await world.loadSavedChunkIndex();
 
@@ -2994,6 +2995,7 @@ function schedulePartialBlockMeshRegionBuild(
     type: PARTIAL_BLOCK_MESH_BUILD_JOB,
     payload,
     revision,
+    priority: update.urgent ? 0 : 20,
     isRevisionStale: (jobRevision) =>
       activeWorld !== world || activeWorld.isPartialBlockMeshRegionRevisionStale(update.key, jobRevision),
     run: buildPartialBlockMeshBuildJob
@@ -3023,7 +3025,7 @@ function schedulePartialBlockMeshRegionBuild(
       result.result.cellCount,
       result.result.geometry
     );
-    workerPool.recordMainThreadUpload(performance.now() - uploadStartedAt);
+    workerPool.recordMainThreadUpload(performance.now() - uploadStartedAt, PARTIAL_BLOCK_MESH_BUILD_JOB);
     partialBlockMeshField.setDirtyRegionCount(
       activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
     );

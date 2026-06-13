@@ -8,7 +8,7 @@ import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
 import type { WorldStats } from "./world";
-import type { WorkerPoolStats } from "./workerPool";
+import type { WorkerPoolJobTypeStats, WorkerPoolStats } from "./workerPool";
 import packageManifest from "../package.json";
 import {
   REMOTE_HITCH_LOG_ENDPOINT,
@@ -557,6 +557,8 @@ function addCrossCuttingPressureDetails(
       `worker jobs q ${stats.workerPool.queuedJobs}, run ${stats.workerPool.runningJobs}, ` +
       `avg ${formatMs(stats.workerPool.averageWorkerTimeMs)}`
     );
+    const activeJobDetails = formatWorkerPoolJobTypeDetails(stats.workerPool.jobsByType);
+    if (activeJobDetails) details.push(activeJobDetails);
   }
 }
 
@@ -613,6 +615,31 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
 
 function formatMs(value: number): string {
   return `${value.toFixed(1)}ms`;
+}
+
+function formatWorkerPoolJobTypeDetails(jobTypes: readonly WorkerPoolJobTypeStats[]): string {
+  const activeTypes = jobTypes.filter((stats) =>
+    stats.queuedJobs > 0 ||
+    stats.runningJobs > 0 ||
+    stats.failedJobs > 0 ||
+    stats.staleJobs > 0
+  );
+  if (activeTypes.length === 0) return "";
+
+  return "worker lanes " + activeTypes
+    .slice(0, 4)
+    .map((stats) =>
+      `${formatWorkerPoolJobType(stats.type)} q${stats.queuedJobs}/run${stats.runningJobs}` +
+      `/stale${stats.staleJobs}/fail${stats.failedJobs}`
+    )
+    .join(", ");
+}
+
+function formatWorkerPoolJobType(type: string): string {
+  if (type === "partial-block-mesh:build") return "partial";
+  if (type === "chunk:generate") return "chunk-gen";
+  if (type === "chunk:mesh") return "chunk-mesh";
+  return type;
 }
 
 function formatFps(value: number): string {

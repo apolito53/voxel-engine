@@ -8,11 +8,17 @@ import {
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
-  ChunkMeshRequest,
   ChunkNeighborBuffers,
-  ChunkWorkerRequest,
   ChunkWorkerResult
 } from "./chunkProtocol";
+import {
+  CHUNK_GENERATE_JOB,
+  CHUNK_MESH_JOB,
+  buildChunkGenerateJob,
+  buildChunkMeshJob,
+  type ChunkGenerateJobPayload,
+  type ChunkMeshJobPayload
+} from "./chunkJobs";
 import type {
   CollisionBounds,
   CollisionVector,
@@ -45,6 +51,7 @@ import {
 } from "./partialBlocks";
 import { normalizeTerraformerSize } from "./terraformerSettings";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext, type TerrainProfile } from "./terrain";
+import type { WorkerPool, WorkerPoolJobResult } from "./workerPool";
 
 const LOAD_RADIUS = 4;
 const UNLOAD_RADIUS = 5;
@@ -108,6 +115,7 @@ export type WorldOptions = {
   readonly storage?: ChunkStorage;
   readonly seed?: string;
   readonly terrainProfile?: TerrainProfile;
+  readonly workerPool?: WorkerPool | null;
 };
 
 export type ChunkCoords = {
@@ -832,11 +840,15 @@ type ChunkQueueWindow = {
   readonly radius: number;
 };
 
-type PendingChunkLoad = ChunkQueueEntry & {
+type PendingChunkLoadBase = ChunkQueueEntry & {
   readonly key: string;
 };
 
-type PendingSavedChunkLoad = PendingChunkLoad & {
+type PendingChunkLoad = PendingChunkLoadBase & {
+  readonly jobId: number;
+};
+
+type PendingSavedChunkLoad = PendingChunkLoadBase & {
   readonly generation: number;
 };
 
@@ -847,6 +859,7 @@ type SavedChunkLoadResult = PendingSavedChunkLoad & {
 type PendingMeshBuild = {
   readonly key: string;
   readonly revision: number;
+  readonly jobId: number;
 };
 
 type PriorityItem = {
@@ -898,7 +911,7 @@ export class VoxelWorld implements CollisionWorld {
   storageGeneration: number;
   storageFlushTimer: ReturnType<typeof setTimeout> | null;
   workerRequestId: number;
-  worker: Worker | null;
+  workerPool: WorkerPool | null;
   priorityCx: number;
   priorityCz: number;
   priorityViewX: number;
@@ -931,7 +944,7 @@ export class VoxelWorld implements CollisionWorld {
   private readonly partialBlockMaskCache: Map<string, PartialBlockMaskCacheEntry>;
   private partialBlockGeometryRevision: number;
 
-  constructor({ storage = createNullChunkStorage(), seed = "", terrainProfile }: WorldOptions = {}) {
+  constructor({ storage = createNullChunkStorage(), seed = "", terrainProfile, workerPool = null }: WorldOptions = {}) {
     this.chunks = new Map();
     this.storage = storage;
     this.seed = String(seed || "");
@@ -955,7 +968,7 @@ export class VoxelWorld implements CollisionWorld {
     this.storageGeneration = 0;
     this.storageFlushTimer = null;
     this.workerRequestId = 0;
-    this.worker = this.createWorker();
+    this.workerPool = workerPool;
     this.priorityCx = 0;
     this.priorityCz = 0;
     this.priorityViewX = 0;
@@ -1047,6 +1060,12 @@ export class VoxelWorld implements CollisionWorld {
     this.chunkLoadQueue.clear();
     this.invalidateChunkQueueWindow();
     this.invalidateChunkUnloadWindow();
+    for (const pending of this.pendingChunkLoads.values()) {
+      this.workerPool?.cancel(pending.jobId);
+    }
+    for (const pending of this.pendingMeshBuilds.values()) {
+      this.workerPool?.cancel(pending.jobId);
+    }
     this.pendingChunkLoads.clear();
     this.pendingChunkKeys.clear();
     this.pendingSavedChunkLoads.clear();
@@ -1072,10 +1091,6 @@ export class VoxelWorld implements CollisionWorld {
     }
 
     this.disposeLoadedChunks(scene);
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
   }
 
   key(cx: number, cz: number): string {
@@ -1084,29 +1099,6 @@ export class VoxelWorld implements CollisionWorld {
 
   getChunk(cx: number, cz: number): Chunk | undefined {
     return this.chunks.get(this.key(cx, cz));
-  }
-
-  createWorker(): Worker | null {
-    if (typeof Worker === "undefined") return null;
-
-    const worker = new Worker(new URL("./chunkWorker.ts", import.meta.url), {
-      type: "module"
-    });
-    worker.onmessage = (event: MessageEvent<ChunkWorkerResult>) => {
-      this.workerResults.push(event.data);
-    };
-    worker.onerror = (event: ErrorEvent) => {
-      console.error("Chunk worker failed", event.message);
-      worker.terminate();
-      this.worker = null;
-      this.pendingChunkLoads.clear();
-      this.pendingChunkKeys.clear();
-      this.pendingMeshBuilds.clear();
-      this.pendingMeshKeys.clear();
-      this.invalidateChunkQueueWindow();
-      this.invalidateChunkUnloadWindow();
-    };
-    return worker;
   }
 
   ensureChunk(cx: number, cz: number): Chunk {
@@ -1348,7 +1340,7 @@ export class VoxelWorld implements CollisionWorld {
         continue;
       }
 
-      if (!this.worker || this.savedChunks.has(key)) {
+      if (!this.workerPool || this.savedChunks.has(key)) {
         this.ensureChunk(queued.cx, queued.cz);
         this.lastLoadedChunks += 1;
         requested += 1;
@@ -1363,7 +1355,7 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   availableChunkLoadSlots(maxLoads: number): number {
-    if (!this.worker) return maxLoads;
+    if (!this.workerPool) return maxLoads;
 
     const pendingLoads = this.pendingChunkLoads.size + this.pendingSavedChunkLoads.size;
     const loadPipelineLimit = Math.max(maxLoads, maxLoads * MAX_PENDING_LOAD_MULTIPLIER);
@@ -1390,23 +1382,28 @@ export class VoxelWorld implements CollisionWorld {
 
   requestChunkGeneration(cx: number, cz: number): void {
     const key = this.key(cx, cz);
-    if (!this.worker || this.pendingChunkKeys.has(key) || this.chunks.has(key)) {
+    if (!this.workerPool || this.pendingChunkKeys.has(key) || this.chunks.has(key)) {
       return;
     }
 
     const requestId = this.nextWorkerRequestId();
     this.chunkLoadQueue.delete(key);
     this.pendingChunkKeys.add(key);
-    this.pendingChunkLoads.set(requestId, { key, cx, cz });
-    const message: ChunkWorkerRequest = {
-      type: "generate",
+    const payload: ChunkGenerateJobPayload = {
       requestId,
       cx,
       cz,
       seed: this.seed,
       terrainProfile: this.terrainProfile
     };
-    this.worker.postMessage(message);
+    const handle = this.workerPool.enqueue<ChunkGenerateJobPayload, ChunkWorkerResult>({
+      type: CHUNK_GENERATE_JOB,
+      payload,
+      priority: this.getChunkWorkerPriority(cx, cz, 40),
+      run: buildChunkGenerateJob
+    });
+    this.pendingChunkLoads.set(requestId, { key, cx, cz, jobId: handle.id });
+    void handle.promise.then((result) => this.bufferChunkWorkerResult(result));
   }
 
   requestSavedChunkLoad(cx: number, cz: number): void {
@@ -1501,6 +1498,74 @@ export class VoxelWorld implements CollisionWorld {
   nextWorkerRequestId(): number {
     this.workerRequestId += 1;
     return this.workerRequestId;
+  }
+
+  private bufferChunkWorkerResult(result: WorkerPoolJobResult<ChunkWorkerResult>): void {
+    if (result.status === "completed") {
+      this.workerResults.push(result.result);
+      return;
+    }
+
+    if (result.type === CHUNK_GENERATE_JOB) {
+      this.releasePendingChunkLoadByJobId(
+        result.id,
+        result.status,
+        result.status === "failed" ? result.error : undefined
+      );
+      return;
+    }
+
+    if (result.type === CHUNK_MESH_JOB) {
+      this.releasePendingMeshBuildByJobId(
+        result.id,
+        result.status,
+        result.status === "failed" ? result.error : undefined
+      );
+    }
+  }
+
+  private releasePendingChunkLoadByJobId(
+    jobId: number,
+    status: WorkerPoolJobResult<ChunkWorkerResult>["status"],
+    error?: unknown
+  ): void {
+    const requestId = findPendingChunkRequestIdByJob(this.pendingChunkLoads, jobId);
+    if (requestId === null) return;
+    const pending = this.pendingChunkLoads.get(requestId);
+    if (!pending) return;
+
+    this.pendingChunkLoads.delete(requestId);
+    this.pendingChunkKeys.delete(pending.key);
+
+    if (status === "failed") {
+      console.warn("Chunk generation worker-pool job failed", pending.key, error);
+      if (!this.chunks.has(pending.key)) {
+        this.chunkLoadQueue.set(pending.key, { cx: pending.cx, cz: pending.cz });
+        this.invalidateChunkQueueWindow();
+      }
+    }
+  }
+
+  private releasePendingMeshBuildByJobId(
+    jobId: number,
+    status: WorkerPoolJobResult<ChunkWorkerResult>["status"],
+    error?: unknown
+  ): void {
+    const requestId = findPendingMeshRequestIdByJob(this.pendingMeshBuilds, jobId);
+    if (requestId === null) return;
+    const pending = this.pendingMeshBuilds.get(requestId);
+    if (!pending) return;
+
+    this.pendingMeshBuilds.delete(requestId);
+    this.pendingMeshKeys.delete(pending.key);
+
+    const [cxText, czText] = pending.key.split(",");
+    const chunk = this.getChunk(Number(cxText), Number(czText));
+    if (chunk) this.markChunkDirty(chunk);
+
+    if (status === "failed") {
+      console.warn("Chunk mesh worker-pool job failed", pending.key, error);
+    }
   }
 
   generateChunk(chunk: Chunk): void {
@@ -1805,7 +1870,10 @@ export class VoxelWorld implements CollisionWorld {
       this.urgentPartialBlockRegionKeys.delete(key);
     }
 
-    return selectedKeys.map((key) => this.createPartialBlockMeshRegionUpdate(key));
+    return selectedKeys.map((key) => this.createPartialBlockMeshRegionUpdate(
+      key,
+      urgentKeys.includes(key)
+    ));
   }
 
   getPartialBlockCount(): number {
@@ -2677,11 +2745,11 @@ export class VoxelWorld implements CollisionWorld {
     return this.key(cx, cz);
   }
 
-  private createPartialBlockMeshRegionUpdate(key: string): PartialBlockMeshRegionUpdate {
+  private createPartialBlockMeshRegionUpdate(key: string, urgent = false): PartialBlockMeshRegionUpdate {
     const coords = parsePartialBlockMeshRegionKey(key);
     const cells = sortPartialBlockCells([...(this.partialBlocksByRegion.get(key)?.values() ?? [])]);
     const revision = this.partialBlockRegionRevisions.get(key) ?? this.partialBlockGeometryRevision;
-    if (!coords) return { key, revision, cells, contextCells: cells };
+    if (!coords) return { key, revision, urgent, cells, contextCells: cells };
 
     const contextCells: PartialBlockCell[] = [];
     for (let rx = coords.rx - 1; rx <= coords.rx + 1; rx += 1) {
@@ -2695,7 +2763,7 @@ export class VoxelWorld implements CollisionWorld {
       }
     }
 
-    return { key, revision, cells, contextCells: sortPartialBlockCells(contextCells) };
+    return { key, revision, urgent, cells, contextCells: sortPartialBlockCells(contextCells) };
   }
 
   isPartialBlockMeshRegionRevisionStale(key: string, revision: number): boolean {
@@ -3096,7 +3164,7 @@ export class VoxelWorld implements CollisionWorld {
     material: THREE.Material,
     maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME
   ): number {
-    if (this.worker) {
+    if (this.workerPool) {
       this.processMeshResults(scene, material, maxRebuilds);
       this.lastRequestedMeshes = this.requestDirtyMeshBuilds(maxRebuilds);
       return this.lastMeshedChunks;
@@ -3153,6 +3221,7 @@ export class VoxelWorld implements CollisionWorld {
       this.pendingMeshBuilds.delete(result.requestId);
       this.pendingMeshKeys.delete(pending.key);
 
+      const uploadStartedAt = performance.now();
       const mesh = chunk.applyMeshData(
         {
           positions: result.positions,
@@ -3164,6 +3233,7 @@ export class VoxelWorld implements CollisionWorld {
         },
         material
       );
+      this.workerPool?.recordMainThreadUpload(performance.now() - uploadStartedAt, CHUNK_MESH_JOB);
       this.markChunkClean(chunk);
       if (!mesh.parent) scene.add(mesh);
       this.lastMeshedChunks += 1;
@@ -3375,8 +3445,16 @@ export class VoxelWorld implements CollisionWorld {
     return a.item.cx < b.item.cx;
   }
 
+  private getChunkWorkerPriority(cx: number, cz: number, basePriority: number): number {
+    const priority = this.createPriorityEntry({ cx, cz }, this.priorityCx, this.priorityCz);
+    // WorkerPool priorities are coarse lanes first, tiny distance/alignment nudge second.
+    // The world still owns exact apply ordering; this only prevents far background work
+    // from occupying every worker while visible chunks or urgent partial meshes wait.
+    return basePriority + priority.lane * 10 + Math.min(priority.distance, 10000) / 10000;
+  }
+
   requestMeshBuild(chunk: Chunk, key: string): void {
-    if (!this.worker) return;
+    if (!this.workerPool) return;
 
     const requestId = this.nextWorkerRequestId();
     const blocks = chunk.blocks.slice();
@@ -3391,12 +3469,7 @@ export class VoxelWorld implements CollisionWorld {
     ].filter((buffer): buffer is ArrayBuffer => Boolean(buffer));
 
     this.pendingMeshKeys.add(key);
-    this.pendingMeshBuilds.set(requestId, {
-      key,
-      revision: chunk.revision
-    });
-    const message: ChunkMeshRequest = {
-      type: "mesh",
+    const payload: ChunkMeshJobPayload = {
       requestId,
       cx: chunk.cx,
       cz: chunk.cz,
@@ -3405,7 +3478,24 @@ export class VoxelWorld implements CollisionWorld {
       neighbors,
       partialBlockMasks
     };
-    this.worker.postMessage(message, transfers);
+    const handle = this.workerPool.enqueue<ChunkMeshJobPayload, ChunkWorkerResult>({
+      type: CHUNK_MESH_JOB,
+      payload,
+      revision: chunk.revision,
+      priority: this.getChunkWorkerPriority(chunk.cx, chunk.cz, 10),
+      transfer: transfers,
+      isRevisionStale: (revision) => {
+        const currentChunk = this.getChunk(chunk.cx, chunk.cz);
+        return !currentChunk || currentChunk.revision !== revision;
+      },
+      run: buildChunkMeshJob
+    });
+    this.pendingMeshBuilds.set(requestId, {
+      key,
+      revision: chunk.revision,
+      jobId: handle.id
+    });
+    void handle.promise.then((result) => this.bufferChunkWorkerResult(result));
   }
 
   snapshotNeighborBlocks(cx: number, cz: number): ChunkNeighborBuffers {
@@ -3621,6 +3711,26 @@ function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {
 function transferChunkBuffer(blocks: Uint8Array): ArrayBuffer {
   // All chunk snapshots in this engine are plain Uint8Array instances, not shared buffers.
   return blocks.buffer as ArrayBuffer;
+}
+
+function findPendingChunkRequestIdByJob(
+  pendingLoads: ReadonlyMap<number, PendingChunkLoad>,
+  jobId: number
+): number | null {
+  for (const [requestId, pending] of pendingLoads) {
+    if (pending.jobId === jobId) return requestId;
+  }
+  return null;
+}
+
+function findPendingMeshRequestIdByJob(
+  pendingBuilds: ReadonlyMap<number, PendingMeshBuild>,
+  jobId: number
+): number | null {
+  for (const [requestId, pending] of pendingBuilds) {
+    if (pending.jobId === jobId) return requestId;
+  }
+  return null;
 }
 
 function getOrCreateMapBucket<K, V>(buckets: Map<string, Map<K, V>>, key: string): Map<K, V> {

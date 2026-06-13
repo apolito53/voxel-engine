@@ -128,6 +128,7 @@ export type PartialBlockMeshRegionBounds = {
 export type PartialBlockMeshRegionUpdate = {
   readonly key: string;
   readonly revision?: number;
+  readonly urgent?: boolean;
   readonly cells: readonly PartialBlockCell[];
   readonly contextCells: readonly PartialBlockCell[];
 };

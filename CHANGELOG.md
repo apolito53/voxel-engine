@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.11.0 - 2026-06-13
+
+### Added
+
+- Added a generic `engineWorker` entrypoint so chunk generation, chunk meshing,
+  and partial-terrain region meshing all run through the shared `WorkerPool`
+  protocol instead of separate worker systems.
+- Added WorkerPool priority lanes plus per-job-type telemetry so urgent partial
+  mesh jobs, visible chunk meshes, chunk generation, and background work can be
+  distinguished in the F3 HUD and hitch logs.
+
+### Changed
+
+- Migrated normal chunk streaming generation and meshing onto the shared
+  WorkerPool while preserving buffered, frustum-prioritized result application
+  on the main thread.
+- Kept Three.js geometry ownership on the main thread and moved only worker-safe
+  typed-array CPU work across the worker boundary.
+
 ## 0.10.7 - 2026-06-12
 
 ### Changed

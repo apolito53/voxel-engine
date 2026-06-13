@@ -55,6 +55,12 @@ import {
 } from "../src/builderTools";
 import { Chunk } from "../src/chunk";
 import type { ChunkGeneratedResult } from "../src/chunkProtocol";
+import {
+  CHUNK_GENERATE_JOB,
+  CHUNK_MESH_JOB,
+  buildChunkGenerateJob,
+  buildChunkMeshJob
+} from "../src/chunkJobs";
 import type { CollisionBounds, CollisionWorld } from "../src/collision";
 import {
   PhysicsCoreAimPreview,
@@ -480,6 +486,15 @@ function assertUint8ArraysEqual(actual: Uint8Array, expected: Uint8Array, messag
   }
 }
 
+function assertFloat32ArraysEqual(actual: Float32Array, expected: Float32Array, message: string): void {
+  assertEqual(actual.length, expected.length, `${message} length`);
+  for (let index = 0; index < actual.length; index += 1) {
+    if (actual[index] !== expected[index]) {
+      throw new Error(`${message}. First difference at ${index}: ${actual[index]} !== ${expected[index]}.`);
+    }
+  }
+}
+
 test("combat log caps entries and reports latest events first", () => {
   const combatLog = new CombatLog(2);
   combatLog.record({
@@ -722,6 +737,69 @@ function createFakeNovaMessageTarget(): NovaPilotMessageTarget & { readonly isVi
     }
   };
 }
+
+test("WorkerPool priority drains urgent jobs ahead of background jobs", async () => {
+  const pool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const started: string[] = [];
+  const completed: string[] = [];
+  const releases: Array<() => void> = [];
+
+  function enqueue(label: string, priority: number): void {
+    pool.enqueue<null, string>({
+      type: label,
+      payload: null,
+      priority,
+      run: () => {
+        started.push(label);
+        return new Promise<string>((resolve) => {
+          releases.push(() => {
+            completed.push(label);
+            resolve(label);
+          });
+        });
+      }
+    });
+  }
+
+  enqueue("background", 90);
+  enqueue("middle", 50);
+  enqueue("urgent", 0);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assertDeepEqual(started, ["background"], "the first job should start immediately");
+  releases.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assertDeepEqual(started, ["background", "urgent"], "urgent queued work should run before older lower-priority work");
+
+  releases.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assertDeepEqual(started, ["background", "urgent", "middle"], "remaining work should continue by priority");
+
+  releases.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assertDeepEqual(completed, ["background", "urgent", "middle"], "all queued priority work should complete");
+});
+
+test("WorkerPool stats separate job types and upload timing", async () => {
+  const pool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2, getNow: () => 10 });
+  const handle = pool.enqueue<null, string>({
+    type: "chunk:mesh",
+    payload: null,
+    priority: 5,
+    run: () => "done"
+  });
+
+  const result = await handle.promise;
+  assertEqual(result.status, "completed", "test worker job should complete");
+  pool.recordMainThreadUpload(4, "chunk:mesh");
+
+  const stats = pool.getStats();
+  const meshStats = stats.jobsByType.find((entry) => entry.type === "chunk:mesh");
+  assert(meshStats, "per-type stats should include the completed mesh job");
+  assertEqual(meshStats.completedJobs, 1, "per-type stats should count completed jobs");
+  assertEqual(meshStats.runningJobs, 0, "per-type stats should clear running jobs");
+  assertEqual(meshStats.averageMainThreadUploadMs, 4, "per-type stats should include upload timing");
+});
 
 test("event bus emits typed payloads and unregisters handlers", () => {
   type CounterEvents = {
@@ -1280,6 +1358,126 @@ test("terrain generation is deterministic by seed", () => {
   const betaChunk = generateChunkBlocks(1, -2, betaTerrain);
   assertUint8ArraysEqual(alphaChunkA, alphaChunkB, "same seed should generate identical chunk blocks");
   assert(hasAnyDifference(alphaChunkA, betaChunk), "different seed should generate a different chunk payload");
+});
+
+test("chunk generation worker job matches direct terrain generation", () => {
+  const terrain = createTerrainContext("chunk-job-seed", "varied");
+  const result = buildChunkGenerateJob({
+    requestId: 17,
+    cx: 2,
+    cz: -3,
+    seed: "chunk-job-seed",
+    terrainProfile: terrain.profile
+  });
+
+  assertEqual(result.type, "generated", "chunk generation job should return a generated result");
+  assertEqual(result.requestId, 17, "chunk generation job should preserve request id");
+  assertUint8ArraysEqual(
+    result.blocks,
+    generateChunkBlocks(2, -3, terrain),
+    "chunk generation worker job should match direct terrain generation"
+  );
+});
+
+test("chunk mesh worker job honors partial render masks", () => {
+  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+  const partialMask = new Uint8Array(blocks.length);
+  const centerIndex = 1 + CHUNK_SIZE * (1 + CHUNK_SIZE * 1);
+  blocks[centerIndex] = BLOCK.stone;
+
+  const visibleResult = buildChunkMeshJob({
+    requestId: 18,
+    cx: 0,
+    cz: 0,
+    revision: 1,
+    blocks: blocks.buffer.slice(0),
+    neighbors: {
+      negativeX: null,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    },
+    partialBlockMasks: {
+      current: null,
+      neighbors: {
+        negativeX: null,
+        positiveX: null,
+        negativeZ: null,
+        positiveZ: null
+      }
+    }
+  });
+
+  partialMask[centerIndex] = 1;
+  const hiddenResult = buildChunkMeshJob({
+    requestId: 19,
+    cx: 0,
+    cz: 0,
+    revision: 2,
+    blocks: blocks.buffer.slice(0),
+    neighbors: {
+      negativeX: null,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    },
+    partialBlockMasks: {
+      current: partialMask.buffer,
+      neighbors: {
+        negativeX: null,
+        positiveX: null,
+        negativeZ: null,
+        positiveZ: null
+      }
+    }
+  });
+
+  assert(visibleResult.positions.length > 0, "unmasked solid blocks should emit chunk mesh geometry");
+  assertEqual(hiddenResult.positions.length, 0, "partial-masked blocks should be hidden from normal chunk mesh");
+  assertEqual(visibleResult.uvs.length / 2, visibleResult.positions.length / 3, "chunk mesh job should emit UVs");
+  assertEqual(
+    visibleResult.textureTiles.length,
+    visibleResult.positions.length / 3,
+    "chunk mesh job should emit per-vertex texture tile ids"
+  );
+});
+
+test("chunk mesh worker job is deterministic for the same payload", () => {
+  const terrain = createTerrainContext("chunk-mesh-deterministic", "varied");
+  const blocks = generateChunkBlocks(0, 0, terrain);
+  const payload = {
+    requestId: 20,
+    cx: 0,
+    cz: 0,
+    revision: 1,
+    blocks: blocks.buffer.slice(0),
+    neighbors: {
+      negativeX: null,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    },
+    partialBlockMasks: {
+      current: null,
+      neighbors: {
+        negativeX: null,
+        positiveX: null,
+        negativeZ: null,
+        positiveZ: null
+      }
+    }
+  };
+
+  const first = buildChunkMeshJob(payload);
+  const second = buildChunkMeshJob({
+    ...payload,
+    requestId: 21,
+    blocks: blocks.buffer.slice(0)
+  });
+
+  assertFloat32ArraysEqual(first.positions, second.positions, "same chunk mesh payload should produce same positions");
+  assertFloat32ArraysEqual(first.colors, second.colors, "same chunk mesh payload should produce same colors");
+  assertFloat32ArraysEqual(first.textureTiles, second.textureTiles, "same chunk mesh payload should produce same texture tiles");
 });
 
 test("classic terrain profile preserves legacy seeded terrain separately from varied terrain", () => {
@@ -3181,7 +3379,7 @@ test("world applies completed generated chunks within the frame budget", () => {
     const requestId = cx + 1;
     const key = world.key(cx, 0);
     world.pendingChunkKeys.add(key);
-    world.pendingChunkLoads.set(requestId, { key, cx, cz: 0 });
+    world.pendingChunkLoads.set(requestId, { key, cx, cz: 0, jobId: requestId + 100 });
     world.workerResults.push({
       type: "generated",
       requestId,
@@ -3198,6 +3396,25 @@ test("world applies completed generated chunks within the frame budget", () => {
   assert(Boolean(world.getChunk(4, 0)), "the closest completed result should be applied first");
   assert(Boolean(world.getChunk(3, 0)), "the next closest completed result should use the remaining budget");
   assertEqual(world.workerResults.length, 3, "extra generated chunks should remain queued for later frames");
+});
+
+test("world buffers WorkerPool-generated chunks before frame-budgeted apply", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "worker-pool-stream-test", workerPool });
+
+  world.chunkLoadQueue.set("0,0", { cx: 0, cz: 0 });
+  assertEqual(world.requestQueuedChunkLoads(0, 0, 1), 1, "world should request one WorkerPool chunk load");
+  assertEqual(world.getStats().loadedChunks, 0, "WorkerPool completion should not synchronously apply terrain");
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assertEqual(world.workerResults.length, 1, "completed WorkerPool generation should wait in the world result buffer");
+
+  world.processGeneratedChunkResults(1);
+  assert(Boolean(world.getChunk(0, 0)), "buffered WorkerPool generation should apply through the normal result drain");
+
+  const generateStats = workerPool.getStats().jobsByType.find((entry) => entry.type === CHUNK_GENERATE_JOB);
+  assert(generateStats, "WorkerPool stats should track chunk generation jobs by type");
+  assertEqual(generateStats.completedJobs, 1, "chunk generation job should complete through the shared pool");
 });
 
 test("world block reads, writes, and solidity follow bounds", async () => {
@@ -9212,7 +9429,8 @@ function createTestHitchStats(
       failedJobs: 0,
       transferredBuffers: 0,
       averageWorkerTimeMs: 0,
-      averageMainThreadUploadMs: 0
+      averageMainThreadUploadMs: 0,
+      jobsByType: []
     },
     ...overrides
   };

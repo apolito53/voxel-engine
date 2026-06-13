@@ -15,7 +15,7 @@ import {
 import type { QualityPreset } from "./qualityPresets";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
-import type { WorkerPoolStats } from "./workerPool";
+import type { WorkerPoolJobTypeStats, WorkerPoolStats } from "./workerPool";
 import type { ChunkCoords, WorldStats } from "./world";
 
 type DebugHudOptions = {
@@ -239,6 +239,7 @@ export class DebugHud {
             value: `${snapshot.workerPoolStats.mode} ${snapshot.workerPoolStats.runningJobs}/${snapshot.workerPoolStats.maxWorkers} run, ` +
               `q ${snapshot.workerPoolStats.queuedJobs}, avg ${snapshot.workerPoolStats.averageWorkerTimeMs.toFixed(1)}ms`
           },
+          { label: "jobs", value: formatWorkerPoolJobTypes(snapshot.workerPoolStats.jobsByType) },
           { label: "draw", value: `${render.calls} calls, ${render.triangles} tris` },
           { label: "mem", value: `${memory.geometries} geo, ${memory.textures} tex` }
         ]
@@ -274,6 +275,32 @@ export class DebugHud {
 function formatHudFps(fps: number): string {
   if (!Number.isFinite(fps) || fps <= 0) return "0";
   return fps < 10 ? fps.toFixed(1) : Math.round(fps).toString();
+}
+
+function formatWorkerPoolJobTypes(jobTypes: readonly WorkerPoolJobTypeStats[]): string {
+  const activeTypes = jobTypes.filter((stats) =>
+    stats.queuedJobs > 0 ||
+    stats.runningJobs > 0 ||
+    stats.completedJobs > 0 ||
+    stats.failedJobs > 0 ||
+    stats.staleJobs > 0
+  );
+  if (activeTypes.length === 0) return "none";
+
+  return activeTypes
+    .slice(0, 3)
+    .map((stats) =>
+      `${compactWorkerJobType(stats.type)} q${stats.queuedJobs}/r${stats.runningJobs} ` +
+      `${stats.averageWorkerTimeMs.toFixed(1)}ms`
+    )
+    .join(" | ");
+}
+
+function compactWorkerJobType(type: string): string {
+  if (type === "partial-block-mesh:build") return "partial";
+  if (type === "chunk:generate") return "chunk gen";
+  if (type === "chunk:mesh") return "chunk mesh";
+  return compactText(type, 16);
 }
 
 function createDebugSection(section: DebugHudSection): HTMLElement {

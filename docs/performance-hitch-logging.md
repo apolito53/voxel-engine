@@ -114,17 +114,16 @@ The important F3/Hitch counters are:
 
 ## Worker Pool
 
-`src/workerPool.ts` is the shared browser-native CPU-job lane. It now runs real
+`src/workerPool.ts` is the shared browser-native CPU-job lane. It runs real
 module Web Workers when available and keeps a sync fallback for tests,
-unsupported browsers, or worker startup failures. Partial terrain is the first
-runtime system on this lane: `src/partialBlockMeshWorker.ts` builds damaged
-terrain region geometry from transferable typed arrays, while
-`src/partialBlockMeshField.ts` stays on the main thread to upload and dispose
-Three.js resources.
+unsupported browsers, or worker startup failures. The generic
+`src/engineWorker.ts` routes chunk generation, chunk meshing, and damaged
+partial-terrain region meshing through the same priority-aware protocol.
 
-Worker results are checked against per-region revisions before upload. That
-guard matters because partial terrain can change several times while an older
-region build is still in flight.
+Chunk and partial-region worker results are buffered or revision-checked before
+main-thread upload. That guard matters because terrain can change several times
+while older mesh work is still in flight, and visible chunks should keep winning
+the upload budget over stale or far-away work.
 
 ## Runtime Combat Records
 
