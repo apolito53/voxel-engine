@@ -60,12 +60,52 @@ type RigidDebrisSupport = {
   readonly penetrationDepth: number;
 };
 
+export type RigidDebrisStaticRefreshReason = "none" | "scheduled" | "dirty";
+
+export type RigidDebrisFrameTimings = {
+  readonly flushMs: number;
+  readonly staticColliderCollectMs: number;
+  readonly staticColliderSyncMs: number;
+  readonly stepMs: number;
+  readonly syncMs: number;
+};
+
 export type RigidDebrisStats = {
   readonly initialized: boolean;
   readonly bodies: number;
   readonly sleepingBodies: number;
+  readonly awakeBodies: number;
+  readonly pendingFragments: number;
+  readonly admittedBodiesThisFrame: number;
+  readonly deniedAdmissionThisFrame: number;
+  readonly admissionQueueDepth: number;
+  readonly convertedToVfxThisFrame: number;
+  readonly substeps: number;
+  readonly accumulatorMs: number;
+  readonly forcedSleepBodiesThisFrame: number;
+  readonly wokenBodiesThisFrame: number;
+  readonly staticRefreshRan: boolean;
+  readonly staticRefreshReason: RigidDebrisStaticRefreshReason;
+  readonly activeColliderCells: number;
+  readonly candidateCellsScanned: number;
+  readonly candidateCellsAccepted: number;
+  readonly candidateCellsRejected: number;
+  readonly candidateCellsBudgetHit: number;
   readonly terrainColliders: number;
+  readonly surfaceBoxColliders: number;
   readonly rubbleSupportColliders: number;
+  readonly staticColliderCreatedThisFrame: number;
+  readonly staticColliderRemovedThisFrame: number;
+  readonly staticColliderReusedThisFrame: number;
+  readonly supportCacheEntries: number;
+  readonly supportCacheHits: number;
+  readonly supportCacheMisses: number;
+  readonly supportCacheInvalidations: number;
+  readonly parkedSleepers: number;
+  readonly parkedWakeCandidates: number;
+  readonly parkedWakesThisFrame: number;
+  readonly parkedExpiredThisFrame: number;
+  readonly parkedColliderCells: number;
 };
 
 export function createEmptyRigidDebrisStats(): RigidDebrisStats {
@@ -73,8 +113,48 @@ export function createEmptyRigidDebrisStats(): RigidDebrisStats {
     initialized: false,
     bodies: 0,
     sleepingBodies: 0,
+    awakeBodies: 0,
+    pendingFragments: 0,
+    admittedBodiesThisFrame: 0,
+    deniedAdmissionThisFrame: 0,
+    admissionQueueDepth: 0,
+    convertedToVfxThisFrame: 0,
+    substeps: 0,
+    accumulatorMs: 0,
+    forcedSleepBodiesThisFrame: 0,
+    wokenBodiesThisFrame: 0,
+    staticRefreshRan: false,
+    staticRefreshReason: "none",
+    activeColliderCells: 0,
+    candidateCellsScanned: 0,
+    candidateCellsAccepted: 0,
+    candidateCellsRejected: 0,
+    candidateCellsBudgetHit: 0,
     terrainColliders: 0,
-    rubbleSupportColliders: 0
+    surfaceBoxColliders: 0,
+    rubbleSupportColliders: 0,
+    staticColliderCreatedThisFrame: 0,
+    staticColliderRemovedThisFrame: 0,
+    staticColliderReusedThisFrame: 0,
+    supportCacheEntries: 0,
+    supportCacheHits: 0,
+    supportCacheMisses: 0,
+    supportCacheInvalidations: 0,
+    parkedSleepers: 0,
+    parkedWakeCandidates: 0,
+    parkedWakesThisFrame: 0,
+    parkedExpiredThisFrame: 0,
+    parkedColliderCells: 0
+  };
+}
+
+function createEmptyRigidDebrisFrameTimings(): RigidDebrisFrameTimings {
+  return {
+    flushMs: 0,
+    staticColliderCollectMs: 0,
+    staticColliderSyncMs: 0,
+    stepMs: 0,
+    syncMs: 0
   };
 }
 
@@ -100,6 +180,23 @@ export class RigidDebrisSimulation {
   private staticCollidersDirty = true;
   private disposed = false;
   private stats: RigidDebrisStats = createEmptyRigidDebrisStats();
+  private lastFrameTimings: RigidDebrisFrameTimings = createEmptyRigidDebrisFrameTimings();
+  private admittedBodiesThisFrame = 0;
+  private deniedAdmissionThisFrame = 0;
+  private admissionQueueDepth = 0;
+  private convertedToVfxThisFrame = 0;
+  private substepsThisFrame = 0;
+  private forcedSleepBodiesThisFrame = 0;
+  private wokenBodiesThisFrame = 0;
+  private staticRefreshRanThisFrame = false;
+  private staticRefreshReasonThisFrame: RigidDebrisStaticRefreshReason = "none";
+  private candidateCellsScannedThisFrame = 0;
+  private candidateCellsAcceptedThisFrame = 0;
+  private candidateCellsRejectedThisFrame = 0;
+  private candidateCellsBudgetHitThisFrame = 0;
+  private staticColliderCreatedThisFrame = 0;
+  private staticColliderRemovedThisFrame = 0;
+  private staticColliderReusedThisFrame = 0;
 
   initialize(): Promise<void> {
     if (this.world) return Promise.resolve();
@@ -132,13 +229,19 @@ export class RigidDebrisSimulation {
   }
 
   update(delta: number, collisionWorld: CollisionWorld): RigidDebrisStats {
+    this.resetFrameCounters();
     if (!this.world) {
       void this.initialize();
       this.refreshStats();
       return this.stats;
     }
 
+    const flushStartedAt = nowMs();
     this.flushPendingFragments();
+    this.lastFrameTimings = {
+      ...this.lastFrameTimings,
+      flushMs: nowMs() - flushStartedAt
+    };
     this.removeExpiredBodies();
     if (this.bodiesByToy.size === 0) {
       this.clearStaticColliders();
@@ -150,6 +253,7 @@ export class RigidDebrisSimulation {
     this.accumulatorSeconds += Math.min(Math.max(0, delta), RIGID_DEBRIS_MAX_FRAME_DELTA);
 
     let substeps = 0;
+    const stepStartedAt = nowMs();
     while (
       this.accumulatorSeconds >= RIGID_DEBRIS_FIXED_STEP &&
       substeps < RIGID_DEBRIS_MAX_SUBSTEPS
@@ -159,12 +263,22 @@ export class RigidDebrisSimulation {
       this.accumulatorSeconds -= RIGID_DEBRIS_FIXED_STEP;
       substeps += 1;
     }
+    this.lastFrameTimings = {
+      ...this.lastFrameTimings,
+      stepMs: nowMs() - stepStartedAt
+    };
+    this.substepsThisFrame = substeps;
 
     if (substeps === RIGID_DEBRIS_MAX_SUBSTEPS) {
       this.accumulatorSeconds = Math.min(this.accumulatorSeconds, RIGID_DEBRIS_FIXED_STEP);
     }
 
+    const syncStartedAt = nowMs();
     this.syncBodiesToToys(substeps * RIGID_DEBRIS_FIXED_STEP, collisionWorld);
+    this.lastFrameTimings = {
+      ...this.lastFrameTimings,
+      syncMs: nowMs() - syncStartedAt
+    };
     this.refreshStats();
     return this.stats;
   }
@@ -210,6 +324,7 @@ export class RigidDebrisSimulation {
         z: record.toy.angularVelocity.z
       }, true);
       record.body.wakeUp();
+      if (bodyWasSleeping) this.wokenBodiesThisFrame += 1;
       record.syncedExternalRevision = externalRevision;
       record.quietSeconds = 0;
       this.staticCollidersDirty = true;
@@ -260,6 +375,10 @@ export class RigidDebrisSimulation {
     return this.stats;
   }
 
+  getLastFrameTimings(): RigidDebrisFrameTimings {
+    return { ...this.lastFrameTimings };
+  }
+
   getRegisteredColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 | null {
     return this.bodiesByToy.get(toy)?.colliderHalfExtents.clone() ?? null;
   }
@@ -267,6 +386,7 @@ export class RigidDebrisSimulation {
   private flushPendingFragments(): void {
     if (!this.world) return;
 
+    this.admissionQueueDepth = Math.max(this.admissionQueueDepth, this.pendingFragments.size);
     for (const toy of this.pendingFragments) {
       if (!toy.isInstancedFragment || toy.isExpired || this.bodiesByToy.has(toy)) continue;
 
@@ -280,6 +400,7 @@ export class RigidDebrisSimulation {
         syncedExternalRevision: toy.rigidDebrisExternalMutationRevision
       });
       toy.attachRigidDebrisBody();
+      this.admittedBodiesThisFrame += 1;
     }
     this.pendingFragments.clear();
   }
@@ -323,6 +444,26 @@ export class RigidDebrisSimulation {
     }
   }
 
+  private resetFrameCounters(): void {
+    this.lastFrameTimings = createEmptyRigidDebrisFrameTimings();
+    this.admittedBodiesThisFrame = 0;
+    this.deniedAdmissionThisFrame = 0;
+    this.admissionQueueDepth = this.pendingFragments.size;
+    this.convertedToVfxThisFrame = 0;
+    this.substepsThisFrame = 0;
+    this.forcedSleepBodiesThisFrame = 0;
+    this.wokenBodiesThisFrame = 0;
+    this.staticRefreshRanThisFrame = false;
+    this.staticRefreshReasonThisFrame = "none";
+    this.candidateCellsScannedThisFrame = 0;
+    this.candidateCellsAcceptedThisFrame = 0;
+    this.candidateCellsRejectedThisFrame = 0;
+    this.candidateCellsBudgetHitThisFrame = 0;
+    this.staticColliderCreatedThisFrame = 0;
+    this.staticColliderRemovedThisFrame = 0;
+    this.staticColliderReusedThisFrame = 0;
+  }
+
   private syncBodiesToToys(delta: number, collisionWorld: CollisionWorld): void {
     for (const record of this.bodiesByToy.values()) {
       const toyWasSleeping = record.toy.isSleeping;
@@ -364,6 +505,7 @@ export class RigidDebrisSimulation {
     const linvel = record.body.linvel();
     record.body.setLinvel({ x: linvel.x, y: Math.min(linvel.y, -0.05), z: linvel.z }, true);
     record.body.wakeUp();
+    this.wokenBodiesThisFrame += 1;
     record.quietSeconds = 0;
     this.staticCollidersDirty = true;
   }
@@ -401,6 +543,7 @@ export class RigidDebrisSimulation {
     record.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
     record.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
     record.body.sleep();
+    this.forcedSleepBodiesThisFrame += 1;
     record.quietSeconds = 0;
     this.staticCollidersDirty = true;
   }
@@ -446,10 +589,20 @@ export class RigidDebrisSimulation {
     // refreshes are coalesced into the same short cadence as normal lookahead.
     this.staticRefreshSeconds = 0;
     this.staticCollidersDirty = false;
+    this.staticRefreshRanThisFrame = true;
+    this.staticRefreshReasonThisFrame = dirtyRefreshDue ? "dirty" : "scheduled";
+    const collectStartedAt = nowMs();
     this.collectActiveColliderCells(collisionWorld);
+    const collectEndedAt = nowMs();
+    const syncStartedAt = collectEndedAt;
     this.syncTerrainColliders(collisionWorld);
     this.syncSurfaceBoxColliders(collisionWorld);
     this.syncRubbleSupportColliders(collisionWorld);
+    this.lastFrameTimings = {
+      ...this.lastFrameTimings,
+      staticColliderCollectMs: collectEndedAt - collectStartedAt,
+      staticColliderSyncMs: nowMs() - syncStartedAt
+    };
   }
 
   private collectActiveColliderCells(collisionWorld: CollisionWorld): void {
@@ -459,7 +612,10 @@ export class RigidDebrisSimulation {
 
       if (record.toy.isSleeping) {
         this.addSleepingSupportColliderCells(record, collisionWorld);
-        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) {
+          this.candidateCellsBudgetHitThisFrame = 1;
+          return;
+        }
         continue;
       }
 
@@ -480,7 +636,10 @@ export class RigidDebrisSimulation {
           position.z + velocity.z * lookaheadSeconds
         );
         this.addColliderCellsAround(this.colliderScanCenter, collisionWorld);
-        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) {
+          this.candidateCellsBudgetHitThisFrame = 1;
+          return;
+        }
       }
     }
   }
@@ -503,7 +662,10 @@ export class RigidDebrisSimulation {
       for (let z = minZ; z <= maxZ; z += 1) {
         this.addStaticColliderCandidateCell(x, supportProbeY, z, collisionWorld);
         this.addStaticColliderCandidateCell(x, rubbleProbeY, z, collisionWorld);
-        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) {
+          this.candidateCellsBudgetHitThisFrame = 1;
+          return;
+        }
       }
     }
   }
@@ -529,7 +691,10 @@ export class RigidDebrisSimulation {
           x += 1
         ) {
           this.addStaticColliderCandidateCell(x, y, z, collisionWorld);
-          if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) return;
+          if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) {
+            this.candidateCellsBudgetHitThisFrame = 1;
+            return;
+          }
         }
       }
     }
@@ -541,13 +706,26 @@ export class RigidDebrisSimulation {
     z: number,
     collisionWorld: CollisionWorld
   ): void {
+    if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) {
+      this.candidateCellsBudgetHitThisFrame = 1;
+      return;
+    }
+
     const cell = { x, y, z };
+    this.candidateCellsScannedThisFrame += 1;
     // The collider budget is tiny compared with a loud debris burst. Spend it
     // only where Rapier can actually receive a terrain or partial-height floor,
     // otherwise high airborne shards can starve ground-adjacent shards of support.
-    if (!isStaticColliderCandidateCell(collisionWorld, cell)) return;
+    if (!isStaticColliderCandidateCell(collisionWorld, cell)) {
+      this.candidateCellsRejectedThisFrame += 1;
+      return;
+    }
 
+    const beforeSize = this.activeColliderCells.size;
     this.activeColliderCells.add(getStaticColliderCellKey(x, y, z));
+    if (this.activeColliderCells.size > beforeSize) {
+      this.candidateCellsAcceptedThisFrame += 1;
+    }
   }
 
   private syncTerrainColliders(collisionWorld: CollisionWorld): void {
@@ -646,13 +824,20 @@ export class RigidDebrisSimulation {
 
       this.world.removeCollider(record.collider, true);
       colliders.delete(key);
+      this.staticColliderRemovedThisFrame += 1;
     }
 
     for (const key of desiredKeys) {
-      if (colliders.has(key)) continue;
+      if (colliders.has(key)) {
+        this.staticColliderReusedThisFrame += 1;
+        continue;
+      }
 
       const collider = createCollider(key);
-      if (collider) colliders.set(key, { collider });
+      if (collider) {
+        colliders.set(key, { collider });
+        this.staticColliderCreatedThisFrame += 1;
+      }
     }
   }
 
@@ -738,15 +923,50 @@ export class RigidDebrisSimulation {
     for (const record of this.bodiesByToy.values()) {
       if (record.body.isSleeping()) sleepingBodies += 1;
     }
+    const awakeBodies = Math.max(0, this.bodiesByToy.size - sleepingBodies);
 
     this.stats = {
       initialized: this.world !== null,
       bodies: this.bodiesByToy.size,
       sleepingBodies,
+      awakeBodies,
+      pendingFragments: this.pendingFragments.size,
+      admittedBodiesThisFrame: this.admittedBodiesThisFrame,
+      deniedAdmissionThisFrame: this.deniedAdmissionThisFrame,
+      admissionQueueDepth: this.admissionQueueDepth,
+      convertedToVfxThisFrame: this.convertedToVfxThisFrame,
+      substeps: this.substepsThisFrame,
+      accumulatorMs: this.accumulatorSeconds * 1000,
+      forcedSleepBodiesThisFrame: this.forcedSleepBodiesThisFrame,
+      wokenBodiesThisFrame: this.wokenBodiesThisFrame,
+      staticRefreshRan: this.staticRefreshRanThisFrame,
+      staticRefreshReason: this.staticRefreshReasonThisFrame,
+      activeColliderCells: this.activeColliderCells.size,
+      candidateCellsScanned: this.candidateCellsScannedThisFrame,
+      candidateCellsAccepted: this.candidateCellsAcceptedThisFrame,
+      candidateCellsRejected: this.candidateCellsRejectedThisFrame,
+      candidateCellsBudgetHit: this.candidateCellsBudgetHitThisFrame,
       terrainColliders: this.terrainColliders.size + this.surfaceBoxColliders.size,
-      rubbleSupportColliders: this.rubbleSupportColliders.size
+      surfaceBoxColliders: this.surfaceBoxColliders.size,
+      rubbleSupportColliders: this.rubbleSupportColliders.size,
+      staticColliderCreatedThisFrame: this.staticColliderCreatedThisFrame,
+      staticColliderRemovedThisFrame: this.staticColliderRemovedThisFrame,
+      staticColliderReusedThisFrame: this.staticColliderReusedThisFrame,
+      supportCacheEntries: 0,
+      supportCacheHits: 0,
+      supportCacheMisses: 0,
+      supportCacheInvalidations: 0,
+      parkedSleepers: 0,
+      parkedWakeCandidates: 0,
+      parkedWakesThisFrame: 0,
+      parkedExpiredThisFrame: 0,
+      parkedColliderCells: 0
     };
   }
+}
+
+function nowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {

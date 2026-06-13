@@ -1,7 +1,7 @@
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { FrameDiagnosticsSnapshot } from "./frameDiagnostics";
-import type { FrameTimings } from "./frameTimings";
+import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
 import type { PartialBlockMeshStats } from "./partialBlockMeshField";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
@@ -32,6 +32,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly physicsObjectBudget: number;
   readonly rigidDebrisBodyBudget: number;
   readonly debrisPressure: DebrisPerformancePressureState;
+  readonly physicsTiming: PhysicsTimingStats;
   readonly world: WorldStats;
   readonly physics: PhysicsToyCollisionStats;
   readonly rigidDebris: RigidDebrisStats;
@@ -439,13 +440,33 @@ function addFrameDiagnosticsDetails(details: string[], input: PerformanceHitchIn
 }
 
 function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapshot): void {
-  const awakeRigidBodies = stats.rigidDebris.bodies - stats.rigidDebris.sleepingBodies;
+  const dominantPhysicsTiming = getDominantPhysicsTiming(stats.physicsTiming);
+  if (dominantPhysicsTiming && dominantPhysicsTiming.valueMs >= 1) {
+    details.push(`${dominantPhysicsTiming.label} ${formatMs(dominantPhysicsTiming.valueMs)}`);
+  }
+
+  const awakeRigidBodies = stats.rigidDebris.awakeBodies;
   const staticColliderCount = stats.rigidDebris.terrainColliders + stats.rigidDebris.rubbleSupportColliders;
   if (awakeRigidBodies > 0) {
     details.push(`${awakeRigidBodies}/${stats.rigidDebris.bodies} rigid debris bodies awake`);
   }
   if (staticColliderCount > 0) {
-    details.push(`${staticColliderCount} temporary debris support colliders active`);
+    details.push(
+      `${staticColliderCount} temporary debris support colliders active, ` +
+      `${stats.rigidDebris.staticColliderCreatedThisFrame}/${stats.rigidDebris.staticColliderRemovedThisFrame} add/remove`
+    );
+  }
+  if (stats.rigidDebris.staticRefreshRan) {
+    details.push(
+      `static refresh ${stats.rigidDebris.staticRefreshReason}: ` +
+      `${stats.rigidDebris.candidateCellsAccepted}/${stats.rigidDebris.candidateCellsScanned} support cells`
+    );
+  }
+  if (stats.rigidDebris.admittedBodiesThisFrame > 0 || stats.rigidDebris.deniedAdmissionThisFrame > 0) {
+    details.push(
+      `rigid admission +${stats.rigidDebris.admittedBodiesThisFrame}/` +
+      `-${stats.rigidDebris.deniedAdmissionThisFrame}, q ${stats.rigidDebris.admissionQueueDepth}`
+    );
   }
   if (stats.debrisSettler.activeFragments > 0) {
     details.push(`${stats.debrisSettler.activeFragments} settling fragments still active`);
@@ -562,6 +583,34 @@ function addCrossCuttingPressureDetails(
   }
 }
 
+function getDominantPhysicsTiming(timings: PhysicsTimingStats): {
+  readonly label: string;
+  readonly valueMs: number;
+} | null {
+  const candidates = [
+    ["toy update", timings.toyUpdateMs],
+    ["impact apply", timings.impactApplyMs],
+    ["rigid debris total", timings.rigidDebrisTotalMs],
+    ["rigid debris flush", timings.rigidDebrisFlushMs],
+    ["rigid debris support collect", timings.rigidDebrisStaticColliderCollectMs],
+    ["rigid debris support sync", timings.rigidDebrisStaticColliderSyncMs],
+    ["rigid debris step", timings.rigidDebrisStepMs],
+    ["rigid debris sync", timings.rigidDebrisSyncMs],
+    ["debris settler", timings.debrisSettlerMs],
+    ["budget enforcement", timings.budgetEnforcementMs],
+    ["ground debris cleanup", timings.groundCleanupMs],
+    ["toy broadphase", timings.toyBroadphaseMs],
+    ["rubble settle", timings.rubbleSettleMs],
+    ["render proxy sync", timings.renderProxySyncMs]
+  ] as const;
+  let best: (typeof candidates)[number] | null = null;
+  for (const candidate of candidates) {
+    if (!Number.isFinite(candidate[1])) continue;
+    if (!best || candidate[1] > best[1]) best = candidate;
+  }
+  return best ? { label: best[0], valueMs: best[1] } : null;
+}
+
 function cloneFrameTimings(timings: FrameTimings): FrameTimings {
   return {
     playerMs: timings.playerMs,
@@ -602,6 +651,7 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     physicsObjectBudget: stats.physicsObjectBudget,
     rigidDebrisBodyBudget: stats.rigidDebrisBodyBudget,
     debrisPressure: { ...stats.debrisPressure },
+    physicsTiming: { ...stats.physicsTiming },
     world: { ...stats.world },
     physics: { ...stats.physics },
     rigidDebris: { ...stats.rigidDebris },

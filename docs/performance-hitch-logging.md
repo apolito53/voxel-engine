@@ -40,6 +40,9 @@ The debug overlay and hitch logger capture:
 - 45ms+ frame spikes.
 - At most one sustained sub-60-FPS sample per second.
 - CPU buckets for player, chunk, physics, mesh, minimap, render, and other work.
+- Split physics timings for toy motion, impact application, Rapier debris
+  flush/step/sync, support-collider collection/sync, debris settling, budget
+  enforcement, cleanup, broadphase, rubble settling, and render-proxy sync.
 - Chunk visibility split into loaded chunks, frustum chunks, actually rendered
   chunks, and chunks hidden behind the opaque fog curtain.
 - Rigid debris body/collider pressure.
@@ -94,6 +97,10 @@ presentation, or driver stalls before blaming terrain, debris, or chunk code.
 Render-led frame summaries lead with current-frame renderer counters before
 stale recent long-task context, while low-FPS records still prefer current RAF
 gap or overlapping long-task clues in the one-line summary.
+Physics-led frame summaries include the largest measured physics subphase first
+when it is at least 1ms, so a debris-pressure repro can distinguish Rapier step
+time from support-collider churn, impact application, cleanup, or render-proxy
+sync.
 
 ## Render Horizon
 

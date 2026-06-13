@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import { RollingFrameRateMeter, type FrameRateSample } from "./frameRateMeter";
-import type { FrameTimings } from "./frameTimings";
+import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
 import type { PartialBlockMeshStats } from "./partialBlockMeshField";
 import type { PhysicsToyCollisionStats } from "./physics";
@@ -85,6 +85,7 @@ export class DebugHud {
     rubbleStats: RubbleFieldStats,
     workerPoolStats: WorkerPoolStats,
     combatLogLines: readonly string[],
+    physicsTiming: PhysicsTimingStats,
     timings: FrameTimings
   ): void {
     if (!this.visible) return;
@@ -114,6 +115,7 @@ export class DebugHud {
       rubbleStats,
       workerPoolStats,
       combatLogLines,
+      physicsTiming,
       timings,
       frameRate
     });
@@ -152,6 +154,7 @@ export class DebugHud {
     readonly rubbleStats: RubbleFieldStats;
     readonly workerPoolStats: WorkerPoolStats;
     readonly combatLogLines: readonly string[];
+    readonly physicsTiming: PhysicsTimingStats;
     readonly timings: FrameTimings;
     readonly frameRate: FrameRateSample;
   }): void {
@@ -212,10 +215,55 @@ export class DebugHud {
         ]
       },
       {
+        title: "Physics CPU",
+        rows: [
+          {
+            label: "rigid",
+            value: `tot ${snapshot.physicsTiming.rigidDebrisTotalMs.toFixed(1)} ` +
+              `step ${snapshot.physicsTiming.rigidDebrisStepMs.toFixed(1)} ` +
+              `sync ${snapshot.physicsTiming.rigidDebrisSyncMs.toFixed(1)}`
+          },
+          {
+            label: "support",
+            value: `scan ${snapshot.physicsTiming.rigidDebrisStaticColliderCollectMs.toFixed(1)} ` +
+              `coll ${snapshot.physicsTiming.rigidDebrisStaticColliderSyncMs.toFixed(1)} ` +
+              `${snapshot.rigidDebrisStats.staticRefreshReason}`
+          },
+          {
+            label: "toy",
+            value: `move ${snapshot.physicsTiming.toyUpdateMs.toFixed(1)} ` +
+              `impact ${snapshot.physicsTiming.impactApplyMs.toFixed(1)} ` +
+              `pairs ${snapshot.physicsTiming.toyBroadphaseMs.toFixed(1)}`
+          },
+          {
+            label: "after",
+            value: `budget ${snapshot.physicsTiming.budgetEnforcementMs.toFixed(1)} ` +
+              `clean ${snapshot.physicsTiming.groundCleanupMs.toFixed(1)} ` +
+              `render ${snapshot.physicsTiming.renderProxySyncMs.toFixed(1)}`
+          }
+        ]
+      },
+      {
         title: "Debris",
         rows: [
-          { label: "rigid", value: `${snapshot.rigidDebrisStats.bodies}/${snapshot.rigidDebrisBodyBudget}, sleep ${snapshot.rigidDebrisStats.sleepingBodies}` },
-          { label: "support", value: `col ${snapshot.rigidDebrisStats.terrainColliders}/${snapshot.rigidDebrisStats.rubbleSupportColliders}, ${debrisPressureLabel}` },
+          { label: "rigid", value: `${snapshot.rigidDebrisStats.awakeBodies}/${snapshot.rigidDebrisStats.bodies}/${snapshot.rigidDebrisBodyBudget}, sleep ${snapshot.rigidDebrisStats.sleepingBodies}` },
+          {
+            label: "support",
+            value: `col ${snapshot.rigidDebrisStats.terrainColliders}/${snapshot.rigidDebrisStats.rubbleSupportColliders}, ` +
+              `cells ${snapshot.rigidDebrisStats.activeColliderCells}, ${debrisPressureLabel}`
+          },
+          {
+            label: "churn",
+            value: `+${snapshot.rigidDebrisStats.staticColliderCreatedThisFrame} ` +
+              `-${snapshot.rigidDebrisStats.staticColliderRemovedThisFrame} ` +
+              `reuse ${snapshot.rigidDebrisStats.staticColliderReusedThisFrame}`
+          },
+          {
+            label: "admit",
+            value: `+${snapshot.rigidDebrisStats.admittedBodiesThisFrame} ` +
+              `-${snapshot.rigidDebrisStats.deniedAdmissionThisFrame} ` +
+              `q ${snapshot.rigidDebrisStats.admissionQueueDepth}`
+          },
           { label: "render", value: `${snapshot.fragmentRenderStats.instances} inst, ${snapshot.fragmentRenderStats.batches} batches, cap ${snapshot.fragmentRenderStats.capacity}` },
           { label: "settle", value: `${snapshot.debrisSettlerStats.regions} rg, ${snapshot.debrisSettlerStats.activeFragments}/${snapshot.debrisSettlerStats.fragments} active` },
           { label: "rubble", value: `${snapshot.rubbleStats.clusters} clusters, ${snapshot.rubbleStats.pieces.toFixed(2)} pcs, ${snapshot.rubbleStats.maxCoverHeight.toFixed(2)}m` }

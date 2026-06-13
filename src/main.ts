@@ -98,7 +98,13 @@ import {
   shouldSkipExpensiveFrame
 } from "./frameLoop";
 import { BrowserFrameDiagnostics } from "./frameDiagnostics";
-import { createEmptyFrameTimings, smoothFrameTimings, type FrameTimings } from "./frameTimings";
+import {
+  createEmptyFrameTimings,
+  createEmptyPhysicsTimingStats,
+  smoothFrameTimings,
+  type FrameTimings,
+  type PhysicsTimingStats
+} from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import {
   createHotbarItems,
@@ -797,6 +803,7 @@ voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = {
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
+let latestPhysicsTimingStats: PhysicsTimingStats = createEmptyPhysicsTimingStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
 let healthBarsEnabled = readHealthBarsEnabled();
@@ -1910,6 +1917,7 @@ function animate(): void {
 
   const delta = clampSimulationDelta(rawDelta);
   const frameTimingSample = createEmptyFrameTimings();
+  const physicsTimingSample = createEmptyPhysicsTimingStats();
   let timingSectionStartedAt = frameStartedAt;
   let debugPlayerChunk: ChunkCoords | null = null;
   let debugPlayerVelocity: THREE.Vector3 | null = null;
@@ -1949,6 +1957,7 @@ function animate(): void {
     );
     recordTimingSection("chunkMs");
 
+    const physicsFrameStartedAt = performance.now();
     physicsImpacts.length = 0;
     damagedBlockKeysThisFrame.clear();
     const physicsToyCountAtFrameStart = toys.length;
@@ -1956,8 +1965,11 @@ function animate(): void {
       const toy = toys[index];
       if (!toy) continue;
       const terrainImpactStartIndex = physicsImpacts.length;
+      const toyUpdateStartedAt = performance.now();
       toy.update(delta, terrainAndRubbleCollisionWorld, physicsImpacts);
+      physicsTimingSample.toyUpdateMs += performance.now() - toyUpdateStartedAt;
 
+      const impactApplyStartedAt = performance.now();
       // Terrain impacts are projectile-spending events. Handle them before the
       // same core gets a rubble collision pass; otherwise one shot can remove a
       // voxel and also chew up an adjacent rubble pile while the impact is still
@@ -1966,29 +1978,64 @@ function animate(): void {
       if (!toy.isExpired) {
         rubbleField.resolveCoreCollision(toy);
       }
+      physicsTimingSample.impactApplyMs += performance.now() - impactApplyStartedAt;
     }
+    const postLoopImpactStartedAt = performance.now();
     emitRubbleDamageEvents(PHYSICS_CORE_COMBAT_SOURCE, "rubble collision");
+    physicsTimingSample.impactApplyMs += performance.now() - postLoopImpactStartedAt;
+
+    const rigidDebrisStartedAt = performance.now();
     rigidDebrisStats = rigidDebris.update(delta, terrainAndRubbleCollisionWorld);
+    const rigidDebrisFrameTimings = rigidDebris.getLastFrameTimings();
+    physicsTimingSample.rigidDebrisTotalMs += performance.now() - rigidDebrisStartedAt;
+    physicsTimingSample.rigidDebrisFlushMs += rigidDebrisFrameTimings.flushMs;
+    physicsTimingSample.rigidDebrisStaticColliderCollectMs += rigidDebrisFrameTimings.staticColliderCollectMs;
+    physicsTimingSample.rigidDebrisStaticColliderSyncMs += rigidDebrisFrameTimings.staticColliderSyncMs;
+    physicsTimingSample.rigidDebrisStepMs += rigidDebrisFrameTimings.stepMs;
+    physicsTimingSample.rigidDebrisSyncMs += rigidDebrisFrameTimings.syncMs;
+
+    const debrisSettlerStartedAt = performance.now();
     debrisSettlerStats = debrisSettler.update(delta, rubbleField, {
       activeCenter: camera.position,
       activeRadius: qualityController.preset.debrisActiveRadiusMeters,
       finalizationMode: "vfx"
     });
+    physicsTimingSample.debrisSettlerMs += performance.now() - debrisSettlerStartedAt;
+
+    const budgetStartedAt = performance.now();
     enforceRigidDebrisBudget();
     enforcePhysicsToyBudget();
+    physicsTimingSample.budgetEnforcementMs += performance.now() - budgetStartedAt;
+
+    const cleanupStartedAt = performance.now();
     updateGroundDebrisCleanup(delta);
     enforceGroundDebrisBudget();
     updateStuckDebrisCleanup(delta, activeWorld);
     debrisSettlerStats = debrisSettler.getStats();
     emitRubbleBatchEvents();
+    physicsTimingSample.groundCleanupMs += performance.now() - cleanupStartedAt;
+
+    const broadphaseStartedAt = performance.now();
     physicsCollisionStats = physicsToyCollider.resolve(toys);
+    physicsTimingSample.toyBroadphaseMs += performance.now() - broadphaseStartedAt;
+
+    const rigidSyncStartedAt = performance.now();
     rigidDebris.syncToyStatesToBodies();
+    physicsTimingSample.rigidDebrisSyncMs += performance.now() - rigidSyncStartedAt;
+
+    const rubbleSettleStartedAt = performance.now();
     rubbleField.settle(activeWorld);
+    physicsTimingSample.rubbleSettleMs += performance.now() - rubbleSettleStartedAt;
+
+    const renderProxyStartedAt = performance.now();
     pruneExpiredToys();
     physicsFragmentInstancer.update(toys);
     physicsCoreTrail.update(delta);
     hitscanBoltTracer.update(delta);
     debrisPoofRenderer.update(delta);
+    physicsTimingSample.renderProxySyncMs += performance.now() - renderProxyStartedAt;
+    physicsTimingSample.framePhysicsMeasuredMs = performance.now() - physicsFrameStartedAt;
+    latestPhysicsTimingStats = physicsTimingSample;
     recordTimingSection("physicsMs");
 
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
@@ -2056,6 +2103,7 @@ function animate(): void {
       physicsObjectBudget,
       rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
       debrisPressure: debrisPerformancePressure,
+      physicsTiming: physicsTimingSample,
       world: debugWorldStats ?? requireWorld().getStats(),
       physics: physicsCollisionStats,
       rigidDebris: rigidDebrisStats,
@@ -2116,6 +2164,7 @@ function animate(): void {
       debugRubbleStats,
       workerPool.getStats(),
       [combatLog.getPersistenceStatusLine(), ...combatLog.getRecentLines(5)],
+      physicsTimingSample,
       smoothedFrameTimings
     );
   }
@@ -2208,6 +2257,7 @@ function resetFrameMetersAfterIdle(): void {
   // Long background gaps should not pollute the HUD's smoothing window or force
   // the minimap to resume halfway through an old slice.
   smoothedFrameTimings = createEmptyFrameTimings();
+  latestPhysicsTimingStats = createEmptyPhysicsTimingStats();
   frameTimingsInitialized = false;
   debugHud.reset();
   minimapRenderer.reset();
@@ -2306,6 +2356,7 @@ function createCurrentPerformanceStatsSnapshot(
     physicsObjectBudget,
     rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
     debrisPressure: debrisPerformancePressure,
+    physicsTiming: latestPhysicsTimingStats,
     world: overrides.world ?? requireWorld().getStats(),
     physics: physicsCollisionStats,
     rigidDebris: rigidDebrisStats,

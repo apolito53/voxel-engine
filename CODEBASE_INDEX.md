@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-06-12
+Last reviewed: 2026-06-13
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -49,11 +49,11 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - WebGL GPU text helpers: `src/gpu.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
-- Debug HUD throttling, grouped Perf/Player/World/Physics/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, worker-pool job stats, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
+- Debug HUD throttling, grouped Perf/Player/World/Physics/Physics CPU/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, split physics subphase timings, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, worker-pool job stats, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
 - Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, browser-frame diagnostics for RAF gaps/unaccounted JS/long tasks/renderer counters, render-horizon/worker-pool stats, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, persistent local `logs/combat/` damage JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/frameDiagnostics.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`, `vite.config.ts`
 - Shared browser-native CPU job lane with clamped worker capacity, real module-worker dispatch, priority lanes, sync fallback, job ids, revision-stale rejection, cancellation, transfer bookkeeping, per-job-type telemetry, and upload/job timing stats; future CPU-heavy migrations should plug into this instead of inventing ad hoc queues: `src/workerPool.ts`, `src/engineWorker.ts`
 - Frame delta clamping, hidden/overnight resume guards, and idle animation-loop hibernation: `src/frameLoop.ts`
-- Smoothed per-frame subsystem timing helpers plus browser-frame clue capture for hitch profiling: `src/frameTimings.ts`, `src/frameDiagnostics.ts`
+- Smoothed per-frame subsystem timing helpers, split physics subphase timing payloads, plus browser-frame clue capture for hitch profiling: `src/frameTimings.ts`, `src/frameDiagnostics.ts`
 - Reusable held-item registry, stack metadata, categories, tags, and primary/secondary action descriptors, including Unarmed, Terraformer, Physics Core, Hitscan Core, and build-only block items: `src/items.ts`
 - Scroll-selected item/block lanes, selection wrapping, number-key mapping, and action resolution helpers: `src/hotbar.ts`
 - Semi/full-auto click-mode normalization, persistence, display labels, and toggle helper used by the input loop: `src/clickFireMode.ts`
@@ -97,7 +97,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Persisted physics-core size/velocity/terrain-bounce/color/trail slider bounds, defaults, normalization, and label formatting: `src/physicsCoreSettings.ts`
 - Shared core material/color helpers and short projectile-core trail renderer: `src/physicsCoreVisuals.ts`, `src/physicsCoreTrail.ts`
 - Instanced debris rendering batches keyed by source block material and shard shape, including per-fragment tumble rotation and non-uniform scale: `src/physicsInstancing.ts`
-- Rapier WASM initialization, dynamic cuboid debris bodies with per-fragment half extents, candidate-filtered capped surface-only path-lookahead temporary terrain/rubble/partial-lattice support colliders, stale partial-support wakeups, shallow support-penetration correction, transform sync back to fragment render proxies, sleeping stats, and cleanup: `src/rigidDebris.ts`
+- Rapier WASM initialization, dynamic cuboid debris bodies with per-fragment half extents, candidate-filtered capped surface-only path-lookahead temporary terrain/rubble/partial-lattice support colliders, per-frame admission/support-cell/collider-churn telemetry, stale partial-support wakeups, shallow support-penetration correction, transform sync back to fragment render proxies, sleeping stats, and cleanup: `src/rigidDebris.ts`
 - Persistent destructible rubble cover patches, sparse hidden support footprints, parked faceted heightfield rendering, batched absorption, bounded surface samples, baked static shard-pile visuals, scaled durability separate from material volume, raycast target-cell reporting, direct-hit damage with small neighbor chip damage, damage-event reporting, multi-cell merge rules, walkable support-height queries, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - CPU-facing Rapier debris body safety cap, adaptive low-FPS debris pressure governor, and post-impact grounded-debris cap label/persistence helpers: `src/debrisPerformanceGovernor.ts`, `src/rigidDebrisBudget.ts`

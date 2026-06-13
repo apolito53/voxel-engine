@@ -11,6 +11,24 @@ export type FrameTimings = {
   frameMs: number;
 };
 
+export type PhysicsTimingStats = {
+  toyUpdateMs: number;
+  impactApplyMs: number;
+  rigidDebrisTotalMs: number;
+  rigidDebrisFlushMs: number;
+  rigidDebrisStaticColliderCollectMs: number;
+  rigidDebrisStaticColliderSyncMs: number;
+  rigidDebrisStepMs: number;
+  rigidDebrisSyncMs: number;
+  debrisSettlerMs: number;
+  budgetEnforcementMs: number;
+  groundCleanupMs: number;
+  toyBroadphaseMs: number;
+  rubbleSettleMs: number;
+  renderProxySyncMs: number;
+  framePhysicsMeasuredMs: number;
+};
+
 const FRAME_TIMING_KEYS = [
   "playerMs",
   "chunkMs",
@@ -32,6 +50,26 @@ export function createEmptyFrameTimings(): FrameTimings {
     renderMs: 0,
     otherMs: 0,
     frameMs: 0
+  };
+}
+
+export function createEmptyPhysicsTimingStats(): PhysicsTimingStats {
+  return {
+    toyUpdateMs: 0,
+    impactApplyMs: 0,
+    rigidDebrisTotalMs: 0,
+    rigidDebrisFlushMs: 0,
+    rigidDebrisStaticColliderCollectMs: 0,
+    rigidDebrisStaticColliderSyncMs: 0,
+    rigidDebrisStepMs: 0,
+    rigidDebrisSyncMs: 0,
+    debrisSettlerMs: 0,
+    budgetEnforcementMs: 0,
+    groundCleanupMs: 0,
+    toyBroadphaseMs: 0,
+    rubbleSettleMs: 0,
+    renderProxySyncMs: 0,
+    framePhysicsMeasuredMs: 0
   };
 }
 

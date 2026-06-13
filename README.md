@@ -114,7 +114,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
   local reactions, and the future model-hook direction.
 - [docs/performance-hitch-logging.md](docs/performance-hitch-logging.md): local
   and deployed hitch logs, browser-frame diagnostics, persistent combat damage
-  logs, debug metrics, server markers, and visual recordings.
+  logs, split physics/debris timing metrics, server markers, and visual
+  recordings.
 - [docs/automation.md](docs/automation.md): F8 avatar, Codex pilot bridge,
   visual scenario recorder, and Chrome/playtest automation notes.
 

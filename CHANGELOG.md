@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.11.1 - 2026-06-13
+
+### Added
+
+- Added split physics subphase telemetry for rigid debris, impact application,
+  broadphase work, rubble settling, cleanup, and render-proxy sync so F3,
+  visual manifests, and hitch logs can name the dominant physics cost instead
+  of reporting one opaque `physicsMs` bucket.
+- Extended rigid-debris stats with per-frame admission, awake/sleeping,
+  support-cell, collider churn, wake, forced-sleep, and future parked-sleeper
+  counters without changing debris behavior.
+
+### Changed
+
+- Updated physics-led hitch summaries to call out the largest measured physics
+  subphase, active support-collider churn, and rigid-body admission pressure.
+
 ## 0.11.0 - 2026-06-13
 
 ### Added

@@ -263,6 +263,7 @@ import {
   normalizeGroundDebrisLifetime
 } from "../src/debrisLifetime";
 import {
+  createEmptyRigidDebrisStats,
   RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET,
   RigidDebrisSimulation
 } from "../src/rigidDebris";
@@ -315,7 +316,11 @@ import {
   shouldSkipExpensiveFrame
 } from "../src/frameLoop";
 import type { FrameDiagnosticsSnapshot } from "../src/frameDiagnostics";
-import { createEmptyFrameTimings, smoothFrameTimings } from "../src/frameTimings";
+import {
+  createEmptyFrameTimings,
+  createEmptyPhysicsTimingStats,
+  smoothFrameTimings
+} from "../src/frameTimings";
 import {
   LOW_FPS_LOG_INTERVAL_MS,
   createPerformanceHitchRecord,
@@ -2451,12 +2456,25 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
     frameMs: timings.frameMs,
     timings,
     stats: createTestHitchStats({
+      physicsTiming: {
+        ...createEmptyPhysicsTimingStats(),
+        rigidDebrisStepMs: 18.5,
+        framePhysicsMeasuredMs: 31
+      },
       rigidDebris: {
+        ...createEmptyRigidDebrisStats(),
         initialized: true,
         bodies: 120,
         sleepingBodies: 20,
+        awakeBodies: 100,
         terrainColliders: 600,
-        rubbleSupportColliders: 24
+        rubbleSupportColliders: 24,
+        staticRefreshRan: true,
+        staticRefreshReason: "dirty",
+        candidateCellsScanned: 800,
+        candidateCellsAccepted: 624,
+        staticColliderCreatedThisFrame: 12,
+        staticColliderRemovedThisFrame: 4
       },
       fragmentRender: {
         batches: 8,
@@ -2470,6 +2488,15 @@ test("performance hitch diagnosis names the dominant subsystem and pressure coun
   assert(
     record.details.some((detail) => detail.includes("rigid debris bodies awake")),
     "physics hitches should call out awake rigid debris pressure"
+  );
+  assert(
+    record.details.some((detail) => detail.includes("rigid debris step 18.5ms")),
+    "physics hitches should name the dominant measured physics subphase"
+  );
+  assertEqual(
+    record.stats.physicsTiming.rigidDebrisStepMs,
+    18.5,
+    "hitch records should retain cloned physics subphase timings for later log parsing"
   );
   assert(
     formatPerformanceHitchRecord(record).includes("physics led"),
@@ -9342,6 +9369,7 @@ function createTestHitchStats(
     physicsObjectBudget: 192,
     rigidDebrisBodyBudget: 128,
     debrisPressure: createDebrisPerformancePressureState(128),
+    physicsTiming: createEmptyPhysicsTimingStats(),
     world: {
       loadedChunks: 0,
       visibleChunks: 0,
@@ -9379,13 +9407,7 @@ function createTestHitchStats(
       resolvedContacts: 0,
       skippedDebrisPairs: 0
     },
-    rigidDebris: {
-      initialized: true,
-      bodies: 0,
-      sleepingBodies: 0,
-      terrainColliders: 0,
-      rubbleSupportColliders: 0
-    },
+    rigidDebris: createEmptyRigidDebrisStats(),
     fragmentRender: {
       batches: 0,
       instances: 0,
