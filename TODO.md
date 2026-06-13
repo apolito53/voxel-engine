@@ -35,8 +35,12 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
 - Current optimization target completed: Rapier admission is capped at spawn
   time while preserving the full visible break burst as cheap VFX, and
   over-pressure rigid debris demotes to VFX before expiring anything.
-- Next reduce temporary support-collider churn with better grounded/falling
-  prioritization and invalidation before considering parked sleepers.
+- Current support target completed: temporary support-collider scans now
+  prioritize sleeping, near-supported, falling, fast, and moving shards before
+  calm unsupported airborne shards, while still doing a narrow lookdown for
+  known rubble/partial support.
+- Next validate fresh `debris-pressure` logs before deciding whether parked
+  sleepers are worth the complexity.
 - Do not revive partial-mesh draw caps or rigid-debris cadence throttling; both
   were playtested and parked because the visual/feel cost was not worth it.
 

@@ -80,6 +80,10 @@ Rigid-debris pressure relief starts at admission now: the full visual burst can
 spawn, but only the most useful representative shards become Rapier bodies
 before the first debris physics step. Overflow remains visible VFX, and
 over-budget rigid bodies demote back to VFX before any shard expires.
+Temporary rigid-debris support colliders are also prioritized: sleeping,
+near-supported, falling, fast, and moving shards get collider scans first, while
+calm unsupported airborne shards skip empty-air work until gravity, contact, or
+known rubble/partial support makes them relevant.
 
 Recent records are available in the browser at:
 

@@ -35,6 +35,10 @@ const RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN = 0.004;
 const RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
 const RIGID_DEBRIS_SUPPORT_MIN_HEIGHT = 0.04;
 const RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION = 1000;
+const RIGID_DEBRIS_SUPPORT_DESCENDING_SPEED = -0.5;
+const RIGID_DEBRIS_SUPPORT_FAST_SPEED_SQ = 10 * 10;
+const RIGID_DEBRIS_SUPPORT_HORIZONTAL_SPEED_SQ = 4 * 4;
+const RIGID_DEBRIS_SUPPORT_LOOKDOWN_METERS = 2.25;
 const RAPIER_COMPAT_INIT_WARNING = "using deprecated parameters for the initialization function";
 
 type RigidDebrisBody = {
@@ -58,6 +62,14 @@ type StaticColliderCell = {
 type RigidDebrisSupport = {
   readonly height: number;
   readonly penetrationDepth: number;
+};
+
+type RigidDebrisSupportScanCandidate = {
+  readonly record: RigidDebrisBody;
+  readonly priority: number;
+  readonly lookaheadSamples: number;
+  readonly supportScanY: number | null;
+  readonly speedSq: number;
 };
 
 export type RigidDebrisStaticRefreshReason = "none" | "scheduled" | "dirty";
@@ -241,6 +253,12 @@ export class RigidDebrisSimulation {
 
     const flushStartedAt = nowMs();
     this.flushPendingFragments();
+    if (this.admittedBodiesThisFrame > 0) {
+      // New bodies need nearby support soon, but forcing a same-frame collider
+      // rebuild immediately after Rapier body creation can churn static
+      // colliders before the solver has a stable velocity/contact picture.
+      this.staticCollidersDirty = true;
+    }
     this.lastFrameTimings = {
       ...this.lastFrameTimings,
       flushMs: nowMs() - flushStartedAt
@@ -635,8 +653,9 @@ export class RigidDebrisSimulation {
 
   private collectActiveColliderCells(collisionWorld: CollisionWorld): void {
     this.activeColliderCells.clear();
-    for (const record of this.bodiesByToy.values()) {
-      if (record.toy.isExpired) continue;
+    const candidates = this.collectSupportScanCandidates(collisionWorld);
+    for (const candidate of candidates) {
+      const { record } = candidate;
 
       if (record.toy.isSleeping) {
         this.addSleepingSupportColliderCells(record, collisionWorld);
@@ -653,11 +672,22 @@ export class RigidDebrisSimulation {
       // Static terrain/rubble colliders are intentionally temporary. Sampling
       // only around the current body position lets tiny fast shards outrun the
       // collider bubble between refreshes and tunnel through the surface they
-      // were about to hit. Add a few scan bubbles along the predicted path so
-      // the first floor/wall ahead exists before Rapier integrates into it.
-      for (let sample = 0; sample <= RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES; sample += 1) {
-        const lookaheadSeconds = (sample / RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES) *
-          RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS;
+      // were about to hit. Fast or descending shards keep lookahead bubbles;
+      // calm airborne shards skip support work until gravity or contact makes
+      // them relevant, which keeps empty-air debris from spending the budget.
+      if (candidate.supportScanY !== null) {
+        this.colliderScanCenter.set(position.x, candidate.supportScanY, position.z);
+        this.addColliderCellsAround(this.colliderScanCenter, collisionWorld);
+        if (this.activeColliderCells.size >= RIGID_DEBRIS_STATIC_COLLIDER_CELL_BUDGET) {
+          this.candidateCellsBudgetHitThisFrame = 1;
+          return;
+        }
+      }
+
+      for (let sample = 0; sample <= candidate.lookaheadSamples; sample += 1) {
+        const lookaheadSeconds = candidate.lookaheadSamples <= 0
+          ? 0
+          : (sample / candidate.lookaheadSamples) * RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS;
         this.colliderScanCenter.set(
           position.x + velocity.x * lookaheadSeconds,
           position.y + velocity.y * lookaheadSeconds,
@@ -869,6 +899,22 @@ export class RigidDebrisSimulation {
     }
   }
 
+  private collectSupportScanCandidates(collisionWorld: CollisionWorld): RigidDebrisSupportScanCandidate[] {
+    const candidates: RigidDebrisSupportScanCandidate[] = [];
+    for (const record of this.bodiesByToy.values()) {
+      if (record.toy.isExpired) continue;
+
+      const candidate = createSupportScanCandidate(record, collisionWorld);
+      if (candidate) candidates.push(candidate);
+    }
+
+    return candidates.sort((left, right) => {
+      const priorityDelta = left.priority - right.priority;
+      if (priorityDelta !== 0) return priorityDelta;
+      return right.speedSq - left.speedSq;
+    });
+  }
+
   private createTerrainCollider(key: string): Collider | null {
     if (!this.world) return null;
 
@@ -997,6 +1043,78 @@ function nowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
+function createSupportScanCandidate(
+  record: RigidDebrisBody,
+  collisionWorld: CollisionWorld
+): RigidDebrisSupportScanCandidate | null {
+  if (record.toy.isSleeping) {
+    return {
+      record,
+      priority: 0,
+      lookaheadSamples: 0,
+      supportScanY: null,
+      speedSq: 0
+    };
+  }
+
+  const velocity = record.body.linvel();
+  const horizontalSpeedSq = velocity.x * velocity.x + velocity.z * velocity.z;
+  const speedSq = horizontalSpeedSq + velocity.y * velocity.y;
+
+  if (isRecordNearSupport(record, collisionWorld)) {
+    return {
+      record,
+      priority: 1,
+      lookaheadSamples: 0,
+      supportScanY: null,
+      speedSq
+    };
+  }
+
+  const nearbySupportScanY = getNearbySupportScanY(record, collisionWorld);
+  if (nearbySupportScanY !== null) {
+    return {
+      record,
+      priority: 2,
+      lookaheadSamples: 0,
+      supportScanY: nearbySupportScanY,
+      speedSq
+    };
+  }
+
+  if (velocity.y <= RIGID_DEBRIS_SUPPORT_DESCENDING_SPEED) {
+    return {
+      record,
+      priority: 3,
+      lookaheadSamples: RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES,
+      supportScanY: null,
+      speedSq
+    };
+  }
+
+  if (speedSq >= RIGID_DEBRIS_SUPPORT_FAST_SPEED_SQ) {
+    return {
+      record,
+      priority: 4,
+      lookaheadSamples: RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES,
+      supportScanY: null,
+      speedSq
+    };
+  }
+
+  if (horizontalSpeedSq >= RIGID_DEBRIS_SUPPORT_HORIZONTAL_SPEED_SQ) {
+    return {
+      record,
+      priority: 5,
+      lookaheadSamples: 0,
+      supportScanY: null,
+      speedSq
+    };
+  }
+
+  return null;
+}
+
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
   return toy.debrisShape?.colliderHalfExtents.clone()
     ?? createDefaultDebrisShape().colliderHalfExtents;
@@ -1004,6 +1122,36 @@ function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
 
 function isRecordNearSupport(record: RigidDebrisBody, collisionWorld: CollisionWorld): boolean {
   return getRigidDebrisSupport(record, collisionWorld) !== null;
+}
+
+function getNearbySupportScanY(
+  record: RigidDebrisBody,
+  collisionWorld: CollisionWorld
+): number | null {
+  if (!collisionWorld.getSupportHeight) return null;
+
+  const position = record.body.translation();
+  const halfExtents = record.colliderHalfExtents;
+  const bottomY = position.y - halfExtents.y;
+  const supportHeight = collisionWorld.getSupportHeight({
+    minX: position.x - halfExtents.x,
+    maxX: position.x + halfExtents.x,
+    minY: bottomY - RIGID_DEBRIS_SUPPORT_LOOKDOWN_METERS,
+    maxY: bottomY + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE,
+    minZ: position.z - halfExtents.z,
+    maxZ: position.z + halfExtents.z
+  });
+
+  if (supportHeight === null || !Number.isFinite(supportHeight)) return null;
+
+  const clearance = bottomY - supportHeight;
+  if (clearance < -RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE) return null;
+  if (clearance > RIGID_DEBRIS_SUPPORT_LOOKDOWN_METERS) return null;
+
+  // Ask the normal cell scanner to visit the support's own voxel row. This is
+  // intentionally narrower than restoring a full airborne scan: rubble/partial
+  // support gets an early collider, while empty sky fragments stay cheap.
+  return supportHeight;
 }
 
 function isRecordNearExplicitCollisionCell(

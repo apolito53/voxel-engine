@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.11.3 - 2026-06-13
+
+### Changed
+
+- Reduced rigid-debris temporary support-collider pressure by prioritizing
+  sleeping, near-supported, falling, fast, and moving shards before calm
+  unsupported airborne shards.
+- Kept rubble and partial-height support reliable by adding a narrow support
+  lookdown probe for shards above known support surfaces, without restoring the
+  old broad empty-air scan.
+- Forced a short dirty support refresh after newly admitted rigid bodies so
+  fresh fast debris can discover terrain support before the first big fall.
+
 ## 0.11.2 - 2026-06-13
 
 ### Added

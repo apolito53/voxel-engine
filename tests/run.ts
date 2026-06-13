@@ -6277,6 +6277,10 @@ test("rigid debris adapter preserves ground colliders when many shards are high 
     "airborne shards should not spend the whole temporary collider budget on empty cells before ground debris gets support"
   );
   assert(
+    rigidDebris.getStats().candidateCellsScanned < 200,
+    "calm high airborne shards should not spend support scan work while grounded or falling shards need it"
+  );
+  assert(
     nearGroundFragment.mesh.position.y > -0.05,
     "near-ground debris should keep a floor collider even when many earlier shards are airborne"
   );
