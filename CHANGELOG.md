@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.10.7 - 2026-06-12
+
+### Changed
+
+- Added a short burst-grace window before `Active Ground Debris Cap` cleanup can
+  cull supported or sleeping debris, so freshly broken blocks keep their visible
+  outward shard spray even when the ground cap is low.
+
 ## 0.10.6 - 2026-06-11
 
 ### Changed

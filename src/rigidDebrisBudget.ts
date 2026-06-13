@@ -10,6 +10,7 @@ export const DEFAULT_GROUND_DEBRIS_BUDGET = 128;
 export const MIN_GROUND_DEBRIS_BUDGET = 0;
 export const MAX_GROUND_DEBRIS_BUDGET = MAX_RIGID_DEBRIS_BODY_BUDGET;
 export const GROUND_DEBRIS_BUDGET_STEP = PHYSICS_OBJECT_BUDGET_STEP;
+export const GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS = 0.9;
 const RIGID_DEBRIS_BODY_BUDGET_RATIO = 0.75;
 
 export function getRigidDebrisBodyBudget(physicsObjectBudget: number): number {
@@ -72,6 +73,16 @@ export function writeGroundDebrisBudgetPreference(budget: number): void {
 export function formatGroundDebrisBudget(budget: number): string {
   const normalizedBudget = normalizeGroundDebrisBudget(budget);
   return `${normalizedBudget} ${normalizedBudget === 1 ? "shard" : "shards"}`;
+}
+
+export function isGroundDebrisBudgetCleanupEligible(ageSeconds: number, isGrounded: boolean): boolean {
+  if (!isGrounded) return false;
+
+  // Some freshly spawned fragments are "grounded" immediately because they
+  // burst out of a terrain face or land on nearby support in the first frames.
+  // The ground cap is aftermath cleanup, not an explosion-shape limiter, so
+  // give every shard a short visible burst window before it can be culled.
+  return Number.isFinite(ageSeconds) && ageSeconds >= GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS;
 }
 
 function normalizeGroundDebrisBudgetFallback(fallbackBudget: number): number {

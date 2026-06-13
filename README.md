@@ -94,7 +94,7 @@ useful terrain-damage speed, so spent shots do not linger forever during stress
 tests.
 `Break Burst Shards` controls the initial destruction spray, while `Active
 Ground Debris Cap` trims only supported or sleeping aftermath shards after they
-touch down.
+touch down and survive the short burst grace.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show

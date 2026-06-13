@@ -236,6 +236,7 @@ import {
 import { voxelRaycast } from "../src/raycast";
 import {
   DEFAULT_GROUND_DEBRIS_BUDGET,
+  GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS,
   GROUND_DEBRIS_BUDGET_STEP,
   MAX_GROUND_DEBRIS_BUDGET,
   MAX_RIGID_DEBRIS_BODY_BUDGET,
@@ -243,6 +244,7 @@ import {
   MIN_RIGID_DEBRIS_BODY_BUDGET,
   formatGroundDebrisBudget,
   getEffectiveRigidDebrisBodyBudget,
+  isGroundDebrisBudgetCleanupEligible,
   normalizeGroundDebrisBudget,
   getRigidDebrisBodyBudget
 } from "../src/rigidDebrisBudget";
@@ -8537,6 +8539,18 @@ test("physics object budget clamps and steps predictably", () => {
     getEffectiveRigidDebrisBodyBudget(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].physicsObjectBudget, 96),
     MAX_RIGID_DEBRIS_BODY_BUDGET,
     "ground debris slider should not shrink the airborne rigid debris burst budget"
+  );
+  assert(
+    !isGroundDebrisBudgetCleanupEligible(GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS - 0.01, true),
+    "fresh grounded shards should keep the initial burst silhouette before the ground cap applies"
+  );
+  assert(
+    isGroundDebrisBudgetCleanupEligible(GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS + 0.01, true),
+    "grounded shards should become eligible for the aftermath cap after the burst grace"
+  );
+  assert(
+    !isGroundDebrisBudgetCleanupEligible(GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS + 10, false),
+    "airborne shards should not be counted against the ground debris cap"
   );
   assertEqual(
     formatGroundDebrisBudget(0),

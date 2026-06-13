@@ -134,9 +134,9 @@ The `Active Ground Debris Cap` and `Ground Debris Lifetime` settings govern
 aftermath:
 
 - Full bursts can exceed the ground cap while airborne.
-- The ground cap only trims shards after they are supported or sleeping, so it
-  controls how much loose clutter remains on the floor rather than how many
-  pieces spray out of a break.
+- The ground cap only trims shards after they are supported or sleeping and have
+  survived a short burst-grace window, so it controls how much loose clutter
+  remains on the floor rather than how many pieces spray out of a break.
 - Excess supported/sleeping debris is culled after it settles.
 - Timed-out shards disappear in a material-tinted poof after first ground
   contact unless lifetime is set to `Forever`.

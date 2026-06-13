@@ -248,6 +248,7 @@ import {
   MIN_GROUND_DEBRIS_BUDGET,
   formatGroundDebrisBudget,
   getEffectiveRigidDebrisBodyBudget,
+  isGroundDebrisBudgetCleanupEligible,
   normalizeGroundDebrisBudget,
   readGroundDebrisBudgetPreference,
   writeGroundDebrisBudgetPreference
@@ -3898,15 +3899,18 @@ function enforceRigidDebrisBudget(): void {
 
 function enforceGroundDebrisBudget(): void {
   const candidates = getRigidDebrisBudgetCandidates()
-    .filter((candidate) => candidate.grounded);
+    .filter((candidate) => isGroundDebrisBudgetCleanupEligible(candidate.toy.age, candidate.grounded));
   const overBudgetCount = candidates.length - groundDebrisBudget;
   if (overBudgetCount <= 0) return;
 
   // The ground cap is an aftermath cleanup knob. Once shards touch support or
-  // sleep, trim the least useful floor clutter first without affecting airborne
-  // burst silhouettes or the active rigid-body safety budget.
+  // sleep and survive the burst grace window, trim the least useful floor
+  // clutter first without affecting airborne burst silhouettes or the active
+  // rigid-body safety budget.
   const cleanupCandidates = candidates
     .sort((left, right) => {
+      const ageDifference = right.toy.age - left.toy.age;
+      if (Math.abs(ageDifference) > 0.001) return ageDifference;
       if (left.toy.isSleeping !== right.toy.isSleeping) return left.toy.isSleeping ? -1 : 1;
       return right.distanceToCameraSq - left.distanceToCameraSq;
     });
