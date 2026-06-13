@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.11.6 - 2026-06-13
+
+### Fixed
+
+- Woke detached sleeping VFX debris when nearby terrain support changes, so
+  shards demoted out of Rapier do not remain parked in midair after the block or
+  partial terrain under their local pile is damaged or destroyed.
+- Broadened terrain support invalidation from exact edited cells to a small
+  support neighborhood/column, catching overhanging and stacked sleeping debris
+  without restoring the old every-frame support scan.
+
 ## 0.11.5 - 2026-06-13
 
 ### Fixed

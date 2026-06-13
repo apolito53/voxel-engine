@@ -26,6 +26,7 @@ const FRAGMENT_GROUND_VERTICAL_DAMPING = 0.36;
 const FRAGMENT_WALL_DAMPING = 0.74;
 const FRAGMENT_PARTIAL_SUPPORT_EPSILON = 0.025;
 const FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION = BLOCK_FRAGMENT_VISUAL_SIZE * 2.25;
+const FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED = -0.35;
 const GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER = 2;
 const GROUND_DEBRIS_AIRBORNE_MIN_SECONDS = 6;
 const CORE_COLLISION_RESTITUTION = 1.55;
@@ -276,6 +277,23 @@ export class PhysicsToy {
     this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
     this.markRigidDebrisExternalMutation();
+  }
+
+  wakeFromTerrainSupportChange(): boolean {
+    if (!this.isInstancedFragment || this.expired || !this.sleeping) return false;
+
+    // Terrain changed underneath or beside this settled shard. Clear the cheap
+    // support-anchored sleep state and give gravity a tiny head start so the
+    // next normal toy update can prove whether the shard still has support.
+    this.sleeping = false;
+    this.supportAnchoredSleep = false;
+    this.supportContactLastUpdate = false;
+    this.settledSeconds = 0;
+    this.velocity.y = Math.min(this.velocity.y, FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED);
+    this.resetLowSpeedDespawnCountdown();
+    this.resetGroundDebrisCleanupClock();
+    this.markRigidDebrisExternalMutation();
+    return true;
   }
 
   markRigidDebrisExternalMutation(): void {

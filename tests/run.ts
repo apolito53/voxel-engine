@@ -80,6 +80,7 @@ import {
   DebrisStuckCleanupTracker,
   isDebrisTrappedForCleanup
 } from "../src/debrisCleanup";
+import { wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells } from "../src/debrisSupportInvalidation";
 import {
   DEBRIS_PRESSURE_MIN_BUDGET_RATIO,
   createDebrisPerformancePressureState,
@@ -6278,7 +6279,7 @@ test("rigid debris adapter preserves ground colliders when many shards are high 
   );
   assert(
     rigidDebris.getStats().candidateCellsScanned < 200,
-    "calm high airborne shards should not spend support scan work while grounded or falling shards need it"
+    `calm high airborne shards should not spend support scan work while grounded or falling shards need it; scanned ${rigidDebris.getStats().candidateCellsScanned} cells`
   );
   assert(
     nearGroundFragment.mesh.position.y > -0.05,
@@ -6515,6 +6516,77 @@ test("rigid debris adapter wakes sleeping shards when their support terrain cell
     "debris resting on an unchanged support cell should stay parked"
   );
   rigidDebris.clear();
+});
+
+test("terrain support invalidation wakes detached sleeping VFX fragments", () => {
+  const targetFragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
+  const unrelatedFragment = createTestFragment(BLOCK.sand, 2.5, 1.08, 0.5);
+  sleepTestFragment(targetFragment);
+  sleepTestFragment(unrelatedFragment);
+  const targetStartY = targetFragment.mesh.position.y;
+  const unrelatedStartY = unrelatedFragment.mesh.position.y;
+
+  const woken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
+    [targetFragment, unrelatedFragment],
+    [{ x: 0, y: 0, z: 0 }]
+  );
+  targetFragment.update(1 / 60, { isSolid: () => false });
+  unrelatedFragment.update(1 / 60, { isSolid: () => false });
+
+  assertEqual(woken, 1, "terrain invalidation should wake only detached debris over the changed support");
+  assert(!targetFragment.isSleeping, "detached debris over changed support should leave cheap sleep");
+  assert(
+    targetFragment.mesh.position.y < targetStartY - 0.005,
+    "woken detached debris should resume gravity after support changes"
+  );
+  assert(unrelatedFragment.isSleeping, "detached debris over unchanged support should stay asleep");
+  assertClose(
+    unrelatedFragment.mesh.position.y,
+    unrelatedStartY,
+    0.001,
+    "unrelated detached debris should not move"
+  );
+});
+
+test("terrain support invalidation wakes detached stacked VFX fragments above changed support", () => {
+  const lowerFragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
+  const upperFragment = createTestFragment(BLOCK.sand, 0.56, 1.35, 0.52);
+  const tooHighFragment = createTestFragment(BLOCK.sand, 0.5, 5.0, 0.5);
+  sleepTestFragment(lowerFragment);
+
+  // Clump sleep can park upper shards that are supported by other debris rather
+  // than direct terrain. The invalidation path should wake that small local
+  // column too, or the bottom shard falls away while the upper shard levitates.
+  upperFragment.sleepInPlace(false);
+  tooHighFragment.sleepInPlace(false);
+  const lowerStartY = lowerFragment.mesh.position.y;
+  const upperStartY = upperFragment.mesh.position.y;
+  const tooHighStartY = tooHighFragment.mesh.position.y;
+
+  const woken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
+    [lowerFragment, upperFragment, tooHighFragment],
+    [{ x: 0, y: 0, z: 0 }]
+  );
+  lowerFragment.update(1 / 60, { isSolid: () => false });
+  upperFragment.update(1 / 60, { isSolid: () => false });
+  tooHighFragment.update(1 / 60, { isSolid: () => false });
+
+  assertEqual(woken, 2, "support invalidation should wake the local detached support stack");
+  assert(
+    lowerFragment.mesh.position.y < lowerStartY - 0.005,
+    "lower detached debris should resume falling after support changes"
+  );
+  assert(
+    upperFragment.mesh.position.y < upperStartY - 0.005,
+    "upper detached debris in the same support stack should not stay parked in midair"
+  );
+  assert(tooHighFragment.isSleeping, "far-above detached debris should stay asleep");
+  assertClose(
+    tooHighFragment.mesh.position.y,
+    tooHighStartY,
+    0.001,
+    "far-above detached debris should not move from the local support wake"
+  );
 });
 
 test("rigid debris adapter keeps temporary terrain colliders surface-only and capped", async () => {

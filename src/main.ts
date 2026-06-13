@@ -89,6 +89,10 @@ import {
   createEmptyDebrisSettlerStats,
   type DebrisSettlerStats
 } from "./debrisSettler";
+import {
+  wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells,
+  type ChangedTerrainCell
+} from "./debrisSupportInvalidation";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
 import { createEngineEventBus } from "./engineEvents";
@@ -274,7 +278,6 @@ import {
 import {
   RigidDebrisSimulation,
   createEmptyRigidDebrisStats,
-  type RigidDebrisChangedTerrainCell,
   type RigidDebrisStats
 } from "./rigidDebris";
 import {
@@ -3278,11 +3281,12 @@ function applyTerrainDamageFeedback(
   damagedBlocksThisFrame?: Set<string>
 ): void {
   let changedTerrainCollider = false;
-  const changedTerrainCells: RigidDebrisChangedTerrainCell[] = [];
+  const changedTerrainCells: ChangedTerrainCell[] = [];
+  const changedTerrainCellKeys = new Set<string>();
 
   for (const result of results) {
     damagedBlocksThisFrame?.add(activeWorld.damageKey(result.position.x, result.position.y, result.position.z));
-    changedTerrainCells.push(result.position);
+    collectTerrainSupportInvalidationCells(result.position, changedTerrainCells, changedTerrainCellKeys);
 
     engineEvents.emit("block:damaged", {
       position: result.position,
@@ -3325,11 +3329,35 @@ function applyTerrainDamageFeedback(
   // Partial-block cuts and final block removals both alter support/collision
   // candidates for active debris. Keep Rapier's temporary static collider cache
   // honest even when a very small chip produces no visible fragment. Also wake
-  // sleeping debris that was resting on the edited cell; this is event-driven
+  // sleeping debris in the edited support neighborhood; this is event-driven
   // so settled piles do not need a broad support scan every frame.
   if (changedTerrainCollider) {
     rigidDebris.wakeDebrisRestingOnChangedTerrainCells(changedTerrainCells);
+    wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(toys, changedTerrainCells);
     rigidDebris.invalidateStaticColliders();
+  }
+}
+
+function collectTerrainSupportInvalidationCells(
+  position: VoxelBlockPosition,
+  cells: ChangedTerrainCell[],
+  seen: Set<string>
+): void {
+  // A damaged voxel can alter support for shards centered on that cell, shards
+  // overhanging an edge, and small clumps whose bottom shard was touching an
+  // adjacent partial/support cell. Keep the halo small and only compute it when
+  // terrain actually changes.
+  for (let y = position.y - 1; y <= position.y + 1; y += 1) {
+    if (y < 0) continue;
+    for (let z = position.z - 1; z <= position.z + 1; z += 1) {
+      for (let x = position.x - 1; x <= position.x + 1; x += 1) {
+        const key = `${x},${y},${z}`;
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+        cells.push({ x, y, z });
+      }
+    }
   }
 }
 
