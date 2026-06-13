@@ -33,6 +33,7 @@ const RIGID_DEBRIS_FORCE_SLEEP_SECONDS = 0.18;
 const RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE = 0.08;
 const RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN = 0.004;
 const RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
+const RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_SPEED = -0.35;
 const RIGID_DEBRIS_SUPPORT_MIN_HEIGHT = 0.04;
 const RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION = 1000;
 const RIGID_DEBRIS_SUPPORT_DESCENDING_SPEED = -0.5;
@@ -58,6 +59,8 @@ type StaticColliderCell = {
   readonly y: number;
   readonly z: number;
 };
+
+export type RigidDebrisChangedTerrainCell = StaticColliderCell;
 
 type RigidDebrisSupport = {
   readonly height: number;
@@ -383,6 +386,38 @@ export class RigidDebrisSimulation {
 
   invalidateStaticColliders(): void {
     this.staticCollidersDirty = true;
+  }
+
+  wakeDebrisRestingOnChangedTerrainCells(cells: Iterable<RigidDebrisChangedTerrainCell>): number {
+    const changedCells = normalizeChangedTerrainCells(cells);
+    if (!this.world || changedCells.length === 0 || this.bodiesByToy.size === 0) return 0;
+
+    let wokenBodies = 0;
+    for (const record of this.bodiesByToy.values()) {
+      if (record.toy.isExpired || !record.body.isSleeping()) continue;
+      if (!isRecordRestingOnAnyChangedTerrainCell(record, changedCells)) continue;
+
+      // Terrain edits are discrete events, so this is the cheap place to unpark
+      // debris that used to be supported by the edited cell. A small downward
+      // nudge keeps Rapier from re-sleeping on the exact stale contact frame.
+      const linvel = record.body.linvel();
+      record.body.setLinvel({
+        x: linvel.x,
+        y: Math.min(linvel.y, RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_SPEED),
+        z: linvel.z
+      }, true);
+      record.body.wakeUp();
+      record.quietSeconds = 0;
+      wokenBodies += 1;
+    }
+
+    if (wokenBodies > 0) {
+      this.wokenBodiesThisFrame += wokenBodies;
+      this.staticCollidersDirty = true;
+      this.staticRefreshSeconds = Infinity;
+      this.refreshStats();
+    }
+    return wokenBodies;
   }
 
   clear(): void {
@@ -1126,6 +1161,64 @@ function createSupportScanCandidate(
   }
 
   return null;
+}
+
+function normalizeChangedTerrainCells(
+  cells: Iterable<RigidDebrisChangedTerrainCell>
+): RigidDebrisChangedTerrainCell[] {
+  const normalized: RigidDebrisChangedTerrainCell[] = [];
+  const seen = new Set<string>();
+
+  for (const cell of cells) {
+    if (
+      !Number.isFinite(cell.x) ||
+      !Number.isFinite(cell.y) ||
+      !Number.isFinite(cell.z)
+    ) {
+      continue;
+    }
+
+    const x = Math.floor(cell.x);
+    const y = Math.floor(cell.y);
+    const z = Math.floor(cell.z);
+    const key = getStaticColliderCellKey(x, y, z);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    normalized.push({ x, y, z });
+  }
+
+  return normalized;
+}
+
+function isRecordRestingOnAnyChangedTerrainCell(
+  record: RigidDebrisBody,
+  cells: readonly RigidDebrisChangedTerrainCell[]
+): boolean {
+  for (const cell of cells) {
+    if (isRecordRestingOnChangedTerrainCell(record, cell)) return true;
+  }
+  return false;
+}
+
+function isRecordRestingOnChangedTerrainCell(
+  record: RigidDebrisBody,
+  cell: RigidDebrisChangedTerrainCell
+): boolean {
+  const position = record.body.translation();
+  const halfExtents = record.colliderHalfExtents;
+  const margin = RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE;
+  const minX = position.x - halfExtents.x - margin;
+  const maxX = position.x + halfExtents.x + margin;
+  const minZ = position.z - halfExtents.z - margin;
+  const maxZ = position.z + halfExtents.z + margin;
+  if (!boundsOverlap(minX, maxX, cell.x, cell.x + 1)) return false;
+  if (!boundsOverlap(minZ, maxZ, cell.z, cell.z + 1)) return false;
+
+  const bottomY = position.y - halfExtents.y;
+  const lowestChangedSupport = cell.y - margin;
+  const highestChangedSupport = cell.y + 1 + RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH;
+  return bottomY >= lowestChangedSupport && bottomY <= highestChangedSupport;
 }
 
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {

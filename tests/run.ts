@@ -6455,6 +6455,68 @@ test("rigid debris adapter wakes shards sleeping on stale partial-block macro su
   rigidDebris.clear();
 });
 
+test("rigid debris adapter wakes sleeping shards when their support terrain cell changes", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shape = createDebrisShape("squat-block");
+  const supportedFragment = PhysicsToy.createBlockFragment(
+    BLOCK.sand,
+    new THREE.Vector3(0.5, 1.35, 0.5),
+    new THREE.Vector3(0, -0.1, 0),
+    1,
+    shape
+  );
+  const unrelatedFragment = PhysicsToy.createBlockFragment(
+    BLOCK.sand,
+    new THREE.Vector3(2.5, 1.35, 0.5),
+    new THREE.Vector3(0, -0.1, 0),
+    1,
+    shape
+  );
+  const twoBlockWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return y === 0 && z === 0 && (x === 0 || x === 2);
+    }
+  };
+
+  rigidDebris.registerFragment(supportedFragment);
+  rigidDebris.registerFragment(unrelatedFragment);
+  for (
+    let frame = 0;
+    frame < 240 && (!supportedFragment.isSleeping || !unrelatedFragment.isSleeping);
+    frame += 1
+  ) {
+    rigidDebris.update(1 / 60, twoBlockWorld);
+  }
+  assert(supportedFragment.isSleeping, "test setup should park the target shard on terrain support");
+  assert(unrelatedFragment.isSleeping, "test setup should park the unrelated shard on terrain support");
+
+  const targetStartY = supportedFragment.mesh.position.y;
+  const unrelatedStartY = unrelatedFragment.mesh.position.y;
+  const woken = rigidDebris.wakeDebrisRestingOnChangedTerrainCells([{ x: 0, y: 0, z: 0 }]);
+  const targetRemovedWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return y === 0 && z === 0 && x === 2;
+    }
+  };
+
+  for (let frame = 0; frame < 90; frame += 1) {
+    rigidDebris.update(1 / 60, targetRemovedWorld);
+    if (supportedFragment.mesh.position.y < targetStartY - 0.2) break;
+  }
+
+  assertEqual(woken, 1, "support invalidation should wake only debris resting on the edited cell");
+  assert(
+    supportedFragment.mesh.position.y < targetStartY - 0.2,
+    "woken debris should fall after the terrain support under it is removed"
+  );
+  assert(
+    Math.abs(unrelatedFragment.mesh.position.y - unrelatedStartY) < 0.05,
+    "debris resting on an unchanged support cell should stay parked"
+  );
+  rigidDebris.clear();
+});
+
 test("rigid debris adapter keeps temporary terrain colliders surface-only and capped", async () => {
   const rigidDebris = new RigidDebrisSimulation();
   await rigidDebris.initialize();

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.5 - 2026-06-13
+
+### Fixed
+
+- Woke sleeping rigid debris when the terrain cell supporting it is damaged or
+  destroyed, preventing settled shards from floating after the block underneath
+  them changes without restoring an every-frame debris support scan.
+
 ## 0.11.4 - 2026-06-13
 
 ### Added

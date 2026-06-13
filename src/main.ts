@@ -274,6 +274,7 @@ import {
 import {
   RigidDebrisSimulation,
   createEmptyRigidDebrisStats,
+  type RigidDebrisChangedTerrainCell,
   type RigidDebrisStats
 } from "./rigidDebris";
 import {
@@ -3277,9 +3278,11 @@ function applyTerrainDamageFeedback(
   damagedBlocksThisFrame?: Set<string>
 ): void {
   let changedTerrainCollider = false;
+  const changedTerrainCells: RigidDebrisChangedTerrainCell[] = [];
 
   for (const result of results) {
     damagedBlocksThisFrame?.add(activeWorld.damageKey(result.position.x, result.position.y, result.position.z));
+    changedTerrainCells.push(result.position);
 
     engineEvents.emit("block:damaged", {
       position: result.position,
@@ -3321,8 +3324,13 @@ function applyTerrainDamageFeedback(
 
   // Partial-block cuts and final block removals both alter support/collision
   // candidates for active debris. Keep Rapier's temporary static collider cache
-  // honest even when a very small chip produces no visible fragment.
-  if (changedTerrainCollider) rigidDebris.invalidateStaticColliders();
+  // honest even when a very small chip produces no visible fragment. Also wake
+  // sleeping debris that was resting on the edited cell; this is event-driven
+  // so settled piles do not need a broad support scan every frame.
+  if (changedTerrainCollider) {
+    rigidDebris.wakeDebrisRestingOnChangedTerrainCells(changedTerrainCells);
+    rigidDebris.invalidateStaticColliders();
+  }
 }
 
 function recordTerrainCombatLog(options: {
