@@ -53,6 +53,15 @@ Preferred format:
 - `[feel]` Terraformer beam mode: make terrain editing feel like a visible tool
   with a sustained beam, impact glow, material chip feedback, and clear range
   falloff instead of only silent block/sub-cell edits.
+- `[mechanic]` Custom Terraformer shapes: let players design or save a brush
+  footprint/volume, then use that shape for repeatable carving instead of only
+  fixed cube-ish brush sizes.
+- `[mechanic]` Custom main-block placement/destruction shapes: separate
+  build/break brush shape authoring from the Terraformer so normal block editing
+  can use saved stamps, masks, or volumes too.
+- `[mechanic]` Player-placeable terrain features: preset trees, hills, rock
+  piles, test fixtures, and eventually buildings that can be previewed, rotated,
+  and stamped into the world as authored feature bundles.
 - Blueprint export/import for small structures.
 - Ghost placement previews for copied structures and larger brushes.
 
@@ -157,6 +166,9 @@ Preferred format:
 - Scanner item that reads block material, HP, support state, and recent damage.
 - Beacon or waypoint item for marking test sites in large worlds.
 - Drill item as a sustained version of the current core destruction loop.
+- `[ux]` Move item-specific settings closer to active play: Terraformer shape,
+  core tuning, beam behavior, and future tool options should have an in-game
+  item/menu surface instead of living only in the pause-menu settings panels.
 - Inventory only when pickups, crafting, or quantities are real enough to need
   it.
 
