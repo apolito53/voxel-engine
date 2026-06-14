@@ -61,6 +61,9 @@ export class DebugHud {
 
   toggle(): void {
     this.visible = !this.visible;
+    if (this.visible && !document.body.classList.contains("in-world")) {
+      this.renderIdlePanel();
+    }
     this.panel.classList.toggle("is-hidden", !this.visible);
   }
 
@@ -69,6 +72,9 @@ export class DebugHud {
     this.frameRateMeter.reset();
     this.peakFrameMs = 0;
     this.peakFrameHoldSeconds = 0;
+    if (this.visible && !document.body.classList.contains("in-world")) {
+      this.renderIdlePanel();
+    }
   }
 
   update(
@@ -346,6 +352,37 @@ export class DebugHud {
     for (const section of sections) {
       grid.append(createDebugSection(section));
     }
+    fragment.append(grid);
+    this.panel.replaceChildren(fragment);
+  }
+
+  private renderIdlePanel(): void {
+    const qualityPreset = this.getQualityPreset();
+    const renderBackendStats = this.getRenderBackendStats?.() ?? null;
+    const fragment = document.createDocumentFragment();
+    const header = document.createElement("div");
+    header.className = "debug-hud-header";
+    header.append(
+      createTextNode("span", "debug-hud-kicker", "F3 Debug"),
+      createTextNode("span", "debug-hud-summary", `${qualityPreset.label} | waiting for world frame data`)
+    );
+    fragment.append(header);
+
+    const grid = document.createElement("div");
+    grid.className = "debug-hud-grid";
+    // F3 can be pressed from the home screen before a world has produced stats.
+    // Render a small status panel so the hotkey visibly confirms itself instead
+    // of toggling an empty fixed element that looks broken.
+    grid.append(createDebugSection({
+      title: "Runtime",
+      rows: [
+        { label: "state", value: document.body.classList.contains("in-world") ? "waiting for frame data" : "no active world" },
+        { label: "quality", value: `${qualityPreset.label} ${qualityPreset.distanceScale}x` },
+        { label: "backend", value: renderBackendStats ? renderBackendStats.name : "initializing" },
+        { label: "gpu", value: compactText(this.gpuInfo.vendor, 30) },
+        { label: "driver", value: compactText(this.gpuInfo.renderer, 34) }
+      ]
+    }));
     fragment.append(grid);
     this.panel.replaceChildren(fragment);
   }

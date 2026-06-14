@@ -1050,7 +1050,6 @@ body:not(.in-world) #hud,
 body:not(.in-world) #hotbar,
 body:not(.in-world) #nova-message,
 body:not(.in-world) #nova-chat,
-body:not(.in-world) #debug-panel,
 body:not(.in-world) #minimap,
 body:not(.in-world) #sprint-overlay,
 body:not(.in-world) #damage-indicators,
@@ -1357,7 +1356,9 @@ body.controls-hidden #hud {
   position: fixed;
   right: 14px;
   top: 14px;
-  z-index: 12;
+  /* Above home/pause overlays so F3 visibly confirms itself outside a world,
+     but below destructive confirmations and the changelog dialog. */
+  z-index: 24;
   box-sizing: border-box;
   width: min(500px, calc(100vw - 28px));
   max-height: calc(100vh - 28px);
