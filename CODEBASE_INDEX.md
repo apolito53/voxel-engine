@@ -19,8 +19,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Install: `npm.cmd install`
 - Start on Windows: `.\start.ps1`
 - Start on Linux/Ubuntu: `chmod +x ./start.sh && ./start.sh`
-- Dev server: `npm.cmd run dev -- --port 5173`; `scripts/dev-server.mjs` writes a `logs/server-starts-YYYY-MM-DD.jsonl` repo-state marker before launching Vite.
-- Hitch/combat-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5174`; normal Vite dev sessions also expose same-origin `POST /__voxel_combat_log` for persistent damage JSONL under `logs/combat/`.
+- Dev server: `npm.cmd run dev -- --port 5193`; `scripts/dev-server.mjs` writes a `logs/server-starts-YYYY-MM-DD.jsonl` repo-state marker before launching Vite. Main keeps `5173`, while this experiment branch defaults to `5193`.
+- Hitch/combat-log receiver: `npm.cmd run debug:logs` on `127.0.0.1:5194`; normal Vite dev sessions also expose same-origin `POST /__voxel_combat_log` for persistent damage JSONL under `logs/combat/`. Main keeps `5174`, while this experiment branch defaults to `5194`.
 - Remote hitch-log inspection: `vercel blob list --prefix hitches --limit 20` then `vercel blob get <pathname> --access private`; local `.env.local` supplies the Blob token and must stay untracked.
 - GitHub Actions CI: `.github/workflows/ci.yml` runs `npm run validate` on pushes and pull requests to `main`, supports manual dispatch, and cancels stale in-progress runs on the same ref.
 - Strict type check: `npm.cmd run typecheck`
@@ -29,7 +29,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Engine robustness tests: `npm.cmd run test`
 - Production build: `npm.cmd run build`
 - Standard local validation pass: `npm.cmd run validate`
-- Preview build: `npm.cmd run preview -- --port 4173`
+- Preview build: `npm.cmd run preview -- --port 4193`
 - TypeScript migration plan: `python .\scripts\ts_migration.py plan`
 - TypeScript migration audit: `python .\scripts\ts_migration_audit.py`
 
@@ -43,7 +43,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Admin command parsing/routing, Superflat Lab launcher hook, and spawnable terrain fixtures used by Nova Terminal and the Builder panel for repeatable testing: `src/adminCommands.ts`
 - F8 scripted runtime avatar for in-browser gameplay smoke checks, including health-aware repeated core shots for sturdy terrain: `src/testAvatar.ts`
 - Browser automation play bridge exposed as `globalThis.__VOXEL_CODEX_PILOT__`, with high-level Superflat/scenario/move/look/fire/play commands that still drive real player and hotbar systems: `src/codexPilot.ts`
-- Local visual test recorder exposed as `globalThis.__VOXEL_VISUAL_TEST__`, with named scenario listing, compact scenario runtime snapshots, WebM canvas capture, sampled review frames, pilot-play/scenario recording, and upload to `logs/visual-runs/` through the `5174` debug receiver: `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`
+- Local visual test recorder exposed as `globalThis.__VOXEL_VISUAL_TEST__`, with named scenario listing, compact scenario runtime snapshots, WebM canvas capture, sampled review frames, pilot-play/scenario recording, and upload to `logs/visual-runs/` through the `5194` debug receiver on this branch: `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`
 - Floating health-bar projection for damaged terrain/rubble targets; visibility is gated by the pause-menu `Health Bars` toggle in `src/main.ts`: `src/damageIndicators.ts`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`

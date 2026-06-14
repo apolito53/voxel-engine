@@ -5,9 +5,12 @@ fresh evidence instead of stale vibes.
 
 ## Local Ports
 
-- App server: `127.0.0.1:5173`
-- Hitch/combat-log receiver: `127.0.0.1:5174`
-- Preview server: `127.0.0.1:4173`
+- App server: `127.0.0.1:5193`
+- Hitch/combat-log receiver: `127.0.0.1:5194`
+- Preview server: `127.0.0.1:4193`
+
+The main branch keeps `5173`/`5174`/`4173`; this renderer-overhaul branch uses
+`5193`/`5194`/`4193` so both branches can run in parallel.
 
 Run the app with:
 
@@ -22,11 +25,12 @@ visual runs:
 npm.cmd run debug:logs
 ```
 
-`5174` is reserved for the receiver. Do not use it as a temporary Vite port.
+`5194` is reserved for this branch's receiver. Do not use it as a temporary
+Vite port.
 
 ## Server Markers
 
-`npm.cmd run dev -- --port 5173` and the startup scripts use
+`npm.cmd run dev -- --port 5193` and the startup scripts use
 `scripts/dev-server.mjs`, which appends a marker to
 `logs/server-starts-YYYY-MM-DD.jsonl` before Vite starts.
 
@@ -176,8 +180,8 @@ POST /__voxel_combat_log -> logs/combat/
 ```
 
 The `npm.cmd run debug:logs` receiver exposes the same endpoint on
-`127.0.0.1:5174` as a fallback for preview or automation sessions. The browser
-tries the Vite endpoint first, then the `5174` receiver. Failed batches are
+`127.0.0.1:5194` as a fallback for preview or automation sessions. The browser
+tries the Vite endpoint first, then the `5194` receiver. Failed batches are
 dropped instead of requeued forever, because a down log receiver should not turn
 a damage bug into a memory bug. The F3 Combat panel shows `disk sent`, `queued`,
 and `failed` counts so you can tell whether the current repro is reaching disk.

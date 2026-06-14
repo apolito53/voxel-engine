@@ -6,7 +6,9 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.VOXEL_HITCH_LOG_PORT ?? 5174);
+// Keep the standalone log receiver paired with the experiment branch dev port.
+// Main keeps 5174; this branch defaults to 5194 for parallel local sessions.
+const PORT = Number(process.env.VOXEL_HITCH_LOG_PORT ?? 5194);
 const HITCH_ENDPOINT = "/__voxel_hitch_log";
 const VISUAL_TEST_ENDPOINT = "/__voxel_visual_test";
 const COMBAT_LOG_ENDPOINT = "/__voxel_combat_log";

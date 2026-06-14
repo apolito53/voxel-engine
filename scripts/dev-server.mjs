@@ -4,7 +4,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOST = "127.0.0.1";
-const DEFAULT_PORT = "5173";
+// This renderer-overhaul branch intentionally uses a different default from
+// main so both branches can run local Vite servers at the same time.
+const DEFAULT_PORT = "5193";
 const ROOT_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOGS_DIRECTORY = resolve(ROOT_DIRECTORY, "logs");
 const VITE_CLI_PATH = resolve(ROOT_DIRECTORY, "node_modules", "vite", "bin", "vite.js");

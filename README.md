@@ -46,22 +46,26 @@ chmod +x ./start.sh
 ./start.sh
 ```
 
-Open `http://127.0.0.1:5173`.
+Open `http://127.0.0.1:5193`.
 
 Run `npm.cmd run debug:logs` in a second terminal when you want the local
-hitch/combat-log receiver on `127.0.0.1:5174`. Normal Vite dev sessions also
+hitch/combat-log receiver on `127.0.0.1:5194`. Normal Vite dev sessions also
 write combat damage JSONL through the same-origin `/__voxel_combat_log`
 endpoint.
 
 Pass a different base-server port as the first argument only for temporary
-one-off runs, for example `.\start.ps1 5193` or `./start.sh 5193`. Do not use
-`5174`; it is reserved for the hitch-log receiver.
+one-off runs, for example `.\start.ps1 5195` or `./start.sh 5195`. Do not use
+`5194`; it is reserved for this branch's hitch-log receiver.
 
 ## Ports
 
-- Base Vite server: `5173`
-- Hitch/combat-log receiver: `5174`
-- Preview server: `4173`
+- Experimental branch base Vite server: `5193`
+- Experimental branch hitch/combat-log receiver: `5194`
+- Experimental branch preview server: `4193`
+
+Main keeps the familiar `5173` app, `5174` receiver, and `4173` preview ports
+so both branches can run at the same time without fighting over browser origins
+or saved-world storage.
 
 The deployed Vercel site writes 45ms+ hitch records to the private
 `voxel-engine-logs` Vercel Blob store through `/api/hitch-log`. The local

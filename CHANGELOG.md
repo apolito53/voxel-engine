@@ -16,6 +16,8 @@
 - Routed the main render loop through the new WebGL backend and hid legacy chunk
   meshes after visibility bookkeeping so the GPU terrain path owns normal terrain
   presentation while the old expanded mesh path remains available for parity.
+- Moved this experiment branch to separate local defaults from main:
+  `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
 ## 0.11.6 - 2026-06-13
 
