@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- Added an experimental `Ripple Cube Field` toggle that renders a local
+  instanced cube field reacting to player movement without changing terrain or
+  save data.
+
 ## 0.11.6 - 2026-06-13
 
 ### Fixed

@@ -253,6 +253,7 @@ import {
   formatShadowQuality,
   getShadowQualityLevel
 } from "./qualitySettings";
+import { ReactiveVoxelField } from "./reactiveVoxelField";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
 import {
   GROUND_DEBRIS_BUDGET_STEP,
@@ -476,6 +477,7 @@ const groundDebrisBudgetValue = requireElement<HTMLElement>("#ground-debris-budg
 const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-debris-lifetime-slider");
 const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
+const rippleFieldToggle = requireElement<HTMLInputElement>("#ripple-field-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
 const builderModeToggleButton = requireElement<HTMLButtonElement>("#builder-mode-toggle-button");
@@ -682,6 +684,7 @@ const builderBrushPreview = new BuilderBrushPreview(scene);
 const hitscanBoltTracer = new HitscanBoltTracer(scene);
 const physicsCoreTrail = new PhysicsCoreTrail(scene);
 const debrisPoofRenderer = new DebrisPoofRenderer(scene);
+const reactiveVoxelField = new ReactiveVoxelField(scene);
 const debrisStuckCleanup = new DebrisStuckCleanupTracker();
 const workerPool = new WorkerPool({
   createWorker: () => new Worker(new URL("./engineWorker.ts", import.meta.url), {
@@ -695,6 +698,7 @@ const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
+const RIPPLE_FIELD_STORAGE_KEY = "voxel-sandbox-ripple-field-enabled";
 const TERRAFORMER_SIZE_STORAGE_KEY = "voxel-sandbox-terraformer-size";
 const CLICK_FIRE_MODE_STORAGE_KEY = "voxel-sandbox-click-fire-mode";
 const CONTROL_HINTS_STORAGE_KEY = "voxel-sandbox-control-hints-visible";
@@ -820,6 +824,7 @@ let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
 let healthBarsEnabled = readHealthBarsEnabled();
 let controlHintsVisible = readControlHintsVisible();
+let rippleFieldEnabled = readRippleFieldEnabled();
 coreAimPreviewEnabled = readCoreAimPreviewEnabled();
 
 void rigidDebris.initialize().catch((error) => {
@@ -877,6 +882,7 @@ updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
 syncControlHintsToggle();
 syncCoreAimPreviewToggle();
+syncRippleFieldToggle();
 renderLoadoutMenus();
 renderBuilderPalette();
 syncBuilderControls();
@@ -1107,6 +1113,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   coreAimPreviewToggle.addEventListener("change", () => {
     setCoreAimPreviewEnabled(coreAimPreviewToggle.checked);
+  }, eventListenerOptions);
+  rippleFieldToggle.addEventListener("change", () => {
+    setRippleFieldEnabled(rippleFieldToggle.checked);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -1387,6 +1396,17 @@ function syncCoreAimPreviewToggle(): void {
   coreAimPreviewToggle.checked = coreAimPreviewEnabled;
 }
 
+function setRippleFieldEnabled(enabled: boolean): void {
+  rippleFieldEnabled = enabled;
+  syncRippleFieldToggle();
+  writeRippleFieldEnabled(enabled);
+  if (!enabled) reactiveVoxelField.hide();
+}
+
+function syncRippleFieldToggle(): void {
+  rippleFieldToggle.checked = rippleFieldEnabled;
+}
+
 function canAdjustTerraformerSizeFromKeyboard(): boolean {
   return inWorld && requirePlayer().isLooking() && isTerraformerSelected();
 }
@@ -1527,6 +1547,23 @@ function writeCoreAimPreviewEnabled(enabled: boolean): void {
     globalThis.localStorage?.setItem(CORE_AIM_PREVIEW_STORAGE_KEY, String(enabled));
   } catch {
     // Same story as the other debug toggles: persistence is nice, not required.
+  }
+}
+
+function readRippleFieldEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(RIPPLE_FIELD_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeRippleFieldEnabled(enabled: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(RIPPLE_FIELD_STORAGE_KEY, String(enabled));
+  } catch {
+    // This is an experimental visual toy. If storage is blocked, the current
+    // session still gets its wobbling cubes and the next session simply starts off.
   }
 }
 
@@ -2146,6 +2183,13 @@ function animate(): void {
     debugPartialMeshStats = partialBlockMeshField.getStats();
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
+    reactiveVoxelField.update({
+      enabled: rippleFieldEnabled,
+      world: activeWorld,
+      playerPosition: camera.position,
+      playerSpeed: activePlayer.velocity.length(),
+      delta
+    });
     updateHud();
     updateNovaContextTelemetry(activePlayer, debugRubbleStats);
     updateTargetBlockHighlighter();
@@ -2162,6 +2206,7 @@ function animate(): void {
     targetBlockHighlighter.hide();
     builderBrushPreview.hide();
     coreAimPreview.hide();
+    reactiveVoxelField.hide();
     damageIndicators.clear();
     updateSprintFeedback(false, false, delta);
     recordTimingSection("otherMs");
@@ -4812,6 +4857,7 @@ function disposeRuntime(): void {
   void combatLog.flushPersistent();
   coreAimPreview.dispose();
   builderBrushPreview.dispose();
+  reactiveVoxelField.dispose();
   physicsCoreTrail.dispose();
   hitscanBoltTracer.dispose();
   debrisPoofRenderer.dispose();

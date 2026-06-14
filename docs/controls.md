@@ -130,6 +130,8 @@ Pause menu `Settings` is split into three tabs.
 
 `Experimental` owns the controls most likely to create CPU/GPU stress:
 
+- Ripple Cube Field, a local instanced visual field that reacts to player
+  movement without changing terrain or saves
 - Physics Object Budget
 - Break Burst Shards, the per-block spawn ceiling for the initial destruction spray
 - Active Ground Debris Cap, the post-impact cap for loose shard bodies kept
