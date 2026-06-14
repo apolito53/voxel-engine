@@ -273,10 +273,11 @@ void main() {
   vec2 tileScale = (vec2(1.0) / atlasGrid) - atlasInset * 2.0;
   vec2 tileUv = tileOrigin + atlasInset + fract(vWorldUv) * tileScale;
 
-  // The block atlas is authored as an sRGB CanvasTexture. MeshStandardMaterial
-  // decodes that texture before lighting, so the custom GPU terrain shader must
-  // do the same or intact blocks render darker than damaged/partial blocks.
-  vec4 texel = sRGBTransferEOTF(texture2D(blockAtlas, tileUv));
+  // The block atlas is an sRGB CanvasTexture, and Three uploads it with an sRGB
+  // internal format on WebGL2. That means texture2D already gives this shader
+  // linear color. Do not manually sRGB-decode here or the GPU terrain path will
+  // double-darken compared with the legacy damaged-block MeshStandardMaterial.
+  vec4 texel = texture2D(blockAtlas, tileUv);
 
   vec3 litColor = texel.rgb * vColor;
   float fogAmount = smoothstep(fogNear, fogFar, vFogDepth);
