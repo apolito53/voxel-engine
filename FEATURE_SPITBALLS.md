@@ -50,6 +50,9 @@ Preferred format:
 - Copy/paste selections, with rotate/mirror before placement.
 - Symmetry modes for quick test structures.
 - Paint/material brush that swaps block material without changing shape.
+- `[feel]` Terraformer beam mode: make terrain editing feel like a visible tool
+  with a sustained beam, impact glow, material chip feedback, and clear range
+  falloff instead of only silent block/sub-cell edits.
 - Blueprint export/import for small structures.
 - Ghost placement previews for copied structures and larger brushes.
 
@@ -57,13 +60,38 @@ Preferred format:
 
 - Material reactions: brittle stone, soft sand, springy wood, crumbly rubble,
   heat-scarred ember blocks.
+- `[mechanic]` Distinct block physics/material traits: ricochet coefficient,
+  light permeability, impact sound/feel, tool affinity, and debris behavior
+  should eventually come from material data rather than one generic block HP
+  table.
+- `[feel]` Material-specific debris styles: leaves float down as soft fluffy
+  pieces, stone throws larger jagged shards, wood splinters, dirt and sand read
+  more like poofs/dust than hard fragments.
+- `[mechanic]` Multi-type blocks as a deliberate revival of the old debris-pile
+  idea: let a terrain cell represent mixed material/cover/fill data without
+  turning ordinary loose debris cleanup back into permanent rubble by accident.
 - Stress/support experiments where unsupported shapes crack, sag, or collapse in
   controlled local bubbles.
 - Explosive or pressure-wave cores that damage by falloff rather than exact
   impact only.
 - Heat/cold damage channels if materials ever need more flavor than HP.
+- `[tech]` Block-face beautification pass for damaged terrain: revisit partial
+  filling of sub-blocks so damaged faces look naturally chipped/filled instead
+  of dangling jagged sub-block clusters.
 - Persistent partial-block saving once the current in-memory bite lattice becomes
   too fun to lose on reload.
+
+## Damage Models And Game Modes
+
+- `[mechanic]` Split terrain damage from entity damage so some play modes can
+  keep the environment indestructible while still letting weapons/tools affect
+  enemies, props, vehicles, or scripted targets.
+- `[tech]` Damage-channel contracts: terrain HP, entity HP, shield/armor, tool
+  edits, and debug/admin damage may need separate routing before real combat or
+  protected-build modes exist.
+- `[maybe]` Per-world or per-mode destruction rules: creative sandbox, protected
+  adventure map, combat arena, and benchmark lab should be able to choose
+  different terrain/entity damage behavior without forking the whole engine.
 
 ## Physics Toys
 
@@ -75,13 +103,48 @@ Preferred format:
 - One deliberately absurd "break the lab" mode that exists only for profiling
   and laughs.
 
+## Vehicles
+
+- `[mechanic]` Basic ground vehicle: simple suspension, chunky wheels, blocky
+  collision, and enough traction/slide tuning to make voxel terrain traversal
+  funny instead of miserable.
+- `[mechanic]` Hover platform or speeder as the lower-friction first vehicle if
+  wheels are too fussy against uneven terrain.
+- `[tech]` Vehicle seats and ownership: entering/exiting, camera handoff,
+  player collision suppression, control routing, and save cleanup need a small
+  contract before vehicles become more than physics props.
+- `[debug]` Vehicle test course in Superflat Lab with ramps, stairs, rubble,
+  partial-block damage, and chunk-boundary crossings.
+
 ## Movement And Player Feel
 
 - Mantle/climb onto ledges where a one-block jump feels slightly too stiff.
 - Slide tuning variants for downhill terrain and low ceilings.
 - Grapple or tether tool as a traversal toy.
+- `[mechanic]` Spider-Man-ish grappling: swing arcs, tension, release momentum,
+  valid anchor feedback, and enough air control to feel expressive rather than
+  binary.
+- `[mechanic]` Physics-driven flight mode that pushes/tilts/accelerates instead
+  of the current clean debug-style flight toggle.
+- `[mechanic]` Wall running or wall kicks for high-energy traversal once player
+  collision and camera comfort can support it.
+- `[feel]` Movement ability variants should preserve readable first-person
+  camera motion; cool traversal is not worth nausea soup.
 - Glider or fall-control item if vertical terrain becomes more interesting.
 - Swimming or buoyancy only after water exists as real gameplay terrain.
+
+## Entities And AI
+
+- `[mechanic]` Computer-controlled enemies as the first real entity-AI target:
+  perception, pathing around voxel terrain, simple attack decisions, and damage
+  routing separate from terrain destruction.
+- `[tech]` AI navigation needs a cheap local representation first: chunk-aware
+  walkable samples, climb/drop limits, avoidance around partial/rubble support,
+  and graceful failure when terrain changes underneath the plan.
+- `[debug]` Spawnable enemy fixtures for Superflat Lab and automation scenarios
+  before enemies are allowed into normal generated worlds.
+- `[maybe]` Friendly/neutral entities later, once hostile AI proves the entity
+  lifecycle, save rules, and damage model are not terrible.
 
 ## Items And Progression Seeds
 
