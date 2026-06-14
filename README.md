@@ -84,8 +84,6 @@ ignored by git.
 
 Gameplay settings include Terraformer size plus Physics Core size, velocity,
 terrain-damaging bounce count, color, and trail controls.
-Experimental settings include a local instanced `Ripple Cube Field` visual toy
-that reacts to player movement without changing terrain or save data.
 Graphics settings treat distance as the clear chunk radius where fog starts;
 the engine streams a hidden extra horizon behind the opaque part of that curtain
 so far chunks fade out instead of popping away at the edge. Hidden-horizon
