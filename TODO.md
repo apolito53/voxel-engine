@@ -26,6 +26,37 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   visual smoke check that moving around chunk boundaries does not pop or leak
   lights weirdly.
 
+## High Priority: Sound
+
+- Goal: add a real sound layer so movement, tools, terrain hits, material
+  destruction, debris, projectiles, UI, Nova, weather, and future entities have
+  readable feedback instead of the current silent prototype feel.
+- First slice should be small and engine-shaped: create an audio manager that
+  unlocks a browser `AudioContext` from a user gesture, owns master/SFX/UI
+  volume and mute state, and exposes a typed event-style API for one-shot and
+  looping sounds.
+- Start with a tiny SFX set tied to existing gameplay signals: footsteps or
+  landing, Terraformer carve, block placement/removal, Physics Core launch and
+  impact, Hitscan fire, material poofs, debris hits, pause/menu clicks, and one
+  Nova companion cue.
+- Material identity should drive sound flavor over time. Leaves can be soft and
+  airy, sand/dirt more dusty, wood snappy, stone heavy/jagged, ember hotter and
+  sharper, matching the existing material/debris personality direction.
+- Add simple positional/spatial audio for world events after the non-spatial SFX
+  path is stable. Keep listener updates tied to the player/camera, cap active
+  voices per quality setting, and pool/reuse nodes so debris storms cannot turn
+  audio into a CPU problem.
+- Browser constraints matter: audio must handle muted autoplay policies,
+  suspend/resume, tab visibility, device changes, and clean teardown during Vite
+  reloads without leaving stale audio nodes alive.
+- Future path: ambient biome loops, day/night/weather sound beds, occlusion or
+  muffling through terrain, per-tool sound profiles, bot/entity voices or cues,
+  and optional music once the world has enough identity to deserve it.
+- Validation shape: include unit coverage for audio settings/state helpers, a
+  browser smoke test that confirms audio unlock and mute/volume behavior, a
+  stress scene with many debris/material events, and a cleanup check across
+  pause, world exit, and dev reload.
+
 ## Worker Migration Roadmap
 
 - Current foundation: `WorkerPool` owns the shared job protocol shape with
