@@ -15,6 +15,7 @@ gameplay sparks, and technical experiments that are not commitments yet.
 - [Physics Toys](#physics-toys)
 - [Vehicles](#vehicles)
 - [Movement And Player Feel](#movement-and-player-feel)
+- [Input And Control Schemes](#input-and-control-schemes)
 - [Entities And AI](#entities-and-ai)
 - [Bots And Helpers](#bots-and-helpers)
 - [Items And Progression Seeds](#items-and-progression-seeds)
@@ -164,6 +165,25 @@ Preferred format:
   camera motion; cool traversal is not worth nausea soup.
 - Glider or fall-control item if vertical terrain becomes more interesting.
 - Swimming or buoyancy only after water exists as real gameplay terrain.
+
+## Input And Control Schemes
+
+- `[ux]` Mobile device control support: when the engine detects a touch/mobile
+  device, replace pointer-lock assumptions with two virtual joysticks, one for
+  movement and one for camera/look, plus touch-friendly jump, crouch, sprint,
+  action, and pause controls.
+- `[tech]` Touch controls need their own input abstraction instead of pretending
+  touch events are mouse movement. Movement/look/action state should feed the
+  same player/tool command layer used by keyboard and mouse.
+- `[mechanic]` Gamepad/controller support for players who do not want mouse and
+  keyboard: left stick movement, right stick look, triggers for primary and
+  secondary actions, face buttons for jump/crouch/interact, and bumpers or d-pad
+  for hotbar/tool selection.
+- `[ux]` Add per-control sensitivity, inversion, dead-zone, and remap settings
+  once touch/gamepad support exists, with profiles saved per browser/device.
+- `[debug]` Add automation or manual smoke scenes for touch-style controls and
+  the browser Gamepad API so future control changes do not regress mobile or
+  controller play while fixing desktop FPS behavior.
 
 ## Entities And AI
 
