@@ -78,6 +78,10 @@ Preferred format:
 - `[tech]` Block-face beautification pass for damaged terrain: revisit partial
   filling of sub-blocks so damaged faces look naturally chipped/filled instead
   of dangling jagged sub-block clusters.
+- `[mechanic]` Player collision with partial blocks: Terraformer-carved stairs,
+  ramps, and slopes should become walkable support, ideally tied to the
+  block-face beautification/fill pass so the visual surface and collision shape
+  agree instead of making pretty slopes that still collide like cube chunks.
 - Persistent partial-block saving once the current in-memory bite lattice becomes
   too fun to lose on reload.
 
