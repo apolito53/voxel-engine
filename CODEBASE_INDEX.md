@@ -120,7 +120,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Clamp, noise, and terrain math helpers: `src/math.ts`
 - Windows startup helper: `start.ps1`
 - Linux/Ubuntu startup helper: `start.sh`
-- Project backlog and parked feature ideas: `TODO.md`
+- Project backlog and parked feature ideas: `TODO.md`; loose feature sparks and
+  messy brainstorming: `FEATURE_SPITBALLS.md`
 - Tiny Node test bundler plus source/docs guardrails: `scripts/run_tests.mjs`, `scripts/check_source_hygiene.mjs`, `scripts/check_docs_links.mjs`
 - Engine robustness test entrypoint: `tests/run.ts`
 - TypeScript migration helpers: `scripts/ts_migration.py`, `scripts/ts_migration_audit.py`, `scripts/run_python.ps1`, `scripts/run_python.sh`, `scripts/README.md`

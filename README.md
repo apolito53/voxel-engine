@@ -131,7 +131,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 
 `CODEBASE_INDEX.md` is the surgical code map for module ownership and
 [common change targets](CODEBASE_INDEX.md#common-change-targets). `TODO.md`
-keeps parked feature ideas visible without pretending they are current scope.
+keeps coherent parked plans visible, while `FEATURE_SPITBALLS.md` keeps looser
+feature sparks that are not committed scope yet.
 
 ## Development Checks
 
