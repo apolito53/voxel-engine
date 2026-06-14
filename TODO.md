@@ -2,6 +2,30 @@
 
 Shortlist of ideas worth keeping visible without pretending they are committed scope yet.
 
+## High Priority: Individual Light Sources
+
+- Goal: support individual local light sources so the world can have torches,
+  lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
+  depends on local darkness or illumination instead of only sun/sky lighting.
+- First slice should be deliberately small: add a bounded light-source registry,
+  one placeable/test light block or admin-spawned lamp, persistence for placed
+  light metadata, and a strict per-quality cap so local lights cannot silently
+  murder frame time.
+- Start with renderer-owned local lights and emissive visuals before attempting
+  full voxel light propagation. Three.js `PointLight`/`SpotLight` behavior,
+  shadow settings, culling, pooling, and quality budgets need to be proven in
+  normal play first.
+- Keep baked sun/face shading and individual runtime lights conceptually
+  separate. Existing `voxelLighting.ts` face shading can remain the cheap
+  ambient/sun baseline while individual lights become an additive local layer.
+- Future path: optional chunk-aware light influence data for blocks/materials,
+  light permeability, colored/emissive blocks, day/night interaction, dynamic
+  projectile glows, and tool/Nova light pulses.
+- Validation shape: include a Superflat Lab scene with multiple lights, a
+  quality-budget stress pass, a save/load check for placed light sources, and a
+  visual smoke check that moving around chunk boundaries does not pop or leak
+  lights weirdly.
+
 ## Worker Migration Roadmap
 
 - Current foundation: `WorkerPool` owns the shared job protocol shape with
