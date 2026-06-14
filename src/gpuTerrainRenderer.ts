@@ -263,6 +263,8 @@ varying vec3 vColor;
 varying float vTextureTile;
 varying float vFogDepth;
 
+#include <tonemapping_pars_fragment>
+
 void main() {
   float tileIndex = floor(vTextureTile + 0.5);
   float tileColumn = mod(tileIndex, atlasGrid.x);
@@ -270,10 +272,20 @@ void main() {
   vec2 tileOrigin = vec2(tileColumn, tileRow) / atlasGrid;
   vec2 tileScale = (vec2(1.0) / atlasGrid) - atlasInset * 2.0;
   vec2 tileUv = tileOrigin + atlasInset + fract(vWorldUv) * tileScale;
-  vec4 texel = texture2D(blockAtlas, tileUv);
+
+  // The block atlas is authored as an sRGB CanvasTexture. MeshStandardMaterial
+  // decodes that texture before lighting, so the custom GPU terrain shader must
+  // do the same or intact blocks render darker than damaged/partial blocks.
+  vec4 texel = sRGBTransferEOTF(texture2D(blockAtlas, tileUv));
+
   vec3 litColor = texel.rgb * vColor;
   float fogAmount = smoothstep(fogNear, fogFar, vFogDepth);
   gl_FragColor = vec4(mix(litColor, fogColor, fogAmount), texel.a);
+
+  // Keep the final output on Three's normal display pipeline. Without this,
+  // the WebGL2 terrain path and the legacy damaged-block material disagree
+  // even when they sample the same atlas and vertex tint.
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
 }
 `;
-
