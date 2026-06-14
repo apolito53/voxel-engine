@@ -111,10 +111,16 @@ touch down and survive the short burst grace.
 When shard storms exceed the rigid-body safety cap, the full visible burst still
 spawns; overflow shards stay as cheap VFX and existing rigid shards are demoted
 to VFX before anything is removed.
+Normal pressure cleanup now removes settled debris first and protects awake
+airborne shards; if the last-resort airborne emergency path ever fires, the F3
+HUD and hitch logs expose it directly.
 Rigid debris support scanning prioritizes sleeping, near-ground, falling, and
 fast shards so stress tests spend less CPU creating temporary colliders for
 calm unsupported airborne fragments, and overlapping debris shares support-cell
 probe results during each refresh instead of repeating the same crater scan.
+Terrain edits, block placement, builder/admin edits, and rubble support changes
+wake a bounded local debris stack above the affected cells so settled piles fall
+when their support is destroyed without restoring broad per-frame scans.
 Local hitch logs also receive runtime diagnostic breadcrumbs for WebGL context
 loss/restoration and uncaught browser errors, which helps separate a canvas-side
 render failure from a full engine freeze.

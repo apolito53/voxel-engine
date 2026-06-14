@@ -33,7 +33,9 @@ const RIGID_DEBRIS_FORCE_SLEEP_SECONDS = 0.18;
 const RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE = 0.08;
 const RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN = 0.004;
 const RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
+const RIGID_DEBRIS_CHANGED_SUPPORT_STACK_WAKE_HEIGHT = 4.5;
 const RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_SPEED = -0.35;
+const RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES = 512;
 const RIGID_DEBRIS_SUPPORT_MIN_HEIGHT = 0.04;
 const RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION = 1000;
 const RIGID_DEBRIS_SUPPORT_DESCENDING_SPEED = -0.5;
@@ -394,6 +396,7 @@ export class RigidDebrisSimulation {
 
     let wokenBodies = 0;
     for (const record of this.bodiesByToy.values()) {
+      if (wokenBodies >= RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES) break;
       if (record.toy.isExpired || !record.body.isSleeping()) continue;
       if (!isRecordRestingOnAnyChangedTerrainCell(record, changedCells)) continue;
 
@@ -1130,22 +1133,25 @@ function createSupportScanCandidate(
     };
   }
 
+  const lookaheadSupportScanY = getLookaheadSupportScanY(record, collisionWorld, velocity);
   if (velocity.y <= RIGID_DEBRIS_SUPPORT_DESCENDING_SPEED) {
+    if (lookaheadSupportScanY === null) return null;
     return {
       record,
       priority: 3,
-      lookaheadSamples: RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES,
-      supportScanY: null,
+      lookaheadSamples: 0,
+      supportScanY: lookaheadSupportScanY,
       speedSq
     };
   }
 
   if (speedSq >= RIGID_DEBRIS_SUPPORT_FAST_SPEED_SQ) {
+    if (lookaheadSupportScanY === null) return null;
     return {
       record,
       priority: 4,
-      lookaheadSamples: RIGID_DEBRIS_STATIC_LOOKAHEAD_SAMPLES,
-      supportScanY: null,
+      lookaheadSamples: 0,
+      supportScanY: lookaheadSupportScanY,
       speedSq
     };
   }
@@ -1158,6 +1164,38 @@ function createSupportScanCandidate(
       supportScanY: null,
       speedSq
     };
+  }
+
+  return null;
+}
+
+function getLookaheadSupportScanY(
+  record: RigidDebrisBody,
+  collisionWorld: CollisionWorld,
+  velocity: { readonly y: number }
+): number | null {
+  if (velocity.y >= 0) return null;
+
+  const position = record.body.translation();
+  const halfExtents = record.colliderHalfExtents;
+  const bottomY = position.y - halfExtents.y;
+  const predictedBottomY = bottomY + velocity.y * RIGID_DEBRIS_STATIC_LOOKAHEAD_SECONDS;
+  const minY = Math.floor(Math.min(bottomY, predictedBottomY) - RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
+  const maxY = Math.floor(Math.max(bottomY, predictedBottomY) + RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE);
+  const minX = Math.floor(position.x - halfExtents.x);
+  const maxX = Math.floor(position.x + halfExtents.x);
+  const minZ = Math.floor(position.z - halfExtents.z);
+  const maxZ = Math.floor(position.z + halfExtents.z);
+
+  // This is a cheap one-column-ish preflight before the expensive collider
+  // bubble scan. Fast debris still gets support before impact, while calm
+  // high-air shards do not spend dozens of rejected empty-air probes per frame.
+  for (let y = maxY; y >= minY; y -= 1) {
+    for (let z = minZ; z <= maxZ; z += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        if (isStaticColliderCandidateCell(collisionWorld, { x, y, z })) return y;
+      }
+    }
   }
 
   return null;
@@ -1217,7 +1255,13 @@ function isRecordRestingOnChangedTerrainCell(
 
   const bottomY = position.y - halfExtents.y;
   const lowestChangedSupport = cell.y - margin;
-  const highestChangedSupport = cell.y + 1 + RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH;
+  // Terrain edits are event-scoped, so we can afford to wake a short local
+  // stack above the edited support cell. This catches sleeping debris resting
+  // on other debris without restoring broad per-frame support scans.
+  const highestChangedSupport = cell.y +
+    1 +
+    RIGID_DEBRIS_CHANGED_SUPPORT_STACK_WAKE_HEIGHT +
+    RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH;
   return bottomY >= lowestChangedSupport && bottomY <= highestChangedSupport;
 }
 

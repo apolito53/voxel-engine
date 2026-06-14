@@ -26,6 +26,34 @@
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
+## 0.11.7 - 2026-06-14
+
+### Added
+
+- Added debris lifecycle diagnostics for support-cell invalidations, rigid/VFX
+  debris wake counts, settled pressure expiries, airborne pressure protections,
+  and emergency airborne expiries in the F3 HUD and hitch-log snapshots.
+- Added rubble support-change events so destroyed, fallen, and promoted rubble
+  can wake debris resting on the affected support cells.
+
+### Changed
+
+- Replaced normal broad toy-budget pressure cleanup with settled-first debris
+  cleanup. Awake airborne shards are now protected during ordinary pressure
+  relief, with a visible emergency counter reserved for last-resort over-budget
+  expiry.
+- Paused the grounded-debris lifetime countdown whenever a shard is knocked
+  airborne again, preventing freshly lifted fragments from poofing mid-flight.
+- Routed terrain damage, block placement, builder brushes, admin spawn fixtures,
+  rubble damage, and rubble settle/promotion through one event-driven support
+  invalidation path.
+
+### Fixed
+
+- Woke a bounded local stack of sleeping Rapier and detached VFX debris when the
+  terrain or rubble support under it changes, avoiding floating debris stacks
+  without restoring broad per-frame support scans.
+
 ## 0.11.6 - 2026-06-13
 
 ### Fixed

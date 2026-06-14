@@ -168,6 +168,11 @@ export type RubbleDamageEvent = {
   readonly collateral: boolean;
 };
 
+export type RubbleSupportChangeEvent = {
+  readonly cell: RubbleCell;
+  readonly reason: "destroyed" | "fallen" | "promoted";
+};
+
 const EMPTY_RUBBLE_STATS: RubbleFieldStats = {
   clusters: 0,
   pieces: 0,
@@ -198,6 +203,7 @@ export class RubbleField {
   private readonly fallbackNormal = new THREE.Vector3(0, 1, 0);
   private readonly rayInverseDirection = new THREE.Vector3();
   private readonly damageEvents: RubbleDamageEvent[] = [];
+  private readonly supportChangeEvents: RubbleSupportChangeEvent[] = [];
   private surfaceWorld: RubbleFieldWorld | null = null;
   private stats: RubbleFieldStats = EMPTY_RUBBLE_STATS;
   private nextClusterId = 1;
@@ -300,6 +306,8 @@ export class RubbleField {
           fallingPile.surfaceSamples,
           fallingPile.visualChunks
         );
+        this.recordSupportChange(fallingPile.cell, "fallen");
+        this.recordSupportChange(getRubbleCellBelow(fallingPile.cell), "fallen");
         this.promoteLargePiles(world, landedCluster);
         changed = true;
       }
@@ -374,6 +382,15 @@ export class RubbleField {
       position: event.position.clone()
     }));
     this.damageEvents.length = 0;
+    return events;
+  }
+
+  consumeSupportChangeEvents(): RubbleSupportChangeEvent[] {
+    const events = this.supportChangeEvents.map((event) => ({
+      ...event,
+      cell: { ...event.cell }
+    }));
+    this.supportChangeEvents.length = 0;
     return events;
   }
 
@@ -641,6 +658,7 @@ export class RubbleField {
       if (this.clustersByCell.get(key) === cluster) {
         this.clustersByCell.delete(key);
       }
+      this.recordSupportChange(destroyedCell, "destroyed");
       this.chipAdjacentPiles(cluster, destroyedCell);
     }
 
@@ -771,6 +789,7 @@ export class RubbleField {
       // Promotion is per occupied cell, not per patch. A broad patch can keep
       // acting as cover while only truly dense cells graduate into terrain.
       world.setBlock(pile.cell.x, pile.cell.y, pile.cell.z, BLOCK.rubble);
+      this.recordSupportChange(pile.cell, "promoted");
       const key = getRubbleCellCoordinateKey(pile.cell);
       cluster.cells.delete(key);
       if (this.clustersByCell.get(key) === cluster) {
@@ -787,6 +806,13 @@ export class RubbleField {
       this.markClusterDirty(cluster);
     }
     return true;
+  }
+
+  private recordSupportChange(cell: RubbleCell, reason: RubbleSupportChangeEvent["reason"]): void {
+    this.supportChangeEvents.push({
+      cell: { x: cell.x, y: cell.y, z: cell.z },
+      reason
+    });
   }
 
   private mergeClusters(target: RubbleCluster, source: RubbleCluster): void {

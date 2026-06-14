@@ -80,7 +80,10 @@ import {
   DebrisStuckCleanupTracker,
   isDebrisTrappedForCleanup
 } from "../src/debrisCleanup";
-import { wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells } from "../src/debrisSupportInvalidation";
+import {
+  createEmptyDebrisLifecycleDiagnostics,
+  wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells
+} from "../src/debrisSupportInvalidation";
 import {
   DEBRIS_PRESSURE_MIN_BUDGET_RATIO,
   createDebrisPerformancePressureState,
@@ -5999,7 +6002,7 @@ test("forever debris lifetime keeps settled fragments renderable", () => {
   assert(fragment.isFragmentRenderVisible, "forever cleanup should keep debris visible");
 });
 
-test("debris cleanup starts after first grounded contact", () => {
+test("debris cleanup pauses again when grounded debris is knocked airborne", () => {
   const fragment = createTestFragment(BLOCK.dirt, 0.5, 3.1, 0.5);
 
   fragment.updateGroundDebrisCleanup(10, 1, false);
@@ -6010,7 +6013,13 @@ test("debris cleanup starts after first grounded contact", () => {
   assert(!fragment.isExpired, "grounded debris should start its cleanup clock");
 
   fragment.updateGroundDebrisCleanup(0.6, 1, false);
-  assert(fragment.isExpired, "cleanup should continue after debris has first touched the ground");
+  assert(!fragment.isExpired, "cleanup should pause when support changes knock debris back airborne");
+
+  fragment.updateGroundDebrisCleanup(0.6, 1, true);
+  assert(!fragment.isExpired, "resumed grounded cleanup should restart from the paused airborne state");
+
+  fragment.updateGroundDebrisCleanup(0.45, 1, true);
+  assert(fragment.isExpired, "cleanup should expire after a full quiet grounded lifetime");
 });
 
 test("stale airborne debris eventually uses cleanup as a floater fallback", () => {
@@ -6646,7 +6655,7 @@ test("terrain support invalidation wakes detached sleeping VFX fragments", () =>
 test("terrain support invalidation wakes detached stacked VFX fragments above changed support", () => {
   const lowerFragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
   const upperFragment = createTestFragment(BLOCK.sand, 0.56, 1.35, 0.52);
-  const tooHighFragment = createTestFragment(BLOCK.sand, 0.5, 5.0, 0.5);
+  const tooHighFragment = createTestFragment(BLOCK.sand, 0.5, 7.5, 0.5);
   sleepTestFragment(lowerFragment);
 
   // Clump sleep can park upper shards that are supported by other debris rather
@@ -8045,6 +8054,42 @@ test("supported rubble survives manual removal of adjacent terrain", () => {
   assert(
     rubble.raycast(new THREE.Vector3(0.5, 1.08, -2), new THREE.Vector3(0, 0, 1), 6),
     "the supported pile should still have a visible/collidable cover proxy"
+  );
+});
+
+test("rubble emits support-change events when piles fall after support removal", () => {
+  const scene = new THREE.Scene();
+  const world = new TestRubbleWorld();
+  const rubble = new RubbleField(scene);
+
+  rubble.absorb(BLOCK.sand, new THREE.Vector3(0.5, 1.1, 0.5), 2);
+  rubble.consumeSupportChangeEvents();
+
+  rubble.settle(world);
+  const supportEvents = rubble.consumeSupportChangeEvents();
+
+  assert(
+    supportEvents.some((event) => event.reason === "fallen" && event.cell.x === 0 && event.cell.y === 1 && event.cell.z === 0),
+    "falling rubble should report the old support cell for debris wake"
+  );
+  assert(
+    supportEvents.some((event) => event.reason === "fallen" && event.cell.x === 0 && event.cell.y === 0 && event.cell.z === 0),
+    "falling rubble should report the new support cell for collider invalidation"
+  );
+});
+
+test("rubble emits support-change events when damage destroys a pile", () => {
+  const scene = new THREE.Scene();
+  const rubble = new RubbleField(scene);
+
+  rubble.absorb(BLOCK.sand, new THREE.Vector3(0.5, 1.1, 0.5), 1);
+  rubble.consumeSupportChangeEvents();
+  rubble.damageNearest(new THREE.Vector3(0.5, 1.1, 0.5), 10_000, 1);
+  const supportEvents = rubble.consumeSupportChangeEvents();
+
+  assert(
+    supportEvents.some((event) => event.reason === "destroyed" && event.cell.x === 0 && event.cell.y === 1 && event.cell.z === 0),
+    "destroyed rubble should report its support cell for debris wake"
   );
 });
 
@@ -9763,6 +9808,7 @@ function createTestHitchStats(
       finalizedPieces: 0,
       forcedFinalizations: 0
     },
+    debrisLifecycle: createEmptyDebrisLifecycleDiagnostics(),
     rubble: {
       clusters: 0,
       pieces: 0,

@@ -7,7 +7,8 @@ import {
   isAdminCommandInput,
   runAdminCommand,
   type AdminCommandApi,
-  type AdminCommandHooks
+  type AdminCommandHooks,
+  type AdminCommandResult
 } from "./adminCommands";
 import {
   BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
@@ -94,8 +95,10 @@ import {
   type DebrisSettlerStats
 } from "./debrisSettler";
 import {
+  createEmptyDebrisLifecycleDiagnostics,
   wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells,
-  type ChangedTerrainCell
+  type ChangedTerrainCell,
+  type DebrisLifecycleDiagnostics
 } from "./debrisSupportInvalidation";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
@@ -746,6 +749,21 @@ const adminCommandHooks: AdminCommandHooks = {
   createSuperflatWorld,
   noteActivity: noteUserActivity
 };
+function runAdminCommandWithTerrainSupportInvalidation(command: string): AdminCommandResult {
+  const changedTerrainCells: ChangedTerrainCell[] = [];
+  const changedTerrainCellKeys = new Set<string>();
+  const result = runAdminCommand({
+    ...adminCommandHooks,
+    onTerrainCellChanged: (cell) => {
+      collectTerrainSupportInvalidationCells(cell, changedTerrainCells, changedTerrainCellKeys);
+    }
+  }, command);
+
+  if (changedTerrainCells.length > 0) {
+    invalidateDebrisSupportForEditedCells(changedTerrainCells);
+  }
+  return result;
+}
 const novaChatPanel = new NovaChatPanel({
   root: novaChatRoot,
   log: novaChatLog,
@@ -754,7 +772,7 @@ const novaChatPanel = new NovaChatPanel({
   closeButton: novaChatCloseButton,
   routeInput: (message) => createNovaTerminalRoute(message, {
     getChatReply: (chatMessage) => createNovaChatReply(chatMessage, novaContext.snapshot()),
-    runCommand: (command) => runAdminCommand(adminCommandHooks, command),
+    runCommand: runAdminCommandWithTerrainSupportInvalidation,
     isCommand: isAdminCommandInput
   }),
   onOpen: openNovaChatInputMode,
@@ -789,7 +807,7 @@ const codexPilot = new CodexPilot({
   getPlayer: requirePlayer,
   getCamera: () => camera,
   getSelectedItemLabel: () => getHotbarItemLabel(getSelectedHotbarItem(), itemRegistry),
-  runAdminCommand: (command) => runAdminCommand(adminCommandHooks, command),
+  runAdminCommand: runAdminCommandWithTerrainSupportInvalidation,
   createSuperflatWorld,
   selectWeapon: selectCodexPilotWeapon,
   fireSelectedPrimary: () => useSelectedHotbarPrimaryAction(requirePlayer()),
@@ -804,7 +822,7 @@ const codexPilot = new CodexPilot({
   noteActivity: noteUserActivity
 });
 voxelRuntimeGlobal.__VOXEL_ADMIN__ = {
-  run: (command) => runAdminCommand(adminCommandHooks, command)
+  run: runAdminCommandWithTerrainSupportInvalidation
 };
 voxelRuntimeGlobal.__VOXEL_CODEX_PILOT__ = codexPilot.api;
 voxelRuntimeGlobal.__VOXEL_TEST_AVATAR__ = testAvatar.api;
@@ -826,6 +844,7 @@ voxelRuntimeGlobal.__VOXEL_VISUAL_TEST__ = {
 let physicsCollisionStats: PhysicsToyCollisionStats = createEmptyPhysicsToyCollisionStats();
 let debrisSettlerStats: DebrisSettlerStats = createEmptyDebrisSettlerStats();
 let rigidDebrisStats: RigidDebrisStats = createEmptyRigidDebrisStats();
+let debrisLifecycleDiagnostics: DebrisLifecycleDiagnostics = createEmptyDebrisLifecycleDiagnostics();
 let latestPhysicsTimingStats: PhysicsTimingStats = createEmptyPhysicsTimingStats();
 let smoothedFrameTimings = createEmptyFrameTimings();
 let frameTimingsInitialized = false;
@@ -1843,6 +1862,10 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
   };
   if (activePlayer.overlapsBlock(target.x, target.y, target.z)) return;
   requireWorld().setBlock(target.x, target.y, target.z, block);
+  const changedTerrainCells: ChangedTerrainCell[] = [];
+  const changedTerrainCellKeys = new Set<string>();
+  collectTerrainSupportInvalidationCells(target, changedTerrainCells, changedTerrainCellKeys);
+  invalidateDebrisSupportForEditedCells(changedTerrainCells);
 }
 
 function applyBuilderBrushAtTarget(operation: "place" | "erase"): void {
@@ -1864,30 +1887,38 @@ function applyBuilderBrushAtTarget(operation: "place" | "erase"): void {
   const activeWorld = requireWorld();
   const activePlayer = requirePlayer();
   const center = getBuilderBrushCenterForTarget(hit.block, hit.normal, operation);
+  const changedTerrainCells: ChangedTerrainCell[] = [];
+  const changedTerrainCellKeys = new Set<string>();
+  const recordChangedCell = (cell: BuilderBrushCell) => {
+    collectTerrainSupportInvalidationCells(cell, changedTerrainCells, changedTerrainCellKeys);
+  };
   const changedCells = operation === "place"
     ? applyBuilderBrush({
         world: activeWorld,
         center,
         size: builderBrushSize,
         block: getSelectedBuilderBlock(),
-        shouldSkipCell: (cell) => activePlayer.overlapsBlock(cell.x, cell.y, cell.z)
+        shouldSkipCell: (cell) => activePlayer.overlapsBlock(cell.x, cell.y, cell.z),
+        onChangedCell: recordChangedCell
       })
     : eraseBuilderBrush({
         world: activeWorld,
         center,
-        size: builderBrushSize
+        size: builderBrushSize,
+        onChangedCell: recordChangedCell
       });
 
   if (changedCells > 0) {
-    rigidDebris.invalidateStaticColliders();
+    invalidateDebrisSupportForEditedCells(changedTerrainCells);
   }
   showBuilderStatus(`Builder: ${operation === "place" ? "placed" : "erased"} ${changedCells} block${changedCells === 1 ? "" : "s"}.`);
 }
 
 function runBuilderSpawnCommand(feature: "target" | "wall" | "platform" | "pillar"): void {
-  const result = runAdminCommand(adminCommandHooks, `spawn ${feature} ${getSelectedBuilderBlockName().toLowerCase()}`);
+  const result = runAdminCommandWithTerrainSupportInvalidation(
+    `spawn ${feature} ${getSelectedBuilderBlockName().toLowerCase()}`
+  );
   showBuilderStatus(result.message);
-  if (result.ok) rigidDebris.invalidateStaticColliders();
 }
 
 function showBuilderStatus(message: string): void {
@@ -2020,6 +2051,7 @@ function animate(): void {
 
   const frameStartedAt = performance.now();
   const rawDelta = clock.getDelta();
+  debrisLifecycleDiagnostics = createEmptyDebrisLifecycleDiagnostics();
   if (shouldSkipExpensiveFrame(document.hidden, rawDelta)) {
     resetFrameMetersAfterIdle();
     scheduleNextFrame();
@@ -2138,6 +2170,7 @@ function animate(): void {
 
     const rubbleSettleStartedAt = performance.now();
     rubbleField.settle(activeWorld);
+    emitRubbleSupportChangeEvents();
     physicsTimingSample.rubbleSettleMs += performance.now() - rubbleSettleStartedAt;
 
     const renderProxyStartedAt = performance.now();
@@ -2250,6 +2283,7 @@ function animate(): void {
       fragmentRender: physicsFragmentInstancer.getStats(),
       partialMesh: debugPartialMeshStats,
       debrisSettler: debrisSettlerStats,
+      debrisLifecycle: debrisLifecycleDiagnostics,
       rubble: debugRubbleStats ?? rubbleField.getStats(),
       workerPool: workerPool.getStats()
     };
@@ -2301,6 +2335,7 @@ function animate(): void {
       physicsFragmentInstancer.getStats(),
       debugPartialMeshStats,
       debrisSettlerStats,
+      debrisLifecycleDiagnostics,
       debugRubbleStats,
       workerPool.getStats(),
       [combatLog.getPersistenceStatusLine(), ...combatLog.getRecentLines(5)],
@@ -2503,6 +2538,7 @@ function createCurrentPerformanceStatsSnapshot(
     fragmentRender: physicsFragmentInstancer.getStats(),
     partialMesh: overrides.partialMesh ?? partialBlockMeshField.getStats(),
     debrisSettler: debrisSettlerStats,
+    debrisLifecycle: debrisLifecycleDiagnostics,
     rubble: overrides.rubble ?? rubbleField.getStats(),
     workerPool: workerPool.getStats()
   };
@@ -3374,9 +3410,7 @@ function applyTerrainDamageFeedback(
   // sleeping debris in the edited support neighborhood; this is event-driven
   // so settled piles do not need a broad support scan every frame.
   if (changedTerrainCollider) {
-    rigidDebris.wakeDebrisRestingOnChangedTerrainCells(changedTerrainCells);
-    wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(toys, changedTerrainCells);
-    rigidDebris.invalidateStaticColliders();
+    invalidateDebrisSupportForEditedCells(changedTerrainCells);
   }
 }
 
@@ -3401,6 +3435,30 @@ function collectTerrainSupportInvalidationCells(
       }
     }
   }
+}
+
+function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCell[]): void {
+  if (cells.length === 0) return;
+
+  const rigidDebrisWoken = rigidDebris.wakeDebrisRestingOnChangedTerrainCells(cells);
+  const detachedDebrisWoken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(toys, cells);
+  rigidDebris.invalidateStaticColliders();
+  addDebrisLifecycleDiagnostics({
+    supportCellsInvalidated: cells.length,
+    rigidDebrisWoken,
+    detachedDebrisWoken
+  });
+}
+
+function addDebrisLifecycleDiagnostics(delta: Partial<DebrisLifecycleDiagnostics>): void {
+  debrisLifecycleDiagnostics = {
+    supportCellsInvalidated: debrisLifecycleDiagnostics.supportCellsInvalidated + (delta.supportCellsInvalidated ?? 0),
+    rigidDebrisWoken: debrisLifecycleDiagnostics.rigidDebrisWoken + (delta.rigidDebrisWoken ?? 0),
+    detachedDebrisWoken: debrisLifecycleDiagnostics.detachedDebrisWoken + (delta.detachedDebrisWoken ?? 0),
+    settledPressureExpiries: debrisLifecycleDiagnostics.settledPressureExpiries + (delta.settledPressureExpiries ?? 0),
+    airbornePressureProtections: debrisLifecycleDiagnostics.airbornePressureProtections + (delta.airbornePressureProtections ?? 0),
+    emergencyAirborneExpiries: debrisLifecycleDiagnostics.emergencyAirborneExpiries + (delta.emergencyAirborneExpiries ?? 0)
+  };
 }
 
 function recordTerrainCombatLog(options: {
@@ -4144,13 +4202,51 @@ function enforcePhysicsToyBudget(): void {
   if (overBudgetCount <= 0) return;
 
   // Debris is VFX now. Durable damage lives in terrain HP and the partial
-  // bite lattice, so pressure relief should drop shard theater instead of
-  // baking surprise cover piles into the world.
-  debrisSettler.discardRegionsForPressure(camera.position, overBudgetCount);
+  // bite lattice, so normal pressure relief trims settled aftermath first
+  // instead of making visible airborne burst shards disappear mid-flight.
+  const settledRegionExpiries = debrisSettler.discardSettledRegionsForPressure(camera.position, overBudgetCount);
+  if (settledRegionExpiries > 0) {
+    addDebrisLifecycleDiagnostics({ settledPressureExpiries: settledRegionExpiries });
+  }
   pruneExpiredToys();
-  expireOrphanFragmentsForBudget(true);
-  expireOrphanFragmentsForBudget(false);
+
+  const outsideSettledOrphanExpiries = expireOrphanFragmentsForBudget(true, false);
+  const settledOrphanExpiries = expireOrphanFragmentsForBudget(false, false);
+  const settledPressureExpiries = outsideSettledOrphanExpiries + settledOrphanExpiries;
+  if (settledPressureExpiries > 0) {
+    addDebrisLifecycleDiagnostics({ settledPressureExpiries });
+  }
+
+  const airborneProtectionCount = Math.min(
+    Math.max(0, toys.length - physicsObjectBudget),
+    countPressureProtectedAirborneFragments()
+  );
+  if (airborneProtectionCount > 0) {
+    addDebrisLifecycleDiagnostics({ airbornePressureProtections: airborneProtectionCount });
+  }
+
   pruneOldestPhysicsCoresForBudget();
+
+  if (toys.length <= physicsObjectBudget) return;
+
+  // Last-resort safety valve: if the scene is still beyond the total toy cap
+  // after settled debris and cores are gone, expire farthest airborne debris.
+  // This should be rare and is surfaced in HUD/log diagnostics when it fires.
+  const emergencySettlerExpiries = debrisSettler.discardRegionsForPressure(
+    camera.position,
+    toys.length - physicsObjectBudget
+  );
+  if (emergencySettlerExpiries > 0) {
+    addDebrisLifecycleDiagnostics({ emergencyAirborneExpiries: emergencySettlerExpiries });
+  }
+  pruneExpiredToys();
+
+  const emergencyOrphanExpiries =
+    expireOrphanFragmentsForBudget(true, true) +
+    expireOrphanFragmentsForBudget(false, true);
+  if (emergencyOrphanExpiries > 0) {
+    addDebrisLifecycleDiagnostics({ emergencyAirborneExpiries: emergencyOrphanExpiries });
+  }
 }
 
 function enforceRigidDebrisBudget(): void {
@@ -4177,7 +4273,10 @@ function enforceRigidDebrisBudget(): void {
 
 function enforceGroundDebrisBudget(): void {
   const candidates = getRigidDebrisBudgetCandidates()
-    .filter((candidate) => isGroundDebrisBudgetCleanupEligible(candidate.toy.age, candidate.grounded));
+    .filter((candidate) => (
+      candidate.toy.isSleeping &&
+      isGroundDebrisBudgetCleanupEligible(candidate.toy.age, candidate.grounded)
+    ));
   const overBudgetCount = candidates.length - groundDebrisBudget;
   if (overBudgetCount <= 0) return;
 
@@ -4282,6 +4381,7 @@ function getGroundedDebrisCleanupCandidates(): PhysicsToy[] {
   return toys.filter((toy) => (
     toy.isInstancedFragment &&
     !toy.isExpired &&
+    toy.isSleeping &&
     isGroundDebrisCleanupGrounded(toy)
   ));
 }
@@ -4321,14 +4421,16 @@ function getGroundDebrisCleanupSupportBounds(toy: PhysicsToy): CollisionBounds {
   };
 }
 
-function expireOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
-  if (toys.length <= physicsObjectBudget) return;
+function expireOrphanFragmentsForBudget(outsideBubbleOnly: boolean, allowAirborne: boolean): number {
+  if (toys.length <= physicsObjectBudget) return 0;
+  let expiredCount = 0;
 
   const candidates = toys
     .filter((toy) => (
       toy.isInstancedFragment &&
       !debrisSettler.owns(toy) &&
       !toy.isExpired &&
+      (allowAirborne || isPressureCleanupSettledFragment(toy)) &&
       (!outsideBubbleOnly || isFragmentOutsideActiveDebrisBubble(toy))
     ))
     .sort((left, right) => (
@@ -4337,13 +4439,34 @@ function expireOrphanFragmentsForBudget(outsideBubbleOnly: boolean): void {
     ));
 
   for (const toy of candidates) {
-    if (toys.length <= physicsObjectBudget) return;
+    if (toys.length <= physicsObjectBudget) return expiredCount;
 
     const index = toys.indexOf(toy);
     if (index === -1) continue;
     expireGroundDebrisWithPoof(toy);
     removePhysicsToyAt(index);
+    expiredCount += 1;
   }
+  return expiredCount;
+}
+
+function isPressureCleanupSettledFragment(toy: PhysicsToy): boolean {
+  return toy.isSleeping && isGroundDebrisCleanupGrounded(toy);
+}
+
+function countPressureProtectedAirborneFragments(): number {
+  let protectedFragments = 0;
+  for (const toy of toys) {
+    if (!toy.isInstancedFragment || toy.isExpired) continue;
+    if (debrisSettler.owns(toy) && !toy.isSleeping) {
+      protectedFragments += 1;
+      continue;
+    }
+    if (!debrisSettler.owns(toy) && !isPressureCleanupSettledFragment(toy)) {
+      protectedFragments += 1;
+    }
+  }
+  return protectedFragments;
 }
 
 function pruneOldestPhysicsCoresForBudget(): void {
@@ -4378,7 +4501,7 @@ function emitRubbleDamageEvents(
   action = "rubble damage"
 ): void {
   const events = rubbleField.consumeDamageEvents();
-  if (events.some((event) => event.destroyed)) rigidDebris.invalidateStaticColliders();
+  emitRubbleSupportChangeEvents();
   recordRubbleCombatLog(source, action, events);
 
   for (const event of events) {
@@ -4396,6 +4519,18 @@ function emitRubbleDamageEvents(
     });
     showRubbleDamageIndicator(event);
   }
+}
+
+function emitRubbleSupportChangeEvents(): void {
+  const supportEvents = rubbleField.consumeSupportChangeEvents();
+  if (supportEvents.length === 0) return;
+
+  const changedTerrainCells: ChangedTerrainCell[] = [];
+  const changedTerrainCellKeys = new Set<string>();
+  for (const event of supportEvents) {
+    collectTerrainSupportInvalidationCells(event.cell, changedTerrainCells, changedTerrainCellKeys);
+  }
+  invalidateDebrisSupportForEditedCells(changedTerrainCells);
 }
 
 function showBlockDamageIndicator(result: BlockDamageResult): void {

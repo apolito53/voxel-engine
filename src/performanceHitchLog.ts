@@ -1,5 +1,6 @@
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
+import type { DebrisLifecycleDiagnostics } from "./debrisSupportInvalidation";
 import type { FrameDiagnosticsSnapshot } from "./frameDiagnostics";
 import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
 import type { PartialBlockMeshStats } from "./partialBlockMeshField";
@@ -39,6 +40,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly fragmentRender: PhysicsFragmentRenderStats;
   readonly partialMesh: PartialBlockMeshStats;
   readonly debrisSettler: DebrisSettlerStats;
+  readonly debrisLifecycle: DebrisLifecycleDiagnostics;
   readonly rubble: RubbleFieldStats;
   readonly workerPool: WorkerPoolStats;
 };
@@ -505,6 +507,17 @@ function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapsh
   if (stats.debrisSettler.activeFragments > 0) {
     details.push(`${stats.debrisSettler.activeFragments} settling fragments still active`);
   }
+  if (stats.debrisLifecycle.emergencyAirborneExpiries > 0) {
+    details.push(`${stats.debrisLifecycle.emergencyAirborneExpiries} emergency airborne debris expiries`);
+  } else if (stats.debrisLifecycle.airbornePressureProtections > 0) {
+    details.push(`${stats.debrisLifecycle.airbornePressureProtections} airborne debris protected from pressure cleanup`);
+  }
+  if (stats.debrisLifecycle.rigidDebrisWoken > 0 || stats.debrisLifecycle.detachedDebrisWoken > 0) {
+    details.push(
+      `support edit woke ${stats.debrisLifecycle.rigidDebrisWoken} rigid and ` +
+      `${stats.debrisLifecycle.detachedDebrisWoken} VFX debris`
+    );
+  }
   if (stats.physics.candidatePairs > 0) {
     details.push(`${stats.physics.candidatePairs} broadphase candidate pairs, ${stats.physics.resolvedContacts} resolved`);
   }
@@ -620,6 +633,9 @@ function addCrossCuttingPressureDetails(
   if (stats.fragmentRender.instances >= 100) {
     details.push(`${stats.fragmentRender.instances} live fragment render instances`);
   }
+  if (stats.debrisLifecycle.emergencyAirborneExpiries > 0) {
+    details.push(`${stats.debrisLifecycle.emergencyAirborneExpiries} emergency airborne debris expiries this frame`);
+  }
   if (stats.workerPool.queuedJobs > 0 || stats.workerPool.runningJobs > 0) {
     details.push(
       `worker jobs q ${stats.workerPool.queuedJobs}, run ${stats.workerPool.runningJobs}, ` +
@@ -706,6 +722,7 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     fragmentRender: { ...stats.fragmentRender },
     partialMesh: { ...stats.partialMesh },
     debrisSettler: { ...stats.debrisSettler },
+    debrisLifecycle: { ...stats.debrisLifecycle },
     rubble: { ...stats.rubble },
     workerPool: { ...stats.workerPool }
   };

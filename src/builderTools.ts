@@ -30,6 +30,7 @@ export type BuilderBrushOptions = {
   readonly size: number;
   readonly block: BlockId;
   readonly shouldSkipCell?: (cell: BuilderBrushCell) => boolean;
+  readonly onChangedCell?: (cell: BuilderBrushCell) => void;
 };
 
 export function normalizeBuilderBrushSize(value: unknown, fallback = BUILDER_BRUSH_MIN_SIZE): number {
@@ -101,6 +102,7 @@ export function applyBuilderBrush(options: BuilderBrushOptions): number {
     if (options.world.getBlock(cell.x, cell.y, cell.z) === block) continue;
 
     options.world.setBlock(cell.x, cell.y, cell.z, block);
+    options.onChangedCell?.(cell);
     changedCells += 1;
   }
 

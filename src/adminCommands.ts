@@ -28,6 +28,7 @@ export type AdminCommandHooks = {
   getCamera(): THREE.PerspectiveCamera;
   createSuperflatWorld(): Promise<void>;
   noteActivity(): void;
+  onTerrainCellChanged?(cell: { readonly x: number; readonly y: number; readonly z: number }): void;
 };
 
 export type ParsedAdminCommand = {
@@ -35,7 +36,7 @@ export type ParsedAdminCommand = {
   readonly args: readonly string[];
 };
 
-type SpawnHooks = Pick<AdminCommandHooks, "getWorld" | "getCamera">;
+type SpawnHooksWithOptionalTerrainEvents = Pick<AdminCommandHooks, "getWorld" | "getCamera" | "onTerrainCellChanged">;
 
 type SpawnArgs = {
   readonly block: BlockId;
@@ -110,7 +111,7 @@ function runAdminSpawnCommand(hooks: AdminCommandHooks, args: readonly string[])
 }
 
 export function spawnWallFixture(
-  hooks: SpawnHooks,
+  hooks: SpawnHooksWithOptionalTerrainEvents,
   block: BlockId,
   width: number,
   height: number
@@ -127,6 +128,7 @@ export function spawnWallFixture(
     for (let yOffset = 0; yOffset < height; yOffset += 1) {
       const position = frame.center.clone().addScaledVector(frame.right, xOffset).floor();
       world.setBlock(position.x, baseY + yOffset, position.z, block);
+      hooks.onTerrainCellChanged?.({ x: position.x, y: baseY + yOffset, z: position.z });
       count += 1;
     }
   }
@@ -134,7 +136,7 @@ export function spawnWallFixture(
   return count;
 }
 
-export function spawnPillarFixture(hooks: SpawnHooks, block: BlockId, height: number): number {
+export function spawnPillarFixture(hooks: SpawnHooksWithOptionalTerrainEvents, block: BlockId, height: number): number {
   const world = hooks.getWorld();
   const frame = createSpawnFrame(hooks.getCamera(), DEFAULT_SPAWN_DISTANCE);
   const x = Math.floor(frame.center.x);
@@ -144,11 +146,12 @@ export function spawnPillarFixture(hooks: SpawnHooks, block: BlockId, height: nu
 
   for (let yOffset = 0; yOffset < height; yOffset += 1) {
     world.setBlock(x, baseY + yOffset, z, block);
+    hooks.onTerrainCellChanged?.({ x, y: baseY + yOffset, z });
   }
   return height;
 }
 
-export function spawnPlatformFixture(hooks: SpawnHooks, block: BlockId, size: number): number {
+export function spawnPlatformFixture(hooks: SpawnHooksWithOptionalTerrainEvents, block: BlockId, size: number): number {
   const world = hooks.getWorld();
   const frame = createSpawnFrame(hooks.getCamera(), DEFAULT_SPAWN_DISTANCE);
   const half = Math.floor(size / 2);
@@ -166,6 +169,7 @@ export function spawnPlatformFixture(hooks: SpawnHooks, block: BlockId, size: nu
         .addScaledVector(frame.forward, forwardOffset)
         .floor();
       world.setBlock(position.x, y, position.z, block);
+      hooks.onTerrainCellChanged?.({ x: position.x, y, z: position.z });
       count += 1;
     }
   }
