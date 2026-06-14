@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
+import type { DebrisLifecycleDiagnostics } from "./debrisSupportInvalidation";
 import { RollingFrameRateMeter, type FrameRateSample } from "./frameRateMeter";
 import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
@@ -82,6 +83,7 @@ export class DebugHud {
     fragmentRenderStats: PhysicsFragmentRenderStats,
     partialMeshStats: PartialBlockMeshStats,
     debrisSettlerStats: DebrisSettlerStats,
+    debrisLifecycleDiagnostics: DebrisLifecycleDiagnostics,
     rubbleStats: RubbleFieldStats,
     workerPoolStats: WorkerPoolStats,
     combatLogLines: readonly string[],
@@ -112,6 +114,7 @@ export class DebugHud {
       fragmentRenderStats,
       partialMeshStats,
       debrisSettlerStats,
+      debrisLifecycleDiagnostics,
       rubbleStats,
       workerPoolStats,
       combatLogLines,
@@ -151,6 +154,7 @@ export class DebugHud {
     readonly fragmentRenderStats: PhysicsFragmentRenderStats;
     readonly partialMeshStats: PartialBlockMeshStats;
     readonly debrisSettlerStats: DebrisSettlerStats;
+    readonly debrisLifecycleDiagnostics: DebrisLifecycleDiagnostics;
     readonly rubbleStats: RubbleFieldStats;
     readonly workerPoolStats: WorkerPoolStats;
     readonly combatLogLines: readonly string[];
@@ -266,6 +270,18 @@ export class DebugHud {
           },
           { label: "render", value: `${snapshot.fragmentRenderStats.instances} inst, ${snapshot.fragmentRenderStats.batches} batches, cap ${snapshot.fragmentRenderStats.capacity}` },
           { label: "settle", value: `${snapshot.debrisSettlerStats.regions} rg, ${snapshot.debrisSettlerStats.activeFragments}/${snapshot.debrisSettlerStats.fragments} active` },
+          {
+            label: "wake",
+            value: `${snapshot.debrisLifecycleDiagnostics.supportCellsInvalidated} cells, ` +
+              `${snapshot.debrisLifecycleDiagnostics.rigidDebrisWoken} rigid, ` +
+              `${snapshot.debrisLifecycleDiagnostics.detachedDebrisWoken} vfx`
+          },
+          {
+            label: "cleanup",
+            value: `settled ${snapshot.debrisLifecycleDiagnostics.settledPressureExpiries}, ` +
+              `protect ${snapshot.debrisLifecycleDiagnostics.airbornePressureProtections}, ` +
+              `emerg ${snapshot.debrisLifecycleDiagnostics.emergencyAirborneExpiries}`
+          },
           { label: "rubble", value: `${snapshot.rubbleStats.clusters} clusters, ${snapshot.rubbleStats.pieces.toFixed(2)} pcs, ${snapshot.rubbleStats.maxCoverHeight.toFixed(2)}m` }
         ]
       },

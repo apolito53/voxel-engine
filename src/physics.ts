@@ -404,11 +404,11 @@ export class PhysicsToy {
       return false;
     }
 
-    if (
-      !isGroundedForCleanup &&
-      this.groundDebrisCleanupSeconds === null &&
-      this.ageSeconds < getGroundDebrisAirborneFallbackSeconds(lifetimeSeconds)
-    ) {
+    if (!isGroundedForCleanup && this.ageSeconds < getGroundDebrisAirborneFallbackSeconds(lifetimeSeconds)) {
+      // A shard that was resting can be knocked airborne again by later
+      // impacts/support edits. Pause its ground cleanup clock so pressure
+      // relief does not make visible flying debris vanish mid-arc.
+      this.groundDebrisCleanupSeconds = null;
       this.fragmentRenderVisible = true;
       return false;
     }

@@ -46,6 +46,9 @@ The debug overlay and hitch logger capture:
 - Chunk visibility split into loaded chunks, frustum chunks, actually rendered
   chunks, and chunks hidden behind the opaque fog curtain.
 - Rigid debris body/collider pressure.
+- Debris lifecycle counters for support-cell invalidations, rigid/VFX wakeups,
+  settled pressure expiries, airborne pressure protections, and emergency
+  airborne expiries.
 - Adaptive debris pressure and effective cap state.
 - Worker-pool pressure: mode, capacity, queued jobs, running jobs, partial-mesh
   jobs, and average job/upload timing.
@@ -121,6 +124,10 @@ Physics-led frame summaries include the largest measured physics subphase first
 when it is at least 1ms, so a debris-pressure repro can distinguish Rapier step
 time from support-collider churn, impact application, cleanup, or render-proxy
 sync.
+When support edits or pressure cleanup affect debris, hitch records also carry
+the lifecycle counters. Nonzero emergency airborne expiries mean the final
+safety valve removed flying shards; nonzero airborne protections mean ordinary
+pressure relief deliberately spared them.
 
 ## Render Horizon
 

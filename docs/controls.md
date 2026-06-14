@@ -37,8 +37,9 @@ the root README.
 - `F3` toggles the grouped debug overlay. It shows Perf, Player, World, Physics,
   Debris, Render, and Combat panels with smoothed FPS, frame time, player speed,
   signed X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block
-  pressure, instanced debris counts, renderer stats, and the latest tool/core
-  damage events with affected terrain sub-cell indexes. The Combat panel also
+  pressure, instanced debris counts, debris support-wake/cleanup counters,
+  renderer stats, and the latest tool/core damage events with affected terrain
+  sub-cell indexes. The Combat panel also
   shows whether those events are queued, written, or failed for local disk
   logging.
 - `F4` cycles the built-in quality presets.

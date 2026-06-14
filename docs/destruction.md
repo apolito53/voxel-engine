@@ -139,17 +139,29 @@ aftermath:
   remains on the floor rather than how many pieces spray out of a break.
 - Excess supported/sleeping debris is culled after it settles.
 - Timed-out shards disappear in a material-tinted poof after first ground
-  contact unless lifetime is set to `Forever`.
+  contact unless lifetime is set to `Forever`; the countdown pauses again if a
+  shard is knocked airborne by later impacts or support changes.
 - Distance and pressure cleanup can still remove shards even when lifetime is
   `Forever`.
 - The rigid-body safety cap is enforced before Rapier admission. The full
   visible spray still appears, but overflow shards remain cheap VFX, and later
   pressure demotes rigid shards to VFX before expiring anything.
+- The total toy-budget cleanup path prefers settled/sleeping debris first and
+  protects awake airborne shards during normal pressure relief. Emergency
+  airborne expiry is reserved for extreme over-budget cases and is surfaced in
+  diagnostics.
 - Extreme airborne bursts can still demote farthest active rigid shards once
   they exceed the separate rigid-body safety cap derived from the Physics Object
   Budget.
 - Sustained sub-60 FPS with heavy debris pressure can temporarily lower the
   effective rigid-debris cap until frames recover.
+
+Terrain damage, block placement/removal, builder/admin edits, rubble damage,
+and rubble falling/promotion all route through an event-driven support
+invalidation path. That path wakes a bounded local stack of Rapier-owned and
+detached VFX debris above edited cells, so sleeping piles fall when their
+terrain or rubble support changes without bringing back a broad per-frame
+support scan.
 
 `Despawn All Objects` performs the full cleanup path and releases physics cores,
 loose debris VFX, and any existing rubble cover.
