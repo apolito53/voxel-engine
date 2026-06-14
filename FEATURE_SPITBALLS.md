@@ -16,6 +16,7 @@ gameplay sparks, and technical experiments that are not commitments yet.
 - [Vehicles](#vehicles)
 - [Movement And Player Feel](#movement-and-player-feel)
 - [Entities And AI](#entities-and-ai)
+- [Bots And Helpers](#bots-and-helpers)
 - [Items And Progression Seeds](#items-and-progression-seeds)
 - [World Saves And Sharing](#world-saves-and-sharing)
 - [Test Lab And Automation Toys](#test-lab-and-automation-toys)
@@ -176,6 +177,28 @@ Preferred format:
   before enemies are allowed into normal generated worlds.
 - `[maybe]` Friendly/neutral entities later, once hostile AI proves the entity
   lifecycle, save rules, and damage model are not terrible.
+
+## Bots And Helpers
+
+- `[mechanic]` Expand the Nova-bot idea into taskable helper bots: assistants
+  that can be assigned jobs instead of only following, chatting, reacting, or
+  throwing cores.
+- `[mechanic]` Helper building/terraforming: in non-creative modes where the
+  player does not personally have every editing tool, bots could execute
+  authorized build, repair, flatten, tunnel, or terrain-shaping tasks inside a
+  marked area.
+- `[mechanic]` Resource collection someday: if the engine grows real resource
+  tracking, helper bots could gather, haul, sort, or deliver materials instead
+  of only manipulating free terrain.
+- `[ux]` Bot tasking needs a clear command surface: select area, choose task,
+  preview intended changes, approve cost/rules, then let the bot work without
+  turning into invisible admin magic.
+- `[tech]` Bot actions should use the same world-edit, item, damage, and future
+  resource contracts as the player so helper behavior stays testable and does
+  not bypass survival/adventure-mode limits.
+- `[debug]` Superflat Lab bot fixtures could test pathing, build queues,
+  interrupted jobs, terrain edits, resource pickup stubs, and chunk-boundary
+  task handoff before bots exist in normal worlds.
 
 ## Items And Progression Seeds
 
