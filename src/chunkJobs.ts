@@ -63,7 +63,14 @@ export function buildChunkMeshJob(payload: ChunkMeshJobPayload): ChunkMeshedResu
     colors: meshData.colors,
     uvs: meshData.uvs,
     textureTiles: meshData.textureTiles,
-    indices: meshData.indices
+    indices: meshData.indices,
+    faceOrigins: meshData.faceOrigins,
+    faceEdgeUs: meshData.faceEdgeUs,
+    faceEdgeVs: meshData.faceEdgeVs,
+    faceNormals: meshData.faceNormals,
+    faceColors: meshData.faceColors,
+    faceTextureTiles: meshData.faceTextureTiles,
+    faceCount: meshData.faceCount
   };
 }
 
@@ -78,7 +85,13 @@ export function getChunkJobResultTransfers(result: ChunkJobResult): Transferable
     result.colors.buffer,
     result.uvs.buffer,
     result.textureTiles.buffer,
-    result.indices.buffer
+    result.indices.buffer,
+    result.faceOrigins.buffer,
+    result.faceEdgeUs.buffer,
+    result.faceEdgeVs.buffer,
+    result.faceNormals.buffer,
+    result.faceColors.buffer,
+    result.faceTextureTiles.buffer
   ];
 }
 
@@ -136,13 +149,80 @@ function buildChunkMesh({
   buildYFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
   buildZFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
 
-  return {
+  return createChunkMeshDataFromExpandedBuffers({
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     colors: new Float32Array(colors),
     uvs: new Float32Array(uvs),
     textureTiles: new Float32Array(textureTiles),
     indices: new Uint32Array(indices)
+  });
+}
+
+function createChunkMeshDataFromExpandedBuffers(meshData: Omit<ChunkMeshData,
+  "faceOrigins" |
+  "faceEdgeUs" |
+  "faceEdgeVs" |
+  "faceNormals" |
+  "faceColors" |
+  "faceTextureTiles" |
+  "faceCount"
+>): ChunkMeshData {
+  const faceCount = Math.floor(meshData.positions.length / 12);
+  const faceOrigins = new Float32Array(faceCount * 3);
+  const faceEdgeUs = new Float32Array(faceCount * 3);
+  const faceEdgeVs = new Float32Array(faceCount * 3);
+  const faceNormals = new Float32Array(faceCount * 3);
+  const faceColors = new Float32Array(faceCount * 3);
+  const faceTextureTiles = new Float32Array(faceCount);
+
+  // The legacy greedy mesher already emits each quad as four consecutive
+  // vertices in stable winding order. The WebGL2 terrain backend only needs one
+  // origin plus two edge vectors per quad, so this conversion gives the new
+  // renderer compact records while keeping exact parity with the old mesh path.
+  for (let faceIndex = 0; faceIndex < faceCount; faceIndex += 1) {
+    const vertexBase = faceIndex * 4;
+    const firstVertex = vertexBase * 3;
+    const secondVertex = (vertexBase + 1) * 3;
+    const fourthVertex = (vertexBase + 3) * 3;
+    const faceBase = faceIndex * 3;
+
+    const originX = meshData.positions[firstVertex] ?? 0;
+    const originY = meshData.positions[firstVertex + 1] ?? 0;
+    const originZ = meshData.positions[firstVertex + 2] ?? 0;
+
+    faceOrigins[faceBase] = originX;
+    faceOrigins[faceBase + 1] = originY;
+    faceOrigins[faceBase + 2] = originZ;
+
+    faceEdgeUs[faceBase] = (meshData.positions[secondVertex] ?? originX) - originX;
+    faceEdgeUs[faceBase + 1] = (meshData.positions[secondVertex + 1] ?? originY) - originY;
+    faceEdgeUs[faceBase + 2] = (meshData.positions[secondVertex + 2] ?? originZ) - originZ;
+
+    faceEdgeVs[faceBase] = (meshData.positions[fourthVertex] ?? originX) - originX;
+    faceEdgeVs[faceBase + 1] = (meshData.positions[fourthVertex + 1] ?? originY) - originY;
+    faceEdgeVs[faceBase + 2] = (meshData.positions[fourthVertex + 2] ?? originZ) - originZ;
+
+    faceNormals[faceBase] = meshData.normals[firstVertex] ?? 0;
+    faceNormals[faceBase + 1] = meshData.normals[firstVertex + 1] ?? 1;
+    faceNormals[faceBase + 2] = meshData.normals[firstVertex + 2] ?? 0;
+
+    faceColors[faceBase] = meshData.colors[firstVertex] ?? 1;
+    faceColors[faceBase + 1] = meshData.colors[firstVertex + 1] ?? 1;
+    faceColors[faceBase + 2] = meshData.colors[firstVertex + 2] ?? 1;
+
+    faceTextureTiles[faceIndex] = meshData.textureTiles[vertexBase] ?? 0;
+  }
+
+  return {
+    ...meshData,
+    faceOrigins,
+    faceEdgeUs,
+    faceEdgeVs,
+    faceNormals,
+    faceColors,
+    faceTextureTiles,
+    faceCount
   };
 }
 

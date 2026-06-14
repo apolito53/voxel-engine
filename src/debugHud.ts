@@ -13,6 +13,7 @@ import {
   type PlayerVelocitySample
 } from "./playerSpeed";
 import type { QualityPreset } from "./qualityPresets";
+import type { RenderBackendStats } from "./renderBackend";
 import type { RigidDebrisStats } from "./rigidDebris";
 import type { RubbleFieldStats } from "./rubble";
 import type { WorkerPoolJobTypeStats, WorkerPoolStats } from "./workerPool";
@@ -23,6 +24,7 @@ type DebugHudOptions = {
   readonly renderer: THREE.WebGLRenderer;
   readonly gpuInfo: GpuInfo;
   readonly getQualityPreset: () => QualityPreset;
+  readonly getRenderBackendStats?: () => RenderBackendStats;
 };
 
 type DebugHudSection = {
@@ -41,6 +43,7 @@ export class DebugHud {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly gpuInfo: GpuInfo;
   private readonly getQualityPreset: () => QualityPreset;
+  private readonly getRenderBackendStats: (() => RenderBackendStats) | null;
   private readonly frameRateMeter = new RollingFrameRateMeter();
   private visible = false;
   private accumulator = Infinity;
@@ -52,6 +55,7 @@ export class DebugHud {
     this.renderer = options.renderer;
     this.gpuInfo = options.gpuInfo;
     this.getQualityPreset = options.getQualityPreset;
+    this.getRenderBackendStats = options.getRenderBackendStats ?? null;
     this.panel.classList.add("is-hidden");
   }
 
@@ -161,6 +165,7 @@ export class DebugHud {
     const render = this.renderer.info.render;
     const memory = this.renderer.info.memory;
     const qualityPreset = this.getQualityPreset();
+    const renderBackendStats = this.getRenderBackendStats?.() ?? null;
     const fogOpaqueRadius = qualityPreset.fogStartRadius + qualityPreset.fogFalloffRadius;
     const debrisPressureLabel = snapshot.debrisPressure.stress > 0.01
       ? `pressure ${Math.round(snapshot.debrisPressure.stress * 100)}%, base ${snapshot.debrisPressure.nominalRigidDebrisBodyBudget}`
@@ -283,6 +288,32 @@ export class DebugHud {
           { label: "gpu", value: compactText(this.gpuInfo.vendor, 30) },
           { label: "driver", value: compactText(this.gpuInfo.renderer, 34) },
           {
+            label: "backend",
+            value: renderBackendStats
+              ? renderBackendStats.name
+              : "legacy scene"
+          },
+          {
+            label: "gpu ms",
+            value: renderBackendStats
+              ? formatGpuTimerStats(renderBackendStats.gpuTimer)
+              : "untracked"
+          },
+          {
+            label: "terrain",
+            value: renderBackendStats
+              ? `${renderBackendStats.terrain.visibleChunks}/${renderBackendStats.terrain.chunks} gpu chunks, ` +
+                `${renderBackendStats.terrain.faces} faces`
+              : "legacy chunks"
+          },
+          {
+            label: "upload",
+            value: renderBackendStats
+              ? `${formatBytes(renderBackendStats.terrain.uploadBytesThisFrame)}/frame, ` +
+                `${formatBytes(renderBackendStats.terrain.totalUploadBytes)} total`
+              : "untracked"
+          },
+          {
             label: "worker",
             value: `${snapshot.workerPoolStats.mode} ${snapshot.workerPoolStats.runningJobs}/${snapshot.workerPoolStats.maxWorkers} run, ` +
               `q ${snapshot.workerPoolStats.queuedJobs}, avg ${snapshot.workerPoolStats.averageWorkerTimeMs.toFixed(1)}ms`
@@ -349,6 +380,23 @@ function compactWorkerJobType(type: string): string {
   if (type === "chunk:generate") return "chunk gen";
   if (type === "chunk:mesh") return "chunk mesh";
   return compactText(type, 16);
+}
+
+function formatGpuTimerStats(stats: RenderBackendStats["gpuTimer"]): string {
+  if (!stats.supported) return "timer unsupported";
+  const latest = stats.lastFrameMs === null ? "pending" : `${stats.lastFrameMs.toFixed(2)}ms`;
+  const average = stats.averageFrameMs === null ? "avg pending" : `avg ${stats.averageFrameMs.toFixed(2)}ms`;
+  const disjoint = stats.disjointCount > 0 ? `, disjoint ${stats.disjointCount}` : "";
+  return `${latest}, ${average}, q ${stats.pendingQueries}${disjoint}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib.toFixed(kib < 10 ? 1 : 0)} KiB`;
+  const mib = kib / 1024;
+  return `${mib.toFixed(mib < 10 ? 2 : 1)} MiB`;
 }
 
 function createDebugSection(section: DebugHudSection): HTMLElement {

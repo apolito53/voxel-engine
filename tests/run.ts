@@ -1452,6 +1452,96 @@ test("chunk mesh worker job honors partial render masks", () => {
   );
 });
 
+test("chunk mesh worker job emits compact GPU face records matching expanded quads", () => {
+  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+  blocks[1 + CHUNK_SIZE * (1 + CHUNK_SIZE * 1)] = BLOCK.stone;
+
+  const result = buildChunkMeshJob({
+    requestId: 20,
+    cx: 0,
+    cz: 0,
+    revision: 1,
+    blocks: blocks.buffer.slice(0),
+    neighbors: {
+      negativeX: null,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    },
+    partialBlockMasks: {
+      current: null,
+      neighbors: {
+        negativeX: null,
+        positiveX: null,
+        negativeZ: null,
+        positiveZ: null
+      }
+    }
+  });
+
+  assertEqual(result.faceCount, result.positions.length / 12, "one compact record should describe each expanded quad");
+  assertEqual(result.faceOrigins.length, result.faceCount * 3, "face origins should be packed as vec3 attributes");
+  assertEqual(result.faceEdgeUs.length, result.faceCount * 3, "face U edges should be packed as vec3 attributes");
+  assertEqual(result.faceEdgeVs.length, result.faceCount * 3, "face V edges should be packed as vec3 attributes");
+  assertEqual(result.faceNormals.length, result.faceCount * 3, "face normals should be packed as vec3 attributes");
+  assertEqual(result.faceColors.length, result.faceCount * 3, "face tint colors should be packed as vec3 attributes");
+  assertEqual(result.faceTextureTiles.length, result.faceCount, "face texture tiles should be packed per quad");
+
+  for (let faceIndex = 0; faceIndex < result.faceCount; faceIndex += 1) {
+    const vertexBase = faceIndex * 4;
+    const firstVertex = vertexBase * 3;
+    const secondVertex = (vertexBase + 1) * 3;
+    const fourthVertex = (vertexBase + 3) * 3;
+    const faceBase = faceIndex * 3;
+
+    assertClose(result.faceOrigins[faceBase] ?? 0, result.positions[firstVertex] ?? 0, 0.00001, "face origin x should match vertex 0");
+    assertClose(result.faceOrigins[faceBase + 1] ?? 0, result.positions[firstVertex + 1] ?? 0, 0.00001, "face origin y should match vertex 0");
+    assertClose(result.faceOrigins[faceBase + 2] ?? 0, result.positions[firstVertex + 2] ?? 0, 0.00001, "face origin z should match vertex 0");
+
+    assertClose(
+      result.faceEdgeUs[faceBase] ?? 0,
+      (result.positions[secondVertex] ?? 0) - (result.positions[firstVertex] ?? 0),
+      0.00001,
+      "face U edge x should reconstruct vertex 1"
+    );
+    assertClose(
+      result.faceEdgeUs[faceBase + 1] ?? 0,
+      (result.positions[secondVertex + 1] ?? 0) - (result.positions[firstVertex + 1] ?? 0),
+      0.00001,
+      "face U edge y should reconstruct vertex 1"
+    );
+    assertClose(
+      result.faceEdgeUs[faceBase + 2] ?? 0,
+      (result.positions[secondVertex + 2] ?? 0) - (result.positions[firstVertex + 2] ?? 0),
+      0.00001,
+      "face U edge z should reconstruct vertex 1"
+    );
+
+    assertClose(
+      result.faceEdgeVs[faceBase] ?? 0,
+      (result.positions[fourthVertex] ?? 0) - (result.positions[firstVertex] ?? 0),
+      0.00001,
+      "face V edge x should reconstruct vertex 3"
+    );
+    assertClose(
+      result.faceEdgeVs[faceBase + 1] ?? 0,
+      (result.positions[fourthVertex + 1] ?? 0) - (result.positions[firstVertex + 1] ?? 0),
+      0.00001,
+      "face V edge y should reconstruct vertex 3"
+    );
+    assertClose(
+      result.faceEdgeVs[faceBase + 2] ?? 0,
+      (result.positions[fourthVertex + 2] ?? 0) - (result.positions[firstVertex + 2] ?? 0),
+      0.00001,
+      "face V edge z should reconstruct vertex 3"
+    );
+
+    assertClose(result.faceNormals[faceBase] ?? 0, result.normals[firstVertex] ?? 0, 0.00001, "face normal x should match vertex normal");
+    assertClose(result.faceColors[faceBase] ?? 0, result.colors[firstVertex] ?? 0, 0.00001, "face color x should match vertex color");
+    assertClose(result.faceTextureTiles[faceIndex] ?? 0, result.textureTiles[vertexBase] ?? 0, 0.00001, "face texture tile should match vertex tile");
+  }
+});
+
 test("chunk mesh worker job is deterministic for the same payload", () => {
   const terrain = createTerrainContext("chunk-mesh-deterministic", "varied");
   const blocks = generateChunkBlocks(0, 0, terrain);
@@ -1488,6 +1578,11 @@ test("chunk mesh worker job is deterministic for the same payload", () => {
   assertFloat32ArraysEqual(first.positions, second.positions, "same chunk mesh payload should produce same positions");
   assertFloat32ArraysEqual(first.colors, second.colors, "same chunk mesh payload should produce same colors");
   assertFloat32ArraysEqual(first.textureTiles, second.textureTiles, "same chunk mesh payload should produce same texture tiles");
+  assertEqual(first.faceCount, second.faceCount, "same chunk mesh payload should produce same compact face count");
+  assertFloat32ArraysEqual(first.faceOrigins, second.faceOrigins, "same chunk mesh payload should produce same face origins");
+  assertFloat32ArraysEqual(first.faceEdgeUs, second.faceEdgeUs, "same chunk mesh payload should produce same face U edges");
+  assertFloat32ArraysEqual(first.faceEdgeVs, second.faceEdgeVs, "same chunk mesh payload should produce same face V edges");
+  assertFloat32ArraysEqual(first.faceTextureTiles, second.faceTextureTiles, "same chunk mesh payload should produce same face texture tiles");
 });
 
 test("classic terrain profile preserves legacy seeded terrain separately from varied terrain", () => {

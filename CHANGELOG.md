@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- Started the radical renderer overhaul branch with a `RenderBackend` contract,
+  async WebGL2 GPU timer queries, packed chunk face records, and a WebGL2
+  instanced terrain renderer that draws accepted worker chunk meshes from
+  compact face data.
+- Extended F3 and hitch diagnostics with renderer-backend stats, GPU timer
+  state, GPU terrain chunk/page counts, face counts, and terrain upload bytes.
+
+### Changed
+
+- Routed the main render loop through the new WebGL backend and hid legacy chunk
+  meshes after visibility bookkeeping so the GPU terrain path owns normal terrain
+  presentation while the old expanded mesh path remains available for parity.
+
 ## 0.11.6 - 2026-06-13
 
 ### Fixed

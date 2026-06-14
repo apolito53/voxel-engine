@@ -8,6 +8,7 @@ import {
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
+  ChunkMeshedResult,
   ChunkNeighborBuffers,
   ChunkWorkerResult
 } from "./chunkProtocol";
@@ -116,6 +117,10 @@ export type WorldOptions = {
   readonly seed?: string;
   readonly terrainProfile?: TerrainProfile;
   readonly workerPool?: WorkerPool | null;
+};
+
+export type ChunkMeshRenderSink = {
+  applyChunkMesh(result: ChunkMeshedResult): void;
 };
 
 export type ChunkCoords = {
@@ -3162,10 +3167,11 @@ export class VoxelWorld implements CollisionWorld {
   rebuildDirty(
     scene: THREE.Scene,
     material: THREE.Material,
-    maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME
+    maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME,
+    renderSink: ChunkMeshRenderSink | null = null
   ): number {
     if (this.workerPool) {
-      this.processMeshResults(scene, material, maxRebuilds);
+      this.processMeshResults(scene, material, maxRebuilds, renderSink);
       this.lastRequestedMeshes = this.requestDirtyMeshBuilds(maxRebuilds);
       return this.lastMeshedChunks;
     }
@@ -3188,7 +3194,8 @@ export class VoxelWorld implements CollisionWorld {
   processMeshResults(
     scene: THREE.Scene,
     material: THREE.Material,
-    maxResults = MAX_CHUNK_REBUILDS_PER_FRAME
+    maxResults = MAX_CHUNK_REBUILDS_PER_FRAME,
+    renderSink: ChunkMeshRenderSink | null = null
   ): void {
     this.lastMeshedChunks = 0;
     if (this.workerResults.length === 0) return;
@@ -3229,10 +3236,18 @@ export class VoxelWorld implements CollisionWorld {
           colors: result.colors,
           uvs: result.uvs,
           textureTiles: result.textureTiles,
-          indices: result.indices
+          indices: result.indices,
+          faceOrigins: result.faceOrigins,
+          faceEdgeUs: result.faceEdgeUs,
+          faceEdgeVs: result.faceEdgeVs,
+          faceNormals: result.faceNormals,
+          faceColors: result.faceColors,
+          faceTextureTiles: result.faceTextureTiles,
+          faceCount: result.faceCount
         },
         material
       );
+      renderSink?.applyChunkMesh(result);
       this.workerPool?.recordMainThreadUpload(performance.now() - uploadStartedAt, CHUNK_MESH_JOB);
       this.markChunkClean(chunk);
       if (!mesh.parent) scene.add(mesh);

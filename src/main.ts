@@ -333,6 +333,7 @@ import {
   type VisualTestScenarioSummary
 } from "./visualTestScenarios";
 import { WorkerPool } from "./workerPool";
+import { WebGlRenderBackend } from "./webGlRenderBackend";
 import {
   VoxelWorld,
   type BlockDamageResult,
@@ -603,6 +604,12 @@ const chunkStreamFrustum = new THREE.Frustum();
 const chunkStreamProjection = new THREE.Matrix4();
 const toys: PhysicsToy[] = [];
 const gpuInfo = readGpuInfo(renderer);
+const renderBackend = new WebGlRenderBackend({
+  renderer,
+  scene,
+  fogColor: WORLD_FOG_COLOR,
+  initialQuality: bootPreset
+});
 const shadowBasis = createDirectionalShadowBasis(SUN_OFFSET);
 const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
@@ -830,7 +837,8 @@ const debugHud = new DebugHud({
   panel: debugPanel,
   renderer,
   gpuInfo,
-  getQualityPreset: () => qualityController.preset
+  getQualityPreset: () => qualityController.preset,
+  getRenderBackendStats: () => renderBackend.getStats()
 });
 const combatLog = new CombatLog(160, {
   persistence: {
@@ -861,6 +869,7 @@ qualityController = new QualityController({
   superUltraToggle,
   updateSunShadowAnchor,
   onQualityChanged: (source: QualityChangeSource) => {
+    renderBackend.applyQuality(qualityController.preset);
     debugHud.reset();
     minimapRenderer.reset();
     if (source === "preset") syncPhysicsBudgetToQuality();
@@ -1535,7 +1544,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(qualityController.renderPixelRatio);
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderBackend.resize(window.innerWidth, window.innerHeight);
 }, eventListenerOptions);
 
 document.addEventListener("keydown", (event) => {
@@ -2013,6 +2022,8 @@ function animate(): void {
     return;
   }
 
+  renderBackend.beginFrame();
+
   const delta = clampSimulationDelta(rawDelta);
   const frameTimingSample = createEmptyFrameTimings();
   const physicsTimingSample = createEmptyPhysicsTimingStats();
@@ -2136,9 +2147,22 @@ function animate(): void {
     latestPhysicsTimingStats = physicsTimingSample;
     recordTimingSection("physicsMs");
 
-    activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
+    activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget, renderBackend);
     updatePartialBlockMesh(activeWorld);
     activeWorld.updateChunkRenderVisibility(
+      debugPlayerChunk.cx,
+      debugPlayerChunk.cz,
+      qualityController.chunkRenderRadius
+    );
+    // Messy-lab renderer split: the old chunk meshes still exist as a parity
+    // source while the WebGL2 terrain backend consumes the packed face stream.
+    // Hide them after their normal visibility bookkeeping so the GPU terrain
+    // path owns presentation without z-fighting the legacy geometry.
+    for (const chunk of activeWorld.chunks.values()) {
+      if (chunk.mesh) chunk.mesh.visible = false;
+    }
+    renderBackend.retainTerrainChunks(activeWorld.chunks.keys());
+    renderBackend.updateTerrainVisibility(
       debugPlayerChunk.cx,
       debugPlayerChunk.cz,
       qualityController.chunkRenderRadius
@@ -2170,9 +2194,22 @@ function animate(): void {
   updateSunShadowAnchor();
   skybox.update(camera);
   novaPilotReactions.update();
+  renderBackend.updateFrame({
+    scene,
+    camera,
+    deltaSeconds: delta,
+    elapsedSeconds: clock.elapsedTime,
+    inWorld
+  });
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
-  renderer.render(scene, camera);
+  renderBackend.render({
+    scene,
+    camera,
+    deltaSeconds: delta,
+    elapsedSeconds: clock.elapsedTime,
+    inWorld
+  });
   const renderEndedAt = performance.now();
   frameTimingSample.renderMs = renderEndedAt - renderStartedAt;
   const frameEndedAt = performance.now();
@@ -2182,7 +2219,8 @@ function animate(): void {
     frameEndedAtMs: frameEndedAt,
     rafGapMs: rawDelta * 1000,
     timings: frameTimingSample,
-    rendererInfo: renderer.info
+    rendererInfo: renderer.info,
+    gpuTimer: renderBackend.getStats().gpuTimer
   });
 
   if (inWorld) {
@@ -4486,6 +4524,7 @@ async function loadWorld(worldId: string): Promise<void> {
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
+    renderBackend.retainTerrainChunks([]);
     partialBlockMeshField.clear();
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
@@ -4500,7 +4539,7 @@ async function loadWorld(worldId: string): Promise<void> {
       loadOrigin.z,
       qualityController.initialLoadRadius
     );
-    activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
+    activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget, renderBackend);
     const loadState = createPlayerLoadState(activeWorld, savedWorld);
     placePlayerAtSavedLocation(activePlayer, activeWorld, loadState);
     camera.getWorldDirection(direction);
@@ -4597,6 +4636,7 @@ async function exitToHome(): Promise<void> {
     clearToys();
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
+    renderBackend.retainTerrainChunks([]);
     partialBlockMeshField.clear();
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
@@ -4826,6 +4866,7 @@ function disposeRuntime(): void {
   damageIndicators.dispose();
   clearPendingPartialBlockMeshJobs();
   partialBlockMeshField.dispose();
+  renderBackend.dispose();
   workerPool.dispose();
   skybox.dispose();
   disposeWorldBlockMaterial(worldMaterial);

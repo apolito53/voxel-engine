@@ -9,6 +9,12 @@ mesh generation use a shared browser `WorkerPool` with priority lanes and sync
 fallbacks, keeping the browser-first engine portable while opening the door for
 more CPU-heavy systems to move off the main thread.
 
+The experimental renderer-overhaul branch now routes scene rendering through a
+`RenderBackend` boundary and draws normal terrain through a WebGL2 instanced
+terrain backend fed by compact worker-produced face records. CPU world state,
+collision, raycast, saves, and partial-block damage remain authoritative while
+WebGL2 begins taking over terrain presentation and GPU diagnostics.
+
 World units are metric: `1 block = 1 meter`.
 
 Edited chunks and the last player location persist in IndexedDB browser storage.
@@ -74,7 +80,8 @@ ignored by git.
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
 - `F3` toggles the debug overlay, including the recent combat/damage log and
-  local disk-write status
+  local disk-write status; the render panel includes WebGL backend, GPU timer,
+  terrain face/page, and upload-byte stats on the overhaul branch
 - `F4` cycles quality presets
 - `F6` toggles Core Aim Preview
 - `F8` toggles the scripted test avatar

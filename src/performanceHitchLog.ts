@@ -566,6 +566,19 @@ function addRenderDetails(
       `${diagnostics.renderer.calls} draw calls, ${diagnostics.renderer.triangles} tris, ` +
       `${diagnostics.renderer.geometries} geo, ${diagnostics.renderer.textures} tex`
     );
+    if (diagnostics.gpu) {
+      const gpuFrame = diagnostics.gpu.lastFrameMs === null
+        ? "pending"
+        : `${diagnostics.gpu.lastFrameMs.toFixed(2)}ms`;
+      const gpuAverage = diagnostics.gpu.averageFrameMs === null
+        ? "avg pending"
+        : `avg ${diagnostics.gpu.averageFrameMs.toFixed(2)}ms`;
+      details.push(
+        `GPU timer ${diagnostics.gpu.supported ? "supported" : "unsupported"}: ` +
+        `${gpuFrame}, ${gpuAverage}, pending ${diagnostics.gpu.pendingQueries}, ` +
+        `disjoint ${diagnostics.gpu.disjointCount}`
+      );
+    }
   }
   if (stats.fragmentRender.instances > 0) {
     details.push(`${stats.fragmentRender.instances} debris instances across ${stats.fragmentRender.batches} batches`);
@@ -672,6 +685,7 @@ function cloneDiagnosticsSnapshot(diagnostics: FrameDiagnosticsSnapshot | null):
     renderCallShare: diagnostics.renderCallShare,
     longTasks: { ...diagnostics.longTasks },
     renderer: { ...diagnostics.renderer },
+    gpu: diagnostics.gpu ? { ...diagnostics.gpu } : null,
     memory: diagnostics.memory ? { ...diagnostics.memory } : null,
     documentHidden: diagnostics.documentHidden,
     visibilityState: diagnostics.visibilityState

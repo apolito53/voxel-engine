@@ -1,4 +1,5 @@
 import type { FrameTimings } from "./frameTimings";
+import type { GpuTimerFrameStats } from "./renderBackend";
 
 export type FrameRendererDiagnostics = {
   readonly calls: number;
@@ -37,6 +38,7 @@ export type FrameDiagnosticsSnapshot = {
   readonly renderCallShare: number;
   readonly longTasks: FrameLongTaskDiagnostics;
   readonly renderer: FrameRendererDiagnostics;
+  readonly gpu: GpuTimerFrameStats | null;
   readonly memory: FrameMemoryDiagnostics;
   readonly documentHidden: boolean;
   readonly visibilityState: string;
@@ -118,6 +120,7 @@ export class BrowserFrameDiagnostics {
     readonly rafGapMs: number;
     readonly timings: FrameTimings;
     readonly rendererInfo: FrameDiagnosticsRendererInfo;
+    readonly gpuTimer?: GpuTimerFrameStats | null;
   }): FrameDiagnosticsSnapshot {
     const jsFrameMs = Math.max(0, input.frameEndedAtMs - input.frameStartedAtMs);
     const measuredBucketTotalMs = getMeasuredBucketTotalMs(input.timings);
@@ -136,6 +139,7 @@ export class BrowserFrameDiagnostics {
       renderCallShare: jsFrameMs > 0 ? renderCallMs / jsFrameMs : 0,
       longTasks,
       renderer: cloneRendererDiagnostics(input.rendererInfo),
+      gpu: input.gpuTimer ? { ...input.gpuTimer } : null,
       memory: readMemoryDiagnostics(),
       documentHidden: typeof document !== "undefined" ? document.hidden : false,
       visibilityState: typeof document !== "undefined" ? document.visibilityState : "unknown"

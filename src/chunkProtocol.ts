@@ -61,6 +61,13 @@ export type ChunkMeshData = {
   readonly uvs: Float32Array;
   readonly textureTiles: Float32Array;
   readonly indices: Uint32Array;
+  readonly faceOrigins: Float32Array;
+  readonly faceEdgeUs: Float32Array;
+  readonly faceEdgeVs: Float32Array;
+  readonly faceNormals: Float32Array;
+  readonly faceColors: Float32Array;
+  readonly faceTextureTiles: Float32Array;
+  readonly faceCount: number;
 };
 
 export type ChunkMeshedResult = ChunkMeshData & {

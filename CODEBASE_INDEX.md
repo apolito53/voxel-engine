@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-06-13
+Last reviewed: 2026-06-14
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -8,6 +8,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 
 - Strict TypeScript Vite browser app using native ES modules and a shared `WorkerPool` with real Web Worker dispatch, priority lanes, per-job-type telemetry, and sync fallback for browser-native CPU jobs. Chunk generation, chunk meshing, and partial-terrain region meshing all run through the generic engine worker.
 - Three.js handles rendering, camera, materials, lights, and meshes.
+- The renderer-overhaul branch routes frame presentation through `RenderBackend`/`WebGlRenderBackend`; normal terrain is drawn by a WebGL2 instanced terrain renderer fed by compact worker-produced face records while the legacy expanded chunk mesh path remains as a parity source.
 - Rapier (`@dimforge/rapier3d-compat`) handles active rigid-body cuboid-envelope debris inside the player bubble through the local `src/rigidDebris.ts` adapter.
 - Vercel Blob (`@vercel/blob`) stores deployed production hitch logs as private JSONL blobs through the Vercel function in `api/hitch-log.ts`.
 - World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.ts`.
@@ -46,7 +47,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Floating health-bar projection for damaged terrain/rubble targets; visibility is gated by the pause-menu `Health Bars` toggle in `src/main.ts`: `src/damageIndicators.ts`
 - Typed in-memory engine/gameplay pub/sub: `src/eventBus.ts`, `src/engineEvents.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`
-- WebGL GPU text helpers: `src/gpu.ts`
+- WebGL GPU info and async timer-query helpers: `src/gpu.ts`
+- Renderer split contracts, WebGL2 backend wrapper, and GPU instanced terrain pages: `src/renderBackend.ts`, `src/webGlRenderBackend.ts`, `src/gpuTerrainRenderer.ts`
 - Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
 - Debug HUD throttling, grouped Perf/Player/World/Physics/Physics CPU/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, split physics subphase timings, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, worker-pool job stats, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
@@ -73,8 +75,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - IndexedDB storage adapter for saved worlds, saved terrain-profile provenance, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
 - Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, varied new-world landforms, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
-- Shared chunk worker request/result message contracts, including terrain-profile generation provenance, per-face atlas UV/tile attributes, and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
-- Worker-safe chunk terrain generation and greedy mesh buffer jobs, including terrain-profile-aware generation caches and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkJobs.ts`
+- Shared chunk worker request/result message contracts, including terrain-profile generation provenance, legacy expanded mesh buffers, compact GPU face records, per-face atlas UV/tile attributes, and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
+- Worker-safe chunk terrain generation and greedy mesh buffer jobs, including terrain-profile-aware generation caches, compact face-record derivation for the WebGL2 terrain renderer, and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkJobs.ts`
 - Legacy chunk worker adapter retained for compatibility/comparison; normal runtime chunk CPU work now routes through `src/engineWorker.ts`: `src/chunkWorker.ts`
 - Chunk ownership, WorkerPool scheduling, cached chunk-window streaming/unloading, fog-hidden render visibility, dirty/modified chunk indexes, reads/writes, sparse block damage, partial-block carve state, coalesced chunk-save writes, idle pending-work reporting, and chunk disposal: `src/world.ts`
 - Shared collision-world shape, collision bounds, and optional partial-height support contract used by player movement and loose debris physics: `src/collision.ts`
