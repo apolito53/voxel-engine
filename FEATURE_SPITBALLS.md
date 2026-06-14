@@ -4,9 +4,23 @@ Loose ideas live here before they deserve a plan. This file is intentionally
 messier than `TODO.md`: half-formed features, "that might be fun" notes,
 gameplay sparks, and technical experiments that are not commitments yet.
 
-When an idea starts to look real, promote it into `TODO.md` with clearer
-constraints, risks, and likely first steps. When it ships, move durable facts to
-the focused docs or `CODEBASE_INDEX.md`.
+## Reader Note
+
+For future Codex/Nova branches: treat this as an idea compost pile, not a
+roadmap. Preserve weird sparks even when they are not ready, but keep each entry
+short enough to scan.
+
+Preferred format:
+
+- One bullet per idea.
+- Start with the player-facing fantasy when there is one.
+- Add a short technical hook only when it helps future implementation.
+- Use rough tags inside the bullet only when they clarify intent, for example
+  `[feel]`, `[mechanic]`, `[tech]`, `[debug]`, `[maybe]`, or `[risky]`.
+- If an idea becomes actionable, promote it to `TODO.md` with the goal, first
+  slice, constraints, and validation shape.
+- If an idea turns into shipped behavior or a firm engine decision, move the
+  durable fact into the focused docs or `CODEBASE_INDEX.md`.
 
 ## World Feel
 
