@@ -4,6 +4,24 @@ Loose ideas live here before they deserve a plan. This file is intentionally
 messier than `TODO.md`: half-formed features, "that might be fun" notes,
 gameplay sparks, and technical experiments that are not commitments yet.
 
+## Index
+
+- [Reader Note](#reader-note)
+- [World Feel](#world-feel)
+- [Terrain And Generation](#terrain-and-generation)
+- [Building And Editing](#building-and-editing)
+- [Destruction And Materials](#destruction-and-materials)
+- [Damage Models And Game Modes](#damage-models-and-game-modes)
+- [Physics Toys](#physics-toys)
+- [Vehicles](#vehicles)
+- [Movement And Player Feel](#movement-and-player-feel)
+- [Entities And AI](#entities-and-ai)
+- [Items And Progression Seeds](#items-and-progression-seeds)
+- [World Saves And Sharing](#world-saves-and-sharing)
+- [Test Lab And Automation Toys](#test-lab-and-automation-toys)
+- [Nova Flavor](#nova-flavor)
+- [Bigger Long Shots](#bigger-long-shots)
+
 ## Reader Note
 
 For future Codex/Nova branches: treat this as an idea compost pile, not a
