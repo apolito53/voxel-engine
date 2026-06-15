@@ -1,4 +1,4 @@
-import type { PhysicsToy } from "./physics";
+import type { PhysicsToy, PhysicsToySupportCell } from "./physics";
 
 export type ChangedTerrainCell = {
   readonly x: number;
@@ -106,8 +106,22 @@ export function isFragmentInsideAnyChangedSupportColumn(
   fragment: PhysicsToy,
   cells: readonly ChangedTerrainCell[]
 ): boolean {
+  if (doesRememberedSupportOverlapChangedCells(fragment.lastKnownSupportCells, cells)) return true;
+
   for (const cell of cells) {
     if (isFragmentInsideChangedSupportColumn(fragment, cell)) return true;
+  }
+  return false;
+}
+
+export function doesRememberedSupportOverlapChangedCells(
+  supportCells: readonly PhysicsToySupportCell[],
+  changedCells: readonly ChangedTerrainCell[]
+): boolean {
+  for (const supportCell of supportCells) {
+    for (const changedCell of changedCells) {
+      if (doSupportCellsOverlap(supportCell, changedCell)) return true;
+    }
   }
   return false;
 }
@@ -187,6 +201,38 @@ function createChangedTerrainCellKey(
     bounds.minZ,
     bounds.maxZ
   ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
+}
+
+function doSupportCellsOverlap(
+  supportCell: PhysicsToySupportCell,
+  changedCell: ChangedTerrainCell
+): boolean {
+  if (supportCell.x !== changedCell.x || supportCell.y !== changedCell.y || supportCell.z !== changedCell.z) {
+    return false;
+  }
+
+  // A whole-block remembered support footprint is useful for block removals,
+  // but it is too coarse for exact Terraformer sub-cell edits. In that case,
+  // fall back to the fragment's current bounds or exact remembered bounds so
+  // neighboring sub-cells do not wake just because they share one macro block.
+  if (changedCell.bounds && !supportCell.bounds) return false;
+
+  const supportBounds = supportCell.bounds ?? createWholeCellBounds(supportCell);
+  const changedBounds = changedCell.bounds ?? createWholeCellBounds(changedCell);
+  return rangesOverlap(supportBounds.minX, supportBounds.maxX, changedBounds.minX, changedBounds.maxX) &&
+    rangesOverlap(supportBounds.minY, supportBounds.maxY, changedBounds.minY, changedBounds.maxY) &&
+    rangesOverlap(supportBounds.minZ, supportBounds.maxZ, changedBounds.minZ, changedBounds.maxZ);
+}
+
+function createWholeCellBounds(cell: { readonly x: number; readonly y: number; readonly z: number }): ChangedTerrainSupportBounds {
+  return {
+    minX: cell.x,
+    maxX: cell.x + 1,
+    minY: cell.y,
+    maxY: cell.y + 1,
+    minZ: cell.z,
+    maxZ: cell.z + 1
+  };
 }
 
 function getDetachedFragmentSupportHalfExtents(fragment: PhysicsToy): { readonly x: number; readonly y: number; readonly z: number } {

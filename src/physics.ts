@@ -89,6 +89,13 @@ export type RigidDebrisState = {
   readonly sleeping: boolean;
 };
 
+export type PhysicsToySupportCell = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly bounds?: CollisionBounds;
+};
+
 export type PhysicsToyCollisionStats = {
   readonly activeBodies: number;
   readonly sleepingBodies: number;
@@ -139,6 +146,8 @@ export class PhysicsToy {
   private supportAnchoredSleep = false;
   private sleeping = false;
   private expired = false;
+  private readonly supportCellsThisUpdate: PhysicsToySupportCell[] = [];
+  private rememberedSupportCells: PhysicsToySupportCell[] = [];
   private fragmentRenderVisible = true;
   private groundDebrisCleanupSeconds: number | null = null;
   private rigidDebrisBodyAttached = false;
@@ -268,11 +277,16 @@ export class PhysicsToy {
     return this.sleeping && this.supportAnchoredSleep;
   }
 
+  get lastKnownSupportCells(): readonly PhysicsToySupportCell[] {
+    return this.rememberedSupportCells;
+  }
+
   wakeFromToyCollision(): void {
     if (!this.sleeping) return;
 
     this.sleeping = false;
     this.supportAnchoredSleep = false;
+    this.clearRememberedSupportCells();
     this.settledSeconds = 0;
     this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
@@ -288,6 +302,7 @@ export class PhysicsToy {
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.supportContactLastUpdate = false;
+    this.clearRememberedSupportCells();
     this.settledSeconds = 0;
     this.velocity.y = Math.min(this.velocity.y, FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED);
     this.resetLowSpeedDespawnCountdown();
@@ -302,6 +317,7 @@ export class PhysicsToy {
     this.rigidDebrisExternalRevision += 1;
     this.sleeping = false;
     this.supportAnchoredSleep = false;
+    this.clearRememberedSupportCells();
     this.settledSeconds = 0;
     this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
@@ -325,6 +341,7 @@ export class PhysicsToy {
     this.expired = true;
     this.sleeping = false;
     this.supportAnchoredSleep = false;
+    this.clearRememberedSupportCells();
     this.fragmentRenderVisible = false;
     this.lowSpeedExpireSeconds = this.lowSpeedExpireAfterSeconds;
     this.velocity.set(0, 0, 0);
@@ -339,6 +356,7 @@ export class PhysicsToy {
     // places the projectile at the tunnel exit and restores its forward speed.
     this.sleeping = false;
     this.supportAnchoredSleep = false;
+    this.clearRememberedSupportCells();
     this.settledSeconds = 0;
     this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
@@ -355,6 +373,11 @@ export class PhysicsToy {
     // debris so they stop visually spinning while remaining shoveable by cores.
     this.sleeping = true;
     this.supportAnchoredSleep = supportAnchored;
+    if (supportAnchored) {
+      this.rememberCurrentSupportFootprint();
+    } else {
+      this.clearRememberedSupportCells();
+    }
     this.settledSeconds = this.sleepAfterSeconds;
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
@@ -366,6 +389,7 @@ export class PhysicsToy {
     this.rigidDebrisBodyAttached = true;
     this.sleeping = false;
     this.supportAnchoredSleep = false;
+    this.clearRememberedSupportCells();
     this.settledSeconds = 0;
     this.resetGroundDebrisCleanupClock();
     this.rigidDebrisExternalRevision = 0;
@@ -385,6 +409,11 @@ export class PhysicsToy {
     this.sleeping = state.sleeping;
     this.supportAnchoredSleep = state.sleeping;
     this.supportContactLastUpdate = state.sleeping;
+    if (state.sleeping) {
+      this.rememberCurrentSupportFootprint();
+    } else {
+      this.clearRememberedSupportCells();
+    }
     this.settledSeconds = state.sleeping ? this.sleepAfterSeconds : 0;
     if (!state.sleeping) this.resetGroundDebrisCleanupClock();
   }
@@ -451,6 +480,7 @@ export class PhysicsToy {
     if (this.expired) return impacts;
 
     this.supportContactLastUpdate = false;
+    this.supportCellsThisUpdate.length = 0;
     this.ageSeconds += delta;
     if (this.maxAgeSeconds !== null && this.ageSeconds >= this.maxAgeSeconds) {
       this.expire();
@@ -476,6 +506,7 @@ export class PhysicsToy {
         .addScaledVector(this.movementStep, sweptBlockHit.t)
         .addScaledVector(sweptBlockHit.normal, 0.001);
       touchedSolidBlock = true;
+      this.rememberSupportCellThisUpdate(sweptBlockHit.x, sweptBlockHit.y, sweptBlockHit.z);
       const impact = this.velocity.dot(sweptBlockHit.normal);
       if (impact < 0) {
         if (this.damagesBlocks) {
@@ -526,6 +557,7 @@ export class PhysicsToy {
           }
 
           touchedSolidBlock = true;
+          this.rememberSupportCellThisUpdate(x, y, z);
           const normal = this.centerDelta.multiplyScalar(1 / distance);
           p.addScaledVector(normal, this.radius - distance + 0.001);
           const impact = this.velocity.dot(normal);
@@ -663,6 +695,8 @@ export class PhysicsToy {
       return false;
     }
 
+    this.rememberSupportBoundsThisUpdate(bounds, supportY);
+
     if (correction > 0) {
       this.mesh.position.y += correction + 0.001;
     }
@@ -685,6 +719,85 @@ export class PhysicsToy {
       minZ: position.z - this.radius,
       maxZ: position.z + this.radius
     };
+  }
+
+  private rememberSupportCellThisUpdate(x: number, y: number, z: number): void {
+    this.addUniqueSupportCell(this.supportCellsThisUpdate, {
+      x: Math.floor(x),
+      y: Math.floor(y),
+      z: Math.floor(z)
+    });
+  }
+
+  private rememberSupportBoundsThisUpdate(bounds: CollisionBounds, supportY: number): void {
+    const supportCellY = Math.floor(supportY - FRAGMENT_PARTIAL_SUPPORT_EPSILON);
+    const minX = Math.floor(bounds.minX);
+    const maxX = Math.floor(bounds.maxX);
+    const minZ = Math.floor(bounds.minZ);
+    const maxZ = Math.floor(bounds.maxZ);
+    for (let z = minZ; z <= maxZ; z += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        this.addUniqueSupportCell(this.supportCellsThisUpdate, {
+          x,
+          y: supportCellY,
+          z,
+          bounds: {
+            minX: Math.max(bounds.minX, x),
+            maxX: Math.min(bounds.maxX, x + 1),
+            minY: supportY - FRAGMENT_PARTIAL_SUPPORT_EPSILON,
+            maxY: supportY,
+            minZ: Math.max(bounds.minZ, z),
+            maxZ: Math.min(bounds.maxZ, z + 1)
+          }
+        });
+      }
+    }
+  }
+
+  private rememberCurrentSupportFootprint(): void {
+    if (this.supportCellsThisUpdate.length > 0) {
+      this.rememberedSupportCells = this.supportCellsThisUpdate.map(clonePhysicsToySupportCell);
+      return;
+    }
+
+    // Settler/rigid sleep can happen after the direct toy collision step. In
+    // that case we still record the terrain cells directly underneath the
+    // shard, because future edits should wake the shard that was parked there
+    // even if its visual pose later drifts or belongs to a larger sleeping pile.
+    const halfExtents = this.debrisShape?.colliderHalfExtents ?? new THREE.Vector3(this.radius, this.radius, this.radius);
+    const position = this.mesh.position;
+    const minX = Math.floor(position.x - halfExtents.x);
+    const maxX = Math.floor(position.x + halfExtents.x);
+    const minZ = Math.floor(position.z - halfExtents.z);
+    const maxZ = Math.floor(position.z + halfExtents.z);
+    const supportY = Math.floor(position.y - halfExtents.y - FRAGMENT_PARTIAL_SUPPORT_EPSILON);
+    const supportCells: PhysicsToySupportCell[] = [];
+
+    for (let z = minZ; z <= maxZ; z += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        this.addUniqueSupportCell(supportCells, { x, y: supportY, z });
+      }
+    }
+
+    this.rememberedSupportCells = supportCells;
+  }
+
+  private clearRememberedSupportCells(): void {
+    this.rememberedSupportCells = [];
+  }
+
+  private addUniqueSupportCell(cells: PhysicsToySupportCell[], cell: PhysicsToySupportCell): void {
+    if (cell.bounds && (
+      cell.bounds.maxX <= cell.bounds.minX ||
+      cell.bounds.maxY <= cell.bounds.minY ||
+      cell.bounds.maxZ <= cell.bounds.minZ
+    )) {
+      return;
+    }
+
+    const key = createPhysicsToySupportCellKey(cell);
+    if (cells.some((existing) => createPhysicsToySupportCellKey(existing) === key)) return;
+    cells.push(clonePhysicsToySupportCell(cell));
   }
 
   private updateAngularMotion(delta: number): void {
@@ -755,9 +868,38 @@ export class PhysicsToy {
     // Sleeping debris keeps the visual aftermath without paying collision costs forever.
     this.sleeping = true;
     this.supportAnchoredSleep = true;
+    this.rememberCurrentSupportFootprint();
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
   }
+}
+
+function clonePhysicsToySupportCell(cell: PhysicsToySupportCell): PhysicsToySupportCell {
+  return cell.bounds
+    ? {
+        x: cell.x,
+        y: cell.y,
+        z: cell.z,
+        bounds: { ...cell.bounds }
+      }
+    : {
+        x: cell.x,
+        y: cell.y,
+        z: cell.z
+      };
+}
+
+function createPhysicsToySupportCellKey(cell: PhysicsToySupportCell): string {
+  if (!cell.bounds) return `${cell.x},${cell.y},${cell.z}`;
+  return [
+    `${cell.x},${cell.y},${cell.z}`,
+    cell.bounds.minX,
+    cell.bounds.maxX,
+    cell.bounds.minY,
+    cell.bounds.maxY,
+    cell.bounds.minZ,
+    cell.bounds.maxZ
+  ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
 }
 
 export function createEmptyPhysicsToyCollisionStats(): PhysicsToyCollisionStats {

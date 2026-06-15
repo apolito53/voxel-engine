@@ -26,6 +26,22 @@
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
+## 0.11.11 - 2026-06-15
+
+### Fixed
+
+- Added remembered support cells to sleeping debris so terrain edits can wake
+  shards by the support that originally parked them, not only by their current
+  visual overlap after a pile has drifted or been cheaply slept.
+- Shared that remembered-support wake path between detached VFX debris and
+  Rapier-owned rigid debris, keeping support removal event-driven without
+  restoring broad per-frame debris scans.
+- Kept exact Terraformer sub-cell invalidation precise by using remembered
+  whole-block support only for whole-cell edits, while exact sub-cell edits
+  still require exact bounds or current overlap.
+- Added regression coverage for sleeping debris whose visual pose no longer
+  overlaps the support cell that caused sleep.
+
 ## 0.11.10 - 2026-06-14
 
 ### Fixed
