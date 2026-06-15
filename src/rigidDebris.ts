@@ -9,6 +9,7 @@ import {
 import * as THREE from "three";
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { createDefaultDebrisShape } from "./debrisShapes";
+import { doesRememberedSupportOverlapChangedCells } from "./debrisSupportInvalidation";
 import type { PhysicsToy } from "./physics";
 
 const RIGID_DEBRIS_GRAVITY = -18;
@@ -1244,6 +1245,8 @@ function isRecordRestingOnAnyChangedTerrainCell(
   record: RigidDebrisBody,
   cells: readonly RigidDebrisChangedTerrainCell[]
 ): boolean {
+  if (doesRememberedSupportOverlapChangedCells(record.toy.lastKnownSupportCells, cells)) return true;
+
   for (const cell of cells) {
     if (isRecordRestingOnChangedTerrainCell(record, cell)) return true;
   }

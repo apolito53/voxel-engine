@@ -6600,6 +6600,28 @@ test("terrain support invalidation wakes detached sleeping VFX fragments", () =>
   );
 });
 
+test("terrain support invalidation wakes detached debris from remembered sleep support", () => {
+  const targetFragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
+  sleepTestFragment(targetFragment);
+
+  // Regression coverage for the v0.11.2-era floating debris: after cheap
+  // debris parking, visual/current overlap can drift away from the block that
+  // actually caused sleep. Support removal must use the remembered sleep
+  // support before falling back to current overlap guesses.
+  targetFragment.mesh.position.x = 1.7;
+  const woken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
+    [targetFragment],
+    [{ x: 0, y: 0, z: 0 }]
+  );
+
+  assertEqual(
+    woken,
+    1,
+    "support invalidation should wake debris whose remembered sleep support was edited"
+  );
+  assert(!targetFragment.isSleeping, "remembered-support debris should leave cheap sleep");
+});
+
 test("terrain support invalidation wakes detached debris resting on a destroyed sub-block", () => {
   const targetFragment = createTestFragment(BLOCK.sand, 1 / 6, 1.08, 1 / 6);
   const sameMacroUnchangedSubCellFragment = createTestFragment(BLOCK.sand, 5 / 6, 1.08, 1 / 6);
