@@ -3,7 +3,7 @@ import { getDebrisShapeGeometry, type DebrisShapeId } from "./debrisShapes";
 import { PhysicsToy, getFragmentMaterial } from "./physics";
 
 type FragmentRenderBatch = {
-  readonly mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  readonly mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   readonly block: number;
   readonly shapeId: DebrisShapeId;
   capacity: number;

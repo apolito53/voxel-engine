@@ -6,9 +6,10 @@ import {
   type PartialBlockMeshGeometryData,
   type PartialBlockMeshRegionUpdate
 } from "./partialBlocks";
+import type { WorldBlockMaterial } from "./blockTextureAtlas";
 
 type PartialBlockMeshRegionEntry = {
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, WorldBlockMaterial>;
   stats: PartialBlockMeshRegionStats;
 };
 
@@ -41,14 +42,14 @@ export const EMPTY_PARTIAL_BLOCK_MESH_STATS: PartialBlockMeshStats = {
 export class PartialBlockMeshField {
   readonly mesh: THREE.Group;
   private readonly scene: THREE.Scene;
-  private readonly material: THREE.MeshStandardMaterial;
+  private readonly material: WorldBlockMaterial;
   private readonly ownsMaterial: boolean;
   private readonly regions: Map<string, PartialBlockMeshRegionEntry>;
   private stats: PartialBlockMeshStats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
   private dirtyRegionCount = 0;
   private rebuiltRegionCount = 0;
 
-  constructor(scene: THREE.Scene, material?: THREE.MeshStandardMaterial) {
+  constructor(scene: THREE.Scene, material?: WorldBlockMaterial) {
     this.scene = scene;
     this.material = material ?? new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -71,7 +72,7 @@ export class PartialBlockMeshField {
     return this.stats;
   }
 
-  getRegionMesh(key: string): THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null {
+  getRegionMesh(key: string): THREE.Mesh<THREE.BufferGeometry, WorldBlockMaterial> | null {
     return this.regions.get(key)?.mesh ?? null;
   }
 

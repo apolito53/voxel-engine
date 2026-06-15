@@ -22,7 +22,11 @@ import {
   getDebrisSpawnProfile,
   type DebrisSpawnProfile
 } from "./blockMaterialRules";
-import { createWorldBlockMaterial, disposeWorldBlockMaterial } from "./blockTextureAtlas";
+import {
+  createUnlitWorldBlockMaterial,
+  createWorldBlockMaterial,
+  disposeWorldBlockMaterial
+} from "./blockTextureAtlas";
 import {
   BUILDER_BRUSH_MAX_SIZE,
   BUILDER_BRUSH_MIN_SIZE,
@@ -542,7 +546,7 @@ const skybox = createSkybox(SUN_OFFSET);
 scene.add(skybox.object);
 
 const worldMaterial = createWorldBlockMaterial();
-const partialBlockMaterial = createWorldBlockMaterial({ side: THREE.DoubleSide });
+const partialBlockMaterial = createUnlitWorldBlockMaterial({ side: THREE.DoubleSide });
 
 const targetBlockHighlighter = new TargetBlockHighlighter();
 scene.add(targetBlockHighlighter.object);

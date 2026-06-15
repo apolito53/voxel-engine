@@ -7,10 +7,12 @@ import {
   BLOCK_TEXTURE_TILE_SIZE_PX
 } from "./blockTextureTiles";
 
-type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile"]>[0];
+type ShaderWithUniforms = Parameters<THREE.Material["onBeforeCompile"]>[0];
 type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
 
 const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
+
+export type WorldBlockMaterial = THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
@@ -26,6 +28,32 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     side: options.side ?? THREE.FrontSide
   });
 
+  applyBlockTextureAtlasShader(material, "voxel-block-texture-atlas-standard-v1");
+  return material;
+}
+
+export function createUnlitWorldBlockMaterial(options: WorldBlockMaterialOptions = {}): THREE.MeshBasicMaterial {
+  const atlasTexture = createBlockTextureAtlas();
+  const material = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    map: atlasTexture,
+    side: options.side ?? THREE.FrontSide
+  });
+
+  // The WebGL2 terrain backend is shader-lit with baked voxel face colors.
+  // Damaged partial terrain should follow that same visual model instead of
+  // receiving extra scene lighting from MeshStandardMaterial.
+  material.toneMapped = true;
+  applyBlockTextureAtlasShader(material, "voxel-block-texture-atlas-basic-v1");
+  return material;
+}
+
+export function disposeWorldBlockMaterial(material: WorldBlockMaterial): void {
+  material.map?.dispose();
+  material.dispose();
+}
+
+function applyBlockTextureAtlasShader(material: WorldBlockMaterial, cacheKey: string): void {
   material.onBeforeCompile = (shader: ShaderWithUniforms) => {
     shader.uniforms.blockTextureAtlasGrid = {
       value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
@@ -69,13 +97,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
       );
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v1";
-  return material;
-}
-
-export function disposeWorldBlockMaterial(material: THREE.MeshStandardMaterial): void {
-  material.map?.dispose();
-  material.dispose();
+  material.customProgramCacheKey = () => cacheKey;
 }
 
 export function createBlockTextureAtlas(): THREE.CanvasTexture {

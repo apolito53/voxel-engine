@@ -90,7 +90,7 @@ type RubbleCluster = {
   readonly id: number;
   readonly block: number;
   readonly cells: Map<string, RubbleCellPile>;
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   readonly bounds: THREE.Box3;
   pieces: number;
   health: number;

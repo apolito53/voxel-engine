@@ -19,6 +19,10 @@
 - Temporarily disabled legacy Three.js shadow maps while the WebGL2 terrain
   backend owns terrain presentation, avoiding hard partial/debris shadow
   artifacts until renderer-owned terrain shadow materials land.
+- Moved damaged partial terrain, block-fragment debris, and rubble visuals to
+  unlit voxel-style materials on the renderer-overhaul branch so exposed crater
+  faces do not inherit legacy standard-material lighting that reads as broken
+  shadows beside GPU terrain.
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
