@@ -19,6 +19,11 @@ export type RigidDebrisAdmissionContext = {
   readonly corePositions?: readonly RigidDebrisAdmissionVector[];
 };
 
+export type RigidDebrisAdmissionPartition<T> = {
+  readonly admitted: readonly T[];
+  readonly denied: readonly T[];
+};
+
 type ScoredAdmissionFragment = {
   readonly index: number;
   readonly octantKey: string;
@@ -71,6 +76,24 @@ export function selectRigidDebrisAdmissionIndices(
   }
 
   return selected;
+}
+
+export function partitionRigidDebrisAdmission<T>(
+  fragments: readonly T[],
+  selectedIndices: ReadonlySet<number>
+): RigidDebrisAdmissionPartition<T> {
+  const admitted: T[] = [];
+  const denied: T[] = [];
+
+  fragments.forEach((fragment, index) => {
+    if (selectedIndices.has(index)) {
+      admitted.push(fragment);
+    } else {
+      denied.push(fragment);
+    }
+  });
+
+  return { admitted, denied };
 }
 
 export function scoreRigidDebrisAdmissionFragment(

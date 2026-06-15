@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.11.10 - 2026-06-14
+
+### Fixed
+
+- Fixed the `v0.11.2` rigid-debris admission regression by splitting burst
+  ownership explicitly: Rapier-admitted shards stay out of VFX settling regions,
+  while denied overflow shards keep the cheap settler lifecycle.
+- Broadened Terraformer/partial-block support invalidation so exact sub-cell
+  edits also wake the surrounding macro-cell support halo. Exact boxes still
+  catch precision cases, but overhanging debris piles no longer depend on a
+  single perfectly centered sub-cell match.
+- Kept a defensive mixed-region wake path for any future demotion/edge case that
+  does create a mixed rigid/VFX region.
+- Added regression coverage for the delayed rigid-admission flag that made the
+  original bug hard to catch in tests.
+
 ## 0.11.9 - 2026-06-14
 
 ### Fixed

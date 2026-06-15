@@ -181,12 +181,12 @@ export class DebrisSettler {
 
     let wokenFragments = 0;
     for (const region of this.regionsById.values()) {
-      if (this.isRigidBodyRegion(region)) continue;
-
       // A sleeping visible pile is tracked as glue-connected components inside
       // a settling region. Waking only the shard directly over the edited block
       // can leave the rest of that glued clump suspended in its old pose, so an
-      // edit under any member wakes the whole local component.
+      // edit under any member wakes the whole local component. Mixed regions
+      // are common after rigid-body admission caps: one shard can be Rapier
+      // owned while its denied VFX neighbors still need this cheap wake path.
       for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredFragments(region))) {
         if (!this.componentTouchesChangedSupportColumn(component, changedCells)) continue;
 
@@ -959,16 +959,15 @@ export class DebrisSettler {
   }
 
   private sleepQuietRegionFragments(region: SettlingRegion): void {
-    if (this.isRigidBodyRegion(region)) return;
     if (this.elapsedSeconds < region.glueAfter + DEBRIS_REGION_QUIET_SLEEP_SECONDS) return;
 
     // Inside the active debris bubble, a quiet glued clump should remain as
     // shoveable debris rather than immediately expiring or converting. Put the
     // fragments into the same sleeping state terrain-supported shards use so
     // they stop spinning in place while the broadphase can still wake them when
-    // a physics core hits. Do this per glue-connected component: one grounded
-    // pile should not freeze unrelated fragments that are still hanging in the air.
-    for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredFragments(region))) {
+    // a physics core hits. Rapier-owned fragments manage sleep through Rapier,
+    // but denied VFX shards in the same fracture still need this path.
+    for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredVfxFragments(region))) {
       const sleepableFragments = this.getSleepableSupportedFragments(component);
 
       for (const fragment of sleepableFragments) {
@@ -1122,6 +1121,10 @@ export class DebrisSettler {
 
   private getUnexpiredFragments(region: SettlingRegion): PhysicsToy[] {
     return [...region.fragments].filter((fragment) => !fragment.isExpired);
+  }
+
+  private getUnexpiredVfxFragments(region: SettlingRegion): PhysicsToy[] {
+    return this.getUnexpiredFragments(region).filter((fragment) => !fragment.isRigidDebrisDriven);
   }
 
   private isRigidBodyRegion(region: SettlingRegion): boolean {

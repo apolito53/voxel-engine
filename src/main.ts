@@ -284,6 +284,7 @@ import {
   type RigidDebrisStats
 } from "./rigidDebris";
 import {
+  partitionRigidDebrisAdmission,
   selectRigidDebrisAdmissionIndices,
   type RigidDebrisAdmissionFragment
 } from "./rigidDebrisAdmission";
@@ -2002,12 +2003,13 @@ function applyTerraformerEdit(input: TerraformerEditInput, expectedTargetKey: st
     ).multiplyScalar(TERRAFORMER_IMPACT_SPEED)
   };
 
-  applyTerrainDamageFeedback(activeWorld, result.results, impact);
+  const feedback = applyTerrainDamageFeedback(activeWorld, result.results, impact);
   recordTerrainCombatLog({
     source: TERRAFORMER_COMBAT_SOURCE,
     action: `edit size ${result.preview.size}`,
     results: result.results,
-    terraformerCells: result.preview.cells
+    terraformerCells: result.preview.cells,
+    feedback
   });
   return true;
 }
@@ -3301,11 +3303,12 @@ function applyCoreTerrainImpact(
   });
   if (!brushResult) return null;
 
-  applyTerrainDamageFeedback(activeWorld, brushResult.results, impact, damagedBlocksThisFrame);
+  const feedback = applyTerrainDamageFeedback(activeWorld, brushResult.results, impact, damagedBlocksThisFrame);
   recordTerrainCombatLog({
     source,
     action: `impact ${impact.speed.toFixed(1)} m/s`,
-    results: brushResult.results
+    results: brushResult.results,
+    feedback
   });
 
   return brushResult;
@@ -3316,7 +3319,7 @@ function applyTerrainDamageFeedback(
   results: readonly BlockDamageResult[],
   impact: TerrainDamageFeedbackImpact,
   damagedBlocksThisFrame?: Set<string>
-): void {
+): TerrainDamageFeedbackSummary {
   let changedTerrainCollider = false;
   const changedTerrainCells: ChangedTerrainCell[] = [];
   const changedTerrainCellKeys = new Set<string>();
@@ -3369,8 +3372,25 @@ function applyTerrainDamageFeedback(
   // sleeping debris in the edited support neighborhood; this is event-driven
   // so settled piles do not need a broad support scan every frame.
   if (changedTerrainCollider) {
-    invalidateDebrisSupportForEditedCells(changedTerrainCells);
+    return invalidateDebrisSupportForEditedCells(changedTerrainCells);
   }
+  return createEmptyTerrainDamageFeedbackSummary();
+}
+
+type TerrainDamageFeedbackSummary = {
+  readonly supportInvalidationCells: number;
+  readonly rigidDebrisWoken: number;
+  readonly settlerDebrisWoken: number;
+  readonly detachedDebrisWoken: number;
+};
+
+function createEmptyTerrainDamageFeedbackSummary(): TerrainDamageFeedbackSummary {
+  return {
+    supportInvalidationCells: 0,
+    rigidDebrisWoken: 0,
+    settlerDebrisWoken: 0,
+    detachedDebrisWoken: 0
+  };
 }
 
 function collectTerrainSupportInvalidationCellsForDamageResult(
@@ -3378,12 +3398,13 @@ function collectTerrainSupportInvalidationCellsForDamageResult(
   cells: ChangedTerrainCell[],
   seen: Set<string>
 ): void {
-  const exactSupportCells = result.supportInvalidationCells ?? [];
-  if (exactSupportCells.length === 0) {
-    collectTerrainSupportInvalidationCells(result.position, cells, seen);
-    return;
-  }
+  // Exact 1/3m support boxes wake debris directly over a removed Terraformer
+  // sub-cell. The macro-cell halo still matters for real piles, because shards
+  // overhang edges, stack on sibling debris, and do not politely center
+  // themselves over the one sub-cell that just disappeared.
+  collectTerrainSupportInvalidationCells(result.position, cells, seen);
 
+  const exactSupportCells = result.supportInvalidationCells ?? [];
   for (const cell of exactSupportCells) {
     addTerrainSupportInvalidationCell(cell, cells, seen);
   }
@@ -3445,8 +3466,8 @@ function createTerrainSupportInvalidationCellKey(cell: ChangedTerrainCell): stri
   ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
 }
 
-function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCell[]): void {
-  if (cells.length === 0) return;
+function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCell[]): TerrainDamageFeedbackSummary {
+  if (cells.length === 0) return createEmptyTerrainDamageFeedbackSummary();
 
   const rigidDebrisWoken = rigidDebris.wakeDebrisRestingOnChangedTerrainCells(cells);
   const settlerDebrisWoken = debrisSettler.wakeRegionsRestingOnChangedTerrainCells(cells);
@@ -3458,6 +3479,12 @@ function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCel
     settlerDebrisWoken,
     detachedDebrisWoken
   });
+  return {
+    supportInvalidationCells: cells.length,
+    rigidDebrisWoken,
+    settlerDebrisWoken,
+    detachedDebrisWoken
+  };
 }
 
 function addDebrisLifecycleDiagnostics(delta: Partial<DebrisLifecycleDiagnostics>): void {
@@ -3477,6 +3504,7 @@ function recordTerrainCombatLog(options: {
   readonly action: string;
   readonly results: readonly BlockDamageResult[];
   readonly terraformerCells?: readonly TerraformerTargetSubCell[];
+  readonly feedback?: TerrainDamageFeedbackSummary;
 }): void {
   if (options.results.length === 0) return;
 
@@ -3518,7 +3546,10 @@ function recordTerrainCombatLog(options: {
   combatLog.record({
     source: options.source,
     action: options.action,
-    targets
+    targets,
+    diagnostics: options.feedback
+      ? { terrainSupport: options.feedback }
+      : undefined
   });
 }
 
@@ -3684,16 +3715,31 @@ function spawnBlockFragments(
     remainingVisualVolumeBudget = Math.max(0, remainingVisualVolumeBudget - debrisShape.estimatedVisualVolume);
   }
 
-  admitRigidDebrisFragments(fragments, blockCenter);
+  const admission = admitRigidDebrisFragments(fragments, blockCenter);
   rigidDebris.invalidateStaticColliders();
-  if (fragments.length > 0) {
-    debrisSettler.registerFracture(block, blockCenter, fragments);
+  if (admission.denied.length > 0) {
+    // The settler is the cheap VFX lifecycle, not Rapier. v0.11.2 accidentally
+    // registered the whole burst here even when some shards were pending rigid
+    // admission, creating mixed regions whose wake/sleep behavior was easy to
+    // miss in tests and very visible in craters. Keep ownership explicit:
+    // admitted shards are Rapier-owned, denied shards stay VFX-settler-owned.
+    debrisSettler.registerFracture(block, blockCenter, admission.denied);
   }
   return fragments.length;
 }
 
-function admitRigidDebrisFragments(fragments: readonly PhysicsToy[], burstCenter: THREE.Vector3): void {
-  if (fragments.length === 0) return;
+type RigidDebrisAdmissionRuntimeResult = {
+  readonly admitted: readonly PhysicsToy[];
+  readonly denied: readonly PhysicsToy[];
+};
+
+function admitRigidDebrisFragments(
+  fragments: readonly PhysicsToy[],
+  burstCenter: THREE.Vector3
+): RigidDebrisAdmissionRuntimeResult {
+  if (fragments.length === 0) {
+    return { admitted: [], denied: [] };
+  }
 
   const availableRigidSlots = getCurrentRigidDebrisBodyBudget() -
     rigidDebris.getBodyCount() -
@@ -3712,15 +3758,12 @@ function admitRigidDebrisFragments(fragments: readonly PhysicsToy[], burstCenter
     }
   );
 
-  let deniedCount = 0;
-  fragments.forEach((fragment, index) => {
-    if (selectedIndices.has(index)) {
-      rigidDebris.registerFragment(fragment);
-    } else {
-      deniedCount += 1;
-    }
-  });
-  rigidDebris.recordAdmissionDenied(deniedCount);
+  const admission = partitionRigidDebrisAdmission(fragments, selectedIndices);
+  for (const fragment of admission.admitted) {
+    rigidDebris.registerFragment(fragment);
+  }
+  rigidDebris.recordAdmissionDenied(admission.denied.length);
+  return admission;
 }
 
 function toRigidDebrisAdmissionFragment(fragment: PhysicsToy): RigidDebrisAdmissionFragment {

@@ -272,6 +272,7 @@ import {
   RigidDebrisSimulation
 } from "../src/rigidDebris";
 import {
+  partitionRigidDebrisAdmission,
   selectRigidDebrisAdmissionIndices,
   type RigidDebrisAdmissionFragment
 } from "../src/rigidDebrisAdmission";
@@ -6081,6 +6082,38 @@ test("rigid debris admission caps bodies while preserving representative burst s
   );
 });
 
+test("rigid debris admission keeps pending rigid shards out of VFX settling regions", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  const settler = new DebrisSettler();
+  const admittedShard = createTestFragment(BLOCK.grass, 0.35, 1.2, 0.35);
+  const deniedShard = createTestFragment(BLOCK.grass, 0.65, 1.2, 0.65);
+  await rigidDebris.initialize();
+
+  const admission = partitionRigidDebrisAdmission(
+    [admittedShard, deniedShard],
+    new Set([0])
+  );
+  for (const shard of admission.admitted) {
+    rigidDebris.registerFragment(shard);
+  }
+  // registerFragment queues the Rapier body and the public rigid flag flips
+  // only after the next adapter update. The spawn path must use the explicit
+  // admission partition, not this delayed flag, or admitted shards get mixed
+  // into VFX settler regions again.
+  assert(
+    !admittedShard.isRigidDebrisDriven,
+    "pending rigid admission should not already look Rapier-driven"
+  );
+
+  settler.registerFracture(BLOCK.grass, new THREE.Vector3(0.5, 1.2, 0.5), admission.denied);
+
+  assert(!settler.owns(admittedShard), "Rapier-admitted shards should not be VFX-settler-owned");
+  assert(settler.owns(deniedShard), "denied overflow shards should keep the VFX-settler lifecycle");
+  assertEqual(admission.denied.length, 1, "partition should preserve the denied overflow count for telemetry");
+
+  rigidDebris.clear();
+});
+
 test("expired quality-scaled fragments still graduate into rubble", () => {
   const scene = new THREE.Scene();
   const rubble = new RubbleField(scene);
@@ -7135,6 +7168,35 @@ test("debris settler wakes a glued sleeping clump when its terrain support chang
   assert(!upper.isSleeping, "upper glued shard should not remain suspended above the falling lower shard");
   assert(lower.mesh.position.y < lowerStartY - 0.005, "lower shard should resume gravity");
   assert(upper.mesh.position.y < upperStartY - 0.005, "upper shard should resume gravity with its clump");
+});
+
+test("debris settler wakes denied VFX shards in mixed rigid-admission regions", () => {
+  const settler = new DebrisSettler();
+  const rigidShard = createTestFragment(BLOCK.grass, 1.5, 1.08, 0.5);
+  const deniedVfxShard = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
+  rigidShard.attachRigidDebrisBody();
+  deniedVfxShard.sleepInPlace(true);
+
+  settler.registerFracture(
+    BLOCK.grass,
+    new THREE.Vector3(0.5, 1.1, 0.5),
+    [rigidShard, deniedVfxShard]
+  );
+
+  const startY = deniedVfxShard.mesh.position.y;
+  const woken = settler.wakeRegionsRestingOnChangedTerrainCells([{ x: 0, y: 0, z: 0 }]);
+  deniedVfxShard.update(1 / 60, { isSolid: () => false });
+
+  assertEqual(
+    woken,
+    1,
+    "support invalidation should still reach VFX shards when a sibling shard was admitted to Rapier"
+  );
+  assert(!deniedVfxShard.isSleeping, "the denied VFX shard should leave cheap sleep after support changes");
+  assert(
+    deniedVfxShard.mesh.position.y < startY - 0.005,
+    "the denied VFX shard should resume gravity instead of hanging in a mixed region"
+  );
 });
 
 test("debris settler only sleeps the supported component inside a mixed settling region", () => {
