@@ -151,6 +151,11 @@ terrain.
 
 ## Quality Presets
 
+On the experimental WebGL2 renderer-overhaul branch, terrain shadow maps are
+temporarily suppressed even when a preset normally enables them. The old shadow
+path will return after the renderer owns matching terrain shadow/depth material
+state instead of mixing legacy damaged meshes with GPU terrain pages.
+
 - `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
   shards/block, 8m active debris bubble, short fog horizon.
 - `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris

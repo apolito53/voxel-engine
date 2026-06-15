@@ -14,6 +14,8 @@ The experimental renderer-overhaul branch now routes scene rendering through a
 terrain backend fed by compact worker-produced face records. CPU world state,
 collision, raycast, saves, and partial-block damage remain authoritative while
 WebGL2 begins taking over terrain presentation and GPU diagnostics.
+This branch temporarily suppresses the old Three.js shadow-map path until
+renderer-owned WebGL2 terrain shadows are rebuilt.
 
 World units are metric: `1 block = 1 meter`.
 
