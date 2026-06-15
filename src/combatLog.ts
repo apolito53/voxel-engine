@@ -60,6 +60,7 @@ export type CombatLogEntry = {
   readonly source: CombatLogSource;
   readonly action: string;
   readonly targets: readonly CombatLogTarget[];
+  readonly diagnostics?: Record<string, unknown>;
 };
 
 export type CombatLogEntryInput = Omit<CombatLogEntry, "id" | "atMs"> & {
@@ -124,7 +125,8 @@ export class CombatLog {
       atMs: input.atMs ?? performance.now(),
       source: input.source,
       action: input.action,
-      targets: [...input.targets]
+      targets: [...input.targets],
+      diagnostics: input.diagnostics
     };
     this.nextId += 1;
 
