@@ -7037,6 +7037,47 @@ test("debris settler sleeps quiet supported clumps even when upper shards are st
   assertEqual(rubble.getStats().pieces, 0, "nearby supported clumps should remain physical inside the active bubble");
 });
 
+test("debris settler wakes a glued sleeping clump when its terrain support changes", () => {
+  const settler = new DebrisSettler();
+  const rubble = new RubbleField(new THREE.Scene());
+  const activeCenter = new THREE.Vector3(0.54, 1.15, 0.5);
+  const lower = createTestFragment(BLOCK.grass, 0.5, 1.08, 0.5);
+  const upper = createTestFragment(BLOCK.grass, 0.55, 1.18, 0.5);
+  const floorWorld = {
+    isSolid(_x: number, y: number, _z: number): boolean {
+      return y === 0;
+    }
+  };
+
+  lower.velocity.set(0, 0, 0);
+  upper.velocity.set(0.08, 0, 0);
+  lower.update(1 / 120, floorWorld);
+  settler.registerFracture(BLOCK.grass, activeCenter, [lower, upper]);
+  settler.update(DEBRIS_REGION_GLUE_BREAKUP_SECONDS + 0.01, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+  settler.update(DEBRIS_REGION_SETTLED_FINALIZE_SECONDS, rubble, {
+    activeCenter,
+    activeRadius: 8
+  });
+
+  assert(lower.isSleeping, "test setup should sleep the terrain-supported lower shard");
+  assert(upper.isSleeping, "test setup should sleep the glued upper shard");
+  const lowerStartY = lower.mesh.position.y;
+  const upperStartY = upper.mesh.position.y;
+
+  const woken = settler.wakeRegionsRestingOnChangedTerrainCells([{ x: 0, y: 0, z: 0 }]);
+  lower.update(1 / 60, { isSolid: () => false });
+  upper.update(1 / 60, { isSolid: () => false });
+
+  assertEqual(woken, 2, "support invalidation should wake the whole glued settler component");
+  assert(!lower.isSleeping, "lower shard should leave settler sleep after its terrain support changes");
+  assert(!upper.isSleeping, "upper glued shard should not remain suspended above the falling lower shard");
+  assert(lower.mesh.position.y < lowerStartY - 0.005, "lower shard should resume gravity");
+  assert(upper.mesh.position.y < upperStartY - 0.005, "upper shard should resume gravity with its clump");
+});
+
 test("debris settler only sleeps the supported component inside a mixed settling region", () => {
   const settler = new DebrisSettler();
   const rubble = new RubbleField(new THREE.Scene());

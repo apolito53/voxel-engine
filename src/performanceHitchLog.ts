@@ -512,9 +512,14 @@ function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapsh
   } else if (stats.debrisLifecycle.airbornePressureProtections > 0) {
     details.push(`${stats.debrisLifecycle.airbornePressureProtections} airborne debris protected from pressure cleanup`);
   }
-  if (stats.debrisLifecycle.rigidDebrisWoken > 0 || stats.debrisLifecycle.detachedDebrisWoken > 0) {
+  if (
+    stats.debrisLifecycle.rigidDebrisWoken > 0 ||
+    stats.debrisLifecycle.settlerDebrisWoken > 0 ||
+    stats.debrisLifecycle.detachedDebrisWoken > 0
+  ) {
     details.push(
-      `support edit woke ${stats.debrisLifecycle.rigidDebrisWoken} rigid and ` +
+      `support edit woke ${stats.debrisLifecycle.rigidDebrisWoken} rigid, ` +
+      `${stats.debrisLifecycle.settlerDebrisWoken} settling, and ` +
       `${stats.debrisLifecycle.detachedDebrisWoken} VFX debris`
     );
   }

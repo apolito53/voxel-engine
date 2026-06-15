@@ -106,8 +106,9 @@ fast shards so stress tests spend less CPU creating temporary colliders for
 calm unsupported airborne fragments, and overlapping debris shares support-cell
 probe results during each refresh instead of repeating the same crater scan.
 Terrain edits, block placement, builder/admin edits, and rubble support changes
-wake a bounded local debris stack above the affected cells so settled piles fall
-when their support is destroyed without restoring broad per-frame scans.
+wake a bounded local debris stack above the affected cells, including
+glue-connected settler clumps that are no longer Rapier-owned, so settled piles
+fall when their support is destroyed without restoring broad per-frame scans.
 Local hitch logs also receive runtime diagnostic breadcrumbs for WebGL context
 loss/restoration and uncaught browser errors, which helps separate a canvas-side
 render failure from a full engine freeze.

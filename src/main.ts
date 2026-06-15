@@ -3399,11 +3399,13 @@ function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCel
   if (cells.length === 0) return;
 
   const rigidDebrisWoken = rigidDebris.wakeDebrisRestingOnChangedTerrainCells(cells);
+  const settlerDebrisWoken = debrisSettler.wakeRegionsRestingOnChangedTerrainCells(cells);
   const detachedDebrisWoken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(toys, cells);
   rigidDebris.invalidateStaticColliders();
   addDebrisLifecycleDiagnostics({
     supportCellsInvalidated: cells.length,
     rigidDebrisWoken,
+    settlerDebrisWoken,
     detachedDebrisWoken
   });
 }
@@ -3412,6 +3414,7 @@ function addDebrisLifecycleDiagnostics(delta: Partial<DebrisLifecycleDiagnostics
   debrisLifecycleDiagnostics = {
     supportCellsInvalidated: debrisLifecycleDiagnostics.supportCellsInvalidated + (delta.supportCellsInvalidated ?? 0),
     rigidDebrisWoken: debrisLifecycleDiagnostics.rigidDebrisWoken + (delta.rigidDebrisWoken ?? 0),
+    settlerDebrisWoken: debrisLifecycleDiagnostics.settlerDebrisWoken + (delta.settlerDebrisWoken ?? 0),
     detachedDebrisWoken: debrisLifecycleDiagnostics.detachedDebrisWoken + (delta.detachedDebrisWoken ?? 0),
     settledPressureExpiries: debrisLifecycleDiagnostics.settledPressureExpiries + (delta.settledPressureExpiries ?? 0),
     airbornePressureProtections: debrisLifecycleDiagnostics.airbornePressureProtections + (delta.airbornePressureProtections ?? 0),

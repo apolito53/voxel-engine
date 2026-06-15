@@ -159,9 +159,9 @@ aftermath:
 Terrain damage, block placement/removal, builder/admin edits, rubble damage,
 and rubble falling/promotion all route through an event-driven support
 invalidation path. That path wakes a bounded local stack of Rapier-owned and
-detached VFX debris above edited cells, so sleeping piles fall when their
-terrain or rubble support changes without bringing back a broad per-frame
-support scan.
+detached VFX debris above edited cells, plus glue-connected settler clumps that
+are sleeping as one visible pile, so sleeping piles fall when their terrain or
+rubble support changes without bringing back a broad per-frame support scan.
 
 `Despawn All Objects` performs the full cleanup path and releases physics cores,
 loose debris VFX, and any existing rubble cover.
