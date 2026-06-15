@@ -342,6 +342,7 @@ import {
   type BlockPierceContinuation,
   type ChunkCoords,
   type DebrisEjectionHint,
+  type TerrainSupportInvalidationCell,
   type TerraformerEditInput,
   type TerraformerEditPreview,
   type TerraformerTargetSubCell,
@@ -3322,7 +3323,7 @@ function applyTerrainDamageFeedback(
 
   for (const result of results) {
     damagedBlocksThisFrame?.add(activeWorld.damageKey(result.position.x, result.position.y, result.position.z));
-    collectTerrainSupportInvalidationCells(result.position, changedTerrainCells, changedTerrainCellKeys);
+    collectTerrainSupportInvalidationCellsForDamageResult(result, changedTerrainCells, changedTerrainCellKeys);
 
     engineEvents.emit("block:damaged", {
       position: result.position,
@@ -3372,6 +3373,22 @@ function applyTerrainDamageFeedback(
   }
 }
 
+function collectTerrainSupportInvalidationCellsForDamageResult(
+  result: BlockDamageResult,
+  cells: ChangedTerrainCell[],
+  seen: Set<string>
+): void {
+  const exactSupportCells = result.supportInvalidationCells ?? [];
+  if (exactSupportCells.length === 0) {
+    collectTerrainSupportInvalidationCells(result.position, cells, seen);
+    return;
+  }
+
+  for (const cell of exactSupportCells) {
+    addTerrainSupportInvalidationCell(cell, cells, seen);
+  }
+}
+
 function collectTerrainSupportInvalidationCells(
   position: VoxelBlockPosition,
   cells: ChangedTerrainCell[],
@@ -3385,14 +3402,47 @@ function collectTerrainSupportInvalidationCells(
     if (y < 0) continue;
     for (let z = position.z - 1; z <= position.z + 1; z += 1) {
       for (let x = position.x - 1; x <= position.x + 1; x += 1) {
-        const key = `${x},${y},${z}`;
-        if (seen.has(key)) continue;
-
-        seen.add(key);
-        cells.push({ x, y, z });
+        addTerrainSupportInvalidationCell({ x, y, z }, cells, seen);
       }
     }
   }
+}
+
+function addTerrainSupportInvalidationCell(
+  cell: ChangedTerrainCell | TerrainSupportInvalidationCell,
+  cells: ChangedTerrainCell[],
+  seen: Set<string>
+): void {
+  const normalizedCell: ChangedTerrainCell = cell.bounds
+    ? {
+        x: Math.floor(cell.x),
+        y: Math.floor(cell.y),
+        z: Math.floor(cell.z),
+        bounds: cell.bounds
+      }
+    : {
+        x: Math.floor(cell.x),
+        y: Math.floor(cell.y),
+        z: Math.floor(cell.z)
+      };
+  const key = createTerrainSupportInvalidationCellKey(normalizedCell);
+  if (seen.has(key)) return;
+
+  seen.add(key);
+  cells.push(normalizedCell);
+}
+
+function createTerrainSupportInvalidationCellKey(cell: ChangedTerrainCell): string {
+  if (!cell.bounds) return `${cell.x},${cell.y},${cell.z}`;
+  return [
+    `${cell.x},${cell.y},${cell.z}`,
+    cell.bounds.minX,
+    cell.bounds.maxX,
+    cell.bounds.minY,
+    cell.bounds.maxY,
+    cell.bounds.minZ,
+    cell.bounds.maxZ
+  ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
 }
 
 function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCell[]): void {
