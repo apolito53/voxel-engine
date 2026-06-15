@@ -60,6 +60,16 @@ type StaticColliderCell = {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  readonly bounds?: StaticColliderCellBounds;
+};
+
+type StaticColliderCellBounds = {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+  readonly minZ: number;
+  readonly maxZ: number;
 };
 
 export type RigidDebrisChangedTerrainCell = StaticColliderCell;
@@ -1219,11 +1229,12 @@ function normalizeChangedTerrainCells(
     const x = Math.floor(cell.x);
     const y = Math.floor(cell.y);
     const z = Math.floor(cell.z);
-    const key = getStaticColliderCellKey(x, y, z);
+    const bounds = normalizeStaticColliderCellBounds(cell.bounds);
+    const key = getChangedStaticColliderCellKey(x, y, z, bounds);
     if (seen.has(key)) continue;
 
     seen.add(key);
-    normalized.push({ x, y, z });
+    normalized.push(bounds ? { x, y, z, bounds } : { x, y, z });
   }
 
   return normalized;
@@ -1250,19 +1261,67 @@ function isRecordRestingOnChangedTerrainCell(
   const maxX = position.x + halfExtents.x + margin;
   const minZ = position.z - halfExtents.z - margin;
   const maxZ = position.z + halfExtents.z + margin;
-  if (!boundsOverlap(minX, maxX, cell.x, cell.x + 1)) return false;
-  if (!boundsOverlap(minZ, maxZ, cell.z, cell.z + 1)) return false;
+  const supportMinX = cell.bounds?.minX ?? cell.x;
+  const supportMaxX = cell.bounds?.maxX ?? cell.x + 1;
+  const supportMinY = cell.bounds?.minY ?? cell.y;
+  const supportMaxY = cell.bounds?.maxY ?? cell.y + 1;
+  const supportMinZ = cell.bounds?.minZ ?? cell.z;
+  const supportMaxZ = cell.bounds?.maxZ ?? cell.z + 1;
+  if (!boundsOverlap(minX, maxX, supportMinX, supportMaxX)) return false;
+  if (!boundsOverlap(minZ, maxZ, supportMinZ, supportMaxZ)) return false;
 
   const bottomY = position.y - halfExtents.y;
-  const lowestChangedSupport = cell.y - margin;
+  const lowestChangedSupport = supportMinY - margin;
   // Terrain edits are event-scoped, so we can afford to wake a short local
   // stack above the edited support cell. This catches sleeping debris resting
   // on other debris without restoring broad per-frame support scans.
-  const highestChangedSupport = cell.y +
-    1 +
+  const highestChangedSupport = supportMaxY +
     RIGID_DEBRIS_CHANGED_SUPPORT_STACK_WAKE_HEIGHT +
     RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH;
   return bottomY >= lowestChangedSupport && bottomY <= highestChangedSupport;
+}
+
+function normalizeStaticColliderCellBounds(
+  bounds: StaticColliderCellBounds | undefined
+): StaticColliderCellBounds | undefined {
+  if (!bounds) return undefined;
+  if (
+    !Number.isFinite(bounds.minX) ||
+    !Number.isFinite(bounds.maxX) ||
+    !Number.isFinite(bounds.minY) ||
+    !Number.isFinite(bounds.maxY) ||
+    !Number.isFinite(bounds.minZ) ||
+    !Number.isFinite(bounds.maxZ)
+  ) {
+    return undefined;
+  }
+
+  const minX = Math.min(bounds.minX, bounds.maxX);
+  const maxX = Math.max(bounds.minX, bounds.maxX);
+  const minY = Math.min(bounds.minY, bounds.maxY);
+  const maxY = Math.max(bounds.minY, bounds.maxY);
+  const minZ = Math.min(bounds.minZ, bounds.maxZ);
+  const maxZ = Math.max(bounds.minZ, bounds.maxZ);
+  if (maxX <= minX || maxY <= minY || maxZ <= minZ) return undefined;
+  return { minX, maxX, minY, maxY, minZ, maxZ };
+}
+
+function getChangedStaticColliderCellKey(
+  x: number,
+  y: number,
+  z: number,
+  bounds: StaticColliderCellBounds | undefined
+): string {
+  if (!bounds) return getStaticColliderCellKey(x, y, z);
+  return [
+    getStaticColliderCellKey(x, y, z),
+    bounds.minX,
+    bounds.maxX,
+    bounds.minY,
+    bounds.maxY,
+    bounds.minZ,
+    bounds.maxZ
+  ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
 }
 
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {

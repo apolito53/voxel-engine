@@ -140,6 +140,7 @@ export type BlockDamageResult = {
   readonly damageBefore?: number;
   readonly damageAfter?: number;
   readonly affectedVisualCellIndexes?: readonly number[];
+  readonly supportInvalidationCells?: readonly TerrainSupportInvalidationCell[];
   readonly bitePoofPositions?: readonly VoxelVector[];
   readonly ejectedRubbleMaterialUnits?: number;
   readonly debrisEjectionHint?: DebrisEjectionHint;
@@ -200,6 +201,13 @@ export type TerraformerSubCellBounds = {
   readonly maxY: number;
   readonly minZ: number;
   readonly maxZ: number;
+};
+
+export type TerrainSupportInvalidationCell = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly bounds?: TerraformerSubCellBounds;
 };
 
 export type TerraformerTargetSubCell = {
@@ -664,6 +672,35 @@ function createSubCellBounds(
     minZ: globalZ / BLOCK_FRAGMENT_GRID_SIZE,
     maxZ: (globalZ + 1) / BLOCK_FRAGMENT_GRID_SIZE
   };
+}
+
+function createTerrainSupportInvalidationCellsForVisualCells(
+  position: VoxelBlockPosition,
+  cellIndexes: readonly number[]
+): TerrainSupportInvalidationCell[] {
+  const cells: TerrainSupportInvalidationCell[] = [];
+  const seen = new Set<number>();
+
+  for (const cellIndex of cellIndexes) {
+    if (seen.has(cellIndex)) continue;
+
+    const localCell = decodePartialBlockVisualCell(cellIndex);
+    const globalX = position.x * BLOCK_FRAGMENT_GRID_SIZE + localCell.x;
+    const globalY = position.y * BLOCK_FRAGMENT_GRID_SIZE + localCell.y;
+    const globalZ = position.z * BLOCK_FRAGMENT_GRID_SIZE + localCell.z;
+    seen.add(cellIndex);
+    cells.push({
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      // This is the actual sub-cell support volume that vanished. Passing it
+      // through the damage result lets debris wake from destroyed sub-blocks
+      // without reintroducing broad per-frame support scans.
+      bounds: createSubCellBounds(globalX, globalY, globalZ)
+    });
+  }
+
+  return cells;
 }
 
 function createNextPartialBlockCuts(
@@ -1793,6 +1830,10 @@ export class VoxelWorld implements CollisionWorld {
         damageBefore: previousDamage,
         damageAfter: cappedDamageAfter,
         affectedVisualCellIndexes: partialCutResult.newlyRemovedVisualCellIndexes,
+        supportInvalidationCells: createTerrainSupportInvalidationCellsForVisualCells(
+          position,
+          partialCutResult.newlyRemovedVisualCellIndexes
+        ),
         bitePoofPositions: createPartialBlockBitePoofPositions(
           position,
           partialCutResult.newlyRemovedVisualCellIndexes,
@@ -1827,6 +1868,10 @@ export class VoxelWorld implements CollisionWorld {
       damageBefore: previousDamage,
       damageAfter: maxHealth,
       affectedVisualCellIndexes: remainingVisualCellIndexes,
+      supportInvalidationCells: createTerrainSupportInvalidationCellsForVisualCells(
+        position,
+        remainingVisualCellIndexes
+      ),
       ejectedRubbleMaterialUnits,
       debrisEjectionHint: createFallbackDebrisEjectionHint(position, input, ejectedRubbleMaterialUnits)
     };
@@ -2051,6 +2096,10 @@ export class VoxelWorld implements CollisionWorld {
         damageBefore: previousDamage,
         damageAfter: nextDamage,
         affectedVisualCellIndexes: newlyRemovedCellIndexes,
+        supportInvalidationCells: createTerrainSupportInvalidationCellsForVisualCells(
+          position,
+          newlyRemovedCellIndexes
+        ),
         bitePoofPositions,
         ejectedRubbleMaterialUnits,
         debrisEjectionHint
@@ -2069,6 +2118,10 @@ export class VoxelWorld implements CollisionWorld {
       damageBefore: previousDamage,
       damageAfter: nextDamage,
       affectedVisualCellIndexes: newlyRemovedCellIndexes,
+      supportInvalidationCells: createTerrainSupportInvalidationCellsForVisualCells(
+        position,
+        newlyRemovedCellIndexes
+      ),
       bitePoofPositions,
       ejectedRubbleMaterialUnits,
       debrisEjectionHint

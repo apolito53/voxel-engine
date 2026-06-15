@@ -26,6 +26,22 @@
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
+## 0.11.9 - 2026-06-14
+
+### Fixed
+
+- Routed exact partial-terrain support boxes from damage results into debris
+  support invalidation, so destroying a Terraformer/core sub-block can wake
+  sleeping debris resting on that specific 1/3m support patch instead of only
+  relying on a whole-block neighborhood guess.
+- Taught rigid, settler, and detached VFX debris wake checks to honor bounded
+  changed-support boxes while still waking a short local stack above them. This
+  keeps the wake path event-driven and avoids bringing back broad per-frame
+  debris scans.
+- Added regression coverage for the real bug shape: two sleeping debris pieces
+  over the same macro block, with only the one over the destroyed sub-block
+  waking and falling.
+
 ## 0.11.8 - 2026-06-14
 
 ### Fixed

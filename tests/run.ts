@@ -3973,6 +3973,16 @@ test("Terraformer edits exact sub-cells on the shared terrain damage path", () =
     [previewedCellIndex],
     "Terraformer edit results should report only the exact affected sub-cell"
   );
+  assertEqual(
+    result.results[0]?.supportInvalidationCells?.length,
+    1,
+    "Terraformer edit results should carry the exact support cell that disappeared"
+  );
+  assertDeepEqual(
+    result.results[0]?.supportInvalidationCells?.[0]?.bounds,
+    preview.cells[0]?.bounds,
+    "support invalidation should use the same sub-cell bounds as the Terraformer highlight"
+  );
   assertEqual(world.getBlockDamage(2, 3, 4), subCellHp, "Terraformer damage should spend exactly one sub-cell HP");
   assertEqual(
     partialCell?.removedVisualCellIndexes?.length,
@@ -6649,6 +6659,55 @@ test("terrain support invalidation wakes detached sleeping VFX fragments", () =>
     unrelatedStartY,
     0.001,
     "unrelated detached debris should not move"
+  );
+});
+
+test("terrain support invalidation wakes detached debris resting on a destroyed sub-block", () => {
+  const targetFragment = createTestFragment(BLOCK.sand, 1 / 6, 1.08, 1 / 6);
+  const sameMacroUnchangedSubCellFragment = createTestFragment(BLOCK.sand, 5 / 6, 1.08, 1 / 6);
+  targetFragment.sleepInPlace(true);
+  sameMacroUnchangedSubCellFragment.sleepInPlace(true);
+  const targetStartY = targetFragment.mesh.position.y;
+  const unrelatedStartY = sameMacroUnchangedSubCellFragment.mesh.position.y;
+
+  const woken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
+    [targetFragment, sameMacroUnchangedSubCellFragment],
+    [{
+      x: 0,
+      y: 0,
+      z: 0,
+      bounds: {
+        minX: 0,
+        maxX: 1 / 3,
+        minY: 2 / 3,
+        maxY: 1,
+        minZ: 0,
+        maxZ: 1 / 3
+      }
+    }]
+  );
+  targetFragment.update(1 / 60, { isSolid: () => false });
+  sameMacroUnchangedSubCellFragment.update(1 / 60, { isSolid: () => false });
+
+  assertEqual(
+    woken,
+    1,
+    "sub-block support invalidation should wake only debris resting over the destroyed support patch"
+  );
+  assert(!targetFragment.isSleeping, "debris over the destroyed sub-block should wake");
+  assert(
+    targetFragment.mesh.position.y < targetStartY - 0.005,
+    "woken debris should start falling once its exact sub-block support is gone"
+  );
+  assert(
+    sameMacroUnchangedSubCellFragment.isSleeping,
+    "debris over another sub-cell in the same macro block should not wake from this exact support patch"
+  );
+  assertClose(
+    sameMacroUnchangedSubCellFragment.mesh.position.y,
+    unrelatedStartY,
+    0.001,
+    "unrelated same-block debris should stay parked"
   );
 });
 
