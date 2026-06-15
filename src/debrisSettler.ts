@@ -1,6 +1,11 @@
 import * as THREE from "three";
 import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
 import { createDefaultDebrisShape } from "./debrisShapes";
+import {
+  isFragmentInsideAnyChangedSupportColumn,
+  normalizeChangedTerrainCells,
+  type ChangedTerrainCell
+} from "./debrisSupportInvalidation";
 import type { PhysicsToy } from "./physics";
 import { RubbleField, type RubbleAbsorptionSample, type RubbleVisualChunkSample } from "./rubble";
 
@@ -168,6 +173,31 @@ export class DebrisSettler {
 
   getFinalizedBatches(): readonly DebrisSettledBatch[] {
     return this.finalizedBatches;
+  }
+
+  wakeRegionsRestingOnChangedTerrainCells(cells: Iterable<ChangedTerrainCell>): number {
+    const changedCells = normalizeChangedTerrainCells(cells);
+    if (changedCells.length === 0) return 0;
+
+    let wokenFragments = 0;
+    for (const region of this.regionsById.values()) {
+      if (this.isRigidBodyRegion(region)) continue;
+
+      // A sleeping visible pile is tracked as glue-connected components inside
+      // a settling region. Waking only the shard directly over the edited block
+      // can leave the rest of that glued clump suspended in its old pose, so an
+      // edit under any member wakes the whole local component.
+      for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredFragments(region))) {
+        if (!this.componentTouchesChangedSupportColumn(component, changedCells)) continue;
+
+        for (const fragment of component) {
+          if (fragment.wakeFromTerrainSupportChange()) wokenFragments += 1;
+        }
+      }
+    }
+
+    if (wokenFragments > 0) this.refreshLiveStats();
+    return wokenFragments;
   }
 
   finalizeRegionsForPressure(
@@ -532,6 +562,16 @@ export class DebrisSettler {
       deltaY > BLOCK_FRAGMENT_VISUAL_SIZE * 0.2 &&
       deltaY <= DEBRIS_REGION_STACK_VERTICAL_RANGE
     );
+  }
+
+  private componentTouchesChangedSupportColumn(
+    component: readonly PhysicsToy[],
+    changedCells: readonly ChangedTerrainCell[]
+  ): boolean {
+    return component.some((fragment) => (
+      !fragment.isExpired &&
+      isFragmentInsideAnyChangedSupportColumn(fragment, changedCells)
+    ));
   }
 
   private getGlueConnectedComponents(

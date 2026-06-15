@@ -285,6 +285,7 @@ export class DebugHud {
             label: "wake",
             value: `${snapshot.debrisLifecycleDiagnostics.supportCellsInvalidated} cells, ` +
               `${snapshot.debrisLifecycleDiagnostics.rigidDebrisWoken} rigid, ` +
+              `${snapshot.debrisLifecycleDiagnostics.settlerDebrisWoken} settle, ` +
               `${snapshot.debrisLifecycleDiagnostics.detachedDebrisWoken} vfx`
           },
           {

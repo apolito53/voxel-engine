@@ -14,6 +14,7 @@ const DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS = 512;
 export type DebrisLifecycleDiagnostics = {
   readonly supportCellsInvalidated: number;
   readonly rigidDebrisWoken: number;
+  readonly settlerDebrisWoken: number;
   readonly detachedDebrisWoken: number;
   readonly settledPressureExpiries: number;
   readonly airbornePressureProtections: number;
@@ -24,6 +25,7 @@ export function createEmptyDebrisLifecycleDiagnostics(): DebrisLifecycleDiagnost
   return {
     supportCellsInvalidated: 0,
     rigidDebrisWoken: 0,
+    settlerDebrisWoken: 0,
     detachedDebrisWoken: 0,
     settledPressureExpiries: 0,
     airbornePressureProtections: 0,
@@ -34,6 +36,7 @@ export function createEmptyDebrisLifecycleDiagnostics(): DebrisLifecycleDiagnost
 export function hasDebrisLifecycleDiagnosticsActivity(stats: DebrisLifecycleDiagnostics): boolean {
   return stats.supportCellsInvalidated > 0 ||
     stats.rigidDebrisWoken > 0 ||
+    stats.settlerDebrisWoken > 0 ||
     stats.detachedDebrisWoken > 0 ||
     stats.settledPressureExpiries > 0 ||
     stats.airbornePressureProtections > 0 ||
@@ -51,7 +54,7 @@ export function wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
   for (const fragment of fragments) {
     if (wokenFragments >= DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS) break;
     if (!shouldWakeDetachedFragment(fragment)) continue;
-    if (!isDetachedFragmentInsideAnyChangedSupportColumn(fragment, changedCells)) continue;
+    if (!isFragmentInsideAnyChangedSupportColumn(fragment, changedCells)) continue;
 
     // Detached VFX shards are deliberately outside Rapier, so the rigid-debris
     // body wake path cannot see them. Wake the whole small support column rather
@@ -83,6 +86,16 @@ export function normalizeChangedTerrainCells(cells: Iterable<ChangedTerrainCell>
   return normalized;
 }
 
+export function isFragmentInsideAnyChangedSupportColumn(
+  fragment: PhysicsToy,
+  cells: readonly ChangedTerrainCell[]
+): boolean {
+  for (const cell of cells) {
+    if (isFragmentInsideChangedSupportColumn(fragment, cell)) return true;
+  }
+  return false;
+}
+
 function shouldWakeDetachedFragment(fragment: PhysicsToy): boolean {
   return fragment.isInstancedFragment &&
     fragment.isSleeping &&
@@ -90,17 +103,7 @@ function shouldWakeDetachedFragment(fragment: PhysicsToy): boolean {
     !fragment.isRigidDebrisDriven;
 }
 
-function isDetachedFragmentInsideAnyChangedSupportColumn(
-  fragment: PhysicsToy,
-  cells: readonly ChangedTerrainCell[]
-): boolean {
-  for (const cell of cells) {
-    if (isDetachedFragmentInsideChangedSupportColumn(fragment, cell)) return true;
-  }
-  return false;
-}
-
-function isDetachedFragmentInsideChangedSupportColumn(
+function isFragmentInsideChangedSupportColumn(
   fragment: PhysicsToy,
   cell: ChangedTerrainCell
 ): boolean {

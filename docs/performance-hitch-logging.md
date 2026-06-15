@@ -50,9 +50,9 @@ The debug overlay and hitch logger capture:
 - Chunk visibility split into loaded chunks, frustum chunks, actually rendered
   chunks, and chunks hidden behind the opaque fog curtain.
 - Rigid debris body/collider pressure.
-- Debris lifecycle counters for support-cell invalidations, rigid/VFX wakeups,
-  settled pressure expiries, airborne pressure protections, and emergency
-  airborne expiries.
+- Debris lifecycle counters for support-cell invalidations, rigid debris,
+  settler-clump, and detached VFX wakeups, settled pressure expiries, airborne
+  pressure protections, and emergency airborne expiries.
 - Adaptive debris pressure and effective cap state.
 - Worker-pool pressure: mode, capacity, queued jobs, running jobs, partial-mesh
   jobs, and average job/upload timing.

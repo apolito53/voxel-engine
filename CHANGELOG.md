@@ -26,6 +26,18 @@
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
+## 0.11.8 - 2026-06-14
+
+### Fixed
+
+- Woke whole glue-connected `DebrisSettler` components when terrain/rubble
+  support changes under any member of the clump. This closes the remaining
+  floating-debris case where a settled visible pile was not owned by Rapier and
+  the detached-fragment wake path only reasoned about individual shards.
+- Added a separate settler-owned debris wake counter to the F3 HUD and hitch
+  logs so future floating-pile screenshots show whether the region wake path
+  fired.
+
 ## 0.11.7 - 2026-06-14
 
 ### Added

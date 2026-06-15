@@ -41,9 +41,9 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   rubble/partial support, and deduplicate repeated support-cell probes inside
   dense crater piles.
 - Current wake/cleanup target completed: terrain, builder/admin, and rubble
-  support edits now wake bounded local stacks of sleeping Rapier/VFX debris, and
-  normal pressure cleanup protects awake airborne shards instead of poofing them
-  mid-flight.
+  support edits now wake bounded local stacks of sleeping Rapier debris,
+  detached VFX debris, and glue-connected settler clumps, while normal pressure
+  cleanup protects awake airborne shards instead of poofing them mid-flight.
 - Next validate fresh `debris-pressure` and WebGL diagnostic logs before
   deciding whether parked sleepers are worth the complexity.
 - Do not revive partial-mesh draw caps or rigid-debris cadence throttling; both
