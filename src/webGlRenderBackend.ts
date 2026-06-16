@@ -48,7 +48,10 @@ export class WebGlRenderBackend implements RenderBackend {
 
   applyQuality(preset: QualityPreset): void {
     this.terrain.applyQuality(preset);
-    this.disableLegacyShadowMaps();
+    // Keep the renderer-level shadow map exactly where QualityController set
+    // it. GPU terrain pages opt out per mesh, but projectile cores and debris
+    // still need the normal Three.js shadow path until the renderer-owned VFX
+    // pass replaces them.
   }
 
   applyChunkMesh(result: ChunkMeshedResult): void {
@@ -90,17 +93,5 @@ export class WebGlRenderBackend implements RenderBackend {
   dispose(): void {
     this.terrain.dispose();
     this.gpuTimer.dispose();
-  }
-
-  private disableLegacyShadowMaps(): void {
-    // M1/M2 of the renderer split deliberately keep the new WebGL2 terrain
-    // shader shadowless. Letting the old Three shadow map stay active produces
-    // half-migrated artifacts: legacy damaged/debris meshes can receive hard
-    // blocky shadows even though the GPU terrain pages do not have matching
-    // depth/shadow materials. Re-enable this only with the renderer-owned
-    // shadow pass planned for the batching/culling milestone.
-    this.renderer.shadowMap.enabled = false;
-    this.renderer.shadowMap.autoUpdate = false;
-    this.renderer.shadowMap.needsUpdate = false;
   }
 }

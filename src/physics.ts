@@ -40,7 +40,7 @@ const PHYSICS_TOY_COLLISION_RESTITUTION = 0.42;
 const PHYSICS_TOY_COLLISION_DAMPING = 0.995;
 const PHYSICS_TOY_COLLISION_EPSILON = 0.000001;
 
-const sharedFragmentMaterials = new Map<number, THREE.MeshBasicMaterial>();
+const sharedFragmentMaterials = new Map<number, THREE.MeshStandardMaterial>();
 
 export type PhysicsImpact = {
   readonly source: PhysicsToy;
@@ -1492,7 +1492,7 @@ function createFragmentAngularVelocity(velocity: THREE.Vector3): THREE.Vector3 {
   return spin.normalize().multiplyScalar(8 + Math.min(speed * 2.5, 16));
 }
 
-export function getFragmentMaterial(block: number): THREE.MeshBasicMaterial {
+export function getFragmentMaterial(block: number): THREE.MeshStandardMaterial {
   const cachedMaterial = sharedFragmentMaterials.get(block);
   if (cachedMaterial) return cachedMaterial;
 
@@ -1502,14 +1502,13 @@ export function getFragmentMaterial(block: number): THREE.MeshBasicMaterial {
     definition.color[1],
     definition.color[2]
   );
-  const material = new THREE.MeshBasicMaterial({
-    color: fragmentColor
+  const material = new THREE.MeshStandardMaterial({
+    color: fragmentColor,
+    roughness: 0.88,
+    metalness: 0.02
   });
-  // Loose block debris is a terrain presentation effect on the WebGL2 branch.
-  // Keep it on the same baked/unlit visual model as GPU terrain instead of
-  // letting StandardMaterial create oversized dark faces that read as broken
-  // shadows in crater piles.
-  material.toneMapped = true;
+  // Debris needs real light response so fragments read as tiny chunks instead
+  // of flat color cards. GPU terrain still opts out of legacy shadows per mesh.
   sharedFragmentMaterials.set(block, material);
   return material;
 }

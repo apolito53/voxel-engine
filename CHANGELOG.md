@@ -16,15 +16,17 @@
 - Routed the main render loop through the new WebGL backend and hid legacy chunk
   meshes after visibility bookkeeping so the GPU terrain path owns normal terrain
   presentation while the old expanded mesh path remains available for parity.
-- Temporarily disabled legacy Three.js shadow maps while the WebGL2 terrain
-  backend owns terrain presentation, avoiding hard partial/debris shadow
-  artifacts until renderer-owned terrain shadow materials land.
-- Moved damaged partial terrain, block-fragment debris, and rubble visuals to
-  unlit voxel-style materials on the renderer-overhaul branch so exposed crater
-  faces do not inherit legacy standard-material lighting that reads as broken
-  shadows beside GPU terrain.
+- Moved damaged partial terrain to unlit voxel-style materials on the
+  renderer-overhaul branch so exposed crater faces do not inherit legacy
+  standard-material lighting that reads as broken shadows beside GPU terrain.
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
+
+### Fixed
+
+- Restored lit, shadow-capable block-fragment and rubble materials on the GPU
+  renderer branch while keeping GPU terrain and interim partial-terrain meshes
+  out of the legacy Three.js shadow pass.
 
 ## 0.11.12 - 2026-06-15
 

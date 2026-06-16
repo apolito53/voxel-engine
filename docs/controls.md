@@ -152,10 +152,10 @@ terrain.
 
 ## Quality Presets
 
-On the experimental WebGL2 renderer-overhaul branch, terrain shadow maps are
-temporarily suppressed even when a preset normally enables them. The old shadow
-path will return after the renderer owns matching terrain shadow/depth material
-state instead of mixing legacy damaged meshes with GPU terrain pages.
+On the experimental WebGL2 renderer-overhaul branch, GPU terrain pages stay out
+of the legacy terrain shadow pass until the renderer owns matching terrain
+shadow/depth material state. Debris, rubble, and projectile-core meshes still use
+normal Three.js lighting/shadows whenever the selected preset enables shadows.
 
 - `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
   shards/block, 8m active debris bubble, short fog horizon.

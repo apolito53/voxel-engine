@@ -3,7 +3,7 @@ import { getDebrisShapeGeometry, type DebrisShapeId } from "./debrisShapes";
 import { PhysicsToy, getFragmentMaterial } from "./physics";
 
 type FragmentRenderBatch = {
-  readonly mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  readonly mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly block: number;
   readonly shapeId: DebrisShapeId;
   capacity: number;
@@ -146,7 +146,10 @@ export class PhysicsFragmentInstancer {
     // Fragment positions move every frame, and Three's computed instanced
     // bounds are not worth chasing for thousands of tiny transient shards.
     mesh.frustumCulled = false;
-    mesh.castShadow = false;
+    // These instanced shards are the visible debris, not the hidden toy meshes.
+    // Let them participate in Three's legacy shadow pass while GPU terrain
+    // pages stay explicitly shadowless in GpuTerrainRenderer.
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.visible = false;
     mesh.count = 0;

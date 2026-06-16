@@ -5918,6 +5918,10 @@ test("block fragments render through instanced batches instead of scene children
     3,
     "fragments should batch into one instanced mesh per block and shard shape"
   );
+  assert(
+    instancedMeshes.every((mesh) => mesh.castShadow && mesh.receiveShadow),
+    "fragment batches should participate in lighting and shadows so debris reads as solid chunks"
+  );
   assertDeepEqual(
     instancer.getStats(),
     { batches: 3, instances: 3, capacity: 3 },

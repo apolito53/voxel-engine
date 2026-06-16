@@ -164,7 +164,10 @@ export class PartialBlockMeshField {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
     mesh.name = `Partial block region ${key}`;
     mesh.castShadow = false;
-    mesh.receiveShadow = true;
+    // Damaged terrain is still rendered on the GPU-terrain visual model. Keep
+    // legacy shadow maps off these interim partial meshes until the renderer
+    // owns a matching terrain shadow/depth path.
+    mesh.receiveShadow = false;
     mesh.visible = false;
     this.mesh.add(mesh);
 

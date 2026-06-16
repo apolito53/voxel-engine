@@ -90,7 +90,7 @@ type RubbleCluster = {
   readonly id: number;
   readonly block: number;
   readonly cells: Map<string, RubbleCellPile>;
-  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  readonly mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   readonly bounds: THREE.Box3;
   pieces: number;
   health: number;
@@ -449,7 +449,7 @@ export class RubbleField {
     this.nextClusterId += 1;
 
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), getFragmentMaterial(block));
-    mesh.castShadow = false;
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.name = `Rubble patch ${id}`;
     this.scene.add(mesh);
