@@ -27,6 +27,7 @@ const FRAGMENT_WALL_DAMPING = 0.74;
 const FRAGMENT_PARTIAL_SUPPORT_EPSILON = 0.025;
 const FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION = BLOCK_FRAGMENT_VISUAL_SIZE * 2.25;
 const FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED = -0.35;
+const FRAGMENT_TERRAIN_SUPPORT_WAKE_SLEEP_GRACE_SECONDS = 0.28;
 const GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER = 2;
 const GROUND_DEBRIS_AIRBORNE_MIN_SECONDS = 6;
 const CORE_COLLISION_RESTITUTION = 1.55;
@@ -141,6 +142,7 @@ export class PhysicsToy {
   private terrainDamageBouncesRemaining: number;
   private ageSeconds = 0;
   private settledSeconds = 0;
+  private terrainSupportWakeSleepGraceSeconds = 0;
   private lowSpeedExpireSeconds = 0;
   private supportContactLastUpdate = false;
   private supportAnchoredSleep = false;
@@ -305,6 +307,7 @@ export class PhysicsToy {
     this.clearRememberedSupportCells();
     this.settledSeconds = 0;
     this.velocity.y = Math.min(this.velocity.y, FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED);
+    this.terrainSupportWakeSleepGraceSeconds = FRAGMENT_TERRAIN_SUPPORT_WAKE_SLEEP_GRACE_SECONDS;
     this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();
     this.markRigidDebrisExternalMutation();
@@ -366,6 +369,7 @@ export class PhysicsToy {
 
   sleepInPlace(supportAnchored = true): void {
     if (!this.isInstancedFragment || this.expired) return;
+    if (this.terrainSupportWakeSleepGraceSeconds > 0) return;
 
     // Settling regions can prove a linked clump is quiet even when an upper
     // shard is resting on another shard instead of directly touching terrain.
@@ -415,7 +419,10 @@ export class PhysicsToy {
       this.clearRememberedSupportCells();
     }
     this.settledSeconds = state.sleeping ? this.sleepAfterSeconds : 0;
-    if (!state.sleeping) this.resetGroundDebrisCleanupClock();
+    if (!state.sleeping) {
+      this.terrainSupportWakeSleepGraceSeconds = 0;
+      this.resetGroundDebrisCleanupClock();
+    }
   }
 
   resetGroundDebrisCleanupClock(): void {
@@ -482,6 +489,10 @@ export class PhysicsToy {
     this.supportContactLastUpdate = false;
     this.supportCellsThisUpdate.length = 0;
     this.ageSeconds += delta;
+    this.terrainSupportWakeSleepGraceSeconds = Math.max(
+      0,
+      this.terrainSupportWakeSleepGraceSeconds - Math.max(0, delta)
+    );
     if (this.maxAgeSeconds !== null && this.ageSeconds >= this.maxAgeSeconds) {
       this.expire();
       return impacts;
@@ -539,6 +550,23 @@ export class PhysicsToy {
       for (let z = minZ; z <= maxZ; z += 1) {
         for (let x = minX; x <= maxX; x += 1) {
           if (!world.isSolid(x, y, z)) continue;
+
+          const cellCollisionBoxes = this.isInstancedFragment
+            ? world.getCellCollisionBoxes?.(x, y, z) ?? null
+            : null;
+          if (cellCollisionBoxes) {
+            if (this.resolveCellCollisionBoxes(cellCollisionBoxes, x, y, z)) {
+              touchedSolidBlock = true;
+            }
+            continue;
+          }
+
+          // Partial terrain cells are still "solid" for player/world queries,
+          // but VFX debris needs the surviving lattice boxes instead of the old
+          // invisible macro cube. If a partial cell has no boxes, it should not
+          // catch fragments on a ghost full-block shell.
+          if (this.isInstancedFragment && world.isPartialBlock?.(x, y, z)) continue;
+
           if (
             !this.isInstancedFragment &&
             !canProjectileHitBlock(world, x, y, z, this.previousPosition, this.movementStep, this.radius)
@@ -583,6 +611,47 @@ export class PhysicsToy {
     this.supportContactLastUpdate = touchedSolidBlock || touchedPartialSupport;
     this.updateSleepState(delta, touchedSolidBlock || touchedPartialSupport);
     return impacts;
+  }
+
+  private resolveCellCollisionBoxes(
+    boxes: readonly CollisionBounds[],
+    cellX: number,
+    cellY: number,
+    cellZ: number
+  ): boolean {
+    let touchedBox = false;
+    for (const box of boxes) {
+      if (this.resolveCellCollisionBox(box, cellX, cellY, cellZ)) touchedBox = true;
+    }
+    return touchedBox;
+  }
+
+  private resolveCellCollisionBox(
+    box: CollisionBounds,
+    cellX: number,
+    cellY: number,
+    cellZ: number
+  ): boolean {
+    const p = this.mesh.position;
+    this.closestPoint.set(
+      clampToRange(p.x, box.minX, box.maxX),
+      clampToRange(p.y, box.minY, box.maxY),
+      clampToRange(p.z, box.minZ, box.maxZ)
+    );
+    const distance = this.centerDelta.copy(p).sub(this.closestPoint).length();
+    if (distance >= this.radius || distance === 0) return false;
+
+    const normal = this.centerDelta.multiplyScalar(1 / distance);
+    p.addScaledVector(normal, this.radius - distance + 0.001);
+
+    // Remember the exact partial-lattice support volume for future edit-driven
+    // wakeups. This is what keeps VFX fragments from sleeping on a ghost copy
+    // of a damaged block after v0.11.2's rigid-admission split.
+    this.rememberSupportBoxThisUpdate(cellX, cellY, cellZ, box);
+
+    const impact = this.velocity.dot(normal);
+    if (impact < 0) this.resolveBlockBounce(normal, impact);
+    return true;
   }
 
   private findSweptBlockCollision(
@@ -754,6 +823,20 @@ export class PhysicsToy {
     }
   }
 
+  private rememberSupportBoxThisUpdate(
+    x: number,
+    y: number,
+    z: number,
+    bounds: CollisionBounds
+  ): void {
+    this.addUniqueSupportCell(this.supportCellsThisUpdate, {
+      x,
+      y,
+      z,
+      bounds
+    });
+  }
+
   private rememberCurrentSupportFootprint(): void {
     if (this.supportCellsThisUpdate.length > 0) {
       this.rememberedSupportCells = this.supportCellsThisUpdate.map(clonePhysicsToySupportCell);
@@ -852,6 +935,11 @@ export class PhysicsToy {
   }
 
   private updateSleepState(delta: number, touchedSolidBlock: boolean): void {
+    if (this.terrainSupportWakeSleepGraceSeconds > 0) {
+      this.settledSeconds = 0;
+      return;
+    }
+
     if (this.sleepAfterSeconds <= 0 || !touchedSolidBlock) {
       this.settledSeconds = 0;
       return;
@@ -1214,6 +1302,10 @@ export class PhysicsToyCollider {
 
 function clampToBlock(value: number, blockCoordinate: number): number {
   return Math.max(blockCoordinate, Math.min(value, blockCoordinate + 1));
+}
+
+function clampToRange(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
 }
 
 function canProjectileHitBlock(
