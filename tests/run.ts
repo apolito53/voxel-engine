@@ -6543,6 +6543,114 @@ test("rigid debris adapter uses partial-block lattice boxes instead of ghost ful
   rigidDebris.clear();
 });
 
+test("VFX debris uses partial-block lattice boxes instead of ghost full cubes", () => {
+  const shape = createDebrisShape("squat-block");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 1.4, 0.5),
+    new THREE.Vector3(0, -0.25, 0),
+    1,
+    shape
+  );
+  const lowPartialBox = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const partialSurfaceWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    isPartialBlock(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [lowPartialBox] : null;
+    }
+  };
+
+  for (let frame = 0; frame < 240 && !fragment.isSleeping; frame += 1) {
+    fragment.update(1 / 60, partialSurfaceWorld);
+  }
+
+  const settledBottom = fragment.mesh.position.y - shape.colliderHalfExtents.y;
+  assert(
+    settledBottom >= lowPartialBox.maxY - 0.04,
+    "VFX debris should rest on the explicit surviving lattice surface"
+  );
+  assert(
+    settledBottom < 0.55,
+    "VFX debris should not float on the old invisible one-meter macro-block top"
+  );
+});
+
+test("VFX debris wakes from removed partial support before the settler can re-sleep it", () => {
+  const shape = createDebrisShape("squat-block");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 1.4, 0.5),
+    new THREE.Vector3(0, -0.25, 0),
+    1,
+    shape
+  );
+  const supportBox = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const supportedPartialWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    isPartialBlock(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [supportBox] : null;
+    }
+  };
+  const removedSupportWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    isPartialBlock(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [] : null;
+    }
+  };
+
+  for (let frame = 0; frame < 240 && !fragment.isSleeping; frame += 1) {
+    fragment.update(1 / 60, supportedPartialWorld);
+  }
+  assert(fragment.isSleeping, "test setup should park VFX debris on explicit partial support");
+  const sleepingY = fragment.mesh.position.y;
+
+  assert(fragment.wakeFromTerrainSupportChange(), "removed sub-cell support should wake sleeping VFX debris");
+  fragment.sleepInPlace(true);
+  assert(
+    !fragment.isSleeping,
+    "settler sleep should not immediately undo a terrain-support wake before physics can re-test support"
+  );
+
+  for (let frame = 0; frame < 20; frame += 1) {
+    fragment.update(1 / 60, removedSupportWorld);
+  }
+
+  assert(
+    fragment.mesh.position.y < sleepingY - 0.1,
+    "woken VFX debris should fall through removed partial support instead of resting on a ghost macro block"
+  );
+  assert(!fragment.isSleeping, "woken VFX debris should not re-sleep while unsupported");
+});
+
 test("rigid debris adapter wakes shards sleeping on stale partial-block macro support", async () => {
   const rigidDebris = new RigidDebrisSimulation();
   await rigidDebris.initialize();

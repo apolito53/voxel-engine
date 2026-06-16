@@ -26,6 +26,20 @@
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 
+## 0.11.12 - 2026-06-15
+
+### Fixed
+
+- Fixed the remaining `v0.11.2` floating-debris regression for visible shards
+  that were denied Rapier admission and handled by the cheaper VFX physics path.
+  VFX debris now resolves damaged partial terrain against the surviving
+  sub-block collision boxes instead of the old invisible full macro block.
+- Added a short support-change wake grace so a terrain edit can wake sleeping
+  debris and let gravity re-test support before the settling-region sleep pass
+  can park the shard again in the same frame.
+- Added regression coverage for VFX debris resting on partial-block support and
+  for the exact wake-then-fall sequence after that sub-block support is removed.
+
 ## 0.11.11 - 2026-06-15
 
 ### Fixed
