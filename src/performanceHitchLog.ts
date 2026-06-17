@@ -91,11 +91,18 @@ export type RuntimeDiagnosticEventInput = {
   readonly details?: Readonly<Record<string, unknown>>;
 };
 
+export type LocalDevHitchLogLocation = {
+  readonly protocol: string;
+  readonly hostname: string;
+  readonly port: string;
+};
+
 const DEFAULT_MAX_RECORDS = 30;
 const DEFAULT_CONSOLE_LOG_INTERVAL_MS = 1000;
 export const LOW_FPS_LOG_THRESHOLD = 60;
 export const LOW_FPS_LOG_INTERVAL_MS = 1000;
-const LOCAL_DEV_HITCH_LOG_ENDPOINT = "http://127.0.0.1:5174/__voxel_hitch_log";
+const LOCAL_DEV_HITCH_LOG_PORT_OFFSET = 1;
+const LOCAL_DEV_HITCH_LOG_FALLBACK_ENDPOINT = "http://127.0.0.1:5174/__voxel_hitch_log";
 const REMOTE_HITCH_LOG_BATCH_DELAY_MS = 1000;
 const REMOTE_HITCH_LOG_KEEPALIVE_MAX_BYTES = 60 * 1024;
 const TIMING_BUCKETS = [
@@ -220,7 +227,7 @@ export class PerformanceHitchLog {
   private writeToLocalDevLog(record: PerformanceHitchRecord): void {
     if (!canWriteLocalDevLog()) return;
 
-    void fetch(LOCAL_DEV_HITCH_LOG_ENDPOINT, {
+    void fetch(getLocalDevHitchLogEndpoint(), {
       method: "POST",
       headers: {
         "content-type": "application/json"
@@ -311,7 +318,7 @@ export function writeRuntimeDiagnosticEvent(input: RuntimeDiagnosticEventInput):
     details: input.details ?? {}
   };
 
-  void fetch(LOCAL_DEV_HITCH_LOG_ENDPOINT, {
+  void fetch(getLocalDevHitchLogEndpoint(), {
     method: "POST",
     headers: {
       "content-type": "application/json"
@@ -328,6 +335,22 @@ function canWriteLocalDevLog(): boolean {
   if (typeof window === "undefined" || typeof fetch !== "function") return false;
   const hostname = window.location.hostname;
   return hostname === "127.0.0.1" || hostname === "localhost";
+}
+
+function getLocalDevHitchLogEndpoint(): string {
+  return createLocalDevHitchLogEndpoint(window.location);
+}
+
+export function createLocalDevHitchLogEndpoint(location: LocalDevHitchLogLocation): string {
+  // Local branch pairs keep the log receiver one port above the app server:
+  // main runs 5173/5174, while this GPU experiment runs 5193/5194. Deriving
+  // the endpoint from the active app URL prevents branch-specific port splits
+  // from silently sending hitch logs to the wrong receiver.
+  const port = Number(location.port);
+  if (Number.isFinite(port) && port > 0) {
+    return `${location.protocol}//${location.hostname}:${port + LOCAL_DEV_HITCH_LOG_PORT_OFFSET}/__voxel_hitch_log`;
+  }
+  return LOCAL_DEV_HITCH_LOG_FALLBACK_ENDPOINT;
 }
 
 function canWriteRemoteProductionLog(): boolean {

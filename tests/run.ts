@@ -340,6 +340,7 @@ import {
 } from "../src/frameTimings";
 import {
   LOW_FPS_LOG_INTERVAL_MS,
+  createLocalDevHitchLogEndpoint,
   createPerformanceHitchRecord,
   formatPerformanceHitchRecord,
   PerformanceHitchLog,
@@ -2777,6 +2778,36 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
   assert(
     renderRecord.details.some((detail) => detail.includes("outside measured buckets")),
     "unaccounted JS-frame time should be visible in hitch details"
+  );
+});
+
+test("local hitch log endpoint follows the active dev server port", () => {
+  assertEqual(
+    createLocalDevHitchLogEndpoint({
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      port: "5193"
+    }),
+    "http://127.0.0.1:5194/__voxel_hitch_log",
+    "experiment branch should post hitch logs to its paired 5194 receiver"
+  );
+  assertEqual(
+    createLocalDevHitchLogEndpoint({
+      protocol: "http:",
+      hostname: "127.0.0.1",
+      port: "5173"
+    }),
+    "http://127.0.0.1:5174/__voxel_hitch_log",
+    "main branch should keep the historical 5173/5174 local pair"
+  );
+  assertEqual(
+    createLocalDevHitchLogEndpoint({
+      protocol: "http:",
+      hostname: "localhost",
+      port: ""
+    }),
+    "http://127.0.0.1:5174/__voxel_hitch_log",
+    "file-like or portless localhost sessions should keep the conservative fallback"
   );
 });
 

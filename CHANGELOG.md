@@ -17,6 +17,10 @@
   The slider now caps active debris bodies and derived Rapier body pressure,
   while thrown cores use their own active-core safety cap, HUD row, hitch-log
   counters, and Nova context wording.
+- Fixed local hitch/runtime diagnostic persistence on branch-specific dev ports.
+  The browser now derives the local log receiver from the active app port, so
+  the GPU experiment posts `5193` hitches to `5194` instead of silently aiming at
+  main's historical `5174` receiver.
 - Routed the main render loop through the new WebGL backend and hid legacy chunk
   meshes after visibility bookkeeping so the GPU terrain path owns normal terrain
   presentation while the old expanded mesh path remains available for parity.
