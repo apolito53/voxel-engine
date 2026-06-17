@@ -74,6 +74,9 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   assembled from partial holes crossing two or more neighboring blocks, confirm
   the player falls through openings at the intended width, and confirm narrower
   partial holes still support or block the player as expected.
+- Research/implementation plan: see `docs/player-partial-collision-plan.md` for
+  the current audit map, proposed footprint-aware support query, test matrix,
+  manual validation checklist, and risks.
 
 ## Worker Migration Roadmap
 
