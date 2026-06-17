@@ -1,4 +1,9 @@
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
+import {
+  CHUNK_SIZE,
+  EXPANDED_TERRAIN_SURFACE_OFFSET,
+  LEGACY_WORLD_HEIGHT,
+  WORLD_HEIGHT
+} from "./voxelConstants";
 import { isSuperflatSeed, type TerrainProfile } from "./terrain";
 
 const DATABASE_NAME = "voxel-engine";
@@ -13,6 +18,7 @@ const DEFAULT_WORLD_NAME = "Default World";
 const DEFAULT_WORLD_SEED = "";
 const VARIED_TERRAIN_PROFILE_INTRODUCED_AT = Date.UTC(2026, 4, 25, 4, 31, 0);
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
+const LEGACY_CHUNK_BYTE_LENGTH = CHUNK_SIZE * LEGACY_WORLD_HEIGHT * CHUNK_SIZE;
 
 export type SavedWorld = {
   readonly id: string;
@@ -38,6 +44,7 @@ export type SavedPlayerStateSnapshot = {
 
 export type SavedPlayerState = SavedPlayerStateSnapshot & {
   readonly savedAt: number;
+  readonly worldHeight: number;
 };
 
 export interface SaveDatabase {
@@ -50,7 +57,7 @@ export interface SaveDatabase {
   updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null>;
   deleteWorld(worldId: string): Promise<void>;
   listChunkKeys(worldId: string): Promise<string[]>;
-  loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null>;
+  loadChunk(worldId: string, chunkKey: string, options?: ChunkLoadOptions): Promise<Uint8Array | null>;
   saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void>;
   deleteChunk(worldId: string, chunkKey: string): Promise<void>;
 }
@@ -62,6 +69,12 @@ export interface ChunkStorage {
   saveChunk(key: string, blocks: Uint8Array): Promise<void>;
   deleteChunk(key: string): Promise<void>;
 }
+
+export type ChunkLoadOptions = {
+  readonly legacyHeightOffset?: number;
+};
+
+type ChunkStorageOptions = ChunkLoadOptions;
 
 type StoreName = typeof METADATA_STORE | typeof WORLDS_STORE | typeof CHUNKS_STORE;
 
@@ -84,9 +97,10 @@ let sharedDatabasePromise: Promise<SaveDatabase> | null = null;
 // restricted/private browser contexts usable without pretending that data is persisted.
 export async function createChunkStorage(
   worldId = DEFAULT_WORLD_ID,
-  database: SaveDatabase | Promise<SaveDatabase> = openSaveDatabase()
+  database: SaveDatabase | Promise<SaveDatabase> = openSaveDatabase(),
+  options: ChunkStorageOptions = {}
 ): Promise<ChunkStorage> {
-  return new IndexedDbChunkStorage(await database, worldId);
+  return new IndexedDbChunkStorage(await database, worldId, options);
 }
 
 export function createNullChunkStorage(worldId = DEFAULT_WORLD_ID): ChunkStorage {
@@ -232,9 +246,9 @@ class IndexedDbSaveDatabase implements SaveDatabase {
       .map((recordId) => recordId.slice(prefix.length));
   }
 
-  async loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null> {
+  async loadChunk(worldId: string, chunkKey: string, options: ChunkLoadOptions = {}): Promise<Uint8Array | null> {
     const record = await this.getRecord<ChunkRecord>(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
-    return decodeStoredBlocks(record?.blocks);
+    return decodeStoredBlocks(record?.blocks, options);
   }
 
   async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
@@ -374,9 +388,9 @@ class MemorySaveDatabase implements SaveDatabase {
       .map((recordId) => recordId.slice(prefix.length));
   }
 
-  async loadChunk(worldId: string, chunkKey: string): Promise<Uint8Array | null> {
+  async loadChunk(worldId: string, chunkKey: string, options: ChunkLoadOptions = {}): Promise<Uint8Array | null> {
     const blocks = this.chunks.get(chunkRecordId(worldId, chunkKey));
-    return blocks ? blocks.slice() : null;
+    return decodeStoredBlocks(blocks, options);
   }
 
   async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
@@ -393,10 +407,12 @@ class MemorySaveDatabase implements SaveDatabase {
 class IndexedDbChunkStorage implements ChunkStorage {
   readonly worldId: string;
   private readonly database: SaveDatabase;
+  private readonly legacyHeightOffset: number;
 
-  constructor(database: SaveDatabase, worldId: string) {
+  constructor(database: SaveDatabase, worldId: string, options: ChunkStorageOptions = {}) {
     this.database = database;
     this.worldId = worldId || DEFAULT_WORLD_ID;
+    this.legacyHeightOffset = Math.trunc(options.legacyHeightOffset ?? 0);
   }
 
   async listChunkKeys(): Promise<string[]> {
@@ -405,7 +421,9 @@ class IndexedDbChunkStorage implements ChunkStorage {
 
   async loadChunk(key: string): Promise<Uint8Array | null> {
     try {
-      return await this.database.loadChunk(this.worldId, key);
+      return await this.database.loadChunk(this.worldId, key, {
+        legacyHeightOffset: this.legacyHeightOffset
+      });
     } catch (error) {
       console.warn("Could not load persisted chunk edit", key, error);
       return null;
@@ -651,7 +669,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function createSavedPlayerState(snapshot: SavedPlayerStateSnapshot): SavedPlayerState | null {
   const normalizedSnapshot = normalizeSavedPlayerState({
     ...snapshot,
-    savedAt: Date.now()
+    savedAt: Date.now(),
+    worldHeight: WORLD_HEIGHT
   });
   return normalizedSnapshot;
 }
@@ -679,7 +698,8 @@ function normalizeSavedPlayerState(value: unknown): SavedPlayerState | null {
     feetPosition: { x, y, z },
     yaw,
     pitch,
-    savedAt: readTimestamp(value.savedAt)
+    savedAt: readTimestamp(value.savedAt),
+    worldHeight: readPositiveInteger(value.worldHeight) ?? LEGACY_WORLD_HEIGHT
   };
 }
 
@@ -688,8 +708,13 @@ function cloneSavedPlayerState(playerState: SavedPlayerState): SavedPlayerState 
     feetPosition: { ...playerState.feetPosition },
     yaw: playerState.yaw,
     pitch: playerState.pitch,
-    savedAt: playerState.savedAt
+    savedAt: playerState.savedAt,
+    worldHeight: playerState.worldHeight
   };
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
 }
 
 function readFiniteNumber(value: unknown): number | null {
@@ -702,18 +727,60 @@ function cloneChunkBuffer(blocks: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-function decodeStoredBlocks(blocks: unknown): Uint8Array | null {
+function decodeStoredBlocks(blocks: unknown, options: ChunkLoadOptions = {}): Uint8Array | null {
   if (!blocks) return null;
 
   const decoded = decodeBinaryPayload(blocks);
   if (!decoded) return null;
 
   if (decoded.length !== CHUNK_BYTE_LENGTH) {
-    // A length mismatch means this payload belongs to another chunk shape or a corrupt save.
+    if (decoded.length === LEGACY_CHUNK_BYTE_LENGTH) {
+      return expandLegacyChunkBlocks(decoded, Math.trunc(options.legacyHeightOffset ?? 0));
+    }
+
+    // A non-migratable length mismatch means this payload belongs to another chunk shape or a corrupt save.
     return null;
   }
 
   return decoded;
+}
+
+function expandLegacyChunkBlocks(blocks: Uint8Array, verticalOffset: number): Uint8Array {
+  const expanded = new Uint8Array(CHUNK_BYTE_LENGTH);
+  const safeOffset = Math.max(0, Math.min(WORLD_HEIGHT - LEGACY_WORLD_HEIGHT, verticalOffset));
+
+  // Old saves used the same X/Z footprint and a 48-block Y span. Classic worlds
+  // keep absolute Y. Varied worlds opt into the expanded terrain lift so edited
+  // chunks line up with their newly generated neighbors instead of forming old
+  // low shelves beside raised terrain.
+  for (let y = 0; y < LEGACY_WORLD_HEIGHT; y += 1) {
+    const sourceStart = CHUNK_SIZE * CHUNK_SIZE * y;
+    const targetStart = CHUNK_SIZE * CHUNK_SIZE * (y + safeOffset);
+    expanded.set(blocks.subarray(sourceStart, sourceStart + CHUNK_SIZE * CHUNK_SIZE), targetStart);
+  }
+
+  return expanded;
+}
+
+export function getLegacyWorldHeightOffset(terrainProfile: TerrainProfile): number {
+  return terrainProfile === "varied" ? EXPANDED_TERRAIN_SURFACE_OFFSET : 0;
+}
+
+export function migrateSavedPlayerStateHeight(savedWorld: SavedWorld): SavedPlayerStateSnapshot | null {
+  const playerState = savedWorld.playerState;
+  if (!playerState) return null;
+
+  const legacyOffset = getLegacyWorldHeightOffset(savedWorld.terrainProfile);
+  if (legacyOffset <= 0 || playerState.worldHeight >= WORLD_HEIGHT) return playerState;
+
+  return {
+    feetPosition: {
+      ...playerState.feetPosition,
+      y: playerState.feetPosition.y + legacyOffset
+    },
+    yaw: playerState.yaw,
+    pitch: playerState.pitch
+  };
 }
 
 function decodeBinaryPayload(payload: unknown): Uint8Array | null {

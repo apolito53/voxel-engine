@@ -40,8 +40,11 @@ import {
 } from "./builderTools";
 import { BuilderBrushPreview } from "./builderPreview";
 import {
+  type ChunkStorage,
   createChunkStorage,
   createWorldRegistry,
+  getLegacyWorldHeightOffset,
+  migrateSavedPlayerStateHeight,
   type SavedPlayerStateSnapshot,
   type SavedWorld,
   type WorldRegistry
@@ -316,6 +319,7 @@ import {
   stepTerraformerSize
 } from "./terraformerSettings";
 import { SUPERFLAT_WORLD_SEED } from "./terrain";
+import { WORLD_HEIGHT } from "./voxelConstants";
 import {
   TEST_AVATAR_QUERY_PARAM,
   TEST_AVATAR_TOGGLE_KEY,
@@ -1010,12 +1014,21 @@ function requirePlayer(): PlayerController {
   return player;
 }
 
+function createStorageForSavedWorld(savedWorld: SavedWorld): Promise<ChunkStorage> {
+  // Saved chunks are full vertical snapshots. When the varied terrain surface
+  // moved upward for the 96m world, legacy 48m edited chunks needed the same
+  // read-time lift so touched and untouched terrain keep lining up.
+  return createChunkStorage(savedWorld.id, undefined, {
+    legacyHeightOffset: getLegacyWorldHeightOffset(savedWorld.terrainProfile)
+  });
+}
+
 async function startApp(): Promise<void> {
   try {
     worldRegistry = await createWorldRegistry();
     const initialWorld = await worldRegistry.getActiveWorld();
     world = new VoxelWorld({
-      storage: await createChunkStorage(initialWorld.id),
+      storage: await createStorageForSavedWorld(initialWorld),
       seed: initialWorld.seed,
       terrainProfile: initialWorld.terrainProfile,
       workerPool
@@ -4712,8 +4725,10 @@ async function loadWorld(worldId: string): Promise<void> {
     const activePlayer = requirePlayer();
     const activeWorldId = await registry.setActiveWorld(worldId);
     const savedWorld = await registry.getActiveWorld();
-    const chunkStorage = await createChunkStorage(activeWorldId);
-    const loadOrigin = savedWorld.playerState?.feetPosition ?? { x: 2, z: 2 };
+    const chunkStorage = await createStorageForSavedWorld(savedWorld);
+    const loadState = createPlayerLoadState(activeWorld, savedWorld);
+    const loadOrigin = loadState.feetPosition;
+    const shouldPersistMigratedPlayerState = hasLegacyExpandedHeightPlayerState(savedWorld);
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
@@ -4732,7 +4747,6 @@ async function loadWorld(worldId: string): Promise<void> {
       qualityController.initialLoadRadius
     );
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
-    const loadState = createPlayerLoadState(activeWorld, savedWorld);
     placePlayerAtSavedLocation(activePlayer, activeWorld, loadState);
     camera.getWorldDirection(direction);
     novaPilot.setActive(true, camera.position, direction, activeWorld);
@@ -4753,6 +4767,9 @@ async function loadWorld(worldId: string): Promise<void> {
     debugHud.reset();
     minimapRenderer.reset();
     activePlayer.resume();
+    if (shouldPersistMigratedPlayerState) {
+      void queuePlayerLocationSave(loadState, true);
+    }
     maybeStartTestAvatarFromUrl();
   } finally {
     worldTransitioning = false;
@@ -4844,7 +4861,16 @@ async function exitToHome(): Promise<void> {
 }
 
 function createPlayerLoadState(activeWorld: VoxelWorld, savedWorld: SavedWorld): SavedPlayerStateSnapshot {
-  return savedWorld.playerState ?? createDefaultPlayerLocation(activeWorld, 2, 2);
+  return migrateSavedPlayerStateHeight(savedWorld) ?? createDefaultPlayerLocation(activeWorld, 2, 2);
+}
+
+function hasLegacyExpandedHeightPlayerState(savedWorld: SavedWorld): boolean {
+  const playerState = savedWorld.playerState;
+  return Boolean(
+    playerState &&
+    playerState.worldHeight < WORLD_HEIGHT &&
+    getLegacyWorldHeightOffset(savedWorld.terrainProfile) > 0
+  );
 }
 
 function createDefaultPlayerLocation(activeWorld: VoxelWorld, x: number, z: number): SavedPlayerStateSnapshot {

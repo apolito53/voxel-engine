@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-06-13
+Last reviewed: 2026-06-17
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -10,7 +10,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Three.js handles rendering, camera, materials, lights, and meshes.
 - Rapier (`@dimforge/rapier3d-compat`) handles active rigid-body cuboid-envelope debris inside the player bubble through the local `src/rigidDebris.ts` adapter.
 - Vercel Blob (`@vercel/blob`) stores deployed production hitch logs as private JSONL blobs through the Vercel function in `api/hitch-log.ts`.
-- World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.ts`.
+- World units are metric: `1 block = 1 meter`, defined by `METERS_PER_BLOCK` in `src/voxelConstants.ts`; the active world height is 96m, with `LEGACY_WORLD_HEIGHT` retained for 48m save expansion.
 - The app code owns chunks, terrain generation, voxel meshing, partial-block terrain carving, player movement, collision, ray picking, split item/block selection, HUD, minimap, admin/test-lab/builder tooling, impact damage, parked crater/scar visuals, debris VFX lifetime/cleanup, parked rubble cover proxies, projectile physics toys/cores, and hitscan cores.
 
 ## Commands
@@ -69,9 +69,9 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Player-bubble-owned debris regions, VFX-mode far/budget expiration, optional parked rubble finalization for tests/experiments, and legacy non-Rapier glue/contact helpers: `src/debrisSettler.ts`
 - Short-lived material-tinted poofs shared by partial-block bite-cell destruction feedback and grounded debris cleanup: `src/debrisPoof.ts`
 - Parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments: `src/fragmentRubble.ts`
-- Shared world scale, chunk dimensions, and world height constants: `src/voxelConstants.ts`
-- IndexedDB storage adapter for saved worlds, saved terrain-profile provenance, player resume location, save deletion, and edited chunk persistence: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, varied new-world landforms, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
+- Shared world scale, chunk dimensions, current 96m world height, legacy 48m height, and varied-terrain lift constants: `src/voxelConstants.ts`
+- IndexedDB storage adapter for saved worlds, saved terrain-profile provenance, player resume location, save deletion, edited chunk persistence, legacy 48m chunk expansion, and legacy varied-world player-height migration: `src/chunkStorage.ts`
+- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, 96m-lifted varied new-world landforms, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
 - Shared chunk worker request/result message contracts, including terrain-profile generation provenance, per-face atlas UV/tile attributes, and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
 - Worker-safe chunk terrain generation and greedy mesh buffer jobs, including terrain-profile-aware generation caches and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkJobs.ts`

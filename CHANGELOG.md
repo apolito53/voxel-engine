@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.11.13 - 2026-06-17
+
+### Changed
+
+- Doubled the vertical world span from 48m to 96m so worlds can support taller
+  builds and deeper underground play.
+- Lifted the varied terrain profile into the expanded vertical volume, keeping
+  the old landform shape while adding meaningful material below natural terrain
+  and preserving headroom above the tallest generated surfaces.
+
+### Fixed
+
+- Added legacy 48m save expansion for edited chunks so existing varied worlds
+  do not load old touched chunks at their original low heights beside newly
+  generated raised terrain.
+- Added player-resume height migration for legacy varied worlds, with current
+  96m saves marked by world height so the lift is not applied twice.
+
 ## 0.11.12 - 2026-06-15
 
 ### Fixed

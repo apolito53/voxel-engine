@@ -1,6 +1,6 @@
 import { BLOCK, type BlockId } from "./blocks";
 import { clamp, fbm2, smoothstep } from "./math";
-import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
+import { CHUNK_SIZE, EXPANDED_TERRAIN_SURFACE_OFFSET, WORLD_HEIGHT } from "./voxelConstants";
 
 export type TerrainProfile = "classic" | "varied";
 
@@ -209,7 +209,10 @@ export function getTerrainHeight(wx: number, wz: number, terrain: TerrainContext
   const terracedHeight = Math.round(height / 2) * 2;
   height += (terracedHeight - height) * terraceMask * 0.35;
 
-  return Math.floor(clamp(height, 2, WORLD_HEIGHT - 6));
+  // The expanded world keeps the old terrain shape but lifts the varied profile
+  // into the taller volume. That buys both build headroom and meaningful depth
+  // below natural terrain without changing every landform formula at once.
+  return Math.floor(clamp(height + EXPANDED_TERRAIN_SURFACE_OFFSET, 2, WORLD_HEIGHT - 6));
 }
 
 export function getTerrainSurfaceBlock(
@@ -239,8 +242,15 @@ export function getTerrainSurfaceBlock(
   );
   const ridge = Math.pow(1 - Math.abs(ridgeSource), 2.35);
 
-  if (height >= 31 || (height >= 27 && ridge > 0.74 && climate < 0.58)) return BLOCK.stone;
-  if (height <= 8 || (wash > 0.78 && height <= 20) || (climate < 0.18 && height <= 17)) return BLOCK.sand;
+  const featureHeight = getTerrainFeatureHeight(height, terrain);
+  if (featureHeight >= 31 || (featureHeight >= 27 && ridge > 0.74 && climate < 0.58)) return BLOCK.stone;
+  if (
+    featureHeight <= 8 ||
+    (wash > 0.78 && featureHeight <= 20) ||
+    (climate < 0.18 && featureHeight <= 17)
+  ) {
+    return BLOCK.sand;
+  }
   return BLOCK.grass;
 }
 
@@ -406,10 +416,14 @@ function getTreeProbability(wx: number, wz: number, surfaceY: number, terrain: T
     4
   );
   const washPenalty = 1 - smoothstep(0.02, 0.16, Math.abs(washSource));
-  const elevationPenalty = smoothstep(25, 32, surfaceY);
+  const elevationPenalty = smoothstep(25, 32, getTerrainFeatureHeight(surfaceY, terrain));
   const groveWeight = smoothstep(0.42, 0.78, grove);
   const climateWeight = smoothstep(0.25, 0.48, climate) * (1 - smoothstep(0.78, 0.95, climate));
   return clamp(groveWeight * climateWeight * (1 - washPenalty) * (1 - elevationPenalty) * 0.58, 0, 0.45);
+}
+
+function getTerrainFeatureHeight(height: number, terrain: TerrainContext): number {
+  return terrain.profile === "varied" ? height - EXPANDED_TERRAIN_SURFACE_OFFSET : height;
 }
 
 function setDecoratedBlockIfInside(

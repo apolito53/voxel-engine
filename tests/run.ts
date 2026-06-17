@@ -296,11 +296,15 @@ import {
   getPlayerSpeedMetersPerSecond
 } from "../src/playerSpeed";
 import {
+  createChunkStorage,
   createMemorySaveDatabase,
   createWorldRegistry,
+  getLegacyWorldHeightOffset,
   getNewWorldTerrainProfile,
+  migrateSavedPlayerStateHeight,
   normalizeSavedTerrainProfile,
-  type ChunkStorage
+  type ChunkStorage,
+  type SavedWorld
 } from "../src/chunkStorage";
 import { parseChangelogEntries } from "../src/changelog";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
@@ -449,7 +453,12 @@ import {
 } from "../src/visualTestScenarios";
 import { createCoreBreakTestPlan, createYawPitchToward } from "../src/testAvatar";
 import { getSunlitFaceShade } from "../src/voxelLighting";
-import { CHUNK_SIZE, WORLD_HEIGHT } from "../src/voxelConstants";
+import {
+  CHUNK_SIZE,
+  EXPANDED_TERRAIN_SURFACE_OFFSET,
+  LEGACY_WORLD_HEIGHT,
+  WORLD_HEIGHT
+} from "../src/voxelConstants";
 import { VoxelWorld, type BlockDamageBrushPreview } from "../src/world";
 import { WorkerPool, getDefaultWorkerPoolSize, normalizeWorkerPoolSize } from "../src/workerPool";
 import { getSkyboxAlignedSunDirection } from "../src/skybox";
@@ -1541,6 +1550,31 @@ test("seeded terrain generation creates varied landforms and surfaces", () => {
   assert(surfaceBlocks.has(BLOCK.sand), "varied terrain should create sandy lowlands or washes");
   assert(surfaceBlocks.has(BLOCK.stone), "varied terrain should expose rocky highland surfaces");
   assert(grassSurfaces > sandSurfaces, "varied terrain should not let sandy washes dominate the common surface");
+});
+
+test("expanded world height gives varied terrain more vertical room", () => {
+  const terrain = createTerrainContext("expanded-height-test", "varied");
+  const heights: number[] = [];
+
+  for (let z = -192; z <= 192; z += 12) {
+    for (let x = -192; x <= 192; x += 12) {
+      heights.push(getTerrainHeight(x, z, terrain));
+    }
+  }
+
+  assertEqual(WORLD_HEIGHT, LEGACY_WORLD_HEIGHT * 2, "world height should be doubled from the old 48m limit");
+  assert(
+    Math.min(...heights) >= EXPANDED_TERRAIN_SURFACE_OFFSET,
+    "expanded varied terrain should keep enough material below ordinary surfaces for deeper underground play"
+  );
+  assert(
+    Math.max(...heights) > LEGACY_WORLD_HEIGHT,
+    "expanded varied terrain should use the upper half of the taller world instead of leaving it as empty sky"
+  );
+  assert(
+    Math.max(...heights) <= WORLD_HEIGHT - 6,
+    "expanded varied terrain should still leave buildable headroom above the tallest generated land"
+  );
 });
 
 test("varied terrain decorates deterministic voxel trees", () => {
@@ -3503,6 +3537,80 @@ test("world coalesces repeated chunk saves before flushing storage", async () =>
   );
 });
 
+test("chunk storage expands legacy 48m chunk payloads without offset by default", async () => {
+  const database = createMemorySaveDatabase();
+  const legacyBlocks = new Uint8Array(CHUNK_SIZE * LEGACY_WORLD_HEIGHT * CHUNK_SIZE);
+  const legacyIndex = (x: number, y: number, z: number): number => x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
+  const currentIndex = (x: number, y: number, z: number): number => x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
+
+  legacyBlocks[legacyIndex(2, 4, 3)] = BLOCK.wood;
+  legacyBlocks[legacyIndex(5, LEGACY_WORLD_HEIGHT - 1, 6)] = BLOCK.ember;
+
+  await database.saveChunk("legacy-height-world", "0,0", legacyBlocks);
+  const loaded = await database.loadChunk("legacy-height-world", "0,0");
+
+  assert(loaded, "legacy chunk payload should load instead of being discarded as corrupt");
+  assertEqual(
+    loaded.length,
+    CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE,
+    "legacy chunk payload should expand to the current world-height byte length"
+  );
+  assertEqual(
+    loaded[currentIndex(2, 4, 3)],
+    BLOCK.wood,
+    "legacy low-elevation edits should keep their original world-space Y coordinate"
+  );
+  assertEqual(
+    loaded[currentIndex(5, LEGACY_WORLD_HEIGHT - 1, 6)],
+    BLOCK.ember,
+    "legacy top-layer edits should survive at the old 48m ceiling"
+  );
+  assertEqual(
+    loaded[currentIndex(5, WORLD_HEIGHT - 1, 6)],
+    BLOCK.air,
+    "new upper-half chunk space should start empty after legacy migration"
+  );
+});
+
+test("varied saved-world storage lifts legacy 48m chunks to match expanded terrain", async () => {
+  const database = createMemorySaveDatabase();
+  const legacyBlocks = new Uint8Array(CHUNK_SIZE * LEGACY_WORLD_HEIGHT * CHUNK_SIZE);
+  const legacyIndex = (x: number, y: number, z: number): number => x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
+  const currentIndex = (x: number, y: number, z: number): number => x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
+  const legacyOffset = getLegacyWorldHeightOffset("varied");
+
+  legacyBlocks[legacyIndex(2, 4, 3)] = BLOCK.wood;
+  legacyBlocks[legacyIndex(5, LEGACY_WORLD_HEIGHT - 1, 6)] = BLOCK.ember;
+
+  await database.saveChunk("legacy-varied-height-world", "0,0", legacyBlocks);
+  const storage = await createChunkStorage("legacy-varied-height-world", database, {
+    legacyHeightOffset: legacyOffset
+  });
+  const loaded = await storage.loadChunk("0,0");
+
+  assert(loaded, "varied legacy chunk payload should load through the world storage adapter");
+  assertEqual(
+    loaded[currentIndex(2, 4 + legacyOffset, 3)],
+    BLOCK.wood,
+    "varied legacy chunk edits should lift by the same offset as regenerated terrain"
+  );
+  assertEqual(
+    loaded[currentIndex(2, 4, 3)],
+    BLOCK.air,
+    "varied legacy chunk reads should not leave a duplicate copy at the old low elevation"
+  );
+  assertEqual(
+    loaded[currentIndex(5, LEGACY_WORLD_HEIGHT - 1 + legacyOffset, 6)],
+    BLOCK.ember,
+    "the old legacy ceiling should map upward by the varied-world lift without claiming all new build headroom"
+  );
+  assertEqual(
+    loaded[currentIndex(5, WORLD_HEIGHT - 1, 6)],
+    BLOCK.air,
+    "new build headroom above lifted legacy chunks should stay empty"
+  );
+});
+
 test("world registry deletes saved worlds and their edited chunks", async () => {
   const database = createMemorySaveDatabase();
   const registry = await createWorldRegistry(database);
@@ -3573,6 +3681,58 @@ test("world registry stores terrain profile provenance", async () => {
   );
 });
 
+test("legacy varied-world player locations migrate into the expanded height band", () => {
+  const legacyVariedWorld: SavedWorld = {
+    id: "legacy-player-height",
+    name: "Legacy Player Height",
+    seed: "legacy-player-seed",
+    terrainProfile: "varied",
+    createdAt: 1,
+    updatedAt: 2,
+    playerState: {
+      feetPosition: { x: 12, y: 18, z: -4 },
+      yaw: 0.25,
+      pitch: -0.125,
+      savedAt: 3,
+      worldHeight: LEGACY_WORLD_HEIGHT
+    }
+  };
+  const migrated = migrateSavedPlayerStateHeight(legacyVariedWorld);
+
+  assert(migrated, "legacy varied player state should still produce a playable spawn state");
+  assertDeepEqual(
+    migrated.feetPosition,
+    { x: 12, y: 18 + EXPANDED_TERRAIN_SURFACE_OFFSET, z: -4 },
+    "legacy varied player feet should lift by the same offset as legacy edited chunks"
+  );
+  assertEqual(migrated.yaw, 0.25, "height migration should preserve yaw");
+  assertEqual(migrated.pitch, -0.125, "height migration should preserve pitch");
+
+  const currentVariedWorld: SavedWorld = {
+    ...legacyVariedWorld,
+    playerState: {
+      ...legacyVariedWorld.playerState,
+      feetPosition: { x: 12, y: 58, z: -4 },
+      worldHeight: WORLD_HEIGHT
+    }
+  };
+  assertDeepEqual(
+    migrateSavedPlayerStateHeight(currentVariedWorld)?.feetPosition,
+    { x: 12, y: 58, z: -4 },
+    "current-height varied player state should not be lifted a second time"
+  );
+
+  const legacyClassicWorld: SavedWorld = {
+    ...legacyVariedWorld,
+    terrainProfile: "classic"
+  };
+  assertDeepEqual(
+    migrateSavedPlayerStateHeight(legacyClassicWorld)?.feetPosition,
+    { x: 12, y: 18, z: -4 },
+    "classic legacy player state should keep absolute world-space height"
+  );
+});
+
 test("world registry stores player location with saved-world metadata", async () => {
   const database = createMemorySaveDatabase();
   const registry = await createWorldRegistry(database);
@@ -3595,6 +3755,7 @@ test("world registry stores player location with saved-world metadata", async ()
   assertEqual(playerState.yaw, 1.125, "saved location should preserve horizontal look angle");
   assertEqual(playerState.pitch, -0.35, "saved location should preserve vertical look angle");
   assert(playerState.savedAt > 0, "saved location should include a write timestamp");
+  assertEqual(playerState.worldHeight, WORLD_HEIGHT, "saved location should record the current world height");
   assert(
     savedWorld.updatedAt >= playerState.savedAt,
     "saving player location should refresh the world's updated timestamp"
@@ -8921,6 +9082,16 @@ test("hitscan debris beam touches active and sleeping fragments without blocking
   }
 
   const world = new VoxelWorld({ seed: "hitscan-debris-nonblocking-test" });
+  // The hitscan assertion needs a controlled air corridor. Terrain height can
+  // legitimately move as the world shape evolves, so do not let generated
+  // ground at the ray origin masquerade as a debris/beam regression.
+  for (let x = 0; x < 6; x += 1) {
+    for (let y = 19; y <= 21; y += 1) {
+      for (let z = -1; z <= 1; z += 1) {
+        world.setBlock(x, y, z, BLOCK.air);
+      }
+    }
+  }
   world.setBlock(6, 20, 0, BLOCK.stone);
   const terrainHit = raycastHitscanCore(world, new THREE.Vector3(0, 20, 0), new THREE.Vector3(1, 0, 0), 8);
   assertDeepEqual(

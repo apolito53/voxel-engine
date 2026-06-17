@@ -9,7 +9,9 @@ mesh generation use a shared browser `WorkerPool` with priority lanes and sync
 fallbacks, keeping the browser-first engine portable while opening the door for
 more CPU-heavy systems to move off the main thread.
 
-World units are metric: `1 block = 1 meter`.
+World units are metric: `1 block = 1 meter`. The active world volume is 96m
+tall, with legacy 48m edited chunk saves expanded on read so older maps remain
+aligned with the current terrain profile.
 
 Edited chunks and the last player location persist in IndexedDB browser storage.
 Clear this site's browser data to reset saved worlds. The home screen creates,
@@ -18,12 +20,16 @@ using the reserved `superflat` seed.
 
 New saved-world seeds use the newer varied terrain profile with broader plains,
 ridges, sandy washes, terraced high ground, rocky highlands, and deterministic
-voxel trees on grassy gentle ground. Existing saved worlds without
-terrain-profile metadata stay on the legacy `classic` generator so full edited
-chunk snapshots do not border newly streamed terrain from a different profile.
-The varied profile keeps sand focused on lowlands and wash channels so generated
-worlds still read primarily as traversable grass and highland terrain;
-`superflat` remains reserved for clear test labs.
+voxel trees on grassy gentle ground. The varied profile is lifted into the 96m
+world height so natural terrain has deeper material below it and buildable
+headroom above it. Existing saved worlds without terrain-profile metadata stay
+on the legacy `classic` generator so full edited chunk snapshots do not border
+newly streamed terrain from a different profile. Legacy varied-world chunks and
+player resume locations are lifted when read so touched chunks do not remain
+stuck at their old 48m-era heights. The varied profile keeps sand focused on
+lowlands and wash channels so generated worlds still read primarily as
+traversable grass and highland terrain; `superflat` remains reserved for clear
+test labs.
 
 ## Quick Start
 
