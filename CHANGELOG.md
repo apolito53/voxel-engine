@@ -19,6 +19,10 @@
 - Moved damaged partial terrain to unlit voxel-style materials on the
   renderer-overhaul branch so exposed crater faces do not inherit legacy
   standard-material lighting that reads as broken shadows beside GPU terrain.
+- Moved damaged partial-terrain presentation behind the WebGL render backend.
+  The CPU still owns partial-block truth/collision/raycast, but the backend now
+  owns regional partial-terrain scene objects, material disposal, and render
+  stats so a later shader-first page renderer can replace the interim mesh path.
 - Moved this experiment branch to separate local defaults from main:
   `5193` for the Vite app, `5194` for hitch/combat logs, and `4193` for preview.
 

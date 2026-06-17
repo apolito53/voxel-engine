@@ -330,6 +330,13 @@ export class DebugHud {
               : "legacy chunks"
           },
           {
+            label: "partial",
+            value: renderBackendStats
+              ? `${renderBackendStats.partialTerrain.regions} gpu regions, ` +
+                `${renderBackendStats.partialTerrain.triangles} tris`
+              : `${snapshot.partialMeshStats.regions} regions`
+          },
+          {
             label: "upload",
             value: renderBackendStats
               ? `${formatBytes(renderBackendStats.terrain.uploadBytesThisFrame)}/frame, ` +

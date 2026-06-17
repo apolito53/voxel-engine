@@ -1,7 +1,10 @@
 import * as THREE from "three";
 import { WebGlGpuTimer } from "./gpu";
+import { GpuPartialTerrainRenderer } from "./gpuPartialTerrainRenderer";
 import { GpuTerrainRenderer } from "./gpuTerrainRenderer";
 import type { ChunkMeshedResult } from "./chunkProtocol";
+import type { PartialBlockMeshStats } from "./partialBlockMeshField";
+import type { PartialBlockMeshGeometryData } from "./partialBlocks";
 import type { QualityPreset } from "./qualityPresets";
 import type {
   GpuTimerFrameStats,
@@ -21,6 +24,7 @@ export class WebGlRenderBackend implements RenderBackend {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly gpuTimer: WebGlGpuTimer;
   private readonly terrain: GpuTerrainRenderer;
+  private readonly partialTerrain: GpuPartialTerrainRenderer;
   private gpuTimerStats: GpuTimerFrameStats = {
     supported: false,
     pendingQueries: 0,
@@ -37,6 +41,9 @@ export class WebGlRenderBackend implements RenderBackend {
       fogColor: options.fogColor,
       fogNear: options.initialQuality.fogNear,
       fogFar: options.initialQuality.fogFar
+    });
+    this.partialTerrain = new GpuPartialTerrainRenderer({
+      scene: options.scene
     });
     this.applyQuality(options.initialQuality);
   }
@@ -66,6 +73,30 @@ export class WebGlRenderBackend implements RenderBackend {
     this.terrain.updateVisibility(centerCx, centerCz, renderRadius);
   }
 
+  beginPartialTerrainUpdate(dirtyRegionCount: number): void {
+    this.partialTerrain.beginUpdate(dirtyRegionCount);
+  }
+
+  setPartialTerrainDirtyRegionCount(dirtyRegionCount: number): void {
+    this.partialTerrain.setDirtyRegionCount(dirtyRegionCount);
+  }
+
+  applyPartialTerrainRegionGeometry(
+    key: string,
+    cellCount: number,
+    geometryData: PartialBlockMeshGeometryData
+  ): void {
+    this.partialTerrain.applyRegionGeometry(key, cellCount, geometryData);
+  }
+
+  clearPartialTerrain(): void {
+    this.partialTerrain.clear();
+  }
+
+  getPartialTerrainStats(): PartialBlockMeshStats {
+    return this.partialTerrain.getStats();
+  }
+
   updateFrame(_context: RenderFrameContext): void {
     // The first backend cut keeps simulation systems responsible for their own
     // render helpers. This hook is where GPU-owned VFX and debug draw will move
@@ -84,13 +115,15 @@ export class WebGlRenderBackend implements RenderBackend {
 
   getStats(): RenderBackendStats {
     return {
-      name: "WebGL2 GPU terrain",
+      name: "WebGL2 GPU terrain + partial",
       gpuTimer: this.gpuTimerStats,
-      terrain: this.terrain.getStats()
+      terrain: this.terrain.getStats(),
+      partialTerrain: this.partialTerrain.getStats()
     };
   }
 
   dispose(): void {
+    this.partialTerrain.dispose();
     this.terrain.dispose();
     this.gpuTimer.dispose();
   }

@@ -216,6 +216,7 @@ import {
   type PartialBlockCell
 } from "../src/partialBlocks";
 import { PartialBlockMeshField } from "../src/partialBlockMeshField";
+import { GpuPartialTerrainRenderer } from "../src/gpuPartialTerrainRenderer";
 import {
   PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
   shouldDeferPartialBlockMeshUpdate
@@ -4722,6 +4723,52 @@ test("partial block field disposes empty regions", () => {
   assertEqual(field.getStats().regions, 0, "empty partial mesh regions should not count as live draw regions");
 
   field.dispose();
+});
+
+test("GPU partial terrain renderer owns regional damaged-terrain presentation", () => {
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const renderer = new GpuPartialTerrainRenderer({ scene, material });
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 2, y: 3, z: 4 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0.15, y: 0.5, z: 0.5 },
+      radius: 0.36,
+      depth: 0.4,
+      seed: 444
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 12,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, () => true);
+  const geometry = buildPartialBlockMeshGeometryData({ update, faceVisibilityMasks: masks });
+
+  renderer.beginUpdate(1);
+  renderer.applyRegionGeometry(update.key, update.cells.length, geometry);
+  const regionMesh = renderer.getRegionMesh(update.key);
+
+  assert(regionMesh, "renderer-owned partial terrain should create a region mesh");
+  assertEqual(scene.children.length, 1, "partial terrain renderer should expose one scene root");
+  assertEqual(scene.children[0].name, "GPU partial terrain field", "scene root should identify backend ownership");
+  assertEqual(renderer.getStats().regions, 1, "renderer stats should count live partial terrain regions");
+  assertEqual(renderer.getStats().cells, 1, "renderer stats should count damaged partial cells");
+
+  renderer.setDirtyRegionCount(3);
+  assertEqual(renderer.getStats().dirtyRegions, 3, "renderer stats should preserve pending dirty-region pressure");
+
+  renderer.clear();
+  assertEqual(renderer.getStats().regions, 0, "clearing the renderer should release regional presentation meshes");
+  renderer.dispose();
+  material.dispose();
+  assertEqual(scene.children.length, 0, "disposing should remove renderer-owned partial terrain from the scene");
 });
 
 test("partial block collision boxes represent remaining lattice cells", () => {

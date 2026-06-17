@@ -24,7 +24,6 @@ import {
   type DebrisSpawnProfile
 } from "./blockMaterialRules";
 import {
-  createUnlitWorldBlockMaterial,
   createWorldBlockMaterial,
   disposeWorldBlockMaterial
 } from "./blockTextureAtlas";
@@ -161,7 +160,6 @@ import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { shouldDeferPartialBlockMeshUpdate } from "./partialBlockMeshBudget";
-import { PartialBlockMeshField } from "./partialBlockMeshField";
 import {
   PARTIAL_BLOCK_CORE_DAMAGE,
   createPartialBlockFaceVisibilityMasks,
@@ -551,7 +549,6 @@ const skybox = createSkybox(SUN_OFFSET);
 scene.add(skybox.object);
 
 const worldMaterial = createWorldBlockMaterial();
-const partialBlockMaterial = createUnlitWorldBlockMaterial({ side: THREE.DoubleSide });
 
 const targetBlockHighlighter = new TargetBlockHighlighter();
 scene.add(targetBlockHighlighter.object);
@@ -705,7 +702,6 @@ const workerPool = new WorkerPool({
     name: "voxel-engine-worker-pool"
   })
 });
-const partialBlockMeshField = new PartialBlockMeshField(scene, partialBlockMaterial);
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
@@ -2071,7 +2067,7 @@ function animate(): void {
   let debugPlayerVelocity: THREE.Vector3 | null = null;
   let debugWorldStats: WorldStats | null = null;
   let debugRubbleStats: RubbleFieldStats | null = null;
-  let debugPartialMeshStats = partialBlockMeshField.getStats();
+  let debugPartialMeshStats = renderBackend.getPartialTerrainStats();
   let debugMinimapMs = minimapRenderer.lastUpdateMs;
 
   const recordTimingSection = (section: FrameTimingSection): void => {
@@ -2207,7 +2203,7 @@ function animate(): void {
       debugPlayerChunk.cz,
       qualityController.chunkRenderRadius
     );
-    debugPartialMeshStats = partialBlockMeshField.getStats();
+    debugPartialMeshStats = renderBackend.getPartialTerrainStats();
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
     updateHud();
@@ -2539,7 +2535,7 @@ function createCurrentPerformanceStatsSnapshot(
     physics: physicsCollisionStats,
     rigidDebris: rigidDebrisStats,
     fragmentRender: physicsFragmentInstancer.getStats(),
-    partialMesh: overrides.partialMesh ?? partialBlockMeshField.getStats(),
+    partialMesh: overrides.partialMesh ?? renderBackend.getPartialTerrainStats(),
     debrisSettler: debrisSettlerStats,
     debrisLifecycle: debrisLifecycleDiagnostics,
     rubble: overrides.rubble ?? rubbleField.getStats(),
@@ -3162,7 +3158,7 @@ function createHitscanRubbleAimPreviewPrediction(
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
   const revision = activeWorld.getPartialBlockGeometryRevision();
   const dirtyRegionCount = activeWorld.getDirtyPartialBlockMeshRegionCount();
-  partialBlockMeshField.beginUpdate(dirtyRegionCount + pendingPartialBlockMeshJobs.size);
+  renderBackend.beginPartialTerrainUpdate(dirtyRegionCount + pendingPartialBlockMeshJobs.size);
   if (revision === renderedPartialBlockRevision && dirtyRegionCount === 0 && pendingPartialBlockMeshJobs.size === 0) return;
   if (dirtyRegionCount === 0) {
     refreshRenderedPartialBlockRevision(activeWorld);
@@ -3188,7 +3184,7 @@ function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
     schedulePartialBlockMeshRegionBuild(activeWorld, update);
   }
 
-  partialBlockMeshField.setDirtyRegionCount(
+  renderBackend.setPartialTerrainDirtyRegionCount(
     activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
   );
   refreshRenderedPartialBlockRevision(activeWorld);
@@ -3204,7 +3200,7 @@ function schedulePartialBlockMeshRegionBuild(
 
   if (update.cells.length === 0) {
     pendingPartialBlockMeshJobs.delete(update.key);
-    partialBlockMeshField.updateRegionGeometry(update.key, 0, {
+    renderBackend.applyPartialTerrainRegionGeometry(update.key, 0, {
       positions: new Float32Array(),
       normals: new Float32Array(),
       colors: new Float32Array(),
@@ -3250,13 +3246,13 @@ function schedulePartialBlockMeshRegionBuild(
     }
 
     const uploadStartedAt = performance.now();
-    partialBlockMeshField.updateRegionGeometry(
+    renderBackend.applyPartialTerrainRegionGeometry(
       result.result.key,
       result.result.cellCount,
       result.result.geometry
     );
     workerPool.recordMainThreadUpload(performance.now() - uploadStartedAt, PARTIAL_BLOCK_MESH_BUILD_JOB);
-    partialBlockMeshField.setDirtyRegionCount(
+    renderBackend.setPartialTerrainDirtyRegionCount(
       activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
     );
     refreshRenderedPartialBlockRevision(activeWorld);
@@ -4760,7 +4756,7 @@ async function loadWorld(worldId: string): Promise<void> {
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     renderBackend.retainTerrainChunks([]);
-    partialBlockMeshField.clear();
+    renderBackend.clearPartialTerrain();
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
@@ -4872,7 +4868,7 @@ async function exitToHome(): Promise<void> {
     await activeWorld.flushStorageWrites();
     activeWorld.disposeLoadedChunks(scene);
     renderBackend.retainTerrainChunks([]);
-    partialBlockMeshField.clear();
+    renderBackend.clearPartialTerrain();
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
@@ -5100,12 +5096,10 @@ function disposeRuntime(): void {
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();
   clearPendingPartialBlockMeshJobs();
-  partialBlockMeshField.dispose();
   renderBackend.dispose();
   workerPool.dispose();
   skybox.dispose();
   disposeWorldBlockMaterial(worldMaterial);
-  disposeWorldBlockMaterial(partialBlockMaterial);
   renderer.renderLists.dispose();
   renderer.dispose();
   renderer.forceContextLoss();

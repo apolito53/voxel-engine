@@ -11,11 +11,12 @@ more CPU-heavy systems to move off the main thread.
 
 The experimental renderer-overhaul branch now routes scene rendering through a
 `RenderBackend` boundary and draws normal terrain through a WebGL2 instanced
-terrain backend fed by compact worker-produced face records. CPU world state,
-collision, raycast, saves, and partial-block damage remain authoritative while
-WebGL2 begins taking over terrain presentation and GPU diagnostics.
-This branch temporarily suppresses the old Three.js shadow-map path until
-renderer-owned WebGL2 terrain shadows are rebuilt.
+terrain backend fed by compact worker-produced face records. Damaged
+partial-terrain presentation also routes through the WebGL backend boundary, but
+CPU world state, collision, raycast, saves, and partial-block damage remain
+authoritative. GPU terrain and partial terrain opt out of the legacy terrain
+shadow pass until renderer-owned WebGL2 terrain shadows are rebuilt; debris,
+rubble, and projectile cores still use normal Three.js shadows when enabled.
 
 World units are metric: `1 block = 1 meter`.
 
@@ -87,7 +88,8 @@ ignored by git.
 - `F` toggles flight
 - `F3` toggles the debug overlay, including the recent combat/damage log and
   local disk-write status; the render panel includes WebGL backend, GPU timer,
-  terrain face/page, and upload-byte stats on the overhaul branch
+  terrain face/page, partial-terrain region, and upload-byte stats on the
+  overhaul branch
 - `F4` cycles quality presets
 - `F6` toggles Core Aim Preview
 - `F8` toggles the scripted test avatar
