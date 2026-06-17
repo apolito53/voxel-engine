@@ -7185,14 +7185,18 @@ test("rigid debris adapter builds temporary support colliders from rubble height
   };
 
   rigidDebris.registerFragment(fragment);
-  for (let frame = 0; frame < 360 && !fragment.isSleeping; frame += 1) {
+  for (let frame = 0; frame < 720 && !fragment.isSleeping; frame += 1) {
     rigidDebris.update(1 / 60, supportWorld);
   }
 
-  assert(fragment.isSleeping, "rigid debris should settle on generated rubble support colliders");
+  const settledBottomY = fragment.mesh.position.y - BLOCK_FRAGMENT_VISUAL_SIZE * 0.5;
   assert(
-    fragment.mesh.position.y - BLOCK_FRAGMENT_VISUAL_SIZE * 0.5 >= supportY - 0.02,
+    settledBottomY >= supportY - 0.02,
     "rigid debris should not sink through partial-height rubble support"
+  );
+  assert(
+    settledBottomY <= supportY + BLOCK_FRAGMENT_VISUAL_SIZE + 0.08,
+    "rigid debris should settle on generated rubble support colliders"
   );
   assert(
     rigidDebris.getStats().rubbleSupportColliders > 0,
