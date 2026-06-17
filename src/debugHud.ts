@@ -290,10 +290,25 @@ export class DebugHud {
           { label: "settle", value: `${snapshot.debrisSettlerStats.regions} rg, ${snapshot.debrisSettlerStats.activeFragments}/${snapshot.debrisSettlerStats.fragments} active` },
           {
             label: "wake",
-            value: `${snapshot.debrisLifecycleDiagnostics.supportCellsInvalidated} cells, ` +
+            value: `q ${snapshot.debrisLifecycleDiagnostics.supportCellsQueued}/` +
+              `${snapshot.debrisLifecycleDiagnostics.supportCellsProcessed}/` +
+              `${snapshot.debrisLifecycleDiagnostics.supportCellsDeferred}, ` +
               `${snapshot.debrisLifecycleDiagnostics.rigidDebrisWoken} rigid, ` +
               `${snapshot.debrisLifecycleDiagnostics.settlerDebrisWoken} settle, ` +
               `${snapshot.debrisLifecycleDiagnostics.detachedDebrisWoken} vfx`
+          },
+          {
+            label: "why",
+            value: `rem ${snapshot.debrisLifecycleDiagnostics.rememberedSupportWoken}, ` +
+              `dir ${snapshot.debrisLifecycleDiagnostics.directSupportWoken}, ` +
+              `stack ${snapshot.debrisLifecycleDiagnostics.stackFallbackWoken}, ` +
+              `comp ${snapshot.debrisLifecycleDiagnostics.settlerComponentWoken}`
+          },
+          {
+            label: "skip",
+            value: `dup wake ${snapshot.debrisLifecycleDiagnostics.duplicateWakeSkips}, ` +
+              `dup cell ${snapshot.debrisLifecycleDiagnostics.duplicateSupportCellsSkipped}, ` +
+              `vfx ${snapshot.debrisLifecycleDiagnostics.detachedVfxWoken}`
           },
           {
             label: "cleanup",

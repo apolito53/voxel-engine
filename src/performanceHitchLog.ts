@@ -541,14 +541,25 @@ function addPhysicsDetails(details: string[], stats: PerformanceHitchStatsSnapsh
     details.push(`${stats.debrisLifecycle.airbornePressureProtections} airborne debris protected from pressure cleanup`);
   }
   if (
+    stats.debrisLifecycle.supportCellsQueued > 0 ||
+    stats.debrisLifecycle.supportCellsProcessed > 0 ||
+    stats.debrisLifecycle.supportCellsDeferred > 0 ||
     stats.debrisLifecycle.rigidDebrisWoken > 0 ||
     stats.debrisLifecycle.settlerDebrisWoken > 0 ||
     stats.debrisLifecycle.detachedDebrisWoken > 0
   ) {
     details.push(
-      `support edit woke ${stats.debrisLifecycle.rigidDebrisWoken} rigid, ` +
+      `support queue q ${stats.debrisLifecycle.supportCellsQueued}/` +
+      `${stats.debrisLifecycle.supportCellsProcessed}/` +
+      `${stats.debrisLifecycle.supportCellsDeferred}; woke ` +
+      `${stats.debrisLifecycle.rigidDebrisWoken} rigid, ` +
       `${stats.debrisLifecycle.settlerDebrisWoken} settling, and ` +
-      `${stats.debrisLifecycle.detachedDebrisWoken} VFX debris`
+      `${stats.debrisLifecycle.detachedDebrisWoken} VFX debris; reasons ` +
+      `rem ${stats.debrisLifecycle.rememberedSupportWoken}, ` +
+      `direct ${stats.debrisLifecycle.directSupportWoken}, ` +
+      `stack ${stats.debrisLifecycle.stackFallbackWoken}, ` +
+      `component ${stats.debrisLifecycle.settlerComponentWoken}, ` +
+      `dup ${stats.debrisLifecycle.duplicateWakeSkips}`
     );
   }
   if (stats.physics.candidatePairs > 0) {
@@ -671,6 +682,12 @@ function addCrossCuttingPressureDetails(
   }
   if (stats.debrisLifecycle.emergencyAirborneExpiries > 0) {
     details.push(`${stats.debrisLifecycle.emergencyAirborneExpiries} emergency airborne debris expiries this frame`);
+  }
+  if (stats.debrisLifecycle.supportCellsDeferred > 0 || stats.debrisLifecycle.duplicateWakeSkips > 0) {
+    details.push(
+      `support wake backlog ${stats.debrisLifecycle.supportCellsDeferred} cells, ` +
+      `${stats.debrisLifecycle.duplicateWakeSkips} duplicate wake skips`
+    );
   }
   if (stats.workerPool.queuedJobs > 0 || stats.workerPool.runningJobs > 0) {
     details.push(

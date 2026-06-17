@@ -26,11 +26,71 @@ const DETACHED_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
 const DETACHED_DEBRIS_SUPPORT_STACK_WAKE_HEIGHT = 4.5;
 const DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS = 512;
 
-export type DebrisLifecycleDiagnostics = {
-  readonly supportCellsInvalidated: number;
+export type DebrisSupportWakeBudgetOwner =
+  | "rigidDebris"
+  | "settlerDebris"
+  | "detachedDebris";
+
+export type DebrisSupportWakeReason =
+  | "remembered-support"
+  | "direct-support"
+  | "stack-fallback"
+  | "settler-component"
+  | "detached-vfx";
+
+export type DebrisSupportWakeMatch = {
+  readonly reason: DebrisSupportWakeReason;
+};
+
+export type DebrisSupportWakeBudgets = {
+  readonly rigidDebris: number;
+  readonly settlerDebris: number;
+  readonly detachedDebris: number;
+};
+
+export type DebrisSupportWakeContext = {
+  readonly claimedToys: WeakSet<PhysicsToy>;
+  readonly budgets: DebrisSupportWakeBudgets;
+  readonly used: Record<DebrisSupportWakeBudgetOwner, number>;
+  duplicateWakeSkips: number;
+  budgetExhausted: boolean;
+};
+
+export type DebrisSupportWakeReport = {
+  readonly supportCellsProcessed: number;
   readonly rigidDebrisWoken: number;
   readonly settlerDebrisWoken: number;
   readonly detachedDebrisWoken: number;
+  readonly rememberedSupportWoken: number;
+  readonly directSupportWoken: number;
+  readonly stackFallbackWoken: number;
+  readonly settlerComponentWoken: number;
+  readonly detachedVfxWoken: number;
+  readonly duplicateWakeSkips: number;
+  readonly budgetExhausted: boolean;
+};
+
+export type DebrisSupportInvalidationQueueReport = {
+  readonly queuedCells: number;
+  readonly duplicateCells: number;
+  readonly pendingCells: number;
+};
+
+export type DebrisLifecycleDiagnostics = {
+  readonly supportCellsInvalidated: number;
+  readonly supportCellsQueued: number;
+  readonly supportCellsProcessed: number;
+  readonly supportCellsDeferred: number;
+  readonly duplicateSupportCellsSkipped: number;
+  readonly duplicateWakeSkips: number;
+  readonly rigidDebrisWoken: number;
+  readonly settlerDebrisWoken: number;
+  readonly detachedDebrisWoken: number;
+  readonly rememberedSupportWoken: number;
+  readonly directSupportWoken: number;
+  readonly stackFallbackWoken: number;
+  readonly settlerComponentWoken: number;
+  readonly detachedVfxWoken: number;
   readonly settledPressureExpiries: number;
   readonly airbornePressureProtections: number;
   readonly emergencyAirborneExpiries: number;
@@ -39,9 +99,19 @@ export type DebrisLifecycleDiagnostics = {
 export function createEmptyDebrisLifecycleDiagnostics(): DebrisLifecycleDiagnostics {
   return {
     supportCellsInvalidated: 0,
+    supportCellsQueued: 0,
+    supportCellsProcessed: 0,
+    supportCellsDeferred: 0,
+    duplicateSupportCellsSkipped: 0,
+    duplicateWakeSkips: 0,
     rigidDebrisWoken: 0,
     settlerDebrisWoken: 0,
     detachedDebrisWoken: 0,
+    rememberedSupportWoken: 0,
+    directSupportWoken: 0,
+    stackFallbackWoken: 0,
+    settlerComponentWoken: 0,
+    detachedVfxWoken: 0,
     settledPressureExpiries: 0,
     airbornePressureProtections: 0,
     emergencyAirborneExpiries: 0
@@ -50,35 +120,238 @@ export function createEmptyDebrisLifecycleDiagnostics(): DebrisLifecycleDiagnost
 
 export function hasDebrisLifecycleDiagnosticsActivity(stats: DebrisLifecycleDiagnostics): boolean {
   return stats.supportCellsInvalidated > 0 ||
+    stats.supportCellsQueued > 0 ||
+    stats.supportCellsProcessed > 0 ||
+    stats.supportCellsDeferred > 0 ||
+    stats.duplicateSupportCellsSkipped > 0 ||
+    stats.duplicateWakeSkips > 0 ||
     stats.rigidDebrisWoken > 0 ||
     stats.settlerDebrisWoken > 0 ||
     stats.detachedDebrisWoken > 0 ||
+    stats.rememberedSupportWoken > 0 ||
+    stats.directSupportWoken > 0 ||
+    stats.stackFallbackWoken > 0 ||
+    stats.settlerComponentWoken > 0 ||
+    stats.detachedVfxWoken > 0 ||
     stats.settledPressureExpiries > 0 ||
     stats.airbornePressureProtections > 0 ||
     stats.emergencyAirborneExpiries > 0;
 }
 
+export class DebrisSupportInvalidationQueue {
+  private readonly pendingCells: ChangedTerrainCell[] = [];
+  private readonly pendingKeys = new Set<string>();
+
+  get pendingCellCount(): number {
+    return this.pendingCells.length;
+  }
+
+  enqueue(cells: Iterable<ChangedTerrainCell>): DebrisSupportInvalidationQueueReport {
+    let queuedCells = 0;
+    let duplicateCells = 0;
+
+    for (const rawCell of cells) {
+      const cell = normalizeChangedTerrainCell(rawCell);
+      if (!cell) continue;
+      const key = createChangedTerrainCellKey(cell.x, cell.y, cell.z, cell.bounds);
+      if (this.pendingKeys.has(key)) {
+        duplicateCells += 1;
+        continue;
+      }
+
+      this.pendingKeys.add(key);
+      this.pendingCells.push(cell);
+      queuedCells += 1;
+    }
+
+    return {
+      queuedCells,
+      duplicateCells,
+      pendingCells: this.pendingCells.length
+    };
+  }
+
+  take(maxCells: number): ChangedTerrainCell[] {
+    const cellCount = Math.min(this.pendingCells.length, Math.max(0, Math.floor(maxCells)));
+    if (cellCount === 0) return [];
+
+    const cells = this.pendingCells.splice(0, cellCount);
+    for (const cell of cells) {
+      this.pendingKeys.delete(createChangedTerrainCellKey(cell.x, cell.y, cell.z, cell.bounds));
+    }
+    return cells;
+  }
+
+  requeueFront(cells: readonly ChangedTerrainCell[]): DebrisSupportInvalidationQueueReport {
+    let queuedCells = 0;
+    let duplicateCells = 0;
+
+    // Preserve the original order when putting an over-budget support slice
+    // back at the front. That makes stress cases drain predictably over the
+    // next few frames instead of starving older terrain edits behind new ones.
+    for (let index = cells.length - 1; index >= 0; index -= 1) {
+      const cell = cells[index];
+      const key = createChangedTerrainCellKey(cell.x, cell.y, cell.z, cell.bounds);
+      if (this.pendingKeys.has(key)) {
+        duplicateCells += 1;
+        continue;
+      }
+
+      this.pendingKeys.add(key);
+      this.pendingCells.unshift(cell);
+      queuedCells += 1;
+    }
+
+    return {
+      queuedCells,
+      duplicateCells,
+      pendingCells: this.pendingCells.length
+    };
+  }
+
+  clear(): void {
+    this.pendingCells.length = 0;
+    this.pendingKeys.clear();
+  }
+}
+
+export function createDebrisSupportWakeContext(budgets: DebrisSupportWakeBudgets): DebrisSupportWakeContext {
+  return {
+    claimedToys: new WeakSet<PhysicsToy>(),
+    budgets: {
+      rigidDebris: Math.max(0, Math.floor(budgets.rigidDebris)),
+      settlerDebris: Math.max(0, Math.floor(budgets.settlerDebris)),
+      detachedDebris: Math.max(0, Math.floor(budgets.detachedDebris))
+    },
+    used: {
+      rigidDebris: 0,
+      settlerDebris: 0,
+      detachedDebris: 0
+    },
+    duplicateWakeSkips: 0,
+    budgetExhausted: false
+  };
+}
+
+export function hasDebrisSupportWakeBudget(
+  context: DebrisSupportWakeContext,
+  owner: DebrisSupportWakeBudgetOwner
+): boolean {
+  const hasBudget = context.used[owner] < context.budgets[owner];
+  if (!hasBudget) context.budgetExhausted = true;
+  return hasBudget;
+}
+
+export function tryClaimDebrisSupportWake(
+  context: DebrisSupportWakeContext,
+  owner: DebrisSupportWakeBudgetOwner,
+  toy: PhysicsToy
+): boolean {
+  if (context.claimedToys.has(toy)) {
+    context.duplicateWakeSkips += 1;
+    return false;
+  }
+  if (!hasDebrisSupportWakeBudget(context, owner)) return false;
+
+  context.claimedToys.add(toy);
+  context.used[owner] += 1;
+  return true;
+}
+
+export function createEmptyDebrisSupportWakeReport(
+  overrides: Partial<DebrisSupportWakeReport> = {}
+): DebrisSupportWakeReport {
+  return {
+    supportCellsProcessed: 0,
+    rigidDebrisWoken: 0,
+    settlerDebrisWoken: 0,
+    detachedDebrisWoken: 0,
+    rememberedSupportWoken: 0,
+    directSupportWoken: 0,
+    stackFallbackWoken: 0,
+    settlerComponentWoken: 0,
+    detachedVfxWoken: 0,
+    duplicateWakeSkips: 0,
+    budgetExhausted: false,
+    ...overrides
+  };
+}
+
+export function addDebrisSupportWakeReports(
+  left: DebrisSupportWakeReport,
+  right: DebrisSupportWakeReport
+): DebrisSupportWakeReport {
+  return {
+    supportCellsProcessed: left.supportCellsProcessed + right.supportCellsProcessed,
+    rigidDebrisWoken: left.rigidDebrisWoken + right.rigidDebrisWoken,
+    settlerDebrisWoken: left.settlerDebrisWoken + right.settlerDebrisWoken,
+    detachedDebrisWoken: left.detachedDebrisWoken + right.detachedDebrisWoken,
+    rememberedSupportWoken: left.rememberedSupportWoken + right.rememberedSupportWoken,
+    directSupportWoken: left.directSupportWoken + right.directSupportWoken,
+    stackFallbackWoken: left.stackFallbackWoken + right.stackFallbackWoken,
+    settlerComponentWoken: left.settlerComponentWoken + right.settlerComponentWoken,
+    detachedVfxWoken: left.detachedVfxWoken + right.detachedVfxWoken,
+    duplicateWakeSkips: left.duplicateWakeSkips + right.duplicateWakeSkips,
+    budgetExhausted: left.budgetExhausted || right.budgetExhausted
+  };
+}
+
+export function addDebrisSupportWakeReason(
+  report: DebrisSupportWakeReport,
+  reason: DebrisSupportWakeReason
+): DebrisSupportWakeReport {
+  switch (reason) {
+    case "remembered-support":
+      return { ...report, rememberedSupportWoken: report.rememberedSupportWoken + 1 };
+    case "direct-support":
+      return { ...report, directSupportWoken: report.directSupportWoken + 1 };
+    case "stack-fallback":
+      return { ...report, stackFallbackWoken: report.stackFallbackWoken + 1 };
+    case "settler-component":
+      return { ...report, settlerComponentWoken: report.settlerComponentWoken + 1 };
+    case "detached-vfx":
+      return { ...report, detachedVfxWoken: report.detachedVfxWoken + 1 };
+  }
+}
+
 export function wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
   fragments: Iterable<PhysicsToy>,
-  cells: Iterable<ChangedTerrainCell>
-): number {
+  cells: Iterable<ChangedTerrainCell>,
+  context = createDebrisSupportWakeContext({
+    rigidDebris: DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS,
+    settlerDebris: DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS,
+    detachedDebris: DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS
+  })
+): DebrisSupportWakeReport {
   const changedCells = normalizeChangedTerrainCells(cells);
-  if (changedCells.length === 0) return 0;
+  if (changedCells.length === 0) return createEmptyDebrisSupportWakeReport();
 
   let wokenFragments = 0;
+  let report = createEmptyDebrisSupportWakeReport();
   for (const fragment of fragments) {
     if (wokenFragments >= DETACHED_DEBRIS_SUPPORT_WAKE_MAX_FRAGMENTS) break;
     if (!shouldWakeDetachedFragment(fragment)) continue;
-    if (!isFragmentInsideAnyChangedSupportColumn(fragment, changedCells)) continue;
+    const match = getFragmentChangedSupportWakeMatch(fragment, changedCells);
+    if (!match) continue;
+    if (!hasDebrisSupportWakeBudget(context, "detachedDebris")) break;
+    if (!tryClaimDebrisSupportWake(context, "detachedDebris", fragment)) continue;
 
     // Detached VFX shards are deliberately outside Rapier, so the rigid-debris
     // body wake path cannot see them. Wake the whole small support column rather
     // than only the exact bottom contact, because upper shards may be sleeping
     // on a lower shard that just lost terrain support.
-    if (fragment.wakeFromTerrainSupportChange()) wokenFragments += 1;
+    if (fragment.wakeFromTerrainSupportChange({ quiet: true })) {
+      wokenFragments += 1;
+      report = addDebrisSupportWakeReason(addDebrisSupportWakeReason(report, match.reason), "detached-vfx");
+    }
   }
 
-  return wokenFragments;
+  return {
+    ...report,
+    detachedDebrisWoken: wokenFragments,
+    duplicateWakeSkips: context.duplicateWakeSkips,
+    budgetExhausted: context.budgetExhausted
+  };
 }
 
 export function normalizeChangedTerrainCells(cells: Iterable<ChangedTerrainCell>): ChangedTerrainCell[] {
@@ -86,32 +359,49 @@ export function normalizeChangedTerrainCells(cells: Iterable<ChangedTerrainCell>
   const seen = new Set<string>();
 
   for (const cell of cells) {
-    if (!Number.isFinite(cell.x) || !Number.isFinite(cell.y) || !Number.isFinite(cell.z)) continue;
+    const normalizedCell = normalizeChangedTerrainCell(cell);
+    if (!normalizedCell) continue;
 
-    const x = Math.floor(cell.x);
-    const y = Math.floor(cell.y);
-    const z = Math.floor(cell.z);
-    const bounds = normalizeChangedTerrainSupportBounds(cell.bounds);
-    const key = createChangedTerrainCellKey(x, y, z, bounds);
+    const key = createChangedTerrainCellKey(normalizedCell.x, normalizedCell.y, normalizedCell.z, normalizedCell.bounds);
     if (seen.has(key)) continue;
 
     seen.add(key);
-    normalized.push(bounds ? { x, y, z, bounds } : { x, y, z });
+    normalized.push(normalizedCell);
   }
 
   return normalized;
+}
+
+function normalizeChangedTerrainCell(cell: ChangedTerrainCell): ChangedTerrainCell | null {
+  if (!Number.isFinite(cell.x) || !Number.isFinite(cell.y) || !Number.isFinite(cell.z)) return null;
+
+  const x = Math.floor(cell.x);
+  const y = Math.floor(cell.y);
+  const z = Math.floor(cell.z);
+  const bounds = normalizeChangedTerrainSupportBounds(cell.bounds);
+  return bounds ? { x, y, z, bounds } : { x, y, z };
 }
 
 export function isFragmentInsideAnyChangedSupportColumn(
   fragment: PhysicsToy,
   cells: readonly ChangedTerrainCell[]
 ): boolean {
-  if (doesRememberedSupportOverlapChangedCells(fragment.lastKnownSupportCells, cells)) return true;
+  return Boolean(getFragmentChangedSupportWakeMatch(fragment, cells));
+}
+
+export function getFragmentChangedSupportWakeMatch(
+  fragment: PhysicsToy,
+  cells: readonly ChangedTerrainCell[]
+): DebrisSupportWakeMatch | null {
+  if (doesRememberedSupportOverlapChangedCells(fragment.lastKnownSupportCells, cells)) {
+    return { reason: "remembered-support" };
+  }
 
   for (const cell of cells) {
-    if (isFragmentInsideChangedSupportColumn(fragment, cell)) return true;
+    const match = getFragmentChangedSupportColumnMatch(fragment, cell);
+    if (match) return match;
   }
-  return false;
+  return null;
 }
 
 export function doesRememberedSupportOverlapChangedCells(
@@ -133,10 +423,10 @@ function shouldWakeDetachedFragment(fragment: PhysicsToy): boolean {
     !fragment.isRigidDebrisDriven;
 }
 
-function isFragmentInsideChangedSupportColumn(
+function getFragmentChangedSupportColumnMatch(
   fragment: PhysicsToy,
   cell: ChangedTerrainCell
-): boolean {
+): DebrisSupportWakeMatch | null {
   const position = fragment.mesh.position;
   const halfExtents = getDetachedFragmentSupportHalfExtents(fragment);
   const margin = DETACHED_DEBRIS_SUPPORT_WAKE_MARGIN;
@@ -148,16 +438,22 @@ function isFragmentInsideChangedSupportColumn(
   const supportMaxZ = cell.bounds?.maxZ ?? cell.z + 1;
 
   if (!rangesOverlap(position.x - halfExtents.x - margin, position.x + halfExtents.x + margin, supportMinX, supportMaxX)) {
-    return false;
+    return null;
   }
   if (!rangesOverlap(position.z - halfExtents.z - margin, position.z + halfExtents.z + margin, supportMinZ, supportMaxZ)) {
-    return false;
+    return null;
   }
 
   const bottomY = position.y - halfExtents.y;
   const supportColumnTop = supportMaxY + DETACHED_DEBRIS_SUPPORT_STACK_WAKE_HEIGHT;
-  return bottomY >= supportMinY - margin &&
-    bottomY <= supportColumnTop + DETACHED_DEBRIS_SUPPORT_RESCUE_DEPTH;
+  if (bottomY < supportMinY - margin || bottomY > supportColumnTop + DETACHED_DEBRIS_SUPPORT_RESCUE_DEPTH) {
+    return null;
+  }
+  return {
+    reason: bottomY <= supportMaxY + margin
+      ? "direct-support"
+      : "stack-fallback"
+  };
 }
 
 function normalizeChangedTerrainSupportBounds(

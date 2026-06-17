@@ -9,7 +9,17 @@ import {
 import * as THREE from "three";
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { createDefaultDebrisShape } from "./debrisShapes";
-import { doesRememberedSupportOverlapChangedCells } from "./debrisSupportInvalidation";
+import {
+  addDebrisSupportWakeReason,
+  createDebrisSupportWakeContext,
+  createEmptyDebrisSupportWakeReport,
+  doesRememberedSupportOverlapChangedCells,
+  hasDebrisSupportWakeBudget,
+  tryClaimDebrisSupportWake,
+  type DebrisSupportWakeContext,
+  type DebrisSupportWakeMatch,
+  type DebrisSupportWakeReport
+} from "./debrisSupportInvalidation";
 import type { PhysicsToy } from "./physics";
 
 const RIGID_DEBRIS_GRAVITY = -18;
@@ -35,7 +45,7 @@ const RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE = 0.08;
 const RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN = 0.004;
 const RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
 const RIGID_DEBRIS_CHANGED_SUPPORT_STACK_WAKE_HEIGHT = 4.5;
-const RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_SPEED = -0.35;
+const RIGID_DEBRIS_CHANGED_SUPPORT_QUIET_WAKE_SPEED = -0.08;
 const RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES = 512;
 const RIGID_DEBRIS_SUPPORT_MIN_HEIGHT = 0.04;
 const RIGID_DEBRIS_SUPPORT_HEIGHT_PRECISION = 1000;
@@ -401,28 +411,50 @@ export class RigidDebrisSimulation {
     this.staticCollidersDirty = true;
   }
 
-  wakeDebrisRestingOnChangedTerrainCells(cells: Iterable<RigidDebrisChangedTerrainCell>): number {
+  wakeDebrisRestingOnChangedTerrainCells(
+    cells: Iterable<RigidDebrisChangedTerrainCell>,
+    context = createDebrisSupportWakeContext({
+      rigidDebris: RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES,
+      settlerDebris: RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES,
+      detachedDebris: RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES
+    })
+  ): DebrisSupportWakeReport {
     const changedCells = normalizeChangedTerrainCells(cells);
-    if (!this.world || changedCells.length === 0 || this.bodiesByToy.size === 0) return 0;
+    if (!this.world || changedCells.length === 0 || this.bodiesByToy.size === 0) {
+      return createEmptyDebrisSupportWakeReport({
+        supportCellsProcessed: changedCells.length
+      });
+    }
 
     let wokenBodies = 0;
+    let report = createEmptyDebrisSupportWakeReport({
+      supportCellsProcessed: changedCells.length
+    });
+    const duplicateSkipsBefore = context.duplicateWakeSkips;
     for (const record of this.bodiesByToy.values()) {
       if (wokenBodies >= RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_MAX_BODIES) break;
       if (record.toy.isExpired || !record.body.isSleeping()) continue;
-      if (!isRecordRestingOnAnyChangedTerrainCell(record, changedCells)) continue;
+      const match = getRecordChangedSupportWakeMatch(record, changedCells);
+      if (!match) continue;
+      if (!hasDebrisSupportWakeBudget(context, "rigidDebris")) break;
+      if (!tryClaimDebrisSupportWake(context, "rigidDebris", record.toy)) continue;
 
       // Terrain edits are discrete events, so this is the cheap place to unpark
-      // debris that used to be supported by the edited cell. A small downward
-      // nudge keeps Rapier from re-sleeping on the exact stale contact frame.
+      // debris that used to be supported by the edited cell. This is a quiet
+      // validation wake, not an impact: clear spin and sideways drift, then use
+      // a tiny downward nudge so Rapier can re-test support without looking
+      // like every nearby shard got slapped.
       const linvel = record.body.linvel();
       record.body.setLinvel({
-        x: linvel.x,
-        y: Math.min(linvel.y, RIGID_DEBRIS_CHANGED_SUPPORT_WAKE_SPEED),
-        z: linvel.z
+        x: 0,
+        y: Math.min(linvel.y, RIGID_DEBRIS_CHANGED_SUPPORT_QUIET_WAKE_SPEED),
+        z: 0
       }, true);
+      record.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
       record.body.wakeUp();
       record.quietSeconds = 0;
       wokenBodies += 1;
+      report = addDebrisSupportWakeReason(report, match.reason);
     }
 
     if (wokenBodies > 0) {
@@ -431,7 +463,12 @@ export class RigidDebrisSimulation {
       this.staticRefreshSeconds = Infinity;
       this.refreshStats();
     }
-    return wokenBodies;
+    return {
+      ...report,
+      rigidDebrisWoken: wokenBodies,
+      duplicateWakeSkips: context.duplicateWakeSkips - duplicateSkipsBefore,
+      budgetExhausted: context.budgetExhausted
+    };
   }
 
   clear(): void {
@@ -1241,22 +1278,25 @@ function normalizeChangedTerrainCells(
   return normalized;
 }
 
-function isRecordRestingOnAnyChangedTerrainCell(
+function getRecordChangedSupportWakeMatch(
   record: RigidDebrisBody,
   cells: readonly RigidDebrisChangedTerrainCell[]
-): boolean {
-  if (doesRememberedSupportOverlapChangedCells(record.toy.lastKnownSupportCells, cells)) return true;
+): DebrisSupportWakeMatch | null {
+  if (doesRememberedSupportOverlapChangedCells(record.toy.lastKnownSupportCells, cells)) {
+    return { reason: "remembered-support" };
+  }
 
   for (const cell of cells) {
-    if (isRecordRestingOnChangedTerrainCell(record, cell)) return true;
+    const match = getRecordChangedSupportColumnMatch(record, cell);
+    if (match) return match;
   }
-  return false;
+  return null;
 }
 
-function isRecordRestingOnChangedTerrainCell(
+function getRecordChangedSupportColumnMatch(
   record: RigidDebrisBody,
   cell: RigidDebrisChangedTerrainCell
-): boolean {
+): DebrisSupportWakeMatch | null {
   const position = record.body.translation();
   const halfExtents = record.colliderHalfExtents;
   const margin = RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE;
@@ -1270,8 +1310,8 @@ function isRecordRestingOnChangedTerrainCell(
   const supportMaxY = cell.bounds?.maxY ?? cell.y + 1;
   const supportMinZ = cell.bounds?.minZ ?? cell.z;
   const supportMaxZ = cell.bounds?.maxZ ?? cell.z + 1;
-  if (!boundsOverlap(minX, maxX, supportMinX, supportMaxX)) return false;
-  if (!boundsOverlap(minZ, maxZ, supportMinZ, supportMaxZ)) return false;
+  if (!boundsOverlap(minX, maxX, supportMinX, supportMaxX)) return null;
+  if (!boundsOverlap(minZ, maxZ, supportMinZ, supportMaxZ)) return null;
 
   const bottomY = position.y - halfExtents.y;
   const lowestChangedSupport = supportMinY - margin;
@@ -1281,7 +1321,12 @@ function isRecordRestingOnChangedTerrainCell(
   const highestChangedSupport = supportMaxY +
     RIGID_DEBRIS_CHANGED_SUPPORT_STACK_WAKE_HEIGHT +
     RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH;
-  return bottomY >= lowestChangedSupport && bottomY <= highestChangedSupport;
+  if (bottomY < lowestChangedSupport || bottomY > highestChangedSupport) return null;
+  return {
+    reason: bottomY <= supportMaxY + margin
+      ? "direct-support"
+      : "stack-fallback"
+  };
 }
 
 function normalizeStaticColliderCellBounds(

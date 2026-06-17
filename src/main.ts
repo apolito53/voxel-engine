@@ -94,10 +94,15 @@ import {
   type DebrisSettlerStats
 } from "./debrisSettler";
 import {
+  DebrisSupportInvalidationQueue,
+  addDebrisSupportWakeReports,
+  createDebrisSupportWakeContext,
+  createEmptyDebrisSupportWakeReport,
   createEmptyDebrisLifecycleDiagnostics,
   wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells,
   type ChangedTerrainCell,
-  type DebrisLifecycleDiagnostics
+  type DebrisLifecycleDiagnostics,
+  type DebrisSupportWakeReport
 } from "./debrisSupportInvalidation";
 import { DebugHud } from "./debugHud";
 import { requireElement } from "./dom";
@@ -713,6 +718,11 @@ const workerPool = new WorkerPool({
 const rubbleField = new RubbleField(scene);
 const debrisSettler = new DebrisSettler();
 const rigidDebris = new RigidDebrisSimulation();
+const debrisSupportInvalidationQueue = new DebrisSupportInvalidationQueue();
+const DEBRIS_SUPPORT_WAKE_CELL_BUDGET = 48;
+const DEBRIS_SUPPORT_WAKE_RIGID_BUDGET = 128;
+const DEBRIS_SUPPORT_WAKE_SETTLER_BUDGET = 192;
+const DEBRIS_SUPPORT_WAKE_DETACHED_BUDGET = 192;
 const HEALTH_BARS_STORAGE_KEY = "voxel-sandbox-health-bars-enabled";
 const CORE_AIM_PREVIEW_STORAGE_KEY = "voxel-sandbox-core-aim-preview-enabled";
 const TERRAFORMER_SIZE_STORAGE_KEY = "voxel-sandbox-terraformer-size";
@@ -766,7 +776,7 @@ function runAdminCommandWithTerrainSupportInvalidation(command: string): AdminCo
   }, command);
 
   if (changedTerrainCells.length > 0) {
-    invalidateDebrisSupportForEditedCells(changedTerrainCells);
+    enqueueDebrisSupportForEditedCells(changedTerrainCells);
   }
   return result;
 }
@@ -1874,7 +1884,7 @@ function placeSelectedBlock(activePlayer: PlayerController, block: BlockId): voi
   const changedTerrainCells: ChangedTerrainCell[] = [];
   const changedTerrainCellKeys = new Set<string>();
   collectTerrainSupportInvalidationCells(target, changedTerrainCells, changedTerrainCellKeys);
-  invalidateDebrisSupportForEditedCells(changedTerrainCells);
+  enqueueDebrisSupportForEditedCells(changedTerrainCells);
 }
 
 function applyBuilderBrushAtTarget(operation: "place" | "erase"): void {
@@ -1918,7 +1928,7 @@ function applyBuilderBrushAtTarget(operation: "place" | "erase"): void {
       });
 
   if (changedCells > 0) {
-    invalidateDebrisSupportForEditedCells(changedTerrainCells);
+    enqueueDebrisSupportForEditedCells(changedTerrainCells);
   }
   showBuilderStatus(`Builder: ${operation === "place" ? "placed" : "erased"} ${changedCells} block${changedCells === 1 ? "" : "s"}.`);
 }
@@ -2137,6 +2147,7 @@ function animate(): void {
     }
     const postLoopImpactStartedAt = performance.now();
     emitRubbleDamageEvents(PHYSICS_CORE_COMBAT_SOURCE, "rubble collision");
+    flushQueuedDebrisSupportInvalidations();
     physicsTimingSample.impactApplyMs += performance.now() - postLoopImpactStartedAt;
 
     const rigidDebrisStartedAt = performance.now();
@@ -3431,13 +3442,15 @@ function applyTerrainDamageFeedback(
   // sleeping debris in the edited support neighborhood; this is event-driven
   // so settled piles do not need a broad support scan every frame.
   if (changedTerrainCollider) {
-    return invalidateDebrisSupportForEditedCells(changedTerrainCells);
+    return enqueueDebrisSupportForEditedCells(changedTerrainCells);
   }
   return createEmptyTerrainDamageFeedbackSummary();
 }
 
 type TerrainDamageFeedbackSummary = {
   readonly supportInvalidationCells: number;
+  readonly supportInvalidationDuplicateCells: number;
+  readonly supportInvalidationPendingCells: number;
   readonly rigidDebrisWoken: number;
   readonly settlerDebrisWoken: number;
   readonly detachedDebrisWoken: number;
@@ -3446,6 +3459,8 @@ type TerrainDamageFeedbackSummary = {
 function createEmptyTerrainDamageFeedbackSummary(): TerrainDamageFeedbackSummary {
   return {
     supportInvalidationCells: 0,
+    supportInvalidationDuplicateCells: 0,
+    supportInvalidationPendingCells: 0,
     rigidDebrisWoken: 0,
     settlerDebrisWoken: 0,
     detachedDebrisWoken: 0
@@ -3525,33 +3540,98 @@ function createTerrainSupportInvalidationCellKey(cell: ChangedTerrainCell): stri
   ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
 }
 
-function invalidateDebrisSupportForEditedCells(cells: readonly ChangedTerrainCell[]): TerrainDamageFeedbackSummary {
+function enqueueDebrisSupportForEditedCells(cells: readonly ChangedTerrainCell[]): TerrainDamageFeedbackSummary {
   if (cells.length === 0) return createEmptyTerrainDamageFeedbackSummary();
 
-  const rigidDebrisWoken = rigidDebris.wakeDebrisRestingOnChangedTerrainCells(cells);
-  const settlerDebrisWoken = debrisSettler.wakeRegionsRestingOnChangedTerrainCells(cells);
-  const detachedDebrisWoken = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(toys, cells);
-  rigidDebris.invalidateStaticColliders();
+  const queueReport = debrisSupportInvalidationQueue.enqueue(cells);
+  if (queueReport.queuedCells > 0) {
+    // Terrain collision changed immediately, even though sleeping debris wakes
+    // are budgeted across frames. Mark Rapier's support collider cache dirty
+    // now so the next rigid update cannot trust stale terrain.
+    rigidDebris.invalidateStaticColliders();
+  }
+
   addDebrisLifecycleDiagnostics({
-    supportCellsInvalidated: cells.length,
-    rigidDebrisWoken,
-    settlerDebrisWoken,
-    detachedDebrisWoken
+    supportCellsInvalidated: queueReport.queuedCells,
+    supportCellsQueued: queueReport.queuedCells,
+    supportCellsDeferred: queueReport.pendingCells,
+    duplicateSupportCellsSkipped: queueReport.duplicateCells
   });
   return {
-    supportInvalidationCells: cells.length,
-    rigidDebrisWoken,
-    settlerDebrisWoken,
-    detachedDebrisWoken
+    supportInvalidationCells: queueReport.queuedCells,
+    supportInvalidationDuplicateCells: queueReport.duplicateCells,
+    supportInvalidationPendingCells: queueReport.pendingCells,
+    rigidDebrisWoken: 0,
+    settlerDebrisWoken: 0,
+    detachedDebrisWoken: 0
   };
+}
+
+function flushQueuedDebrisSupportInvalidations(): void {
+  const cells = debrisSupportInvalidationQueue.take(DEBRIS_SUPPORT_WAKE_CELL_BUDGET);
+  if (cells.length === 0) return;
+
+  const wakeContext = createDebrisSupportWakeContext({
+    rigidDebris: DEBRIS_SUPPORT_WAKE_RIGID_BUDGET,
+    settlerDebris: DEBRIS_SUPPORT_WAKE_SETTLER_BUDGET,
+    detachedDebris: DEBRIS_SUPPORT_WAKE_DETACHED_BUDGET
+  });
+  let wakeReport: DebrisSupportWakeReport = createEmptyDebrisSupportWakeReport({
+    supportCellsProcessed: cells.length
+  });
+
+  const rigidWakeReport = rigidDebris.wakeDebrisRestingOnChangedTerrainCells(cells, wakeContext);
+  wakeReport = addDebrisSupportWakeReports(wakeReport, {
+    ...rigidWakeReport,
+    supportCellsProcessed: 0
+  });
+  const settlerWakeReport = debrisSettler.wakeRegionsRestingOnChangedTerrainCells(cells, wakeContext);
+  wakeReport = addDebrisSupportWakeReports(wakeReport, {
+    ...settlerWakeReport,
+    supportCellsProcessed: 0
+  });
+  const detachedWakeReport = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(toys, cells, wakeContext);
+  wakeReport = addDebrisSupportWakeReports(wakeReport, {
+    ...detachedWakeReport,
+    supportCellsProcessed: 0
+  });
+
+  if (wakeContext.budgetExhausted) {
+    debrisSupportInvalidationQueue.requeueFront(cells);
+  }
+
+  rigidDebris.invalidateStaticColliders();
+  addDebrisLifecycleDiagnostics({
+    supportCellsProcessed: cells.length,
+    supportCellsDeferred: debrisSupportInvalidationQueue.pendingCellCount,
+    duplicateWakeSkips: wakeContext.duplicateWakeSkips,
+    rigidDebrisWoken: wakeReport.rigidDebrisWoken,
+    settlerDebrisWoken: wakeReport.settlerDebrisWoken,
+    detachedDebrisWoken: wakeReport.detachedDebrisWoken,
+    rememberedSupportWoken: wakeReport.rememberedSupportWoken,
+    directSupportWoken: wakeReport.directSupportWoken,
+    stackFallbackWoken: wakeReport.stackFallbackWoken,
+    settlerComponentWoken: wakeReport.settlerComponentWoken,
+    detachedVfxWoken: wakeReport.detachedVfxWoken
+  });
 }
 
 function addDebrisLifecycleDiagnostics(delta: Partial<DebrisLifecycleDiagnostics>): void {
   debrisLifecycleDiagnostics = {
     supportCellsInvalidated: debrisLifecycleDiagnostics.supportCellsInvalidated + (delta.supportCellsInvalidated ?? 0),
+    supportCellsQueued: debrisLifecycleDiagnostics.supportCellsQueued + (delta.supportCellsQueued ?? 0),
+    supportCellsProcessed: debrisLifecycleDiagnostics.supportCellsProcessed + (delta.supportCellsProcessed ?? 0),
+    supportCellsDeferred: Math.max(debrisLifecycleDiagnostics.supportCellsDeferred, delta.supportCellsDeferred ?? 0),
+    duplicateSupportCellsSkipped: debrisLifecycleDiagnostics.duplicateSupportCellsSkipped + (delta.duplicateSupportCellsSkipped ?? 0),
+    duplicateWakeSkips: debrisLifecycleDiagnostics.duplicateWakeSkips + (delta.duplicateWakeSkips ?? 0),
     rigidDebrisWoken: debrisLifecycleDiagnostics.rigidDebrisWoken + (delta.rigidDebrisWoken ?? 0),
     settlerDebrisWoken: debrisLifecycleDiagnostics.settlerDebrisWoken + (delta.settlerDebrisWoken ?? 0),
     detachedDebrisWoken: debrisLifecycleDiagnostics.detachedDebrisWoken + (delta.detachedDebrisWoken ?? 0),
+    rememberedSupportWoken: debrisLifecycleDiagnostics.rememberedSupportWoken + (delta.rememberedSupportWoken ?? 0),
+    directSupportWoken: debrisLifecycleDiagnostics.directSupportWoken + (delta.directSupportWoken ?? 0),
+    stackFallbackWoken: debrisLifecycleDiagnostics.stackFallbackWoken + (delta.stackFallbackWoken ?? 0),
+    settlerComponentWoken: debrisLifecycleDiagnostics.settlerComponentWoken + (delta.settlerComponentWoken ?? 0),
+    detachedVfxWoken: debrisLifecycleDiagnostics.detachedVfxWoken + (delta.detachedVfxWoken ?? 0),
     settledPressureExpiries: debrisLifecycleDiagnostics.settledPressureExpiries + (delta.settledPressureExpiries ?? 0),
     airbornePressureProtections: debrisLifecycleDiagnostics.airbornePressureProtections + (delta.airbornePressureProtections ?? 0),
     emergencyAirborneExpiries: debrisLifecycleDiagnostics.emergencyAirborneExpiries + (delta.emergencyAirborneExpiries ?? 0)
@@ -4660,7 +4740,7 @@ function emitRubbleSupportChangeEvents(): void {
   for (const event of supportEvents) {
     collectTerrainSupportInvalidationCells(event.cell, changedTerrainCells, changedTerrainCellKeys);
   }
-  invalidateDebrisSupportForEditedCells(changedTerrainCells);
+  enqueueDebrisSupportForEditedCells(changedTerrainCells);
 }
 
 function showBlockDamageIndicator(result: BlockDamageResult): void {
@@ -5048,6 +5128,7 @@ function clearToys(): void {
   damageIndicators.clear();
   debrisSettler.clear();
   rigidDebris.clear();
+  debrisSupportInvalidationQueue.clear();
   debrisPoofRenderer.clear();
   // Full cleanup is allowed to be heavy-handed: release the high-water instanced
   // debris batches so long stress tests do not keep oversized GPU buffers alive.

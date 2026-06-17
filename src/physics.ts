@@ -27,6 +27,7 @@ const FRAGMENT_WALL_DAMPING = 0.74;
 const FRAGMENT_PARTIAL_SUPPORT_EPSILON = 0.025;
 const FRAGMENT_PARTIAL_SUPPORT_MAX_CORRECTION = BLOCK_FRAGMENT_VISUAL_SIZE * 2.25;
 const FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED = -0.35;
+const FRAGMENT_TERRAIN_SUPPORT_QUIET_WAKE_SPEED = -0.08;
 const FRAGMENT_TERRAIN_SUPPORT_WAKE_SLEEP_GRACE_SECONDS = 0.28;
 const GROUND_DEBRIS_AIRBORNE_LIFETIME_MULTIPLIER = 2;
 const GROUND_DEBRIS_AIRBORNE_MIN_SECONDS = 6;
@@ -95,6 +96,10 @@ export type PhysicsToySupportCell = {
   readonly y: number;
   readonly z: number;
   readonly bounds?: CollisionBounds;
+};
+
+export type PhysicsToyTerrainSupportWakeOptions = {
+  readonly quiet?: boolean;
 };
 
 export type PhysicsToyCollisionStats = {
@@ -295,18 +300,25 @@ export class PhysicsToy {
     this.markRigidDebrisExternalMutation();
   }
 
-  wakeFromTerrainSupportChange(): boolean {
+  wakeFromTerrainSupportChange(options: PhysicsToyTerrainSupportWakeOptions = {}): boolean {
     if (!this.isInstancedFragment || this.expired || !this.sleeping) return false;
 
     // Terrain changed underneath or beside this settled shard. Clear the cheap
     // support-anchored sleep state and give gravity a tiny head start so the
     // next normal toy update can prove whether the shard still has support.
+    // Quiet validation wakes deliberately do not add spin or horizontal motion;
+    // visible "debris got hit" energy should only come from real impacts.
     this.sleeping = false;
     this.supportAnchoredSleep = false;
     this.supportContactLastUpdate = false;
     this.clearRememberedSupportCells();
     this.settledSeconds = 0;
-    this.velocity.y = Math.min(this.velocity.y, FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED);
+    if (options.quiet) {
+      this.velocity.set(0, Math.min(this.velocity.y, FRAGMENT_TERRAIN_SUPPORT_QUIET_WAKE_SPEED), 0);
+      this.angularVelocity.set(0, 0, 0);
+    } else {
+      this.velocity.y = Math.min(this.velocity.y, FRAGMENT_TERRAIN_SUPPORT_WAKE_SPEED);
+    }
     this.terrainSupportWakeSleepGraceSeconds = FRAGMENT_TERRAIN_SUPPORT_WAKE_SLEEP_GRACE_SECONDS;
     this.resetLowSpeedDespawnCountdown();
     this.resetGroundDebrisCleanupClock();

@@ -13,6 +13,10 @@
 
 ### Changed
 
+- Batched terrain-support debris wakeups behind a frame-owned queue. Terrain
+  edits now dedupe support cells, process bounded wake slices across frames, and
+  use quiet validation wakes so nearby settled debris checks support without
+  visibly spinning like it was hit.
 - Decoupled projectile Physics Cores from the loose-debris Physics Object Budget.
   The slider now caps active debris bodies and derived Rapier body pressure,
   while thrown cores use their own active-core safety cap, HUD row, hitch-log

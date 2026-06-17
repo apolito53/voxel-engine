@@ -81,6 +81,8 @@ import {
   isDebrisTrappedForCleanup
 } from "../src/debrisCleanup";
 import {
+  DebrisSupportInvalidationQueue,
+  createDebrisSupportWakeContext,
   createEmptyDebrisLifecycleDiagnostics,
   wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells
 } from "../src/debrisSupportInvalidation";
@@ -6852,7 +6854,7 @@ test("rigid debris adapter wakes sleeping shards when their support terrain cell
     if (supportedFragment.mesh.position.y < targetStartY - 0.2) break;
   }
 
-  assertEqual(woken, 1, "support invalidation should wake only debris resting on the edited cell");
+  assertEqual(woken.rigidDebrisWoken, 1, "support invalidation should wake only debris resting on the edited cell");
   assert(
     supportedFragment.mesh.position.y < targetStartY - 0.2,
     "woken debris should fall after the terrain support under it is removed"
@@ -6879,7 +6881,7 @@ test("terrain support invalidation wakes detached sleeping VFX fragments", () =>
   targetFragment.update(1 / 60, { isSolid: () => false });
   unrelatedFragment.update(1 / 60, { isSolid: () => false });
 
-  assertEqual(woken, 1, "terrain invalidation should wake only detached debris over the changed support");
+  assertEqual(woken.detachedDebrisWoken, 1, "terrain invalidation should wake only detached debris over the changed support");
   assert(!targetFragment.isSleeping, "detached debris over changed support should leave cheap sleep");
   assert(
     targetFragment.mesh.position.y < targetStartY - 0.005,
@@ -6891,6 +6893,105 @@ test("terrain support invalidation wakes detached sleeping VFX fragments", () =>
     unrelatedStartY,
     0.001,
     "unrelated detached debris should not move"
+  );
+});
+
+test("debris support invalidation queue deduplicates whole and exact cells", () => {
+  const queue = new DebrisSupportInvalidationQueue();
+  const exactBounds = {
+    minX: 0,
+    maxX: 1 / 3,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1 / 3
+  };
+
+  const first = queue.enqueue([
+    { x: 0, y: 0, z: 0 },
+    { x: 0.4, y: 0.2, z: 0.8 },
+    { x: 0, y: 0, z: 0, bounds: exactBounds },
+    { x: 0, y: 0, z: 0, bounds: exactBounds }
+  ]);
+
+  assertEqual(first.queuedCells, 2, "whole-cell and exact sub-cell support edits should remain distinct");
+  assertEqual(first.duplicateCells, 2, "repeat support cells should be skipped while enqueueing");
+  assertEqual(queue.pendingCellCount, 2, "only unique support cells should stay pending");
+
+  const taken = queue.take(1);
+  assertEqual(taken.length, 1, "support queue should hand out a bounded slice");
+  assertEqual(queue.pendingCellCount, 1, "unprocessed support cells should remain queued");
+
+  const requeued = queue.requeueFront(taken);
+  assertEqual(requeued.pendingCells, 2, "over-budget slices should be able to return to the front");
+});
+
+test("detached support wake budget drains large piles over multiple passes", () => {
+  const firstFragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
+  const secondFragment = createTestFragment(BLOCK.sand, 0.58, 1.08, 0.5);
+  sleepTestFragment(firstFragment);
+  sleepTestFragment(secondFragment);
+  const cells = [{ x: 0, y: 0, z: 0 }];
+
+  const firstContext = createDebrisSupportWakeContext({
+    rigidDebris: 0,
+    settlerDebris: 0,
+    detachedDebris: 1
+  });
+  const firstWake = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
+    [firstFragment, secondFragment],
+    cells,
+    firstContext
+  );
+
+  assertEqual(firstWake.detachedDebrisWoken, 1, "one detached shard should wake when the VFX budget is one");
+  assert(firstWake.budgetExhausted, "wake report should expose that more debris may need a later frame");
+  assert(
+    firstFragment.isSleeping !== secondFragment.isSleeping,
+    "only one same-cell shard should leave sleep in the first budgeted pass"
+  );
+
+  const secondContext = createDebrisSupportWakeContext({
+    rigidDebris: 0,
+    settlerDebris: 0,
+    detachedDebris: 1
+  });
+  const secondWake = wakeSleepingDetachedFragmentsRestingOnChangedTerrainCells(
+    [firstFragment, secondFragment],
+    cells,
+    secondContext
+  );
+
+  assertEqual(secondWake.detachedDebrisWoken, 1, "the next pass should wake the remaining sleeping shard");
+  assert(!firstFragment.isSleeping && !secondFragment.isSleeping, "budgeted support wakes should eventually drain");
+});
+
+test("quiet terrain-support wake clears spin and sideways drift", () => {
+  const fragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
+  fragment.sleepInPlace(true);
+  fragment.velocity.set(1.5, 0.2, -0.75);
+  fragment.angularVelocity.set(4, 2, 1);
+
+  assert(fragment.wakeFromTerrainSupportChange({ quiet: true }), "quiet support wake should wake sleeping debris");
+  assertClose(fragment.velocity.x, 0, 0.0001, "quiet support wake should not add horizontal x motion");
+  assertClose(fragment.velocity.z, 0, 0.0001, "quiet support wake should not add horizontal z motion");
+  assert(fragment.velocity.y < 0 && fragment.velocity.y > -0.35, "quiet support wake should use a tiny downward nudge");
+  assertClose(fragment.angularVelocity.length(), 0, 0.0001, "quiet support wake should clear visible spin");
+});
+
+test("non-quiet terrain-support wake keeps the legacy dramatic wake motion available", () => {
+  const fragment = createTestFragment(BLOCK.sand, 0.5, 1.08, 0.5);
+  fragment.sleepInPlace(true);
+  fragment.velocity.set(0.4, 0.2, -0.25);
+  fragment.angularVelocity.set(3, 0.5, 0.25);
+
+  assert(fragment.wakeFromTerrainSupportChange(), "default support wake should still wake sleeping debris");
+  assertClose(fragment.velocity.x, 0.4, 0.0001, "non-quiet wake should preserve existing horizontal x motion");
+  assertClose(fragment.velocity.z, -0.25, 0.0001, "non-quiet wake should preserve existing horizontal z motion");
+  assertEqual(fragment.velocity.y, -0.35, "non-quiet wake should keep the old stronger downward nudge");
+  assert(
+    fragment.angularVelocity.length() > 0,
+    "non-quiet wake should not erase existing angular velocity"
   );
 });
 
@@ -6909,10 +7010,11 @@ test("terrain support invalidation wakes detached debris from remembered sleep s
   );
 
   assertEqual(
-    woken,
+    woken.detachedDebrisWoken,
     1,
     "support invalidation should wake debris whose remembered sleep support was edited"
   );
+  assertEqual(woken.rememberedSupportWoken, 1, "remembered support wakes should be counted by reason");
   assert(!targetFragment.isSleeping, "remembered-support debris should leave cheap sleep");
 });
 
@@ -6944,7 +7046,7 @@ test("terrain support invalidation wakes detached debris resting on a destroyed 
   sameMacroUnchangedSubCellFragment.update(1 / 60, { isSolid: () => false });
 
   assertEqual(
-    woken,
+    woken.detachedDebrisWoken,
     1,
     "sub-block support invalidation should wake only debris resting over the destroyed support patch"
   );
@@ -6988,7 +7090,8 @@ test("terrain support invalidation wakes detached stacked VFX fragments above ch
   upperFragment.update(1 / 60, { isSolid: () => false });
   tooHighFragment.update(1 / 60, { isSolid: () => false });
 
-  assertEqual(woken, 2, "support invalidation should wake the local detached support stack");
+  assertEqual(woken.detachedDebrisWoken, 2, "support invalidation should wake the local detached support stack");
+  assertEqual(woken.stackFallbackWoken, 1, "upper support-stack fallback wakes should be counted by reason");
   assert(
     lowerFragment.mesh.position.y < lowerStartY - 0.005,
     "lower detached debris should resume falling after support changes"
@@ -7479,7 +7582,8 @@ test("debris settler wakes a glued sleeping clump when its terrain support chang
   lower.update(1 / 60, { isSolid: () => false });
   upper.update(1 / 60, { isSolid: () => false });
 
-  assertEqual(woken, 2, "support invalidation should wake the whole glued settler component");
+  assertEqual(woken.settlerDebrisWoken, 2, "support invalidation should wake the whole glued settler component");
+  assertEqual(woken.settlerComponentWoken, 2, "settler component wakes should be counted by reason");
   assert(!lower.isSleeping, "lower shard should leave settler sleep after its terrain support changes");
   assert(!upper.isSleeping, "upper glued shard should not remain suspended above the falling lower shard");
   assert(lower.mesh.position.y < lowerStartY - 0.005, "lower shard should resume gravity");
@@ -7504,7 +7608,7 @@ test("debris settler wakes denied VFX shards in mixed rigid-admission regions", 
   deniedVfxShard.update(1 / 60, { isSolid: () => false });
 
   assertEqual(
-    woken,
+    woken.settlerDebrisWoken,
     1,
     "support invalidation should still reach VFX shards when a sibling shard was admitted to Rapier"
   );

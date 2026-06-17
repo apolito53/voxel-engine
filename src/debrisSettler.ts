@@ -2,9 +2,17 @@ import * as THREE from "three";
 import { BLOCK_FRAGMENT_VISUAL_SIZE } from "./blockFragments";
 import { createDefaultDebrisShape } from "./debrisShapes";
 import {
-  isFragmentInsideAnyChangedSupportColumn,
+  addDebrisSupportWakeReason,
+  createDebrisSupportWakeContext,
+  createEmptyDebrisSupportWakeReport,
+  getFragmentChangedSupportWakeMatch,
+  hasDebrisSupportWakeBudget,
   normalizeChangedTerrainCells,
-  type ChangedTerrainCell
+  tryClaimDebrisSupportWake,
+  type ChangedTerrainCell,
+  type DebrisSupportWakeContext,
+  type DebrisSupportWakeMatch,
+  type DebrisSupportWakeReport
 } from "./debrisSupportInvalidation";
 import type { PhysicsToy } from "./physics";
 import { RubbleField, type RubbleAbsorptionSample, type RubbleVisualChunkSample } from "./rubble";
@@ -175,11 +183,20 @@ export class DebrisSettler {
     return this.finalizedBatches;
   }
 
-  wakeRegionsRestingOnChangedTerrainCells(cells: Iterable<ChangedTerrainCell>): number {
+  wakeRegionsRestingOnChangedTerrainCells(
+    cells: Iterable<ChangedTerrainCell>,
+    context = createDebrisSupportWakeContext({
+      rigidDebris: Number.MAX_SAFE_INTEGER,
+      settlerDebris: Number.MAX_SAFE_INTEGER,
+      detachedDebris: Number.MAX_SAFE_INTEGER
+    })
+  ): DebrisSupportWakeReport {
     const changedCells = normalizeChangedTerrainCells(cells);
-    if (changedCells.length === 0) return 0;
+    if (changedCells.length === 0) return createEmptyDebrisSupportWakeReport();
 
     let wokenFragments = 0;
+    let report = createEmptyDebrisSupportWakeReport();
+    const duplicateSkipsBefore = context.duplicateWakeSkips;
     for (const region of this.regionsById.values()) {
       // A sleeping visible pile is tracked as glue-connected components inside
       // a settling region. Waking only the shard directly over the edited block
@@ -188,16 +205,33 @@ export class DebrisSettler {
       // are common after rigid-body admission caps: one shard can be Rapier
       // owned while its denied VFX neighbors still need this cheap wake path.
       for (const component of this.getGlueConnectedComponents(region, this.getUnexpiredFragments(region))) {
-        if (!this.componentTouchesChangedSupportColumn(component, changedCells)) continue;
+        const componentMatch = this.getComponentChangedSupportWakeMatch(component, changedCells);
+        if (!componentMatch) continue;
 
         for (const fragment of component) {
-          if (fragment.wakeFromTerrainSupportChange()) wokenFragments += 1;
+          if (!fragment.isSleeping) continue;
+          if (!hasDebrisSupportWakeBudget(context, "settlerDebris")) break;
+          if (!tryClaimDebrisSupportWake(context, "settlerDebris", fragment)) continue;
+
+          const fragmentMatch = getFragmentChangedSupportWakeMatch(fragment, changedCells);
+          if (fragment.wakeFromTerrainSupportChange({ quiet: true })) {
+            wokenFragments += 1;
+            report = addDebrisSupportWakeReason(report, "settler-component");
+            report = addDebrisSupportWakeReason(report, fragmentMatch?.reason ?? componentMatch.reason);
+          }
         }
+        if (context.budgetExhausted) break;
       }
+      if (context.budgetExhausted) break;
     }
 
     if (wokenFragments > 0) this.refreshLiveStats();
-    return wokenFragments;
+    return {
+      ...report,
+      settlerDebrisWoken: wokenFragments,
+      duplicateWakeSkips: context.duplicateWakeSkips - duplicateSkipsBefore,
+      budgetExhausted: context.budgetExhausted
+    };
   }
 
   finalizeRegionsForPressure(
@@ -564,14 +598,16 @@ export class DebrisSettler {
     );
   }
 
-  private componentTouchesChangedSupportColumn(
+  private getComponentChangedSupportWakeMatch(
     component: readonly PhysicsToy[],
     changedCells: readonly ChangedTerrainCell[]
-  ): boolean {
-    return component.some((fragment) => (
-      !fragment.isExpired &&
-      isFragmentInsideAnyChangedSupportColumn(fragment, changedCells)
-    ));
+  ): DebrisSupportWakeMatch | null {
+    for (const fragment of component) {
+      if (fragment.isExpired) continue;
+      const match = getFragmentChangedSupportWakeMatch(fragment, changedCells);
+      if (match) return match;
+    }
+    return null;
   }
 
   private getGlueConnectedComponents(
