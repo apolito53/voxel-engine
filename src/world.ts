@@ -1320,12 +1320,12 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   pruneQueuedChunks(centerCx: number, centerCz: number, radius = LOAD_RADIUS): void {
+    const normalizedRadius = normalizeChunkRadius(radius);
     for (const [key, queued] of this.chunkLoadQueue.entries()) {
-      const distance = Math.max(
-        Math.abs(queued.cx - centerCx),
-        Math.abs(queued.cz - centerCz)
-      );
-      if (distance > radius || this.chunks.has(key)) {
+      if (
+        !isChunkOffsetInsideRadius(queued.cx - centerCx, queued.cz - centerCz, normalizedRadius) ||
+        this.chunks.has(key)
+      ) {
         this.chunkLoadQueue.delete(key);
       }
     }
@@ -2967,11 +2967,7 @@ export class VoxelWorld implements CollisionWorld {
     this.lastUnloadCandidateChecks = chunkEntries.length;
 
     for (const [key, chunk] of chunkEntries) {
-      const distance = Math.max(
-        Math.abs(chunk.cx - centerCx),
-        Math.abs(chunk.cz - centerCz)
-      );
-      if (distance <= normalizedRadius) continue;
+      if (isChunkOffsetInsideRadius(chunk.cx - centerCx, chunk.cz - centerCz, normalizedRadius)) continue;
 
       if (chunk.modified) {
         this.rememberModifiedChunk(key, chunk.blocks);
@@ -3416,7 +3412,7 @@ export class VoxelWorld implements CollisionWorld {
     const dx = item.cx - centerCx;
     const dz = item.cz - centerCz;
     const distance = dx * dx + dz * dz;
-    const ring = Math.max(Math.abs(dx), Math.abs(dz));
+    const ring = Math.sqrt(distance);
     const alignment = this.chunkViewAlignment(dx, dz, distance);
     const visible = this.chunkIntersectsFrustum(item.cx, item.cz);
 
@@ -3467,11 +3463,11 @@ export class VoxelWorld implements CollisionWorld {
       const mesh = chunk.mesh;
       if (!mesh) continue;
 
-      const ringDistance = Math.max(
-        Math.abs(chunk.cx - centerCx),
-        Math.abs(chunk.cz - centerCz)
+      const hiddenByOpaqueFog = !isChunkOffsetInsideRadius(
+        chunk.cx - centerCx,
+        chunk.cz - centerCz,
+        normalizedRadius
       );
-      const hiddenByOpaqueFog = ringDistance > normalizedRadius;
       mesh.visible = !hiddenByOpaqueFog;
       if (hiddenByOpaqueFog) {
         this.fogHiddenChunkKeys.add(key);
@@ -3744,6 +3740,7 @@ function getChunkRadiusOffsets(radius: number): readonly ChunkRadiusOffset[] {
   const offsets: ChunkRadiusOffset[] = [];
   for (let dz = -normalizedRadius; dz <= normalizedRadius; dz += 1) {
     for (let dx = -normalizedRadius; dx <= normalizedRadius; dx += 1) {
+      if (!isChunkOffsetInsideRadius(dx, dz, normalizedRadius)) continue;
       offsets.push({ dx, dz });
     }
   }
@@ -3755,6 +3752,15 @@ function getChunkRadiusOffsets(radius: number): readonly ChunkRadiusOffset[] {
 function normalizeChunkRadius(radius: number): number {
   if (!Number.isFinite(radius)) return 0;
   return Math.max(0, Math.floor(radius));
+}
+
+function isChunkOffsetInsideRadius(dx: number, dz: number, radius: number): boolean {
+  // Chunk streaming works in whole-chunk coordinates, but the horizon is viewed
+  // as a circular fog curtain. The half-chunk margin keeps edge chunks from
+  // popping when the player stands near a chunk boundary while still trimming
+  // the square corners that made distant terrain look like a floating island.
+  const radiusWithChunkMargin = radius + 0.5;
+  return dx * dx + dz * dz <= radiusWithChunkMargin * radiusWithChunkMargin;
 }
 
 function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {

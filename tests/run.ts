@@ -1350,6 +1350,22 @@ test("world chunk coordinates wrap cleanly across zero", () => {
   assertDeepEqual(world.toChunkCoords(-16.1, 32), { cx: -2, cz: 2, lx: 15, lz: 0 }, "mixed-sign coordinates");
 });
 
+test("chunk streaming horizon trims square corners to match circular fog", () => {
+  const world = new VoxelWorld({ seed: "circular-horizon-test" });
+
+  world.queueChunksAround(0, 0, 2);
+
+  assert(world.chunkLoadQueue.has(world.key(2, 0)), "radial horizon should keep the positive X edge");
+  assert(world.chunkLoadQueue.has(world.key(2, 1)), "half-chunk margin should keep near-corner edge chunks");
+  assert(!world.chunkLoadQueue.has(world.key(2, 2)), "radial horizon should drop the old square corner");
+  assert(!world.chunkLoadQueue.has(world.key(-2, -2)), "radial horizon should be symmetric in negative space");
+  assertEqual(
+    world.chunkLoadQueue.size,
+    21,
+    "radius-2 horizon should queue the circular footprint plus chunk-boundary safety margin"
+  );
+});
+
 test("chunk top-column cache follows block edits", () => {
   const chunk = new Chunk(0, 0);
 
@@ -3316,15 +3332,15 @@ test("world hides opaque-fog horizon chunks without unloading the stream window"
   world.updateChunkRenderVisibility(0, 0, 1);
 
   const stats = world.getStats();
-  assertEqual(stats.loadedChunks, 25, "render culling should keep the loaded horizon available for streaming");
-  assertEqual(stats.frustumChunks, 25, "without a priority frustum, every loaded chunk should count as in-frustum");
+  assertEqual(stats.loadedChunks, 21, "render culling should keep the radial loaded horizon available for streaming");
+  assertEqual(stats.frustumChunks, 21, "without a priority frustum, every loaded chunk should count as in-frustum");
   assertEqual(stats.renderedChunks, 9, "radius-one render visibility should draw the nearest 3x3 chunk window");
-  assertEqual(stats.fogHiddenChunks, 16, "outer loaded chunks should be hidden behind opaque fog");
+  assertEqual(stats.fogHiddenChunks, 12, "outer radial chunks should be hidden behind opaque fog");
   assertEqual(stats.visibleChunks, stats.frustumChunks, "legacy visible chunk stats should remain frustum-compatible");
 
   world.updateChunkRenderVisibility(0, 0, 2);
   const restoredStats = world.getStats();
-  assertEqual(restoredStats.renderedChunks, 25, "approaching or widening the horizon should restore hidden chunk meshes");
+  assertEqual(restoredStats.renderedChunks, 21, "approaching or widening the horizon should restore hidden chunk meshes");
   assertEqual(restoredStats.fogHiddenChunks, 0, "no chunks should remain fog-hidden inside the render radius");
 });
 
@@ -3332,7 +3348,7 @@ test("world reuses queued chunk windows while player stays in the same chunk", (
   const world = new VoxelWorld({ seed: "stream-window-cache-test" });
   const scene = new THREE.Scene();
   const loadRadius = 3;
-  const expectedCandidateChecks = (loadRadius * 2 + 1) ** 2;
+  const expectedCandidateChecks = 37;
 
   world.streamChunksAround(0, 0, scene, loadRadius, loadRadius + 1, 1);
   let diagnostics = world.getStreamingDiagnostics();

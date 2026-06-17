@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.11.14 - 2026-06-17
+
+### Changed
+
+- Changed chunk streaming, unloading, and fog-hidden render visibility from
+  square chunk rings to a radial footprint with a half-chunk safety margin, so
+  the loaded terrain horizon matches the circular fog curtain instead of
+  revealing square corners as a floating island edge.
+
+### Validation
+
+- `npm.cmd run validate`
+- Browser smoke at `http://127.0.0.1:5173/?radialHorizonSmoke=1778602000000`
+  loaded without console errors.
+
 ## 0.11.13 - 2026-06-17
 
 ### Changed
