@@ -96,6 +96,11 @@ Preferred format:
 - `[feel]` Material-specific debris styles: leaves float down as soft fluffy
   pieces, stone throws larger jagged shards, wood splinters, dirt and sand read
   more like poofs/dust than hard fragments.
+- `[mechanic]` Source-material debris behavior: when a block breaks, its
+  material type can seed debris mass, bounce, drag, lifetime, particle shape,
+  color, and settling rules so leaves flutter, sand puffs and settles fast, wood
+  tumbles as splinters, and stone clatters as heavier chunks without making
+  shard count affect gameplay value.
 - `[mechanic]` Multi-type blocks as a deliberate revival of the old debris-pile
   idea: let a terrain cell represent mixed material/cover/fill data without
   turning ordinary loose debris cleanup back into permanent rubble by accident.
