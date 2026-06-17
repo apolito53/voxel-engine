@@ -78,6 +78,17 @@ export type PartialBlockSurfaceSample = {
   readonly weight: number;
 };
 
+export type PartialBlockFootprintSupportOptions = {
+  readonly minPassableSubBlocks?: number;
+};
+
+export type PartialBlockFootprintSupportResult = {
+  readonly supportY: number | null;
+  readonly coveredArea: number;
+  readonly footprintArea: number;
+  readonly hasPassableAperture: boolean;
+};
+
 export type PartialBlockFaceVisibility = (
   cell: PartialBlockCell,
   normal: PartialBlockPosition
@@ -464,6 +475,145 @@ export function getPartialBlockSupportHeight(
   }
 
   return supportY;
+}
+
+export function getPartialBlockPlayerFootprintSupport(
+  cells: Iterable<PartialBlockCell>,
+  bounds: CollisionBounds,
+  options: PartialBlockFootprintSupportOptions = {}
+): PartialBlockFootprintSupportResult {
+  const minPassableSubBlocks = Math.max(1, Math.floor(options.minPassableSubBlocks ?? 3));
+  const footprint = createPlayerSupportFootprint(bounds, minPassableSubBlocks);
+  const supportBoxes: CollisionBounds[] = [];
+  const minSupportY = bounds.minY - PARTIAL_BLOCK_SURFACE_MAX_HEIGHT - PARTIAL_BLOCK_SURFACE_EPSILON;
+  const maxSupportY = bounds.maxY + PARTIAL_BLOCK_SURFACE_EPSILON;
+  let supportY: number | null = null;
+
+  for (const cell of cells) {
+    for (const box of createPartialBlockCollisionBoxes(cell)) {
+      if (box.maxY < minSupportY || box.maxY > maxSupportY) continue;
+      if (box.maxX <= footprint.minX || box.minX >= footprint.maxX) continue;
+      if (box.maxZ <= footprint.minZ || box.minZ >= footprint.maxZ) continue;
+      supportY = supportY === null ? box.maxY : Math.max(supportY, box.maxY);
+      supportBoxes.push(box);
+    }
+  }
+
+  const footprintArea = Math.max(0, footprint.maxX - footprint.minX) * Math.max(0, footprint.maxZ - footprint.minZ);
+  if (supportY === null || footprintArea <= 0) {
+    return { supportY, coveredArea: 0, footprintArea, hasPassableAperture: supportY === null };
+  }
+
+  const minGridX = Math.floor(footprint.minX / PARTIAL_BLOCK_LATTICE_CELL_SIZE);
+  const maxGridX = Math.ceil(footprint.maxX / PARTIAL_BLOCK_LATTICE_CELL_SIZE) - 1;
+  const minGridZ = Math.floor(footprint.minZ / PARTIAL_BLOCK_LATTICE_CELL_SIZE);
+  const maxGridZ = Math.ceil(footprint.maxZ / PARTIAL_BLOCK_LATTICE_CELL_SIZE) - 1;
+  const width = Math.max(0, maxGridX - minGridX + 1);
+  const depth = Math.max(0, maxGridZ - minGridZ + 1);
+  const covered = new Array<boolean>(width * depth).fill(false);
+
+  for (const box of supportBoxes) {
+    if (Math.abs(box.maxY - supportY) > PARTIAL_BLOCK_SURFACE_EPSILON) continue;
+    const boxMinGridX = Math.floor(Math.max(box.minX, footprint.minX) / PARTIAL_BLOCK_LATTICE_CELL_SIZE);
+    const boxMaxGridX = Math.ceil(Math.min(box.maxX, footprint.maxX) / PARTIAL_BLOCK_LATTICE_CELL_SIZE) - 1;
+    const boxMinGridZ = Math.floor(Math.max(box.minZ, footprint.minZ) / PARTIAL_BLOCK_LATTICE_CELL_SIZE);
+    const boxMaxGridZ = Math.ceil(Math.min(box.maxZ, footprint.maxZ) / PARTIAL_BLOCK_LATTICE_CELL_SIZE) - 1;
+    for (let z = boxMinGridZ; z <= boxMaxGridZ; z += 1) {
+      for (let x = boxMinGridX; x <= boxMaxGridX; x += 1) {
+        const index = (z - minGridZ) * width + (x - minGridX);
+        if (index >= 0 && index < covered.length) covered[index] = true;
+      }
+    }
+  }
+
+  let coveredCells = 0;
+  for (const isCovered of covered) {
+    if (isCovered) coveredCells += 1;
+  }
+
+  const hasPassableAperture = hasConnectedPassableAperture(
+    covered,
+    width,
+    depth,
+    minPassableSubBlocks
+  );
+
+  return {
+    supportY: hasPassableAperture ? null : supportY,
+    coveredArea: coveredCells * PARTIAL_BLOCK_LATTICE_CELL_SIZE * PARTIAL_BLOCK_LATTICE_CELL_SIZE,
+    footprintArea,
+    hasPassableAperture
+  };
+}
+
+function createPlayerSupportFootprint(
+  bounds: CollisionBounds,
+  minPassableSubBlocks: number
+): Pick<CollisionBounds, "minX" | "maxX" | "minZ" | "maxZ"> {
+  const minWidth = minPassableSubBlocks * PARTIAL_BLOCK_LATTICE_CELL_SIZE;
+  const centerX = (bounds.minX + bounds.maxX) * 0.5;
+  const centerZ = (bounds.minZ + bounds.maxZ) * 0.5;
+  const halfX = Math.max((bounds.maxX - bounds.minX) * 0.5, minWidth * 0.5);
+  const halfZ = Math.max((bounds.maxZ - bounds.minZ) * 0.5, minWidth * 0.5);
+  return {
+    minX: centerX - halfX,
+    maxX: centerX + halfX,
+    minZ: centerZ - halfZ,
+    maxZ: centerZ + halfZ
+  };
+}
+
+function hasConnectedPassableAperture(
+  covered: readonly boolean[],
+  width: number,
+  depth: number,
+  minPassableSubBlocks: number
+): boolean {
+  const visited = new Array<boolean>(covered.length).fill(false);
+  const queue: number[] = [];
+
+  for (let start = 0; start < covered.length; start += 1) {
+    if (covered[start] || visited[start]) continue;
+
+    visited[start] = true;
+    queue.length = 0;
+    queue.push(start);
+    let minX = start % width;
+    let maxX = minX;
+    let minZ = Math.floor(start / width);
+    let maxZ = minZ;
+
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const index = queue[cursor];
+      const x = index % width;
+      const z = Math.floor(index / width);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z);
+      maxZ = Math.max(maxZ, z);
+
+      const neighbors = [
+        x > 0 ? index - 1 : -1,
+        x + 1 < width ? index + 1 : -1,
+        z > 0 ? index - width : -1,
+        z + 1 < depth ? index + width : -1
+      ];
+      for (const neighbor of neighbors) {
+        if (neighbor < 0 || covered[neighbor] || visited[neighbor]) continue;
+        visited[neighbor] = true;
+        queue.push(neighbor);
+      }
+    }
+
+    if (
+      maxX - minX + 1 >= minPassableSubBlocks &&
+      maxZ - minZ + 1 >= minPassableSubBlocks
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function addPartialBlockCellGeometry(

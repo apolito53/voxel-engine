@@ -38,6 +38,7 @@ import {
   createPartialBlockRemovedVisualCellIndexes,
   createPartialBlockSurfaceSamples,
   createPartialBlockTrajectoryTunnelCellIndexes,
+  getPartialBlockPlayerFootprintSupport,
   getPartialBlockMeshDirtyRegionKeys,
   getPartialBlockSupportHeight,
   isPartialBlockInsideRegionHalo,
@@ -1931,6 +1932,34 @@ export class VoxelWorld implements CollisionWorld {
 
   getSupportHeight(bounds: CollisionBounds): number | null {
     return getPartialBlockSupportHeight(this.partialBlocks.values(), bounds);
+  }
+
+  getPlayerFootprintSupportHeight(bounds: CollisionBounds, options?: {
+    readonly minPassableSubBlocks?: number;
+    readonly minHorizontalClearanceSubBlocks?: number;
+    readonly stance?: "standing" | "crawling";
+  }): number | null {
+    const minX = Math.floor(bounds.minX - 1);
+    const maxX = Math.floor(bounds.maxX + 1);
+    const minY = Math.floor(bounds.minY - 1);
+    const maxY = Math.floor(bounds.maxY);
+    const minZ = Math.floor(bounds.minZ - 1);
+    const maxZ = Math.floor(bounds.maxZ + 1);
+    const cells: PartialBlockCell[] = [];
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          const cell = this.getPartialBlock(x, y, z);
+          if (cell) cells.push(cell);
+        }
+      }
+    }
+
+    const result = getPartialBlockPlayerFootprintSupport(cells, bounds, {
+      minPassableSubBlocks: options?.minPassableSubBlocks
+    });
+    return result.hasPassableAperture ? null : result.supportY;
   }
 
   getCellCollisionBoxes(x: number, y: number, z: number): readonly CollisionBounds[] | null {

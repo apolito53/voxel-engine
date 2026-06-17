@@ -39,4 +39,9 @@ export type CollisionWorld = {
     radius: number
   ): ProjectileBlockSweepHit | null;
   getSupportHeight?(bounds: CollisionBounds): number | null;
+  getPlayerFootprintSupportHeight?(bounds: CollisionBounds, options?: {
+    readonly minPassableSubBlocks?: number;
+    readonly minHorizontalClearanceSubBlocks?: number;
+    readonly stance?: "standing" | "crawling";
+  }): number | null;
 };
