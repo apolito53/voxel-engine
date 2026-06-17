@@ -57,6 +57,24 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   stress scene with many debris/material events, and a cleanup check across
   pause, world exit, and dev reload.
 
+## Medium Priority: Player Collision With Cross-Block Partial Holes
+
+- Goal: fix player collision/support checks so partial-block damage can create
+  a fall-through hole when the opening is wide enough for the player, even if
+  the missing sub-blocks are spread across neighboring main blocks.
+- Current bug: carving a gap that should be passable (roughly >= 3 sub-blocks
+  wide) can still leave the player standing on air because support is evaluated
+  too locally per main block instead of considering the combined sub-voxel
+  aperture under the player's footprint.
+- First slice: audit player grounding and collision sampling around the sparse
+  3x3x3 partial-block bite lattice, especially at macro-block boundaries, and
+  replace any single-block "has support" shortcut with footprint-aware checks
+  across adjacent damaged blocks.
+- Validation shape: add a regression scene/test where a fall-through shaft is
+  assembled from partial holes crossing two or more neighboring blocks, confirm
+  the player falls through openings at the intended width, and confirm narrower
+  partial holes still support or block the player as expected.
+
 ## Worker Migration Roadmap
 
 - Current foundation: `WorkerPool` owns the shared job protocol shape with
