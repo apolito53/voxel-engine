@@ -210,6 +210,7 @@ import {
   createPartialBlockCollisionBoxes,
   createPartialBlockFaceVisibilityMasks,
   createPartialBlockMeshRegionKey,
+  getPartialBlockPlayerFootprintSupport,
   createPartialBlockRemovedVisualCellIndexes,
   getPartialBlockRemainingVisualCellCount,
   getPartialBlockRemovedVisualCellCount,
@@ -516,6 +517,30 @@ function assertFloat32ArraysEqual(actual: Float32Array, expected: Float32Array, 
       throw new Error(`${message}. First difference at ${index}: ${actual[index]} !== ${expected[index]}.`);
     }
   }
+}
+
+function createTestPartialBlockCell(
+  position: { readonly x: number; readonly y: number; readonly z: number },
+  removedVisualCellIndexes: readonly number[]
+): PartialBlockCell {
+  return {
+    block: BLOCK.stone,
+    position,
+    cuts: [],
+    removedVisualCellIndexes,
+    damage: 1,
+    maxHealth: 1
+  };
+}
+
+function createRemovedPartialColumns(columns: readonly { readonly x: number; readonly z: number }[]): number[] {
+  const removed: number[] = [];
+  for (const { x, z } of columns) {
+    for (let y = 0; y < 3; y += 1) {
+      removed.push(x + y * 3 + z * 9);
+    }
+  }
+  return removed;
 }
 
 test("combat log caps entries and reports latest events first", () => {
@@ -5248,6 +5273,49 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   assert(bounds.max.y > 5.25 && bounds.max.y < 6, "surface samples should create a partial-height walkable patch");
 
   field.dispose();
+});
+
+test("player footprint support falls through a three-sub-block cross-block shaft", () => {
+  const cells = [
+    createTestPartialBlockCell({ x: 0, y: 0, z: 0 }, createRemovedPartialColumns([{ x: 2, z: 0 }, { x: 2, z: 1 }, { x: 2, z: 2 }])),
+    createTestPartialBlockCell({ x: 1, y: 0, z: 0 }, createRemovedPartialColumns([
+      { x: 0, z: 0 },
+      { x: 0, z: 1 },
+      { x: 0, z: 2 },
+      { x: 1, z: 0 },
+      { x: 1, z: 1 },
+      { x: 1, z: 2 }
+    ]))
+  ];
+  const result = getPartialBlockPlayerFootprintSupport(cells, {
+    minX: 0.85,
+    maxX: 1.49,
+    minY: 1,
+    maxY: 1.05,
+    minZ: 0.18,
+    maxZ: 0.82
+  });
+
+  assertEqual(result.supportY, null, "a connected one-block-wide cross-block shaft should not support the player");
+  assert(result.hasPassableAperture, "the footprint query should report the three-sub-block aperture as passable");
+});
+
+test("player footprint support preserves narrower cross-block seams", () => {
+  const cells = [
+    createTestPartialBlockCell({ x: 0, y: 0, z: 0 }, createRemovedPartialColumns([{ x: 2, z: 0 }, { x: 2, z: 1 }, { x: 2, z: 2 }])),
+    createTestPartialBlockCell({ x: 1, y: 0, z: 0 }, createRemovedPartialColumns([{ x: 0, z: 0 }, { x: 0, z: 1 }, { x: 0, z: 2 }]))
+  ];
+  const result = getPartialBlockPlayerFootprintSupport(cells, {
+    minX: 0.85,
+    maxX: 1.49,
+    minY: 1,
+    maxY: 1.05,
+    minZ: 0.18,
+    maxZ: 0.82
+  });
+
+  assertEqual(result.supportY, 1, "a seam below the one-block-wide passability threshold should still support the player");
+  assert(!result.hasPassableAperture, "two sub-blocks of connected opening should remain too narrow to fall through");
 });
 
 test("fractured terrain does not stamp a break-time surface puddle", () => {

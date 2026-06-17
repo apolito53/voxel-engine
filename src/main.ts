@@ -728,6 +728,13 @@ const terrainAndRubbleCollisionWorld: CollisionWorld = {
     if (terrainSupportY === null) return rubbleSupportY;
     if (rubbleSupportY === null) return terrainSupportY;
     return Math.max(terrainSupportY, rubbleSupportY);
+  },
+  getPlayerFootprintSupportHeight: (bounds, options) => {
+    const terrainSupportY = requireWorld().getPlayerFootprintSupportHeight(bounds, options);
+    const rubbleSupportY = rubbleField.getSupportHeight(bounds);
+    if (terrainSupportY === null) return rubbleSupportY;
+    if (rubbleSupportY === null) return terrainSupportY;
+    return Math.max(terrainSupportY, rubbleSupportY);
   }
 };
 const novaPilot = new NovaPilot();

@@ -688,7 +688,10 @@ export class PlayerController {
   }
 
   private snapDownToPartialSupport(previousFeetY: number): boolean {
-    const supportY = this.world.getSupportHeight?.(this.getBounds());
+    const bounds = this.getBounds();
+    const supportY = this.world.getPlayerFootprintSupportHeight
+      ? this.world.getPlayerFootprintSupportHeight(bounds)
+      : this.world.getSupportHeight?.(bounds);
     if (supportY === undefined || supportY === null) return false;
 
     const feetY = this.getFeetY();
@@ -702,7 +705,10 @@ export class PlayerController {
   }
 
   private stepUpOntoPartialSupport(previousFeetY: number): boolean {
-    const supportY = this.world.getSupportHeight?.(this.getBounds());
+    const bounds = this.getBounds();
+    const supportY = this.world.getPlayerFootprintSupportHeight
+      ? this.world.getPlayerFootprintSupportHeight(bounds)
+      : this.world.getSupportHeight?.(bounds);
     if (supportY === undefined || supportY === null) return false;
 
     const feetY = this.getFeetY();
