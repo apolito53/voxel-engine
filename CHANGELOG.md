@@ -13,6 +13,10 @@
 
 ### Changed
 
+- Decoupled projectile Physics Cores from the loose-debris Physics Object Budget.
+  The slider now caps active debris bodies and derived Rapier body pressure,
+  while thrown cores use their own active-core safety cap, HUD row, hitch-log
+  counters, and Nova context wording.
 - Routed the main render loop through the new WebGL backend and hid legacy chunk
   meshes after visibility bookkeeping so the GPU terrain path owns normal terrain
   presentation while the old expanded mesh path remains available for parity.

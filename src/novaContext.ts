@@ -25,7 +25,10 @@ export type NovaRuntimeTelemetry = {
   readonly movementMode: PlayerMovementMode;
   readonly speedMetersPerSecond: number;
   readonly novaActive: boolean;
+  // Budgeted debris bodies are separate from thrown cores. Keeping both in the
+  // context lets chat/status replies explain which system is actually busy.
   readonly physicsObjectCount: number;
+  readonly physicsCoreCount: number;
   readonly rubblePatchCount: number;
   readonly rubblePieceCount: number;
 };
@@ -59,6 +62,7 @@ const DEFAULT_RUNTIME_TELEMETRY: NovaRuntimeTelemetry = {
   speedMetersPerSecond: 0,
   novaActive: false,
   physicsObjectCount: 0,
+  physicsCoreCount: 0,
   rubblePatchCount: 0,
   rubblePieceCount: 0
 };
@@ -131,7 +135,7 @@ export class NovaContextJournal {
       this.events.on("quality:changed", (event) => this.onQualityChanged(event)),
       this.events.on("settings:physics-budget-changed", (event) => {
         this.physicsObjectBudget = event.physicsObjectBudget;
-        this.remember("Settings", `Physics budget set to ${event.physicsObjectBudget} bodies.`);
+        this.remember("Settings", `Physics debris budget set to ${event.physicsObjectBudget} bodies.`);
       }),
       this.events.on("palette:selected", (event) => {
         this.runtime = { ...this.runtime, selectedItemLabel: event.name };

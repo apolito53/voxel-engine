@@ -95,7 +95,9 @@ The preview is a debug aid, not durable gameplay state.
 
 Thrown Physics Cores have a 20 second hard lifetime. Once a projectile stays
 below useful terrain-damage speed, it starts a short fade/despawn countdown so
-old spent shots stop accumulating as physics objects.
+old spent shots stop accumulating as physics objects. Projectile cores do not
+consume the loose-debris body budget; they have a separate active-core safety
+cap so debris cleanup cannot silently delete freshly fired gameplay shots.
 
 ## Debris VFX
 

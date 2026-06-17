@@ -106,7 +106,8 @@ chunks remain loaded for continuity, but stop drawing after the opaque fog
 curtain plus a safety ring to reduce far-distance draw pressure.
 Thrown Physics Cores have a hard lifetime and fade out once they stay below
 useful terrain-damage speed, so spent shots do not linger forever during stress
-tests.
+tests. They no longer consume the loose-debris body budget; projectile cores
+use their own gameplay safety cap.
 `Break Burst Shards` controls the initial destruction spray, while `Active
 Ground Debris Cap` trims only supported or sleeping aftermath shards after they
 touch down and survive the short burst grace.

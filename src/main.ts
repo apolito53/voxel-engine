@@ -200,6 +200,14 @@ import {
 } from "./physicsCoreLaunch";
 import { PhysicsFragmentInstancer } from "./physicsInstancing";
 import {
+  PHYSICS_CORE_ACTIVE_BUDGET,
+  countActiveDebrisPhysicsObjects,
+  countActivePhysicsCores,
+  getDebrisPhysicsObjectsOverBudget,
+  getPhysicsCoresOverBudget,
+  isActivePhysicsCore
+} from "./physicsObjectCounts";
+import {
   MAX_PHYSICS_OBJECT_BUDGET,
   MIN_PHYSICS_OBJECT_BUDGET,
   PHYSICS_OBJECT_BUDGET_STEP,
@@ -966,8 +974,11 @@ function recordRuntimeRenderDiagnostic(
       appVersion: APP_VERSION,
       inWorld,
       qualityLabel: qualityController.preset.label,
-      physicsObjectCount: toys.length,
+      physicsObjectCount: getActiveDebrisPhysicsObjectCount(),
       physicsObjectBudget,
+      physicsCoreCount: getActivePhysicsCoreCount(),
+      physicsCoreBudget: PHYSICS_CORE_ACTIVE_BUDGET,
+      totalPhysicsToyCount: toys.length,
       rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
       rigidDebris: rigidDebrisStats,
       renderer: {
@@ -2148,7 +2159,8 @@ function animate(): void {
 
     const budgetStartedAt = performance.now();
     enforceRigidDebrisBudget();
-    enforcePhysicsToyBudget();
+    enforceDebrisPhysicsObjectBudget();
+    enforcePhysicsCoreBudget();
     physicsTimingSample.budgetEnforcementMs += performance.now() - budgetStartedAt;
 
     const cleanupStartedAt = performance.now();
@@ -2271,8 +2283,11 @@ function animate(): void {
 
     const performanceStats = {
       qualityLabel: qualityController.preset.label,
-      physicsObjectCount: toys.length,
+      physicsObjectCount: getActiveDebrisPhysicsObjectCount(),
       physicsObjectBudget,
+      physicsCoreCount: getActivePhysicsCoreCount(),
+      physicsCoreBudget: PHYSICS_CORE_ACTIVE_BUDGET,
+      totalPhysicsToyCount: toys.length,
       rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
       debrisPressure: debrisPerformancePressure,
       physicsTiming: physicsTimingSample,
@@ -2325,8 +2340,10 @@ function animate(): void {
       debugPlayerChunk,
       debugWorldStats,
       debugMinimapMs,
-      toys.length,
+      getActiveDebrisPhysicsObjectCount(),
       physicsObjectBudget,
+      getActivePhysicsCoreCount(),
+      PHYSICS_CORE_ACTIVE_BUDGET,
       physicsCollisionStats,
       rigidDebrisStats,
       getCurrentRigidDebrisBodyBudget(),
@@ -2479,7 +2496,8 @@ function updateNovaContextTelemetry(activePlayer: PlayerController, rubbleStats:
     movementMode: activePlayer.movementMode,
     speedMetersPerSecond: getPlayerSpeedMetersPerSecond(activePlayer.velocity),
     novaActive: novaPilot.active,
-    physicsObjectCount: toys.length,
+    physicsObjectCount: getActiveDebrisPhysicsObjectCount(),
+    physicsCoreCount: getActivePhysicsCoreCount(),
     rubblePatchCount: rubbleStats.clusters,
     rubblePieceCount: rubbleStats.pieces
   });
@@ -2526,8 +2544,11 @@ function createCurrentPerformanceStatsSnapshot(
   if (!inWorld) return null;
   return {
     qualityLabel: qualityController.preset.label,
-    physicsObjectCount: toys.length,
+    physicsObjectCount: getActiveDebrisPhysicsObjectCount(),
     physicsObjectBudget,
+    physicsCoreCount: getActivePhysicsCoreCount(),
+    physicsCoreBudget: PHYSICS_CORE_ACTIVE_BUDGET,
+    totalPhysicsToyCount: toys.length,
     rigidDebrisBodyBudget: getCurrentRigidDebrisBodyBudget(),
     debrisPressure: debrisPerformancePressure,
     physicsTiming: latestPhysicsTimingStats,
@@ -4075,6 +4096,9 @@ function addPhysicsToy(toy: PhysicsToy): void {
   toys.push(toy);
   if (!toy.isInstancedFragment) {
     scene.add(toy.mesh);
+    // Cores are gameplay projectiles, so they have an independent safety cap
+    // instead of competing with debris shards for the Physics Object Budget.
+    if (isActivePhysicsCore(toy)) enforcePhysicsCoreBudget();
   }
 }
 
@@ -4099,7 +4123,7 @@ function setPhysicsObjectBudget(nextBudget: number, persist = true): void {
   }
 
   updatePhysicsBudgetControls();
-  enforcePhysicsToyBudget();
+  enforceDebrisPhysicsObjectBudget();
   enforceRigidDebrisBudget();
   if (persist) {
     engineEvents.emit("settings:physics-budget-changed", {
@@ -4120,7 +4144,7 @@ function syncPhysicsBudgetToQuality(): void {
 }
 
 function updatePhysicsBudgetControls(): void {
-  physicsBudgetValue.textContent = `${physicsObjectBudget} bodies`;
+  physicsBudgetValue.textContent = `${physicsObjectBudget} debris bodies`;
   physicsBudgetDecreaseButton.disabled = physicsObjectBudget <= MIN_PHYSICS_OBJECT_BUDGET;
   physicsBudgetIncreaseButton.disabled = physicsObjectBudget >= MAX_PHYSICS_OBJECT_BUDGET;
   physicsBudgetSlider.min = String(MIN_PHYSICS_OBJECT_BUDGET);
@@ -4289,8 +4313,16 @@ function updateSettingsControls(): void {
   updateGroundDebrisLifetimeControls();
 }
 
-function enforcePhysicsToyBudget(): void {
-  const overBudgetCount = toys.length - physicsObjectBudget;
+function getActiveDebrisPhysicsObjectCount(): number {
+  return countActiveDebrisPhysicsObjects(toys);
+}
+
+function getActivePhysicsCoreCount(): number {
+  return countActivePhysicsCores(toys);
+}
+
+function enforceDebrisPhysicsObjectBudget(): void {
+  const overBudgetCount = getDebrisPhysicsObjectsOverBudget(toys, physicsObjectBudget);
   if (overBudgetCount <= 0) return;
 
   // Debris is VFX now. Durable damage lives in terrain HP and the partial
@@ -4310,23 +4342,22 @@ function enforcePhysicsToyBudget(): void {
   }
 
   const airborneProtectionCount = Math.min(
-    Math.max(0, toys.length - physicsObjectBudget),
+    getDebrisPhysicsObjectsOverBudget(toys, physicsObjectBudget),
     countPressureProtectedAirborneFragments()
   );
   if (airborneProtectionCount > 0) {
     addDebrisLifecycleDiagnostics({ airbornePressureProtections: airborneProtectionCount });
   }
 
-  pruneOldestPhysicsCoresForBudget();
+  const emergencyOverBudgetCount = getDebrisPhysicsObjectsOverBudget(toys, physicsObjectBudget);
+  if (emergencyOverBudgetCount <= 0) return;
 
-  if (toys.length <= physicsObjectBudget) return;
-
-  // Last-resort safety valve: if the scene is still beyond the total toy cap
-  // after settled debris and cores are gone, expire farthest airborne debris.
-  // This should be rare and is surfaced in HUD/log diagnostics when it fires.
+  // Last-resort safety valve: if debris is still beyond the shard cap after
+  // settled cleanup, expire farthest airborne debris. Cores stay out of this
+  // pressure path so projectile gameplay does not punish heavy debris scenes.
   const emergencySettlerExpiries = debrisSettler.discardRegionsForPressure(
     camera.position,
-    toys.length - physicsObjectBudget
+    emergencyOverBudgetCount
   );
   if (emergencySettlerExpiries > 0) {
     addDebrisLifecycleDiagnostics({ emergencyAirborneExpiries: emergencySettlerExpiries });
@@ -4514,7 +4545,7 @@ function getGroundDebrisCleanupSupportBounds(toy: PhysicsToy): CollisionBounds {
 }
 
 function expireOrphanFragmentsForBudget(outsideBubbleOnly: boolean, allowAirborne: boolean): number {
-  if (toys.length <= physicsObjectBudget) return 0;
+  if (getDebrisPhysicsObjectsOverBudget(toys, physicsObjectBudget) <= 0) return 0;
   let expiredCount = 0;
 
   const candidates = toys
@@ -4531,7 +4562,7 @@ function expireOrphanFragmentsForBudget(outsideBubbleOnly: boolean, allowAirborn
     ));
 
   for (const toy of candidates) {
-    if (toys.length <= physicsObjectBudget) return expiredCount;
+    if (getDebrisPhysicsObjectsOverBudget(toys, physicsObjectBudget) <= 0) return expiredCount;
 
     const index = toys.indexOf(toy);
     if (index === -1) continue;
@@ -4561,11 +4592,18 @@ function countPressureProtectedAirborneFragments(): number {
   return protectedFragments;
 }
 
-function pruneOldestPhysicsCoresForBudget(): void {
-  while (toys.length > physicsObjectBudget) {
-    const coreIndex = toys.findIndex((toy) => !toy.isInstancedFragment);
-    if (coreIndex === -1) return;
-    removePhysicsToyAt(coreIndex);
+function enforcePhysicsCoreBudget(): void {
+  let overBudgetCount = getPhysicsCoresOverBudget(toys, PHYSICS_CORE_ACTIVE_BUDGET);
+  if (overBudgetCount <= 0) return;
+
+  // The independent cap is a runaway guard, not a tuning knob for debris. Array
+  // order matches spawn order, so this removes oldest active cores first.
+  for (let index = 0; index < toys.length && overBudgetCount > 0; index += 1) {
+    const toy = toys[index];
+    if (!toy || !isActivePhysicsCore(toy)) continue;
+    removePhysicsToyAt(index);
+    index -= 1;
+    overBudgetCount -= 1;
   }
 }
 

@@ -171,6 +171,13 @@ import {
   stepPhysicsObjectBudget
 } from "../src/physicsBudget";
 import {
+  PHYSICS_CORE_ACTIVE_BUDGET,
+  countActiveDebrisPhysicsObjects,
+  countActivePhysicsCores,
+  getDebrisPhysicsObjectsOverBudget,
+  getPhysicsCoresOverBudget
+} from "../src/physicsObjectCounts";
+import {
   DEFAULT_PHYSICS_CORE_SETTINGS,
   PHYSICS_CORE_BASE_RADIUS,
   PHYSICS_CORE_BOUNCE_MAX_COUNT,
@@ -931,6 +938,7 @@ test("nova context journal records world, runtime, and event state", () => {
     speedMetersPerSecond: 12.5,
     novaActive: true,
     physicsObjectCount: 3,
+    physicsCoreCount: 1,
     rubblePatchCount: 2,
     rubblePieceCount: 11
   });
@@ -978,6 +986,7 @@ test("nova chat replies use context and chat logs stay bounded", () => {
     speedMetersPerSecond: 0,
     novaActive: true,
     physicsObjectCount: 1,
+    physicsCoreCount: 1,
     rubblePatchCount: 0,
     rubblePieceCount: 0
   });
@@ -9556,6 +9565,40 @@ test("physics object budget clamps and steps predictably", () => {
   );
 });
 
+test("physics object counters keep projectile cores out of debris pressure", () => {
+  const activeDebris = { isInstancedFragment: true, isExpired: false };
+  const expiredDebris = { isInstancedFragment: true, isExpired: true };
+  const activeCore = { isInstancedFragment: false, isExpired: false };
+  const expiredCore = { isInstancedFragment: false, isExpired: true };
+  const toys = [activeDebris, expiredDebris, activeCore, activeCore, expiredCore];
+
+  assertEqual(
+    countActiveDebrisPhysicsObjects(toys),
+    1,
+    "only active instanced fragments should consume the debris body budget"
+  );
+  assertEqual(
+    countActivePhysicsCores(toys),
+    2,
+    "only active non-instanced projectiles should consume the independent core budget"
+  );
+  assertEqual(
+    getDebrisPhysicsObjectsOverBudget(toys, 1),
+    0,
+    "active cores should not make debris cleanup think the scene is over budget"
+  );
+  assertEqual(
+    getPhysicsCoresOverBudget(toys, 1),
+    1,
+    "core over-budget pressure should be calculated independently from debris"
+  );
+  assertEqual(
+    getPhysicsCoresOverBudget(toys, PHYSICS_CORE_ACTIVE_BUDGET),
+    0,
+    "the default gameplay cap should leave ordinary active core counts alone"
+  );
+});
+
 test("physics core settings clamp slider values", () => {
   assertEqual(PHYSICS_CORE_SIZE_MIN_PERCENT, 10, "smallest projectile core setting should support bullet-scale shots");
   assertEqual(PHYSICS_CORE_VELOCITY_MAX_PERCENT, 500, "fastest projectile core setting should support bullet-scale shots");
@@ -9959,11 +10002,11 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   assertEqual(QUALITY_PRESETS.high.distanceScale, 4, "High should remain 4x distance");
   assertEqual(QUALITY_PRESETS.ultra.distanceScale, 6, "Ultra should remain 6x distance");
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
-  assertEqual(QUALITY_PRESETS.potato.physicsObjectBudget, 64, "Potato should allow 64 physics bodies by default");
-  assertEqual(QUALITY_PRESETS.low.physicsObjectBudget, 128, "Low should allow 128 physics bodies by default");
-  assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 physics bodies by default");
-  assertEqual(QUALITY_PRESETS.high.physicsObjectBudget, 512, "High should allow 512 physics bodies by default");
-  assertEqual(QUALITY_PRESETS.ultra.physicsObjectBudget, 1024, "Ultra should allow 1024 physics bodies by default");
+  assertEqual(QUALITY_PRESETS.potato.physicsObjectBudget, 64, "Potato should allow 64 debris bodies by default");
+  assertEqual(QUALITY_PRESETS.low.physicsObjectBudget, 128, "Low should allow 128 debris bodies by default");
+  assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 debris bodies by default");
+  assertEqual(QUALITY_PRESETS.high.physicsObjectBudget, 512, "High should allow 512 debris bodies by default");
+  assertEqual(QUALITY_PRESETS.ultra.physicsObjectBudget, 1024, "Ultra should allow 1024 debris bodies by default");
   assertEqual(QUALITY_PRESETS.potato.debrisActiveRadiusMeters, 8, "Potato should use the smallest active debris bubble");
   assertEqual(QUALITY_PRESETS.low.debrisActiveRadiusMeters, 12, "Low should keep debris active a little farther out");
   assertEqual(QUALITY_PRESETS.normal.debrisActiveRadiusMeters, 20, "Normal should keep a practical active debris radius");
@@ -10085,6 +10128,9 @@ function createTestHitchStats(
     qualityLabel: "Test",
     physicsObjectCount: 0,
     physicsObjectBudget: 192,
+    physicsCoreCount: 0,
+    physicsCoreBudget: PHYSICS_CORE_ACTIVE_BUDGET,
+    totalPhysicsToyCount: 0,
     rigidDebrisBodyBudget: 128,
     debrisPressure: createDebrisPerformancePressureState(128),
     physicsTiming: createEmptyPhysicsTimingStats(),

@@ -29,8 +29,13 @@ export type PerformanceHitchKind = "frame-hitch" | "low-fps";
 
 export type PerformanceHitchStatsSnapshot = {
   readonly qualityLabel: string;
+  // Historical name kept for persisted diagnostics; this now means active
+  // debris fragments governed by the Physics Object Budget, not thrown cores.
   readonly physicsObjectCount: number;
   readonly physicsObjectBudget: number;
+  readonly physicsCoreCount: number;
+  readonly physicsCoreBudget: number;
+  readonly totalPhysicsToyCount: number;
   readonly rigidDebrisBodyBudget: number;
   readonly debrisPressure: DebrisPerformancePressureState;
   readonly physicsTiming: PhysicsTimingStats;
@@ -628,7 +633,10 @@ function addCrossCuttingPressureDetails(
     );
   }
   if (stats.physicsObjectCount >= stats.physicsObjectBudget) {
-    details.push(`physics objects at budget ${stats.physicsObjectCount}/${stats.physicsObjectBudget}`);
+    details.push(`debris physics objects at budget ${stats.physicsObjectCount}/${stats.physicsObjectBudget}`);
+  }
+  if (stats.physicsCoreCount >= stats.physicsCoreBudget) {
+    details.push(`physics cores at gameplay cap ${stats.physicsCoreCount}/${stats.physicsCoreBudget}`);
   }
   if (stats.world.partialDamageBlocks > 0) {
     details.push(
@@ -718,6 +726,9 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     qualityLabel: stats.qualityLabel,
     physicsObjectCount: stats.physicsObjectCount,
     physicsObjectBudget: stats.physicsObjectBudget,
+    physicsCoreCount: stats.physicsCoreCount,
+    physicsCoreBudget: stats.physicsCoreBudget,
+    totalPhysicsToyCount: stats.totalPhysicsToyCount,
     rigidDebrisBodyBudget: stats.rigidDebrisBodyBudget,
     debrisPressure: { ...stats.debrisPressure },
     physicsTiming: { ...stats.physicsTiming },

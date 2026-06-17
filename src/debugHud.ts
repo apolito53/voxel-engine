@@ -84,8 +84,10 @@ export class DebugHud {
     playerChunk: ChunkCoords,
     stats: WorldStats,
     lastMinimapMs: number,
-    physicsBodyCount: number,
-    physicsBodyBudget: number,
+    debrisPhysicsBodyCount: number,
+    debrisPhysicsBodyBudget: number,
+    physicsCoreCount: number,
+    physicsCoreBudget: number,
     physicsCollisions: PhysicsToyCollisionStats,
     rigidDebrisStats: RigidDebrisStats,
     rigidDebrisBodyBudget: number,
@@ -115,8 +117,10 @@ export class DebugHud {
       playerChunk,
       stats,
       lastMinimapMs,
-      physicsBodyCount,
-      physicsBodyBudget,
+      debrisPhysicsBodyCount,
+      debrisPhysicsBodyBudget,
+      physicsCoreCount,
+      physicsCoreBudget,
       physicsCollisions,
       rigidDebrisStats,
       rigidDebrisBodyBudget,
@@ -155,8 +159,10 @@ export class DebugHud {
     readonly playerChunk: ChunkCoords;
     readonly stats: WorldStats;
     readonly lastMinimapMs: number;
-    readonly physicsBodyCount: number;
-    readonly physicsBodyBudget: number;
+    readonly debrisPhysicsBodyCount: number;
+    readonly debrisPhysicsBodyBudget: number;
+    readonly physicsCoreCount: number;
+    readonly physicsCoreBudget: number;
     readonly physicsCollisions: PhysicsToyCollisionStats;
     readonly rigidDebrisStats: RigidDebrisStats;
     readonly rigidDebrisBodyBudget: number;
@@ -223,7 +229,8 @@ export class DebugHud {
       {
         title: "Physics",
         rows: [
-          { label: "bodies", value: `${snapshot.physicsBodyCount}/${snapshot.physicsBodyBudget}` },
+          { label: "debris", value: `${snapshot.debrisPhysicsBodyCount}/${snapshot.debrisPhysicsBodyBudget}` },
+          { label: "cores", value: `${snapshot.physicsCoreCount}/${snapshot.physicsCoreBudget}` },
           { label: "pairs", value: `${snapshot.physicsCollisions.candidatePairs} candidates, ${snapshot.physicsCollisions.resolvedContacts} hits` },
           { label: "cells", value: `${snapshot.physicsCollisions.broadphaseCells}/${snapshot.physicsCollisions.sleepingBroadphaseCells}` },
           { label: "sleep", value: `${snapshot.physicsCollisions.sleepingBodies} sleeping, ${snapshot.physicsCollisions.skippedDebrisPairs} skipped` }

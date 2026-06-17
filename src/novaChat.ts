@@ -144,13 +144,16 @@ function createWorldReply(context: NovaContextSnapshot): string {
 
 function createPerformanceReply(context: NovaContextSnapshot): string {
   if (context.lastPerformanceHitch === null) {
-    return `No frame hitch is in my recent notes. Quality is ${context.qualityLabel}, distance is ${context.renderDistance} chunks, and the physics budget is ${context.physicsObjectBudget}. Your machine is not currently screaming in a language I can hear.`;
+    return `No frame hitch is in my recent notes. Quality is ${context.qualityLabel}, distance is ${context.renderDistance} chunks, and the debris physics budget is ${context.physicsObjectBudget}. Your machine is not currently screaming in a language I can hear.`;
   }
-  return `${formatPerformanceHitchRecord(context.lastPerformanceHitch)} Quality is ${context.qualityLabel}, physics is ${context.runtime.physicsObjectCount}/${context.physicsObjectBudget}. I logged the full counter snapshot in the browser console too.`;
+  return `${formatPerformanceHitchRecord(context.lastPerformanceHitch)} Quality is ${context.qualityLabel}, debris physics is ${context.runtime.physicsObjectCount}/${context.physicsObjectBudget}, cores ${context.runtime.physicsCoreCount}. I logged the full counter snapshot in the browser console too.`;
 }
 
 function createPhysicsReply(context: NovaContextSnapshot): string {
-  return `You have thrown ${context.counters.playerCoreThrows} core${context.counters.playerCoreThrows === 1 ? "" : "s"} this world, I have thrown ${context.counters.novaCoreThrows}, and there are ${context.runtime.physicsObjectCount} physics bodies active. Science, violence, same clipboard.`;
+  const activeCoreCount = context.runtime.physicsCoreCount;
+  const activeCoreNoun = activeCoreCount === 1 ? "core" : "cores";
+  const activeCoreVerb = activeCoreCount === 1 ? "is" : "are";
+  return `You have thrown ${context.counters.playerCoreThrows} core${context.counters.playerCoreThrows === 1 ? "" : "s"} this world, I have thrown ${context.counters.novaCoreThrows}, and there ${activeCoreVerb} ${activeCoreCount} active ${activeCoreNoun} plus ${context.runtime.physicsObjectCount} debris bodies. Science, violence, same clipboard.`;
 }
 
 function createRubbleReply(context: NovaContextSnapshot): string {

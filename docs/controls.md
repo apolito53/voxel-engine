@@ -131,7 +131,9 @@ Pause menu `Settings` is split into three tabs.
 
 `Experimental` owns the controls most likely to create CPU/GPU stress:
 
-- Physics Object Budget
+- Physics Object Budget, the loose-debris body cap used by debris cleanup and
+  the derived Rapier rigid-body budget. Projectile cores use a separate gameplay
+  cap so firing a core does not compete with the aftermath shard budget.
 - Break Burst Shards, the per-block spawn ceiling for the initial destruction spray
 - Active Ground Debris Cap, the post-impact cap for loose shard bodies kept
   around after they touch support or sleep past the short burst grace
@@ -159,18 +161,18 @@ shadowless for now so it matches GPU terrain. Debris, rubble, and
 projectile-core meshes still use normal Three.js lighting/shadows whenever the
 selected preset enables shadows.
 
-- `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
+- `Potato`: 0.5x clear distance, no shadows, 64 debris bodies, 54 max debris
   shards/block, 8m active debris bubble, short fog horizon.
-- `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris
+- `Low`: low-end baseline, no shadows, 128 debris bodies, 72 max debris
   shards/block, 12m active debris bubble, short fog horizon.
-- `Normal`: 2x clear distance, shadows, 192 physics bodies, 108 max debris
+- `Normal`: 2x clear distance, shadows, 192 debris bodies, 108 max debris
   shards/block, 20m active debris bubble, medium fog horizon.
-- `High`: 4x clear distance, sharper local shadows, 512 physics bodies, 144 max
+- `High`: 4x clear distance, sharper local shadows, 512 debris bodies, 144 max
   debris shards/block, 32m active debris bubble, extended fog horizon.
-- `Ultra`: 6x clear distance, sharper local shadows, 1024 physics bodies, 180
+- `Ultra`: 6x clear distance, sharper local shadows, 1024 debris bodies, 180
   max debris shards/block, 48m active debris bubble, broad fog horizon.
 - `Super Ultra`: 12x clear distance, highest local shadow resolution, 4096
-  physics bodies, 216 max debris shards/block, 72m active debris bubble. This is
+  debris bodies, 216 max debris shards/block, 72m active debris bubble. This is
   a stress-test mode and requires an opt-in from the pause menu once `Ultra` is
   selected.
 - `Custom`: created automatically when settings sliders are changed, using the
