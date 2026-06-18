@@ -42,6 +42,9 @@ const CLAMBER_BASE_DURATION_SECONDS = 0.16;
 const CLAMBER_DURATION_PER_METER = 0.08;
 const CLAMBER_MAX_DURATION_SECONDS = 0.34;
 const CLAMBER_HORIZONTAL_DELAY = 0.22;
+const STEP_UP_BASE_DURATION_SECONDS = 0.055;
+const STEP_UP_DURATION_PER_METER = 0.06;
+const STEP_UP_MAX_DURATION_SECONDS = 0.085;
 const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
 const PLAYER_COLLISION_OVERLAP_EPSILON = 0.000001;
 const CLAMBER_CLEARANCE_EPSILON = 0.002;
@@ -66,6 +69,7 @@ type CatchablePointerLockRequest = {
 };
 
 type ClamberAnimation = {
+  readonly kind: "step" | "clamber";
   readonly start: THREE.Vector3;
   readonly target: THREE.Vector3;
   elapsed: number;
@@ -750,6 +754,7 @@ export class PlayerController {
 
     this.onGround = true;
     if (this.velocity.y < 0) this.velocity.y = 0;
+    this.startStepAnimation(previousCameraY, this.camera.position.clone(), stepHeight);
     return true;
   }
 
@@ -795,6 +800,8 @@ export class PlayerController {
       if (this.velocity.y < 0) this.velocity.y = 0;
       if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
         this.startClamberAnimation(clamberStart ?? this.camera.position, this.camera.position.clone(), liftHeight);
+      } else {
+        this.startStepAnimation(previousCameraY, this.camera.position.clone(), liftHeight);
       }
       return true;
     }
@@ -826,6 +833,8 @@ export class PlayerController {
       if (this.velocity.y < 0) this.velocity.y = 0;
       if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
         this.startClamberAnimation(clamberStart ?? this.camera.position, this.camera.position.clone(), liftHeight);
+      } else {
+        this.startStepAnimation(previousCameraY, this.camera.position.clone(), liftHeight);
       }
       return true;
     }
@@ -877,6 +886,27 @@ export class PlayerController {
     }];
   }
 
+  private startStepAnimation(previousCameraY: number, target: THREE.Vector3, liftHeight: number): void {
+    const start = target.clone();
+    start.y = previousCameraY;
+
+    // Low ledges already passed the collision check at the final y position.
+    // Move x/z to that approved pose immediately, then ease only the vertical
+    // camera lift so one-sub-block stairs feel like a step instead of a pop.
+    this.camera.position.copy(start);
+    this.clamberAnimation = {
+      kind: "step",
+      start,
+      target: target.clone(),
+      elapsed: 0,
+      duration: clamp(
+        STEP_UP_BASE_DURATION_SECONDS + liftHeight * STEP_UP_DURATION_PER_METER,
+        STEP_UP_BASE_DURATION_SECONDS,
+        STEP_UP_MAX_DURATION_SECONDS
+      )
+    };
+  }
+
   private startClamberAnimation(start: THREE.Vector3, target: THREE.Vector3, liftHeight: number): void {
     this.endSlide();
     this.slideMomentumAirborne = false;
@@ -889,6 +919,7 @@ export class PlayerController {
     // instead of the old instant y-snap.
     this.camera.position.copy(start);
     this.clamberAnimation = {
+      kind: "clamber",
       start: start.clone(),
       target: target.clone(),
       elapsed: 0,
@@ -906,10 +937,10 @@ export class PlayerController {
 
     animation.elapsed = Math.min(animation.duration, animation.elapsed + Math.max(0, delta));
     const progress = animation.duration <= 0 ? 1 : animation.elapsed / animation.duration;
-    const verticalProgress = easeOutCubic(progress);
-    const horizontalProgress = smoothStep(
-      clamp((progress - CLAMBER_HORIZONTAL_DELAY) / (1 - CLAMBER_HORIZONTAL_DELAY), 0, 1)
-    );
+    const verticalProgress = animation.kind === "step" ? smoothStep(progress) : easeOutCubic(progress);
+    const horizontalProgress = animation.kind === "step"
+      ? 1
+      : smoothStep(clamp((progress - CLAMBER_HORIZONTAL_DELAY) / (1 - CLAMBER_HORIZONTAL_DELAY), 0, 1));
 
     this.camera.position.set(
       lerp(animation.start.x, animation.target.x, horizontalProgress),
@@ -929,7 +960,11 @@ export class PlayerController {
     this.camera.position.copy(animation.target);
     this.clamberAnimation = null;
     this.onGround = true;
-    this.velocity.set(0, 0, 0);
+    if (animation.kind === "clamber") {
+      this.velocity.set(0, 0, 0);
+    } else if (this.velocity.y < 0) {
+      this.velocity.y = 0;
+    }
   }
 
   private cancelClamberAnimation(): void {

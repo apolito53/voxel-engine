@@ -5466,7 +5466,17 @@ test("player movement steps up after contacting a low partial-block ledge", () =
     player.moveAxis("x", 0.6);
 
     assert(camera.position.x > 0.1, "horizontal motion should survive stepping onto a low partial ledge");
-    assertClose(player.getFeetY(), 1 / 3, 0.000001, "player feet should land on the one-sub-block ledge");
+    assertClose(player.getFeetY(), 0, 0.000001, "low partial ledges should not snap the view upward immediately");
+
+    player.active = true;
+    player.update(0.03);
+    assert(
+      player.getFeetY() > 0 && player.getFeetY() < 1 / 3,
+      "low partial ledges should ease upward during the short step animation"
+    );
+
+    player.update(1);
+    assertClose(player.getFeetY(), 1 / 3, 0.000001, "player feet should finish on the one-sub-block ledge");
     player.dispose();
   } finally {
     if (originalDocument) globals.document = originalDocument;
@@ -5516,14 +5526,33 @@ test("player movement climbs sequential one-sub-block partial stairs without jum
     const camera = new THREE.PerspectiveCamera();
     camera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
     const player = new PlayerController(camera, fakeCanvas, stairWorld);
+    player.active = true;
 
     player.moveAxis("x", 0.6);
+    player.update(0.03);
+    assert(
+      player.getFeetY() > 0 && player.getFeetY() < 1 / 3,
+      "first one-sub-block stair should begin with a smooth lift instead of a snap"
+    );
+    player.update(1);
     assertClose(player.getFeetY(), 1 / 3, 0.000001, "first one-sub-block stair should step up");
 
     player.moveAxis("x", 0.7);
+    player.update(0.03);
+    assert(
+      player.getFeetY() > 1 / 3 && player.getFeetY() < 2 / 3,
+      "second one-sub-block stair should also ease upward"
+    );
+    player.update(1);
     assertClose(player.getFeetY(), 2 / 3, 0.000001, "second one-sub-block stair should step up");
 
     player.moveAxis("x", 1);
+    player.update(0.03);
+    assert(
+      player.getFeetY() > 2 / 3 && player.getFeetY() < 1,
+      "third one-sub-block stair should ease into the full-block height"
+    );
+    player.update(1);
     assertClose(player.getFeetY(), 1, 0.000001, "third one-sub-block stair should complete the block climb");
     assert(camera.position.x > 1.8, "horizontal movement should keep advancing across the partial stair run");
     player.dispose();

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.11.19 - 2026-06-18
+
+### Changed
+
+- Smoothed low partial-surface step-ups so one-sub-block Terraformer stairs lift
+  the view over a few frames instead of snapping the camera upward at each
+  step. Horizontal movement still lands on the approved ledge immediately, so
+  stair runs stay responsive.
+
+### Fixed
+
+- Kept low stair animation separate from taller clamber animation. Short
+  step-ups preserve normal movement momentum, while full ledge clambers still
+  use the deliberate pull-up that clears slide/velocity state.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.18 - 2026-06-18
 
 ### Changed
