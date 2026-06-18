@@ -5572,8 +5572,34 @@ test("player movement clambers onto reachable full-block ledges", () => {
     reachableCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
     const reachablePlayer = new PlayerController(reachableCamera, fakeCanvas, twoBlockWall);
     reachablePlayer.moveAxis("x", 0.6);
-    assert(reachableCamera.position.x > 0.1, "reachable wall contact should keep the horizontal move");
-    assertClose(reachablePlayer.getFeetY(), 2.002, 0.000001, "reachable wall should clamber just above the top surface");
+    assertClose(
+      reachableCamera.position.x,
+      -0.45,
+      0.000001,
+      "reachable wall contact should begin from the safe pre-clamber position"
+    );
+    assertClose(
+      reachablePlayer.getFeetY(),
+      0,
+      0.000001,
+      "reachable wall should not snap to the final clamber height immediately"
+    );
+
+    reachablePlayer.active = true;
+    reachablePlayer.update(0.08);
+    assert(
+      reachablePlayer.getFeetY() > 0 && reachablePlayer.getFeetY() < 2.002,
+      "reachable wall clamber should animate upward before reaching the target ledge"
+    );
+
+    reachablePlayer.update(1);
+    assert(reachableCamera.position.x > 0.1, "reachable wall clamber should finish the horizontal move");
+    assertClose(
+      reachablePlayer.getFeetY(),
+      2.002,
+      0.000001,
+      "reachable wall should clamber just above the top surface"
+    );
     reachablePlayer.dispose();
 
     const blockedCamera = new THREE.PerspectiveCamera();

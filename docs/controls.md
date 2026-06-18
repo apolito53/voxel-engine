@@ -24,8 +24,9 @@ the root README.
   committed slide with an 80% entry-speed pop. Hold `W` to glide longer and
   press `Space` to spring-jump out of the slide.
 - Low damaged-terrain ledges step up automatically, so one-sub-block
-  Terraformer cuts can form usable stairs. Taller reachable ledges clamber if
-  their top surface is within roughly one sub-block of the player's head height.
+  Terraformer cuts can form usable stairs. Taller reachable ledges clamber with
+  a short pull-up animation if their top surface is within roughly one
+  sub-block of the player's head height.
 - `Shift` sprints on the ground or uses the stronger flight speed boost. Active
   sprint/boost widens FOV and adds peripheral speed lines.
 - `F` toggles flight mode.

@@ -78,7 +78,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Legacy chunk worker adapter retained for compatibility/comparison; normal runtime chunk CPU work now routes through `src/engineWorker.ts`: `src/chunkWorker.ts`
 - Chunk ownership, WorkerPool scheduling, cached radial chunk-window streaming/unloading, fog-hidden radial render visibility, dirty/modified chunk indexes, reads/writes, sparse block damage, partial-block carve state, coalesced chunk-save writes, idle pending-work reporting, and chunk disposal: `src/world.ts`
 - Shared collision-world shape, collision bounds, and optional partial-height support contract used by player movement and loose debris physics: `src/collision.ts`
-- First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, collision-driven partial stair stepping and reachable ledge clamber, pointer lock, input-listener disposal, voxel collision, partial-block lattice collision for damaged terrain, and partial-height rubble stepping: `src/player.ts`
+- First-person walking, flight, smoothed crouch view, committed slide state, crouched landing slides, slide-jump momentum, collision-driven partial stair stepping, animated reachable ledge clamber, pointer lock, input-listener disposal, voxel collision, partial-block lattice collision for damaged terrain, and partial-height rubble stepping: `src/player.ts`
 - Player movement constants and committed slide/landing-slide/air-control/flight/crouch-view tuning helpers: `src/playerMovement.ts`
 - Player velocity magnitude, signed axis component, and metric speed readout formatting: `src/playerSpeed.ts`
 - Sprint/flight-boost feedback FOV target and smoothing helpers: `src/sprintFeedback.ts`

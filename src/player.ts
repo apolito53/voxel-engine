@@ -38,6 +38,10 @@ export type PlayerMovementMode = "walk" | "crouch" | "slide" | "flight";
 const PARTIAL_SURFACE_STEP_HEIGHT = 0.55;
 const SUB_BLOCK_HEIGHT = 1 / 3;
 const CLAMBER_EXTRA_HEAD_REACH = SUB_BLOCK_HEIGHT;
+const CLAMBER_BASE_DURATION_SECONDS = 0.16;
+const CLAMBER_DURATION_PER_METER = 0.08;
+const CLAMBER_MAX_DURATION_SECONDS = 0.34;
+const CLAMBER_HORIZONTAL_DELAY = 0.22;
 const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
 const PLAYER_COLLISION_OVERLAP_EPSILON = 0.000001;
 const CLAMBER_CLEARANCE_EPSILON = 0.002;
@@ -61,6 +65,13 @@ type CatchablePointerLockRequest = {
   catch(onRejected: () => void): unknown;
 };
 
+type ClamberAnimation = {
+  readonly start: THREE.Vector3;
+  readonly target: THREE.Vector3;
+  elapsed: number;
+  readonly duration: number;
+};
+
 export class PlayerController {
   readonly camera: THREE.PerspectiveCamera;
   readonly domElement: HTMLElement;
@@ -82,6 +93,7 @@ export class PlayerController {
   private slideSpeedLimit = 0;
   private slideMomentumAirborne = false;
   private crouchViewOffset = 0;
+  private clamberAnimation: ClamberAnimation | null = null;
   private readonly eventAbortController = new AbortController();
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: CollisionWorld) {
@@ -239,6 +251,7 @@ export class PlayerController {
     // Chat/input overlays need the cursor and keyboard without raising the pause
     // menu. Flip the gameplay controller inactive before releasing pointer lock
     // so the browser's pointerlockchange event does not treat this as Esc pause.
+    this.completeClamberAnimation();
     this.active = false;
     this.pendingLock = false;
     this.clearLockTimeout();
@@ -250,6 +263,7 @@ export class PlayerController {
   }
 
   pause(exitPointerLock = true): void {
+    this.completeClamberAnimation();
     this.active = false;
     this.pendingLock = false;
     this.clearLockTimeout();
@@ -276,6 +290,7 @@ export class PlayerController {
     // into the terrain. Teleporting is also a clean movement-state reset.
     this.velocity.set(0, 0, 0);
     this.keys.clear();
+    this.cancelClamberAnimation();
     this.onGround = false;
     this.flying = false;
     this.crouching = false;
@@ -301,6 +316,12 @@ export class PlayerController {
 
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+
+    if (this.clamberAnimation) {
+      this.updateClamberAnimation(delta);
+      this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
+      return;
+    }
 
     if (this.flying) {
       this.updateFlight(delta, forward, right);
@@ -487,6 +508,7 @@ export class PlayerController {
   setFlightEnabled(enabled: boolean): void {
     if (this.flying === enabled) return;
 
+    this.completeClamberAnimation();
     this.flying = enabled;
     this.velocity.y = 0;
     this.endSlide();
@@ -619,6 +641,9 @@ export class PlayerController {
 
   moveAxis(axis: MovementAxis, amount: number): void {
     if (amount === 0) return;
+    if (this.clamberAnimation) return;
+
+    const movementStart = this.camera.position.clone();
     const previousFeetY = this.getFeetY();
     this.camera.position[axis] += amount;
 
@@ -632,7 +657,7 @@ export class PlayerController {
     // before support-height queries can help. While the horizontal move is still
     // applied, inspect the blocking collision boxes directly and lift onto the
     // lowest reachable top surface that leaves the player's body clear.
-    if (axis !== "y" && !this.flying && this.traverseHorizontalObstacle(previousFeetY)) return;
+    if (axis !== "y" && !this.flying && this.traverseHorizontalObstacle(previousFeetY, movementStart)) return;
 
     this.camera.position[axis] -= amount;
     if (axis === "y" && amount < 0) this.onGround = true;
@@ -728,7 +753,7 @@ export class PlayerController {
     return true;
   }
 
-  private traverseHorizontalObstacle(previousFeetY: number): boolean {
+  private traverseHorizontalObstacle(previousFeetY: number, movementStart: THREE.Vector3): boolean {
     if (this.liftOntoReachableSurface(previousFeetY, PARTIAL_SURFACE_STEP_HEIGHT)) {
       return true;
     }
@@ -740,11 +765,16 @@ export class PlayerController {
     // reject cleanly instead of letting the camera phase through terrain.
     return this.liftOntoReachableSurface(
       previousFeetY,
-      this.getCollisionHeight() + CLAMBER_EXTRA_HEAD_REACH
+      this.getCollisionHeight() + CLAMBER_EXTRA_HEAD_REACH,
+      movementStart
     );
   }
 
-  private liftOntoReachableSurface(previousFeetY: number, maxLiftHeight: number): boolean {
+  private liftOntoReachableSurface(
+    previousFeetY: number,
+    maxLiftHeight: number,
+    clamberStart?: THREE.Vector3
+  ): boolean {
     const surfaceCandidates = this.findReachableSurfaceHeights(previousFeetY, maxLiftHeight);
 
     for (const surfaceY of surfaceCandidates) {
@@ -764,16 +794,15 @@ export class PlayerController {
       this.onGround = true;
       if (this.velocity.y < 0) this.velocity.y = 0;
       if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
-        this.endSlide();
-        this.slideMomentumAirborne = false;
+        this.startClamberAnimation(clamberStart ?? this.camera.position, this.camera.position.clone(), liftHeight);
       }
       return true;
     }
 
-    return this.liftUntilClear(previousFeetY, maxLiftHeight);
+    return this.liftUntilClear(previousFeetY, maxLiftHeight, clamberStart);
   }
 
-  private liftUntilClear(previousFeetY: number, maxLiftHeight: number): boolean {
+  private liftUntilClear(previousFeetY: number, maxLiftHeight: number, clamberStart?: THREE.Vector3): boolean {
     // Full-block clamber can be blocked by a lower collision box while the
     // actual top surface is one or two voxels above it. If the explicit surface
     // candidate path cannot find a clean landing, sweep upward in sub-block
@@ -796,8 +825,7 @@ export class PlayerController {
       this.onGround = true;
       if (this.velocity.y < 0) this.velocity.y = 0;
       if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
-        this.endSlide();
-        this.slideMomentumAirborne = false;
+        this.startClamberAnimation(clamberStart ?? this.camera.position, this.camera.position.clone(), liftHeight);
       }
       return true;
     }
@@ -847,6 +875,65 @@ export class PlayerController {
       minZ: z,
       maxZ: z + 1
     }];
+  }
+
+  private startClamberAnimation(start: THREE.Vector3, target: THREE.Vector3, liftHeight: number): void {
+    this.endSlide();
+    this.slideMomentumAirborne = false;
+    this.velocity.set(0, 0, 0);
+    this.onGround = true;
+
+    // Collision has already approved the target pose. Restore the camera to the
+    // last safe pose and then play a short visual climb toward the approved
+    // landing, raising first and sliding forward second so it reads as a pull-up
+    // instead of the old instant y-snap.
+    this.camera.position.copy(start);
+    this.clamberAnimation = {
+      start: start.clone(),
+      target: target.clone(),
+      elapsed: 0,
+      duration: clamp(
+        CLAMBER_BASE_DURATION_SECONDS + liftHeight * CLAMBER_DURATION_PER_METER,
+        CLAMBER_BASE_DURATION_SECONDS,
+        CLAMBER_MAX_DURATION_SECONDS
+      )
+    };
+  }
+
+  private updateClamberAnimation(delta: number): void {
+    const animation = this.clamberAnimation;
+    if (!animation) return;
+
+    animation.elapsed = Math.min(animation.duration, animation.elapsed + Math.max(0, delta));
+    const progress = animation.duration <= 0 ? 1 : animation.elapsed / animation.duration;
+    const verticalProgress = easeOutCubic(progress);
+    const horizontalProgress = smoothStep(
+      clamp((progress - CLAMBER_HORIZONTAL_DELAY) / (1 - CLAMBER_HORIZONTAL_DELAY), 0, 1)
+    );
+
+    this.camera.position.set(
+      lerp(animation.start.x, animation.target.x, horizontalProgress),
+      lerp(animation.start.y, animation.target.y, verticalProgress),
+      lerp(animation.start.z, animation.target.z, horizontalProgress)
+    );
+
+    if (progress >= 1) {
+      this.completeClamberAnimation();
+    }
+  }
+
+  private completeClamberAnimation(): void {
+    const animation = this.clamberAnimation;
+    if (!animation) return;
+
+    this.camera.position.copy(animation.target);
+    this.clamberAnimation = null;
+    this.onGround = true;
+    this.velocity.set(0, 0, 0);
+  }
+
+  private cancelClamberAnimation(): void {
+    this.clamberAnimation = null;
   }
 }
 
@@ -900,6 +987,19 @@ function horizontalBoundsOverlap(a: CollisionBounds, b: CollisionBounds): boolea
     a.minZ < b.maxZ - PLAYER_COLLISION_OVERLAP_EPSILON &&
     a.maxZ > b.minZ + PLAYER_COLLISION_OVERLAP_EPSILON
   );
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
+}
+
+function easeOutCubic(progress: number): number {
+  const remaining = 1 - progress;
+  return 1 - remaining * remaining * remaining;
+}
+
+function smoothStep(progress: number): number {
+  return progress * progress * (3 - 2 * progress);
 }
 
 function shouldPreventGameKeyDefault(code: string): boolean {

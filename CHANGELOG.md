@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.11.18 - 2026-06-18
+
+### Changed
+
+- Changed clamber traversal from an instant camera snap into a short controlled
+  pull-up animation. Collision still validates the final landing pose first,
+  then the view eases up and forward from the previous safe position.
+
+### Fixed
+
+- Kept one-sub-block stair traversal immediate while preserving the taller
+  ledge clamber limit, so partial Terraformer stairs stay responsive and only
+  actual clambers get the animation treatment.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.17 - 2026-06-18
 
 ### Changed
