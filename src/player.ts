@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { CollisionWorld } from "./collision";
+import type { CollisionBounds, CollisionWorld } from "./collision";
 import { clamp } from "./math";
 import {
   AIR_ACCELERATION,
@@ -669,22 +669,7 @@ export class PlayerController {
   }
 
   collides(): boolean {
-    const bounds = this.getBounds();
-    const minX = Math.floor(bounds.minX);
-    const maxX = Math.floor(bounds.maxX);
-    const minY = Math.floor(bounds.minY);
-    const maxY = Math.floor(bounds.maxY);
-    const minZ = Math.floor(bounds.minZ);
-    const maxZ = Math.floor(bounds.maxZ);
-
-    for (let y = minY; y <= maxY; y += 1) {
-      for (let z = minZ; z <= maxZ; z += 1) {
-        for (let x = minX; x <= maxX; x += 1) {
-          if (this.world.isSolid(x, y, z)) return true;
-        }
-      }
-    }
-    return false;
+    return doesPlayerBoundsCollideWithWorld(this.getBounds(), this.world);
   }
 
   private snapDownToPartialSupport(previousFeetY: number): boolean {
@@ -732,6 +717,49 @@ export class PlayerController {
     if (this.velocity.y < 0) this.velocity.y = 0;
     return true;
   }
+}
+
+export function doesPlayerBoundsCollideWithWorld(bounds: PlayerBounds, world: CollisionWorld): boolean {
+  const minX = Math.floor(bounds.minX);
+  const maxX = Math.floor(bounds.maxX);
+  const minY = Math.floor(bounds.minY);
+  const maxY = Math.floor(bounds.maxY);
+  const minZ = Math.floor(bounds.minZ);
+  const maxZ = Math.floor(bounds.maxZ);
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let z = minZ; z <= maxZ; z += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        const partialBoxes = world.getCellCollisionBoxes?.(x, y, z);
+
+        // Damaged terrain remains a non-air macro block so world.isSolid() stays
+        // true for projectile/raycast bookkeeping. Player collision has to use
+        // the surviving 3x3x3 lattice boxes instead, or a carved hole still
+        // behaves like an invisible full cube.
+        if (partialBoxes) {
+          for (const box of partialBoxes) {
+            if (collisionBoundsOverlap(bounds, box)) return true;
+          }
+          continue;
+        }
+
+        if (world.isSolid(x, y, z)) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function collisionBoundsOverlap(a: CollisionBounds, b: CollisionBounds): boolean {
+  return (
+    a.minX < b.maxX &&
+    a.maxX > b.minX &&
+    a.minY < b.maxY &&
+    a.maxY > b.minY &&
+    a.minZ < b.maxZ &&
+    a.maxZ > b.minZ
+  );
 }
 
 function shouldPreventGameKeyDefault(code: string): boolean {

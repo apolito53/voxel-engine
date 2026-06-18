@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.11.15 - 2026-06-17
+
+### Fixed
+
+- Fixed player collision against damaged partial terrain by routing the player
+  AABB through surviving partial-block lattice collision boxes before falling
+  back to full macro-block solidity. This makes carved holes and low surviving
+  slabs behave like their visible sub-block shape instead of an invisible full
+  cube.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.14 - 2026-06-17
 
 ### Changed

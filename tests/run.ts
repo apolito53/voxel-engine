@@ -161,7 +161,7 @@ import {
   shouldStartLandingSlide,
   shouldStartSlide
 } from "../src/playerMovement";
-import { isCatchablePointerLockRequest } from "../src/player";
+import { doesPlayerBoundsCollideWithWorld, isCatchablePointerLockRequest } from "../src/player";
 import {
   DEFAULT_PHYSICS_OBJECT_BUDGET,
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -5316,6 +5316,49 @@ test("player footprint support preserves narrower cross-block seams", () => {
 
   assertEqual(result.supportY, 1, "a seam below the one-block-wide passability threshold should still support the player");
   assert(!result.hasPassableAperture, "two sub-blocks of connected opening should remain too narrow to fall through");
+});
+
+test("player collision uses partial-block boxes instead of ghost full cubes", () => {
+  const lowSurvivingPartialBox: CollisionBounds = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const partialWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [lowSurvivingPartialBox] : null;
+    }
+  };
+
+  assert(
+    !doesPlayerBoundsCollideWithWorld({
+      minX: 0.15,
+      maxX: 0.85,
+      minY: 0.5,
+      maxY: 2.25,
+      minZ: 0.15,
+      maxZ: 0.85
+    }, partialWorld),
+    "a player above the surviving low lattice slab should not collide with the old invisible full cube"
+  );
+
+  assert(
+    doesPlayerBoundsCollideWithWorld({
+      minX: 0.15,
+      maxX: 0.85,
+      minY: 0.2,
+      maxY: 1.95,
+      minZ: 0.15,
+      maxZ: 0.85
+    }, partialWorld),
+    "a player overlapping the surviving lattice slab should still collide with damaged terrain"
+  );
 });
 
 test("fractured terrain does not stamp a break-time surface puddle", () => {
