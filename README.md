@@ -72,6 +72,8 @@ ignored by git.
 
 - `WASD` move, `Mouse` look, `Esc` pause/release mouse
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
+- Low damaged-terrain ledges step up automatically; taller reachable lips
+  clamber when their top is within roughly one sub-block of head height
 - `G` toggles between `Items` and `Blocks`
 - `T` toggles click actions between `Semi Auto` and `Full Auto`
 - `Mouse wheel` selects within the active lane

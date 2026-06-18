@@ -5474,6 +5474,121 @@ test("player movement steps up after contacting a low partial-block ledge", () =
   }
 });
 
+test("player movement climbs sequential one-sub-block partial stairs without jumping", () => {
+  const originalDocument = (globalThis as { document?: Document }).document;
+  const globals = globalThis as { document?: Document };
+  globals.document = {
+    pointerLockElement: null,
+    body: {
+      classList: {
+        toggle(): boolean {
+          return false;
+        }
+      }
+    },
+    addEventListener(): void {},
+    exitPointerLock(): void {}
+  } as unknown as Document;
+
+  const stairBoxes: readonly CollisionBounds[] = [
+    { minX: 0, maxX: 1, minY: 0, maxY: 1 / 3, minZ: 0, maxZ: 1 },
+    { minX: 1, maxX: 2, minY: 0, maxY: 2 / 3, minZ: 0, maxZ: 1 },
+    { minX: 2, maxX: 3, minY: 0, maxY: 1, minZ: 0, maxZ: 1 }
+  ];
+  const stairWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return y === 0 && z === 0 && x >= 0 && x <= 2;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      if (y !== 0 || z !== 0 || x < 0 || x >= stairBoxes.length) return null;
+      return [stairBoxes[x]];
+    }
+  };
+  const fakeCanvas = {
+    tabIndex: 0,
+    style: { cursor: "" },
+    addEventListener(): void {},
+    requestPointerLock(): void {},
+    focus(): void {}
+  } as unknown as HTMLElement;
+
+  try {
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const player = new PlayerController(camera, fakeCanvas, stairWorld);
+
+    player.moveAxis("x", 0.6);
+    assertClose(player.getFeetY(), 1 / 3, 0.000001, "first one-sub-block stair should step up");
+
+    player.moveAxis("x", 0.7);
+    assertClose(player.getFeetY(), 2 / 3, 0.000001, "second one-sub-block stair should step up");
+
+    player.moveAxis("x", 1);
+    assertClose(player.getFeetY(), 1, 0.000001, "third one-sub-block stair should complete the block climb");
+    assert(camera.position.x > 1.8, "horizontal movement should keep advancing across the partial stair run");
+    player.dispose();
+  } finally {
+    if (originalDocument) globals.document = originalDocument;
+    else delete globals.document;
+  }
+});
+
+test("player movement clambers onto reachable full-block ledges", () => {
+  const originalDocument = (globalThis as { document?: Document }).document;
+  const globals = globalThis as { document?: Document };
+  globals.document = {
+    pointerLockElement: null,
+    body: {
+      classList: {
+        toggle(): boolean {
+          return false;
+        }
+      }
+    },
+    addEventListener(): void {},
+    exitPointerLock(): void {}
+  } as unknown as Document;
+
+  const twoBlockWall: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && z === 0 && (y === 0 || y === 1);
+    }
+  };
+  const tooTallWall: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && z === 0 && (y === 0 || y === 1 || y === 2);
+    }
+  };
+  const fakeCanvas = {
+    tabIndex: 0,
+    style: { cursor: "" },
+    addEventListener(): void {},
+    requestPointerLock(): void {},
+    focus(): void {}
+  } as unknown as HTMLElement;
+
+  try {
+    const reachableCamera = new THREE.PerspectiveCamera();
+    reachableCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const reachablePlayer = new PlayerController(reachableCamera, fakeCanvas, twoBlockWall);
+    reachablePlayer.moveAxis("x", 0.6);
+    assert(reachableCamera.position.x > 0.1, "reachable wall contact should keep the horizontal move");
+    assertClose(reachablePlayer.getFeetY(), 2.002, 0.000001, "reachable wall should clamber just above the top surface");
+    reachablePlayer.dispose();
+
+    const blockedCamera = new THREE.PerspectiveCamera();
+    blockedCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const blockedPlayer = new PlayerController(blockedCamera, fakeCanvas, tooTallWall);
+    blockedPlayer.moveAxis("x", 0.6);
+    assertClose(blockedCamera.position.x, -0.45, 0.000001, "too-tall ledge should still block horizontal movement");
+    assertClose(blockedPlayer.getFeetY(), 0, 0.000001, "too-tall ledge should not clamber beyond head reach");
+    blockedPlayer.dispose();
+  } finally {
+    if (originalDocument) globals.document = originalDocument;
+    else delete globals.document;
+  }
+});
+
 test("fractured terrain does not stamp a break-time surface puddle", () => {
   const world = new VoxelWorld({ seed: "partial-surface-patch-test" });
   const target = { x: 8, y: 3, z: 8 };

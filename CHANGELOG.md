@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.11.17 - 2026-06-18
+
+### Changed
+
+- Added collision-driven clamber movement for horizontal terrain contacts. The
+  player now searches reachable blocking surfaces and can pull onto ledges whose
+  top is within roughly one sub-block of head height, while still rejecting
+  ceilings and too-tall walls through the normal collision pass.
+
+### Fixed
+
+- Fixed one-sub-block Terraformer stair runs by stepping from the actual
+  blocking collision boxes instead of relying only on broad footprint support
+  queries, which could treat narrow partial stairs as passable holes.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.16 - 2026-06-18
 
 ### Fixed

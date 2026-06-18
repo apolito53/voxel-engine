@@ -36,8 +36,11 @@ import {
 type MovementAxis = "x" | "y" | "z";
 export type PlayerMovementMode = "walk" | "crouch" | "slide" | "flight";
 const PARTIAL_SURFACE_STEP_HEIGHT = 0.55;
+const SUB_BLOCK_HEIGHT = 1 / 3;
+const CLAMBER_EXTRA_HEAD_REACH = SUB_BLOCK_HEIGHT;
 const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
 const PLAYER_COLLISION_OVERLAP_EPSILON = 0.000001;
+const CLAMBER_CLEARANCE_EPSILON = 0.002;
 
 export type PlayerBounds = {
   readonly minX: number;
@@ -621,15 +624,15 @@ export class PlayerController {
 
     if (!this.collides()) {
       if (axis === "y" && amount < 0 && this.snapDownToPartialSupport(previousFeetY)) return;
-      if (axis !== "y") this.stepUpOntoPartialSupport(previousFeetY);
+      if (axis !== "y" && !this.flying) this.stepUpOntoPartialSupport(previousFeetY);
       return;
     }
 
-    // Low 1/3m terrain ledges collide at the old foot height before the player
-    // can be lifted onto them. Try the partial-surface step while the horizontal
-    // move is still applied, then only reject the move if the lifted bounds
-    // still collide with terrain.
-    if (axis !== "y" && this.stepUpOntoPartialSupport(previousFeetY)) return;
+    // Low 1/3m ledges and taller climbable lips collide at the old foot height
+    // before support-height queries can help. While the horizontal move is still
+    // applied, inspect the blocking collision boxes directly and lift onto the
+    // lowest reachable top surface that leaves the player's body clear.
+    if (axis !== "y" && !this.flying && this.traverseHorizontalObstacle(previousFeetY)) return;
 
     this.camera.position[axis] -= amount;
     if (axis === "y" && amount < 0) this.onGround = true;
@@ -724,6 +727,127 @@ export class PlayerController {
     if (this.velocity.y < 0) this.velocity.y = 0;
     return true;
   }
+
+  private traverseHorizontalObstacle(previousFeetY: number): boolean {
+    if (this.liftOntoReachableSurface(previousFeetY, PARTIAL_SURFACE_STEP_HEIGHT)) {
+      return true;
+    }
+
+    // Clamber is intentionally broader than ordinary stair stepping: if the
+    // ledge top is no higher than roughly a sub-block above the player's head,
+    // the controller may pull onto it. The collision re-check after each lift is
+    // still the final authority, so ceilings, overhangs, and too-tall stacks
+    // reject cleanly instead of letting the camera phase through terrain.
+    return this.liftOntoReachableSurface(
+      previousFeetY,
+      this.getCollisionHeight() + CLAMBER_EXTRA_HEAD_REACH
+    );
+  }
+
+  private liftOntoReachableSurface(previousFeetY: number, maxLiftHeight: number): boolean {
+    const surfaceCandidates = this.findReachableSurfaceHeights(previousFeetY, maxLiftHeight);
+
+    for (const surfaceY of surfaceCandidates) {
+      const previousCameraY = this.camera.position.y;
+      const liftHeight = surfaceY - this.getFeetY();
+      if (liftHeight <= PARTIAL_SURFACE_SNAP_EPSILON) continue;
+
+      // Place the feet from the chosen surface instead of adding the lift delta.
+      // Tall clambers can otherwise accumulate tiny float error and make the
+      // follow-up collision pass think the player is still touching the ledge.
+      this.camera.position.y = surfaceY + this.getVisualEyeHeight();
+      if (this.collides()) {
+        this.camera.position.y = previousCameraY;
+        continue;
+      }
+
+      this.onGround = true;
+      if (this.velocity.y < 0) this.velocity.y = 0;
+      if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
+        this.endSlide();
+        this.slideMomentumAirborne = false;
+      }
+      return true;
+    }
+
+    return this.liftUntilClear(previousFeetY, maxLiftHeight);
+  }
+
+  private liftUntilClear(previousFeetY: number, maxLiftHeight: number): boolean {
+    // Full-block clamber can be blocked by a lower collision box while the
+    // actual top surface is one or two voxels above it. If the explicit surface
+    // candidate path cannot find a clean landing, sweep upward in sub-block
+    // increments and accept the first height where the already-applied
+    // horizontal move no longer intersects terrain. This stays bounded and only
+    // runs after a real horizontal collision, so it cannot become a general
+    // "walk up air" cheat.
+    for (
+      let liftHeight = SUB_BLOCK_HEIGHT;
+      liftHeight <= maxLiftHeight + PLAYER_COLLISION_OVERLAP_EPSILON;
+      liftHeight += SUB_BLOCK_HEIGHT
+    ) {
+      const previousCameraY = this.camera.position.y;
+      this.camera.position.y = previousFeetY + liftHeight + CLAMBER_CLEARANCE_EPSILON + this.getVisualEyeHeight();
+      if (this.collides()) {
+        this.camera.position.y = previousCameraY;
+        continue;
+      }
+
+      this.onGround = true;
+      if (this.velocity.y < 0) this.velocity.y = 0;
+      if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
+        this.endSlide();
+        this.slideMomentumAirborne = false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  private findReachableSurfaceHeights(previousFeetY: number, maxLiftHeight: number): readonly number[] {
+    const bounds = this.getBounds();
+    const maxSurfaceY = previousFeetY + maxLiftHeight;
+    const minX = Math.floor(bounds.minX);
+    const maxX = Math.floor(bounds.maxX);
+    const minY = Math.floor(previousFeetY - PLAYER_COLLISION_OVERLAP_EPSILON);
+    const maxY = Math.floor(maxSurfaceY + PLAYER_COLLISION_OVERLAP_EPSILON);
+    const minZ = Math.floor(bounds.minZ);
+    const maxZ = Math.floor(bounds.maxZ);
+    const surfaceHeights: number[] = [];
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          for (const box of this.getCollisionBoxesForCell(x, y, z)) {
+            if (!horizontalBoundsOverlap(bounds, box)) continue;
+            if (box.maxY <= previousFeetY + PARTIAL_SURFACE_SNAP_EPSILON) continue;
+            if (box.maxY > maxSurfaceY + PARTIAL_SURFACE_SNAP_EPSILON) continue;
+            if (!surfaceHeights.some((height) => Math.abs(height - box.maxY) <= PLAYER_COLLISION_OVERLAP_EPSILON)) {
+              surfaceHeights.push(box.maxY);
+            }
+          }
+        }
+      }
+    }
+
+    return surfaceHeights.sort((left, right) => left - right);
+  }
+
+  private getCollisionBoxesForCell(x: number, y: number, z: number): readonly CollisionBounds[] {
+    const partialBoxes = this.world.getCellCollisionBoxes?.(x, y, z);
+    if (partialBoxes) return partialBoxes;
+    if (!this.world.isSolid(x, y, z)) return [];
+
+    return [{
+      minX: x,
+      maxX: x + 1,
+      minY: y,
+      maxY: y + 1,
+      minZ: z,
+      maxZ: z + 1
+    }];
+  }
 }
 
 export function doesPlayerBoundsCollideWithWorld(bounds: PlayerBounds, world: CollisionWorld): boolean {
@@ -764,6 +888,15 @@ function collisionBoundsOverlap(a: CollisionBounds, b: CollisionBounds): boolean
     a.maxX > b.minX + PLAYER_COLLISION_OVERLAP_EPSILON &&
     a.minY < b.maxY - PLAYER_COLLISION_OVERLAP_EPSILON &&
     a.maxY > b.minY + PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.minZ < b.maxZ - PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.maxZ > b.minZ + PLAYER_COLLISION_OVERLAP_EPSILON
+  );
+}
+
+function horizontalBoundsOverlap(a: CollisionBounds, b: CollisionBounds): boolean {
+  return (
+    a.minX < b.maxX - PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.maxX > b.minX + PLAYER_COLLISION_OVERLAP_EPSILON &&
     a.minZ < b.maxZ - PLAYER_COLLISION_OVERLAP_EPSILON &&
     a.maxZ > b.minZ + PLAYER_COLLISION_OVERLAP_EPSILON
   );
