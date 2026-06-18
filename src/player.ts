@@ -37,6 +37,7 @@ type MovementAxis = "x" | "y" | "z";
 export type PlayerMovementMode = "walk" | "crouch" | "slide" | "flight";
 const PARTIAL_SURFACE_STEP_HEIGHT = 0.55;
 const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
+const PLAYER_COLLISION_OVERLAP_EPSILON = 0.000001;
 
 export type PlayerBounds = {
   readonly minX: number;
@@ -624,6 +625,12 @@ export class PlayerController {
       return;
     }
 
+    // Low 1/3m terrain ledges collide at the old foot height before the player
+    // can be lifted onto them. Try the partial-surface step while the horizontal
+    // move is still applied, then only reject the move if the lifted bounds
+    // still collide with terrain.
+    if (axis !== "y" && this.stepUpOntoPartialSupport(previousFeetY)) return;
+
     this.camera.position[axis] -= amount;
     if (axis === "y" && amount < 0) this.onGround = true;
     if (axis === "y") this.velocity.y = 0;
@@ -753,12 +760,12 @@ export function doesPlayerBoundsCollideWithWorld(bounds: PlayerBounds, world: Co
 
 function collisionBoundsOverlap(a: CollisionBounds, b: CollisionBounds): boolean {
   return (
-    a.minX < b.maxX &&
-    a.maxX > b.minX &&
-    a.minY < b.maxY &&
-    a.maxY > b.minY &&
-    a.minZ < b.maxZ &&
-    a.maxZ > b.minZ
+    a.minX < b.maxX - PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.maxX > b.minX + PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.minY < b.maxY - PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.maxY > b.minY + PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.minZ < b.maxZ - PLAYER_COLLISION_OVERLAP_EPSILON &&
+    a.maxZ > b.minZ + PLAYER_COLLISION_OVERLAP_EPSILON
   );
 }
 

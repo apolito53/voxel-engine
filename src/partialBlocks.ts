@@ -34,6 +34,7 @@ const PARTIAL_BLOCK_SURFACE_EDGE_HEIGHT = 0.1;
 const PARTIAL_BLOCK_SURFACE_SAMPLE_FALLOFF = 0.5;
 const PARTIAL_BLOCK_SURFACE_SAMPLE_NOISE = 0.09;
 const PARTIAL_BLOCK_SURFACE_EPSILON = 0.000001;
+const PARTIAL_BLOCK_HIDDEN_BOUNDARY_CAP_INSET = 0.0015;
 
 export const PARTIAL_BLOCK_MESH_REGION_SIZE_XZ = 4;
 export const PARTIAL_BLOCK_MESH_REGION_SIZE_Y = 8;
@@ -1075,6 +1076,8 @@ function addPartialBlockLatticeGeometry(
 
   for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
     if (removedCells.has(latticeCell.index)) continue;
+    const touchesRemovedMaterial = getPartialBlockAdjacentLatticeCellIndexes(latticeCell.index)
+      .some((index) => removedCells.has(index));
 
     for (const face of PARTIAL_BLOCK_LATTICE_FACES) {
       const neighborIndex = getPartialBlockLatticeCellIndex(
@@ -1084,12 +1087,24 @@ function addPartialBlockLatticeGeometry(
       );
       const isBoundaryFace = neighborIndex === null;
       const exposesBite = neighborIndex !== null && removedCells.has(neighborIndex);
+      const macroFaceVisible = isBoundaryFace && isFaceVisible(cell, face.normal);
+      const shouldDrawNeighborBackedCap =
+        isBoundaryFace &&
+        !macroFaceVisible &&
+        exactRemovedCells.size > 0 &&
+        touchesRemovedMaterial;
       // Shared faces between remaining hidden cells are skipped, so the damaged
       // block reads as one chipped volume instead of twenty-seven tiny cubes.
       if (!isBoundaryFace && !exposesBite) continue;
-      if (isBoundaryFace && !isFaceVisible(cell, face.normal)) continue;
+      if (isBoundaryFace && !macroFaceVisible && !shouldDrawNeighborBackedCap) continue;
 
-      const corners = getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal);
+      const corners = shouldDrawNeighborBackedCap
+        ? insetPartialBlockFaceCorners(
+          getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal),
+          face.normal,
+          PARTIAL_BLOCK_HIDDEN_BOUNDARY_CAP_INSET
+        )
+        : getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal);
       if (exposesBite) {
         if (neighborIndex !== null && exactRemovedCells.has(neighborIndex)) {
           // Terraformer edits are precision deletions, not impacts. Draw their
@@ -1104,6 +1119,23 @@ function addPartialBlockLatticeGeometry(
       }
     }
   }
+}
+
+function insetPartialBlockFaceCorners(
+  corners: readonly PartialBlockPosition[],
+  normal: PartialBlockPosition,
+  inset: number
+): readonly PartialBlockPosition[] {
+  // Exact Terraformer cuts can expose a sub-cell face on a macro face that the
+  // normal chunk mesh still considers covered by a neighboring full block. Add a
+  // tiny inward cap for those neighboring-backed faces so the carved piece reads
+  // as a solid sub-voxel instead of a hollow shell, without fighting the chunk
+  // face at exactly the same depth.
+  return corners.map((corner) => ({
+    x: corner.x - normal.x * inset,
+    y: corner.y - normal.y * inset,
+    z: corner.z - normal.z * inset
+  }));
 }
 
 function createPartialBlockFaceVisibilityFromMasks(

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.11.16 - 2026-06-18
+
+### Fixed
+
+- Fixed player movement over low damaged-terrain ledges by trying the
+  partial-surface step recovery while the horizontal contact move is still
+  applied, then adding a tiny AABB contact tolerance so one-sub-block stairs do
+  not reject themselves on floating-point fuzz.
+- Added inset boundary caps for exact Terraformer sub-cell cuts when neighboring
+  normal chunk geometry hides the macro face, reducing the hollow-shell look on
+  carved ledges and thin sub-block remnants.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+
 ## 0.11.15 - 2026-06-17
 
 ### Fixed

@@ -161,7 +161,7 @@ import {
   shouldStartLandingSlide,
   shouldStartSlide
 } from "../src/playerMovement";
-import { doesPlayerBoundsCollideWithWorld, isCatchablePointerLockRequest } from "../src/player";
+import { PlayerController, doesPlayerBoundsCollideWithWorld, isCatchablePointerLockRequest } from "../src/player";
 import {
   DEFAULT_PHYSICS_OBJECT_BUDGET,
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -4758,6 +4758,55 @@ test("Terraformer exact cuts render clean sub-cell walls", () => {
   field.dispose();
 });
 
+test("Terraformer exact cuts cap sub-cell boundaries hidden by neighboring chunks", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const exactRemovedCell = encodeTestLatticeIndex(0, 1, 1);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 27,
+    removedVisualCellIndexes: [exactRemovedCell],
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 1 / 6, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: [exactRemovedCell],
+      radius: 0.12,
+      depth: 0.12,
+      seed: 8642
+    }]
+  };
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+
+  field.beginUpdate(1);
+  // Simulate the Terraformer cut sitting against neighboring normal chunk
+  // geometry. The macro face is not visible, but sub-cell caps bordering the
+  // exact cut still need a tiny inset face so the carved ledge does not read as
+  // a hollow shell from inside the opening.
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => false);
+  const regionMesh = field.getRegionMesh(regionKey);
+  assert(regionMesh, "neighbor-backed exact-cut test should create a regional mesh");
+  const positions = regionMesh.geometry.getAttribute("position");
+  const normals = regionMesh.geometry.getAttribute("normal");
+  let insetBoundaryCapVertices = 0;
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const normalX = normals.getX(index);
+    if (normalX < -0.9 && x > cell.position.x && x < cell.position.x + 0.01) {
+      insetBoundaryCapVertices += 1;
+    }
+  }
+
+  assert(
+    insetBoundaryCapVertices > 0,
+    "exact cuts should keep inset caps for sub-cell faces backed by neighboring full chunk geometry"
+  );
+
+  field.dispose();
+});
+
 test("partial block field rebuilds only the requested region", () => {
   const scene = new THREE.Scene();
   const field = new PartialBlockMeshField(scene);
@@ -5359,6 +5408,70 @@ test("player collision uses partial-block boxes instead of ghost full cubes", ()
     }, partialWorld),
     "a player overlapping the surviving lattice slab should still collide with damaged terrain"
   );
+});
+
+test("player movement steps up after contacting a low partial-block ledge", () => {
+  const originalDocument = (globalThis as { document?: Document }).document;
+  const globals = globalThis as { document?: Document };
+  globals.document = {
+    pointerLockElement: null,
+    body: {
+      classList: {
+        toggle(): boolean {
+          return false;
+        }
+      }
+    },
+    addEventListener(): void {},
+    exitPointerLock(): void {}
+  } as unknown as Document;
+
+  const lowLedgeBox: CollisionBounds = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 1 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const ledgeWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [lowLedgeBox] : null;
+    },
+    getPlayerFootprintSupportHeight(bounds): number | null {
+      const overlapsLedge =
+        bounds.maxX > lowLedgeBox.minX &&
+        bounds.minX < lowLedgeBox.maxX &&
+        bounds.maxZ > lowLedgeBox.minZ &&
+        bounds.minZ < lowLedgeBox.maxZ;
+      return overlapsLedge ? lowLedgeBox.maxY : null;
+    }
+  };
+  const fakeCanvas = {
+    tabIndex: 0,
+    style: { cursor: "" },
+    addEventListener(): void {},
+    requestPointerLock(): void {},
+    focus(): void {}
+  } as unknown as HTMLElement;
+
+  try {
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const player = new PlayerController(camera, fakeCanvas, ledgeWorld);
+
+    player.moveAxis("x", 0.6);
+
+    assert(camera.position.x > 0.1, "horizontal motion should survive stepping onto a low partial ledge");
+    assertClose(player.getFeetY(), 1 / 3, 0.000001, "player feet should land on the one-sub-block ledge");
+    player.dispose();
+  } finally {
+    if (originalDocument) globals.document = originalDocument;
+    else delete globals.document;
+  }
 });
 
 test("fractured terrain does not stamp a break-time surface puddle", () => {
