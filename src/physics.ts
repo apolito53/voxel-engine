@@ -13,6 +13,7 @@ import {
   getDebrisShapeGeometry,
   type DebrisShape
 } from "./debrisShapes";
+import { GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS } from "./debrisLifetime";
 
 export const BLOCK_DAMAGE_IMPACT_SPEED = 2;
 export const PHYSICS_CORE_BLOCK_DAMAGE = 30;
@@ -437,6 +438,15 @@ export class PhysicsToy {
 
     if (lifetimeSeconds === null) {
       this.resetGroundDebrisCleanupClock();
+      return false;
+    }
+
+    if (isGroundedForCleanup && this.ageSeconds < GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS) {
+      // Lifetime cleanup is aftermath cleanup, just like the active ground cap.
+      // Some shards spawn already touching terrain support, so even a 0s
+      // lifetime must wait long enough for the break burst to visibly exist.
+      this.groundDebrisCleanupSeconds = null;
+      this.fragmentRenderVisible = true;
       return false;
     }
 

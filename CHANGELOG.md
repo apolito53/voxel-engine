@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.11.23 - 2026-06-19
+
+### Fixed
+
+- Prevented `Ground Debris Lifetime = 0s` from thinning or suppressing the
+  initial break burst. Lifetime cleanup now shares the ground-debris cap's
+  short burst grace, so `Break Burst Shards` still owns eruption density while
+  lifetime only controls grounded aftermath cleanup.
+
+### Tests
+
+- Added a regression test proving `0s` lifetime preserves a fresh grounded
+  burst shard until the cleanup grace has elapsed.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.22 - 2026-06-19
 
 ### Changed

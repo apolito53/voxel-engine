@@ -261,6 +261,7 @@ import {
 } from "../src/rigidDebrisBudget";
 import {
   DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS,
+  GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS,
   FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS,
   MAX_GROUND_DEBRIS_LIFETIME_SECONDS,
   formatGroundDebrisLifetime,
@@ -6559,6 +6560,7 @@ test("block fragments visually tumble while flying", () => {
 test("settled debris cleanup stays visible until the poof expiry", () => {
   const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
   sleepTestFragment(fragment);
+  ageTestFragmentPastGroundDebrisBurstGrace(fragment);
 
   fragment.updateGroundDebrisCleanup(0.2, 1);
   assert(!fragment.isExpired, "freshly settled cleanup debris should remain visible at first");
@@ -6579,6 +6581,7 @@ test("settled debris cleanup stays visible until the poof expiry", () => {
 test("forever debris lifetime keeps settled fragments renderable", () => {
   const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
   sleepTestFragment(fragment);
+  ageTestFragmentPastGroundDebrisBurstGrace(fragment);
 
   fragment.updateGroundDebrisCleanup(120, null);
 
@@ -6586,8 +6589,20 @@ test("forever debris lifetime keeps settled fragments renderable", () => {
   assert(fragment.isFragmentRenderVisible, "forever cleanup should keep debris visible");
 });
 
+test("zero debris lifetime preserves the break burst before grounded cleanup", () => {
+  const fragment = createTestFragment(BLOCK.dirt, 0.5, 1.1, 0.5);
+
+  fragment.updateGroundDebrisCleanup(10, 0, true);
+  assert(!fragment.isExpired, "0s lifetime should not erase a freshly spawned grounded burst shard");
+
+  ageTestFragmentPastGroundDebrisBurstGrace(fragment);
+  fragment.updateGroundDebrisCleanup(0, 0, true);
+  assert(fragment.isExpired, "0s lifetime should expire grounded debris after the burst grace window");
+});
+
 test("debris cleanup pauses again when grounded debris is knocked airborne", () => {
   const fragment = createTestFragment(BLOCK.dirt, 0.5, 3.1, 0.5);
+  ageTestFragmentPastGroundDebrisBurstGrace(fragment);
 
   fragment.updateGroundDebrisCleanup(10, 1, false);
   assert(!fragment.isExpired, "airborne debris should not consume its cleanup lifetime");
@@ -7693,6 +7708,15 @@ function sleepTestFragment(fragment: PhysicsToy): void {
     fragment.update(1 / 60, floorWorld);
   }
   assert(fragment.isSleeping, "test fragment should reach the same sleeping state as settled browser debris");
+}
+
+function ageTestFragmentPastGroundDebrisBurstGrace(fragment: PhysicsToy): void {
+  const emptyWorld = {
+    isSolid(_x: number, _y: number, _z: number): boolean {
+      return false;
+    }
+  };
+  fragment.update(GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS + 0.01, emptyWorld);
 }
 
 function sleepTestFragments(fragments: readonly PhysicsToy[]): void {

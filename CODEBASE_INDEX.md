@@ -103,7 +103,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Persistent destructible rubble cover patches, sparse hidden support footprints, parked faceted heightfield rendering, batched absorption, bounded surface samples, baked static shard-pile visuals, scaled durability separate from material volume, raycast target-cell reporting, direct-hit damage with small neighbor chip damage, damage-event and support-change reporting, multi-cell merge rules, walkable support-height queries, support/fall behavior, and dense terrain-block promotion: `src/rubble.ts`
 - Per-quality persisted physics body budget bounds and step helpers: `src/physicsBudget.ts`
 - CPU-facing Rapier debris body safety cap, adaptive low-FPS debris pressure governor, and post-impact grounded-debris cap label/persistence helpers: `src/debrisPerformanceGovernor.ts`, `src/rigidDebrisBudget.ts`
-- Grounded debris lifetime slider bounds, explicit forever-toggle sentinel, persistence, and label formatting: `src/debrisLifetime.ts`
+- Grounded debris lifetime slider bounds, explicit forever-toggle sentinel, shared initial-burst cleanup grace, persistence, and label formatting: `src/debrisLifetime.ts`
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants and light-aware baked voxel face shading: `src/voxelLighting.ts`
 - Render quality controller, fog-start-to-opaque-to-hidden-horizon policy, separate chunk render radius,

@@ -4,6 +4,7 @@ export const FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS = -1;
 export const MIN_GROUND_DEBRIS_LIFETIME_SECONDS = 0;
 export const MAX_GROUND_DEBRIS_LIFETIME_SECONDS = 60;
 export const GROUND_DEBRIS_LIFETIME_STEP_SECONDS = 1;
+export const GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS = 0.9;
 
 export function normalizeGroundDebrisLifetime(
   value: unknown,

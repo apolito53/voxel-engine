@@ -1,4 +1,5 @@
 import { PHYSICS_OBJECT_BUDGET_STEP } from "./physicsBudget";
+import { GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS } from "./debrisLifetime";
 
 // This floor is the adaptive-pressure escape hatch, not the user's normal
 // ground-debris slider step. A 32-body Rapier pile can already be too expensive
@@ -10,7 +11,7 @@ export const DEFAULT_GROUND_DEBRIS_BUDGET = 128;
 export const MIN_GROUND_DEBRIS_BUDGET = 0;
 export const MAX_GROUND_DEBRIS_BUDGET = MAX_RIGID_DEBRIS_BODY_BUDGET;
 export const GROUND_DEBRIS_BUDGET_STEP = PHYSICS_OBJECT_BUDGET_STEP;
-export const GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS = 0.9;
+export const GROUND_DEBRIS_BUDGET_BURST_GRACE_SECONDS = GROUND_DEBRIS_CLEANUP_BURST_GRACE_SECONDS;
 const RIGID_DEBRIS_BODY_BUDGET_RATIO = 0.75;
 
 export function getRigidDebrisBodyBudget(physicsObjectBudget: number): number {
