@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.12.2 - 2026-06-19
+
+### Changed
+
+- Raised non-core procedural sound gains by another 30% so terrain, rubble,
+  movement, UI, and Nova cues read more clearly at normal system volume.
+- Left Physics Core and Hitscan Core launch mix levels unchanged.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.12.1 - 2026-06-19
 
 ### Changed
