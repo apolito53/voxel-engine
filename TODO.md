@@ -8,9 +8,9 @@ promoted work, not every fun idea that crosses the room.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:
-  1. Sound
-  2. Individual light sources
-  3. Equipment and items
+  1. Individual light sources
+  2. Equipment and items
+  3. Sound polish/content pass
 - Treat rigid debris, worker scheduling, and partial terrain collision as
   maintenance/watchlist areas for now. They should not steal the whole roadmap
   unless a bug makes them unavoidable.
@@ -20,17 +20,17 @@ promoted work, not every fun idea that crosses the room.
 
 ## High Priority: Sound
 
+- First engine slice shipped in `v0.12.0`: `src/audioEngine.ts` owns a
+  browser-unlocked procedural Web Audio layer, `src/audioSettings.ts` owns
+  persisted Sound/Master/SFX/UI settings, and `src/main.ts` feeds it typed
+  engine events plus lightweight player motion snapshots.
 - Goal: add a real sound layer so movement, tools, terrain hits, material
   destruction, debris, projectiles, UI, Nova, weather, and future entities have
   readable feedback instead of the current silent prototype feel.
-- First slice should be small and engine-shaped: create an audio manager that
-  unlocks a browser `AudioContext` from a user gesture, owns master/SFX/UI
-  volume and mute state, and exposes a typed event-style API for one-shot and
-  looping sounds.
-- Start with a tiny SFX set tied to existing gameplay signals: footsteps or
-  landing, Terraformer carve, block placement/removal, Physics Core launch and
-  impact, Hitscan fire, material poofs, debris hits, pause/menu clicks, and one
-  Nova companion cue.
+- Next slice should improve content quality and coverage: authored/generated
+  source assets or richer synth profiles for Terraformer carve, block
+  placement/removal, material poofs, debris hits, weather, and more distinct
+  Nova companion cues.
 - Material identity should drive sound flavor over time. Leaves can be soft and
   airy, sand/dirt more dusty, wood snappy, stone heavy/jagged, ember hotter and
   sharper, matching the existing material/debris personality direction.

@@ -55,6 +55,10 @@ the root README.
   cells draw bright white, while hidden/far-side cells draw as a softer red
   ghost.
 - `F8` toggles the scripted test avatar.
+- The first-pass sound engine unlocks after the first normal click/key press and
+  plays procedural cues for UI clicks, world load/exit, item selection, core
+  shots, terrain damage/destruction, rubble activity, Nova reactions,
+  footsteps, and landings.
 
 ## Items And Blocks
 
@@ -133,6 +137,8 @@ Pause menu `Settings` is split into three tabs.
 - Projectile core trail toggle
 - Core Aim Preview toggle
 - Health Bars toggle
+- Sound toggle
+- Master/SFX/UI volume sliders
 - Despawn All Objects
 
 `Experimental` owns the controls most likely to create CPU/GPU stress:
@@ -146,9 +152,10 @@ Pause menu `Settings` is split into three tabs.
 
 Quality slider edits switch the dropdown to `Custom` so built-in presets stay
 clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any
-visible bars when turned off. `Gameplay > Despawn All Objects` performs the
-drastic full cleanup: physics cores, loose debris VFX, and any existing rubble
-cover.
+visible bars when turned off. `Gameplay > Sound` mutes or enables the procedural
+Web Audio layer, with separate master, SFX, and UI volume sliders persisted in
+local storage. `Gameplay > Despawn All Objects` performs the drastic full
+cleanup: physics cores, loose debris VFX, and any existing rubble cover.
 The fog start distance is the clear chunk radius. Far terrain fades to opaque
 fog over the preset's falloff band, while the engine streams a hidden extra
 horizon behind that opacity so the hard chunk cutoff stays out of sight.

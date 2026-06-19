@@ -386,6 +386,63 @@
                   type="checkbox"
                 />
               </label>
+              <label class="settings-toggle" for="sound-enabled-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Sound</span>
+                  <span class="settings-toggle-hint">Enable procedural engine audio after the first click or key press</span>
+                </span>
+                <input
+                  id="sound-enabled-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                  checked
+                />
+              </label>
+              <label class="settings-field" for="master-volume-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Master Volume</span>
+                  <span id="master-volume-value" class="settings-value">65%</span>
+                </span>
+                <input
+                  id="master-volume-slider"
+                  class="range-input"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="65"
+                />
+              </label>
+              <label class="settings-field" for="sfx-volume-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">SFX Volume</span>
+                  <span id="sfx-volume-value" class="settings-value">80%</span>
+                </span>
+                <input
+                  id="sfx-volume-slider"
+                  class="range-input"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="80"
+                />
+              </label>
+              <label class="settings-field" for="ui-volume-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">UI Volume</span>
+                  <span id="ui-volume-value" class="settings-value">55%</span>
+                </span>
+                <input
+                  id="ui-volume-slider"
+                  class="range-input"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="55"
+                />
+              </label>
               <button
                 id="despawn-objects-button"
                 class="menu-button secondary settings-utility-button"

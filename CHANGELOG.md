@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-06-19
+
+### Added
+
+- Added the first procedural sound-engine slice: a Web Audio manager that
+  unlocks from normal player input, listens to typed engine events, and plays
+  lightweight synthesized cues for UI clicks, world load/exit, item changes,
+  core throws, terrain damage/destruction, rubble activity, Nova chat/toggle
+  reactions, footsteps, and landings.
+- Added persisted `Settings > Gameplay` audio controls for Sound, Master
+  Volume, SFX Volume, and UI Volume.
+
+### Tests
+
+- Added audio settings normalization coverage for persisted mute/volume state.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.23 - 2026-06-19
 
 ### Fixed

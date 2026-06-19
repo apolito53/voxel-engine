@@ -92,8 +92,10 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
-Gameplay settings include Terraformer size plus Physics Core size, velocity,
-terrain-damaging bounce count, color, and trail controls.
+Gameplay settings include Terraformer size, Physics Core size, velocity,
+terrain-damaging bounce count, color, and trail controls, plus a first-pass
+procedural sound layer with Sound, Master Volume, SFX Volume, and UI Volume
+controls. Browser audio unlocks after the first normal click or key press.
 Graphics settings treat distance as the clear chunk radius where fog starts;
 the engine streams a hidden extra horizon behind the opaque part of that curtain
 so far chunks fade out instead of popping away at the edge. Streaming,
@@ -132,8 +134,8 @@ render failure from a full engine freeze.
 The bottom hotbar shows the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu
 `Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show
-or hide the quick-control hints. Debug and control overlays start hidden by
-default.
+or hide the quick-control hints and tune audio. Debug and control overlays
+start hidden by default.
 
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).

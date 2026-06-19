@@ -18,6 +18,19 @@ import {
   getDistributedBlockFragmentIndex,
   getTerrainImpactFragmentCount
 } from "./blockFragments";
+import { GameAudio } from "./audioEngine";
+import {
+  AUDIO_VOLUME_MAX_PERCENT,
+  AUDIO_VOLUME_MIN_PERCENT,
+  AUDIO_VOLUME_STEP_PERCENT,
+  audioVolumeFromPercent,
+  audioVolumeToPercent,
+  formatAudioVolumePercent,
+  readAudioSettingsPreference,
+  writeAudioSettingsPreference,
+  type AudioSettings,
+  type AudioVolumeChannel
+} from "./audioSettings";
 import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "./blocks";
 import {
   getDebrisSpawnProfile,
@@ -490,6 +503,13 @@ const groundDebrisLifetimeForeverToggle = requireElement<HTMLInputElement>("#gro
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
+const soundEnabledToggle = requireElement<HTMLInputElement>("#sound-enabled-toggle");
+const masterVolumeSlider = requireElement<HTMLInputElement>("#master-volume-slider");
+const masterVolumeValue = requireElement<HTMLElement>("#master-volume-value");
+const sfxVolumeSlider = requireElement<HTMLInputElement>("#sfx-volume-slider");
+const sfxVolumeValue = requireElement<HTMLElement>("#sfx-volume-value");
+const uiVolumeSlider = requireElement<HTMLInputElement>("#ui-volume-slider");
+const uiVolumeValue = requireElement<HTMLElement>("#ui-volume-value");
 const builderModeToggleButton = requireElement<HTMLButtonElement>("#builder-mode-toggle-button");
 const builderBlockPalette = requireElement<HTMLElement>("#builder-block-palette");
 const builderSelectedBlockValue = requireElement<HTMLElement>("#builder-selected-block-value");
@@ -584,6 +604,7 @@ let terraformerSize = readTerraformerSizePreference();
 let clickFireMode: ClickFireMode = readClickFireModePreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
+let audioSettings: AudioSettings = readAudioSettingsPreference();
 let lastTimedGroundDebrisLifetimeSeconds = groundDebrisLifetimeSeconds === FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS
   ? DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS
   : groundDebrisLifetimeSeconds;
@@ -604,6 +625,10 @@ let terraformerState: TerraformerState | null = null;
 let coreAimPreviewEnabled = false;
 
 const engineEvents = createEngineEventBus();
+const gameAudio = new GameAudio({
+  events: engineEvents,
+  settings: audioSettings
+});
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
 const toolHotbarItems = createToolHotbarItems();
 const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
@@ -915,6 +940,7 @@ updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
 syncControlHintsToggle();
 syncCoreAimPreviewToggle();
+syncAudioControls();
 renderLoadoutMenus();
 renderBuilderPalette();
 syncBuilderControls();
@@ -1163,6 +1189,18 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   controlHintsToggle.addEventListener("change", () => {
     setControlHintsVisible(controlHintsToggle.checked);
+  }, eventListenerOptions);
+  soundEnabledToggle.addEventListener("change", () => {
+    setAudioEnabled(soundEnabledToggle.checked);
+  }, eventListenerOptions);
+  masterVolumeSlider.addEventListener("input", () => {
+    setAudioVolume("masterVolume", masterVolumeSlider.value);
+  }, eventListenerOptions);
+  sfxVolumeSlider.addEventListener("input", () => {
+    setAudioVolume("sfxVolume", sfxVolumeSlider.value);
+  }, eventListenerOptions);
+  uiVolumeSlider.addEventListener("input", () => {
+    setAudioVolume("uiVolume", uiVolumeSlider.value);
   }, eventListenerOptions);
   builderModeToggleButton.addEventListener("click", () => {
     setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items", { resumeGameplay: true });
@@ -1426,6 +1464,43 @@ function syncControlHintsToggle(): void {
   document.body.classList.toggle("controls-hidden", !controlHintsVisible);
 }
 
+function setAudioEnabled(enabled: boolean): void {
+  updateAudioSettings({
+    ...audioSettings,
+    enabled
+  });
+  if (enabled) void gameAudio.unlockFromUserGesture();
+}
+
+function setAudioVolume(channel: AudioVolumeChannel, percent: unknown): void {
+  updateAudioSettings({
+    ...audioSettings,
+    [channel]: audioVolumeFromPercent(percent, audioSettings[channel])
+  });
+}
+
+function updateAudioSettings(settings: AudioSettings): void {
+  audioSettings = settings;
+  writeAudioSettingsPreference(audioSettings);
+  gameAudio.applySettings(audioSettings);
+  syncAudioControls();
+}
+
+function syncAudioControls(): void {
+  soundEnabledToggle.checked = audioSettings.enabled;
+  syncAudioSlider(masterVolumeSlider, masterVolumeValue, audioSettings.masterVolume);
+  syncAudioSlider(sfxVolumeSlider, sfxVolumeValue, audioSettings.sfxVolume);
+  syncAudioSlider(uiVolumeSlider, uiVolumeValue, audioSettings.uiVolume);
+}
+
+function syncAudioSlider(slider: HTMLInputElement, valueLabel: HTMLElement, volume: number): void {
+  slider.min = String(AUDIO_VOLUME_MIN_PERCENT);
+  slider.max = String(AUDIO_VOLUME_MAX_PERCENT);
+  slider.step = String(AUDIO_VOLUME_STEP_PERCENT);
+  slider.value = String(audioVolumeToPercent(volume));
+  valueLabel.textContent = formatAudioVolumePercent(volume);
+}
+
 function setCoreAimPreviewEnabled(enabled: boolean): void {
   coreAimPreviewEnabled = enabled;
   syncCoreAimPreviewToggle();
@@ -1590,6 +1665,7 @@ window.addEventListener("resize", () => {
 
 document.addEventListener("keydown", (event) => {
   noteUserActivity();
+  void gameAudio.unlockFromUserGesture();
   if (event.code === "Escape" && isChangelogDialogOpen()) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -1703,7 +1779,15 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 }, eventListenerOptions);
-document.addEventListener("pointerdown", noteUserActivity, eventListenerOptions);
+document.addEventListener("pointerdown", () => {
+  noteUserActivity();
+  void gameAudio.unlockFromUserGesture();
+}, eventListenerOptions);
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest("button")) {
+    gameAudio.playUiClick();
+  }
+}, eventListenerOptions);
 document.addEventListener("pointermove", noteUserActivity, eventListenerOptions);
 document.addEventListener("mousemove", noteUserActivity, eventListenerOptions);
 
@@ -2099,7 +2183,15 @@ function animate(): void {
     const activePlayer = requirePlayer();
     debugPlayerVelocity = activePlayer.velocity;
 
+    const playerVerticalVelocityBeforeUpdate = activePlayer.velocity.y;
     activePlayer.update(delta);
+    gameAudio.updatePlayerMotion(delta, {
+      active: activePlayer.active,
+      onGround: activePlayer.onGround,
+      flying: activePlayer.flying,
+      speedMetersPerSecond: getPlayerSpeedMetersPerSecond(activePlayer.velocity),
+      verticalVelocity: playerVerticalVelocityBeforeUpdate
+    });
     updateHeldClickActions(frameStartedAt);
     testAvatar.update(delta);
     maybeAutosavePlayerLocation(frameStartedAt);
@@ -5108,6 +5200,7 @@ function disposeRuntime(): void {
   rigidDebris.dispose();
   activeWorld?.dispose(scene);
   inWorld = false;
+  gameAudio.dispose();
   novaPilotReactions.dispose();
   novaContext.dispose();
   novaPilot.dispose();

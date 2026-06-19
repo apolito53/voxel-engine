@@ -443,6 +443,14 @@ import {
   toggleClickFireMode
 } from "../src/clickFireMode";
 import {
+  DEFAULT_AUDIO_SETTINGS,
+  audioVolumeFromPercent,
+  audioVolumeToPercent,
+  formatAudioVolumePercent,
+  normalizeAudioSettings,
+  normalizeAudioVolumePercent
+} from "../src/audioSettings";
+import {
   VISUAL_TEST_SCENARIO_SNAPSHOT_MAX_HITCHES,
   normalizeVisualPilotRecordOptions,
   normalizeVisualTestRecorderOptions,
@@ -1303,6 +1311,34 @@ test("click fire mode toggles between semi and full auto", () => {
   assertEqual(toggleClickFireMode("full"), "semi", "T should step full-auto back into semi-auto");
   assertEqual(formatClickFireMode("semi"), "Semi Auto", "Nova status copy should spell out semi-auto mode");
   assertEqual(formatClickFireModeShort("full"), "FULL", "hotbar copy should keep full-auto compact");
+});
+
+test("audio settings normalize persisted volume controls", () => {
+  assertDeepEqual(
+    normalizeAudioSettings({
+      enabled: false,
+      masterVolume: 2,
+      sfxVolume: "-1",
+      uiVolume: "0.25"
+    }),
+    {
+      enabled: false,
+      masterVolume: 1,
+      sfxVolume: 0,
+      uiVolume: 0.25
+    },
+    "audio settings should preserve the toggle and clamp each volume lane"
+  );
+  assertEqual(
+    normalizeAudioSettings({ enabled: "sure" }).enabled,
+    DEFAULT_AUDIO_SETTINGS.enabled,
+    "invalid audio toggles should fall back to the default"
+  );
+  assertEqual(audioVolumeToPercent(0.655), 66, "volume display should round to the nearest percent");
+  assertEqual(audioVolumeFromPercent("42", 0.8), 0.42, "slider percentages should convert back to 0..1 volume");
+  assertEqual(normalizeAudioVolumePercent(120, 65), 100, "volume slider values should clamp high");
+  assertEqual(normalizeAudioVolumePercent(Number.NaN, 65), 65, "invalid volume slider values should preserve fallback");
+  assertEqual(formatAudioVolumePercent(0.5), "50%", "audio volume labels should stay compact");
 });
 
 test("builder brush sizing stays odd and centered", () => {
