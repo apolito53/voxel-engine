@@ -16,9 +16,9 @@ export const AUDIO_VOLUME_STEP_PERCENT = 1;
 
 export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   enabled: true,
-  masterVolume: 0.65,
-  sfxVolume: 0.8,
-  uiVolume: 0.55
+  masterVolume: 0.8,
+  sfxVolume: 1,
+  uiVolume: 0.9
 };
 
 export function normalizeAudioSettings(value: unknown, fallback = DEFAULT_AUDIO_SETTINGS): AudioSettings {

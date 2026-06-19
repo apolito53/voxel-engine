@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.12.1 - 2026-06-19
+
+### Changed
+
+- Raised the first-pass sound engine's default Master/SFX/UI volume posture and
+  boosted quiet non-core cues so footsteps, UI clicks, terrain damage, rubble,
+  landings, and Nova reactions are audible without maxing the system volume.
+- Kept Physics Core and Hitscan Core launch cues near their original level so
+  the louder mix does not turn cores into jump scares.
+
+### Tests
+
+- Added regression coverage for the louder default audio slider values.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.12.0 - 2026-06-19
 
 ### Added

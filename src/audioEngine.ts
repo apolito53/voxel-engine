@@ -44,6 +44,31 @@ const FOOTSTEP_MIN_INTERVAL_SECONDS = 0.22;
 const WALK_STEP_DISTANCE_METERS = 1.7;
 const LANDING_SOUND_MIN_AIR_TIME_SECONDS = 0.16;
 
+// These are tuned against normal Windows/browser output, not studio monitors.
+// Cores were already audible; the rest of the soundscape needs more body so the
+// user does not have to crank system volume and get ambushed by other apps.
+const UI_CLICK_GAIN = 0.105;
+const UI_CONFIRM_GAIN = 0.095;
+const UI_CONFIRM_SECONDARY_GAIN = 0.07;
+const UI_SELECT_GAIN = 0.085;
+const TERRAIN_DAMAGE_GAIN = 0.105;
+const TERRAIN_BREAK_NOISE_GAIN_MIN = 0.13;
+const TERRAIN_BREAK_NOISE_GAIN_MAX = 0.18;
+const TERRAIN_BREAK_TONE_GAIN = 0.105;
+const RUBBLE_FORM_GAIN = 0.095;
+const RUBBLE_DAMAGE_GAIN = 0.085;
+const RUBBLE_BREAK_GAIN = 0.12;
+const FOOTSTEP_GAIN_MIN = 0.055;
+const FOOTSTEP_GAIN_MAX = 0.12;
+const LANDING_GAIN_MIN = 0.075;
+const LANDING_GAIN_MAX = 0.18;
+const NOVA_TOGGLE_GAIN = 0.095;
+const NOVA_CHAT_GAIN = 0.065;
+const HITSCAN_CORE_GAIN = 0.052;
+const PHYSICS_CORE_GAIN = 0.058;
+const PHYSICS_CORE_NOISE_GAIN = 0.02;
+const CORE_CLEAR_GAIN = 0.105;
+
 export class GameAudio {
   private readonly events: EngineEventBus;
   private readonly unsubscribers: Array<() => void> = [];
@@ -83,7 +108,7 @@ export class GameAudio {
       frequency: 720,
       frequencyEnd: 920,
       durationSeconds: 0.045,
-      gain: 0.035,
+      gain: UI_CLICK_GAIN,
       category: "ui",
       type: "triangle"
     });
@@ -147,7 +172,7 @@ export class GameAudio {
       this.events.on("settings:physics-budget-changed", () => this.playUiClick()),
       this.events.on("physics:core-thrown", (event) => this.playCoreThrown(event.mode ?? "projectile")),
       this.events.on("physics:cores-cleared", (event) => {
-        if (event.count > 0) this.playNoise({ durationSeconds: 0.08, gain: 0.055, category: "sfx", filterFrequency: 440 });
+        if (event.count > 0) this.playNoise({ durationSeconds: 0.08, gain: CORE_CLEAR_GAIN, category: "sfx", filterFrequency: 440 });
       }),
       this.events.on("block:damaged", (event) => this.playBlockDamaged(event.block, event.impactSpeed)),
       this.events.on("block:destroyed", (event) => this.playBlockDestroyed(event.block, event.fragmentCount)),
@@ -157,13 +182,13 @@ export class GameAudio {
         frequency: event.active ? 520 : 360,
         frequencyEnd: event.active ? 760 : 240,
         durationSeconds: 0.08,
-        gain: 0.04,
+        gain: NOVA_TOGGLE_GAIN,
         category: "ui",
         type: "sine"
       })),
       this.events.on("nova:chat-message", (event) => {
         if (event.role === "nova") {
-          this.playTone({ frequency: 620, durationSeconds: 0.035, gain: 0.022, category: "ui", type: "triangle" });
+          this.playTone({ frequency: 620, durationSeconds: 0.035, gain: NOVA_CHAT_GAIN, category: "ui", type: "triangle" });
         }
       })
     );
@@ -199,8 +224,8 @@ export class GameAudio {
   }
 
   private playWorldLoaded(): void {
-    this.playTone({ frequency: 220, frequencyEnd: 330, durationSeconds: 0.11, gain: 0.035, category: "ui", type: "sine" });
-    this.playTone({ frequency: 330, frequencyEnd: 495, durationSeconds: 0.14, gain: 0.026, category: "ui", type: "sine" });
+    this.playTone({ frequency: 220, frequencyEnd: 330, durationSeconds: 0.11, gain: UI_CONFIRM_GAIN, category: "ui", type: "sine" });
+    this.playTone({ frequency: 330, frequencyEnd: 495, durationSeconds: 0.14, gain: UI_CONFIRM_SECONDARY_GAIN, category: "ui", type: "sine" });
   }
 
   private playItemSelected(slotIndex: number): void {
@@ -208,7 +233,7 @@ export class GameAudio {
       frequency: 440 + slotIndex * 38,
       frequencyEnd: 660 + slotIndex * 22,
       durationSeconds: 0.055,
-      gain: 0.028,
+      gain: UI_SELECT_GAIN,
       category: "ui",
       type: "triangle"
     });
@@ -220,7 +245,7 @@ export class GameAudio {
         frequency: 880,
         frequencyEnd: 260,
         durationSeconds: 0.095,
-        gain: 0.06,
+        gain: HITSCAN_CORE_GAIN,
         category: "sfx",
         type: "sawtooth"
       });
@@ -231,11 +256,11 @@ export class GameAudio {
       frequency: 180,
       frequencyEnd: 80,
       durationSeconds: 0.12,
-      gain: 0.065,
+      gain: PHYSICS_CORE_GAIN,
       category: "sfx",
       type: "triangle"
     });
-    this.playNoise({ durationSeconds: 0.06, gain: 0.025, category: "sfx", filterFrequency: 900, pitch: 1.2 });
+    this.playNoise({ durationSeconds: 0.06, gain: PHYSICS_CORE_NOISE_GAIN, category: "sfx", filterFrequency: 900, pitch: 1.2 });
   }
 
   private playBlockDamaged(blockId: number, impactSpeed: number): void {
@@ -245,7 +270,7 @@ export class GameAudio {
 
     const block = BLOCKS[blockId];
     const pitch = 110 + (block?.health ?? 1) * 6 + clamp(impactSpeed, 0, 16) * 8;
-    this.playNoise({ durationSeconds: 0.045, gain: 0.035, category: "sfx", filterFrequency: pitch * 6, pitch });
+    this.playNoise({ durationSeconds: 0.045, gain: TERRAIN_DAMAGE_GAIN, category: "sfx", filterFrequency: pitch * 6, pitch });
   }
 
   private playBlockDestroyed(blockId: number, fragmentCount: number): void {
@@ -253,7 +278,11 @@ export class GameAudio {
     const hardness = block?.health ?? 1;
     this.playNoise({
       durationSeconds: 0.12,
-      gain: clamp(0.045 + fragmentCount * 0.00015, 0.045, 0.11),
+      gain: clamp(
+        TERRAIN_BREAK_NOISE_GAIN_MIN + fragmentCount * 0.00025,
+        TERRAIN_BREAK_NOISE_GAIN_MIN,
+        TERRAIN_BREAK_NOISE_GAIN_MAX
+      ),
       category: "sfx",
       filterFrequency: 180 + hardness * 45,
       pitch: 0.75
@@ -262,7 +291,7 @@ export class GameAudio {
       frequency: 72 + hardness * 8,
       frequencyEnd: 44,
       durationSeconds: 0.09,
-      gain: 0.045,
+      gain: TERRAIN_BREAK_TONE_GAIN,
       category: "sfx",
       type: "triangle"
     });
@@ -272,7 +301,7 @@ export class GameAudio {
     const now = performance.now();
     if (now - this.lastRubbleSoundAt < RUBBLE_SOUND_MIN_INTERVAL_MS) return;
     this.lastRubbleSoundAt = now;
-    this.playNoise({ durationSeconds: 0.07, gain: 0.035, category: "sfx", filterFrequency: 260, pitch: 0.6 });
+    this.playNoise({ durationSeconds: 0.07, gain: RUBBLE_FORM_GAIN, category: "sfx", filterFrequency: 260, pitch: 0.6 });
   }
 
   private playRubbleDamaged(destroyed: boolean): void {
@@ -281,7 +310,7 @@ export class GameAudio {
     this.lastRubbleSoundAt = now;
     this.playNoise({
       durationSeconds: destroyed ? 0.1 : 0.05,
-      gain: destroyed ? 0.05 : 0.03,
+      gain: destroyed ? RUBBLE_BREAK_GAIN : RUBBLE_DAMAGE_GAIN,
       category: "sfx",
       filterFrequency: destroyed ? 230 : 360,
       pitch: 0.7
@@ -291,7 +320,7 @@ export class GameAudio {
   private playFootstep(speedMetersPerSecond: number): void {
     this.playNoise({
       durationSeconds: 0.035,
-      gain: clamp(0.018 + speedMetersPerSecond * 0.002, 0.018, 0.04),
+      gain: clamp(FOOTSTEP_GAIN_MIN + speedMetersPerSecond * 0.005, FOOTSTEP_GAIN_MIN, FOOTSTEP_GAIN_MAX),
       category: "sfx",
       filterFrequency: 300,
       pitch: 0.55
@@ -301,7 +330,7 @@ export class GameAudio {
   private playLanding(verticalSpeed: number): void {
     this.playNoise({
       durationSeconds: 0.08,
-      gain: clamp(0.025 + verticalSpeed * 0.006, 0.025, 0.09),
+      gain: clamp(LANDING_GAIN_MIN + verticalSpeed * 0.011, LANDING_GAIN_MIN, LANDING_GAIN_MAX),
       category: "sfx",
       filterFrequency: 220,
       pitch: 0.45

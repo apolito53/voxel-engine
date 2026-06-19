@@ -95,7 +95,9 @@ ignored by git.
 Gameplay settings include Terraformer size, Physics Core size, velocity,
 terrain-damaging bounce count, color, and trail controls, plus a first-pass
 procedural sound layer with Sound, Master Volume, SFX Volume, and UI Volume
-controls. Browser audio unlocks after the first normal click or key press.
+controls. Audio defaults are intentionally forward in the mix so terrain,
+movement, and UI cues are audible without pushing the OS volume to nonsense
+territory. Browser audio unlocks after the first normal click or key press.
 Graphics settings treat distance as the clear chunk radius where fog starts;
 the engine streams a hidden extra horizon behind the opaque part of that curtain
 so far chunks fade out instead of popping away at the edge. Streaming,

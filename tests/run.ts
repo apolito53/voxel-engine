@@ -1339,6 +1339,21 @@ test("audio settings normalize persisted volume controls", () => {
   assertEqual(normalizeAudioVolumePercent(120, 65), 100, "volume slider values should clamp high");
   assertEqual(normalizeAudioVolumePercent(Number.NaN, 65), 65, "invalid volume slider values should preserve fallback");
   assertEqual(formatAudioVolumePercent(0.5), "50%", "audio volume labels should stay compact");
+  assertEqual(
+    formatAudioVolumePercent(DEFAULT_AUDIO_SETTINGS.masterVolume),
+    "80%",
+    "default master volume should be audible without forcing the system mixer to max"
+  );
+  assertEqual(
+    formatAudioVolumePercent(DEFAULT_AUDIO_SETTINGS.sfxVolume),
+    "100%",
+    "default SFX volume should give quiet movement and terrain cues room to breathe"
+  );
+  assertEqual(
+    formatAudioVolumePercent(DEFAULT_AUDIO_SETTINGS.uiVolume),
+    "90%",
+    "default UI volume should be present without relying on the louder SFX lane"
+  );
 });
 
 test("builder brush sizing stays odd and centered", () => {

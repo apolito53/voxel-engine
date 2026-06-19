@@ -154,8 +154,10 @@ Quality slider edits switch the dropdown to `Custom` so built-in presets stay
 clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any
 visible bars when turned off. `Gameplay > Sound` mutes or enables the procedural
 Web Audio layer, with separate master, SFX, and UI volume sliders persisted in
-local storage. `Gameplay > Despawn All Objects` performs the drastic full
-cleanup: physics cores, loose debris VFX, and any existing rubble cover.
+local storage. Default audio levels favor audible terrain, movement, and UI
+feedback while keeping core launch sounds from dominating the mix. The
+`Gameplay > Despawn All Objects` button performs the drastic full cleanup:
+physics cores, loose debris VFX, and any existing rubble cover.
 The fog start distance is the clear chunk radius. Far terrain fades to opaque
 fog over the preset's falloff band, while the engine streams a hidden extra
 horizon behind that opacity so the hard chunk cutoff stays out of sight.
