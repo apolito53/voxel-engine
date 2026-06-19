@@ -1,30 +1,22 @@
 # TODO
 
-Shortlist of ideas worth keeping visible without pretending they are committed scope yet.
+Shortlist of project direction that is worth keeping visible. This file is for
+promoted work, not every fun idea that crosses the room.
 
-## High Priority: Individual Light Sources
+## Current Recommended Next Slice
 
-- Goal: support individual local light sources so the world can have torches,
-  lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
-  depends on local darkness or illumination instead of only sun/sky lighting.
-- First slice should be deliberately small: add a bounded light-source registry,
-  one placeable/test light block or admin-spawned lamp, persistence for placed
-  light metadata, and a strict per-quality cap so local lights cannot silently
-  murder frame time.
-- Start with renderer-owned local lights and emissive visuals before attempting
-  full voxel light propagation. Three.js `PointLight`/`SpotLight` behavior,
-  shadow settings, culling, pooling, and quality budgets need to be proven in
-  normal play first.
-- Keep baked sun/face shading and individual runtime lights conceptually
-  separate. Existing `voxelLighting.ts` face shading can remain the cheap
-  ambient/sun baseline while individual lights become an additive local layer.
-- Future path: optional chunk-aware light influence data for blocks/materials,
-  light permeability, colored/emissive blocks, day/night interaction, dynamic
-  projectile glows, and tool/Nova light pulses.
-- Validation shape: include a Superflat Lab scene with multiple lights, a
-  quality-budget stress pass, a save/load check for placed light sources, and a
-  visual smoke check that moving around chunk boundaries does not pop or leak
-  lights weirdly.
+- Stop polishing debris unless logs or playtesting show a blocking regression.
+  The engine is stable enough to start adding gameplay-relevant systems again.
+- Best next gameplay-feel lanes:
+  1. Sound
+  2. Individual light sources
+  3. Equipment and items
+- Treat rigid debris, worker scheduling, and partial terrain collision as
+  maintenance/watchlist areas for now. They should not steal the whole roadmap
+  unless a bug makes them unavoidable.
+- Keep performance work evidence-led. Check Chrome logs, F3 counters, and
+  repeatable stress scenes before optimizing something just because it feels
+  suspicious.
 
 ## High Priority: Sound
 
@@ -57,39 +49,75 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   stress scene with many debris/material events, and a cleanup check across
   pause, world exit, and dev reload.
 
-## Medium Priority: Player Collision With Cross-Block Partial Holes
+## High Priority: Individual Light Sources
 
-- Goal: fix player collision/support checks so partial-block damage can create
-  a fall-through hole when the opening is wide enough for the player, even if
-  the missing sub-blocks are spread across neighboring main blocks.
-- Current bug: carving a gap that should be passable (roughly >= 3 sub-blocks
-  wide) can still leave the player standing on air because support is evaluated
-  too locally per main block instead of considering the combined sub-voxel
-  aperture under the player's footprint.
-- First slice: audit player grounding and collision sampling around the sparse
-  3x3x3 partial-block bite lattice, especially at macro-block boundaries, and
-  replace any single-block "has support" shortcut with footprint-aware checks
-  across adjacent damaged blocks.
-- Validation shape: add a regression scene/test where a fall-through shaft is
-  assembled from partial holes crossing two or more neighboring blocks, confirm
-  the player falls through openings at the intended width, and confirm narrower
-  partial holes still support or block the player as expected.
-- Research/implementation plan: see `docs/player-partial-collision-plan.md` for
-  the current audit map, proposed footprint-aware support query, test matrix,
-  manual validation checklist, and risks.
+- Goal: support individual local light sources so the world can have torches,
+  lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
+  depends on local darkness or illumination instead of only sun/sky lighting.
+- First slice should be deliberately small: add a bounded light-source registry,
+  one placeable/test light block or admin-spawned lamp, persistence for placed
+  light metadata, and a strict per-quality cap so local lights cannot silently
+  murder frame time.
+- Start with renderer-owned local lights and emissive visuals before attempting
+  full voxel light propagation. Three.js `PointLight`/`SpotLight` behavior,
+  shadow settings, culling, pooling, and quality budgets need to be proven in
+  normal play first.
+- Keep baked sun/face shading and individual runtime lights conceptually
+  separate. Existing `voxelLighting.ts` face shading can remain the cheap
+  ambient/sun baseline while individual lights become an additive local layer.
+- Future path: optional chunk-aware light influence data for blocks/materials,
+  light permeability, colored/emissive blocks, day/night interaction, dynamic
+  projectile glows, and tool/Nova light pulses.
+- Validation shape: include a Superflat Lab scene with multiple lights, a
+  quality-budget stress pass, a save/load check for placed light sources, and a
+  visual smoke check that moving around chunk boundaries does not pop or leak
+  lights weirdly.
+
+## High Priority: Equipment And Items
+
+- First foundation is in place: `src/items.ts` defines reusable item
+  definitions, stack metadata, categories, tags, and primary/secondary action
+  descriptors; `src/hotbar.ts` selects item stacks instead of hard-coded
+  behavior unions.
+- Next slice should turn that foundation into actual gameplay structure:
+  equipment slots, inventory containers, item quantities, pickups/drops, and
+  durable tool/weapon definitions.
+- Keep blocks, throwable cores, tools, and future weapons in one clean model.
+  If the hotbar becomes too crowded, split presentation into equipment slots
+  plus inventory without splitting the item data model too early.
+- Add explicit tool behavior so terrain editing, combat, building, and utility
+  actions are owned by selected items instead of creeping back into universal
+  left-click/right-click logic.
+- Validation shape: unit-test item container operations, hotbar/equipment
+  selection, stack limits, pickup/drop transfer, and click-action routing; smoke
+  test that Terraformer, blocks, Physics Core, and Hitscan Core still behave.
+
+## Watchlist: Partial Terrain Traversal
+
+- Current status: the old cross-block partial-hole collision task has largely
+  shipped. Player movement now uses partial-block collision/support paths for
+  fall-through holes, narrower seams, low partial ledges/stairs, vaults,
+  clambers, and falling edge-grabs.
+- Keep watching for collision/visual mismatches around weird damaged terrain:
+  cross-block apertures, one-sub-block stairs, partial ledges, clamber/vault
+  transitions, and debris piles near partial terrain.
+- `docs/player-partial-collision-plan.md` is now a historical/audit reference,
+  not the active next implementation plan.
+- Do not reopen this lane unless playtesting finds a clear repro. When that
+  happens, add a regression scene/test before patching the movement code again.
 
 ## Worker Migration Roadmap
 
-- Current foundation: `WorkerPool` owns the shared job protocol shape with
-  clamped capacity, ids, stale revision rejection, cancellation, sync fallback,
-  transfer bookkeeping, priority lanes, per-job-type telemetry, and buffered
-  main-thread upload accounting.
+- Current foundation: `WorkerPool` owns shared job protocol shape with clamped
+  capacity, ids, stale revision rejection, cancellation, sync fallback, transfer
+  bookkeeping, priority lanes, per-job-type telemetry, and buffered main-thread
+  upload accounting.
 - Completed browser-worker slices: partial-region geometry building plus chunk
   generation/meshing now run through the generic `engineWorker` and shared
   WorkerPool while the main thread keeps Three.js `BufferGeometry` ownership.
-- Later, decouple loose debris simulation state from Three proxy objects so
-  rendering consumes plain arrays of transforms/material/shape ids instead of
-  owning the simulation state.
+- Future worker targets should be chosen from logs, not vibes. The next likely
+  worthwhile lane is decoupling loose-debris simulation state from Three proxy
+  objects so rendering consumes plain arrays of transforms/material/shape ids.
 - Only after that, prototype workerized loose-debris simulation with compact
   nearby-support snapshots. Keep player movement, core firing, terrain damage,
   gameplay decisions, SharedArrayBuffer, WASM threads, and OffscreenCanvas out
@@ -99,58 +127,63 @@ Shortlist of ideas worth keeping visible without pretending they are committed s
   would unlock normal host-side multi-threading, process-level CPU/core
   telemetry, richer profiling, heavier physics/world jobs, and cleaner log
   capture than browser APIs allow. Keep it as a deliberate backend experiment,
-  not a panic rewrite, unless browser-native workers prove too cramped for the
-  engine vision.
+  not a panic rewrite.
 
 ## Rigid Debris Optimization Roadmap
 
-- Current first step: split physics timing now distinguishes toy motion, impact
-  application, Rapier debris flush/step/sync, support-collider collection/sync,
-  cleanup, broadphase, rubble settling, and render-proxy sync without changing
-  gameplay behavior.
-- Current optimization target completed: Rapier admission is capped at spawn
-  time while preserving the full visible break burst as cheap VFX, and
-  over-pressure rigid debris demotes to VFX before expiring anything.
-- Current support target completed: temporary support-collider scans now
-  prioritize sleeping, near-supported, falling, fast, and moving shards before
-  calm unsupported airborne shards, still do a narrow lookdown for known
-  rubble/partial support, and deduplicate repeated support-cell probes inside
-  dense crater piles.
-- Current wake/cleanup target completed: terrain, builder/admin, and rubble
-  support edits now wake bounded local stacks of sleeping Rapier debris,
-  detached VFX debris, and glue-connected settler clumps, while normal pressure
-  cleanup protects awake airborne shards instead of poofing them mid-flight.
-- Next validate fresh `debris-pressure` and WebGL diagnostic logs before
-  deciding whether parked sleepers are worth the complexity.
+- Current state: rigid debris is good enough for now. Recent passes split
+  physics timings, capped Rapier admission at spawn time, preserved full visible
+  break bursts as cheap VFX, reduced support-collider pressure, and fixed the
+  detached-sleeper support bug that made debris float after the terrain below it
+  changed.
+- Parked unless logs force it: parked sleepers, deeper workerized debris
+  simulation, material-specific rigid behavior, and GPU-owned transient VFX.
 - Do not revive partial-mesh draw caps or rigid-debris cadence throttling; both
   were playtested and parked because the visual/feel cost was not worth it.
+- Do not keep nitpicking debris feel while the game has no sound, light tools,
+  inventory, combat loop, entities, objectives, or world interaction structure.
+  Yes, this note is here because we know exactly what we are like.
+- If this lane reopens, require a named repro/stress scene and compare against
+  current Chrome logs before changing behavior.
 
 ## Rigid Sub-Voxel Damage Objects
 
-- Current direction: loose block debris is VFX, while block HP and the sparse 3x3x3 partial-block bite lattice own durable terrain damage.
-- Future experiment: let selected damaged sub-voxels promote into real rigid objects when that is the actual mechanic, instead of using generic debris bake-out as an accidental gameplay proxy.
-- Keep this opt-in and local to impacted macro blocks. Do not activate the whole world as tiny rigid voxels.
-- Useful first target: a heavily damaged bite cell or severed exposed chunk can detach as a rigid cuboid/shard, collide briefly, then either expire as VFX or intentionally become a placed terrain/cover object through a dedicated rule.
-- Preserve material/HP accounting separately from visible shard count so graphics quality never changes gameplay value.
+- Current direction: loose block debris is VFX, while block HP and the sparse
+  3x3x3 partial-block bite lattice own durable terrain damage.
+- Future experiment: let selected damaged sub-voxels promote into real rigid
+  objects when that is the actual mechanic, instead of using generic debris
+  bake-out as an accidental gameplay proxy.
+- Keep this opt-in and local to impacted macro blocks. Do not activate the
+  whole world as tiny rigid voxels.
+- Useful first target: a heavily damaged bite cell or severed exposed chunk can
+  detach as a rigid cuboid/shard, collide briefly, then either expire as VFX or
+  intentionally become a placed terrain/cover object through a dedicated rule.
+- Preserve material/HP accounting separately from visible shard count so
+  graphics quality never changes gameplay value.
 
 ## Future Nova Chat Hook
 
-- First local slice is in place: `Enter` opens Nova Chat, `NovaContextJournal` collects recent engine context, and `novaChat.ts` produces local context-aware replies without network calls.
-- Add an optional live Nova chat path so the in-game companion can answer typed player questions with a real model response instead of only canned local reactions.
-- Keep API credentials out of browser code. The safe shape is a tiny local/backend proxy for text chat, then a browser-safe short-lived token flow if we later move to realtime voice.
-- Feed a real model the existing compact game context from the event bus journal: active world name/seed, selected block, quality preset, player speed/mode, recent block damage, rubble events, and frame hitches.
-- Start with explicit player-initiated chat so token usage is controlled. Event-triggered autonomous commentary can stay canned or heavily rate-limited until the behavior is actually fun.
-- Likely next implementation: local/backend proxy that streams Responses API text into the Nova chat log.
-- Later stretch goal: Realtime API voice mode, if it still feels useful once the text version proves itself.
+- First local slice is in place: `Enter` opens Nova Chat,
+  `NovaContextJournal` collects recent engine context, and `novaChat.ts`
+  produces local context-aware replies without network calls.
+- Add an optional live Nova chat path so the in-game companion can answer typed
+  player questions with a real model response instead of only canned local
+  reactions.
+- Keep API credentials out of browser code. The safe shape is a tiny
+  local/backend proxy for text chat, then a browser-safe short-lived token flow
+  if we later move to realtime voice.
+- Feed a real model the existing compact game context from the event bus
+  journal: active world name/seed, selected block, quality preset, player
+  speed/mode, recent block damage, rubble events, and frame hitches.
+- Start with explicit player-initiated chat so token usage is controlled.
+  Event-triggered autonomous commentary can stay canned or heavily rate-limited
+  until the behavior is actually fun.
+- Likely next implementation: local/backend proxy that streams Responses API
+  text into the Nova chat log.
+- Later stretch goal: Realtime API voice mode, if it still feels useful once
+  the text version proves itself.
 
 Official docs to re-check before implementation:
 - Responses streaming: https://developers.openai.com/api/docs/guides/streaming
 - Realtime WebRTC: https://developers.openai.com/api/docs/guides/realtime-webrtc
 - Realtime client secrets: https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets
-
-## Equipment And Items Iteration
-
-- First foundation is in place: `src/items.ts` defines reusable item definitions, stack metadata, categories, tags, and primary/secondary action descriptors; `src/hotbar.ts` now selects item stacks instead of hard-coded behavior unions.
-- Add explicit tool items so terrain destruction can be owned by selected blocks/tools instead of being a universal left-click behavior.
-- Decide whether blocks, throwable cores, tools, and future weapons share one hotbar or split into equipment slots plus item inventory.
-- Add an actual inventory/equipment container once item quantities, pickups, crafting, or weapon slots exist in gameplay.
