@@ -5562,7 +5562,77 @@ test("player movement climbs sequential one-sub-block partial stairs without jum
   }
 });
 
-test("player movement clambers onto reachable full-block ledges", () => {
+test("player movement vaults medium ledges only while sprinting", () => {
+  const originalDocument = (globalThis as { document?: Document }).document;
+  const globals = globalThis as { document?: Document };
+  globals.document = {
+    pointerLockElement: null,
+    body: {
+      classList: {
+        toggle(): boolean {
+          return false;
+        }
+      }
+    },
+    addEventListener(): void {},
+    exitPointerLock(): void {}
+  } as unknown as Document;
+
+  const mediumLedgeBox: CollisionBounds = {
+    minX: 0,
+    maxX: 1,
+    minY: 0,
+    maxY: 2 / 3,
+    minZ: 0,
+    maxZ: 1
+  };
+  const ledgeWorld: CollisionWorld = {
+    isSolid(x, y, z): boolean {
+      return x === 0 && y === 0 && z === 0;
+    },
+    getCellCollisionBoxes(x, y, z): readonly CollisionBounds[] | null {
+      return x === 0 && y === 0 && z === 0 ? [mediumLedgeBox] : null;
+    }
+  };
+  const fakeCanvas = {
+    tabIndex: 0,
+    style: { cursor: "" },
+    addEventListener(): void {},
+    requestPointerLock(): void {},
+    focus(): void {}
+  } as unknown as HTMLElement;
+
+  try {
+    const blockedCamera = new THREE.PerspectiveCamera();
+    blockedCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const blockedPlayer = new PlayerController(blockedCamera, fakeCanvas, ledgeWorld);
+    blockedPlayer.onGround = true;
+    blockedPlayer.moveAxis("x", 0.6);
+    assertClose(blockedCamera.position.x, -0.45, 0.000001, "two-sub-block ledges should block without sprint vaulting");
+    assertClose(blockedPlayer.getFeetY(), 0, 0.000001, "blocked medium ledges should not lift the player");
+    blockedPlayer.dispose();
+
+    const vaultCamera = new THREE.PerspectiveCamera();
+    vaultCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const vaultPlayer = new PlayerController(vaultCamera, fakeCanvas, ledgeWorld);
+    vaultPlayer.active = true;
+    vaultPlayer.onGround = true;
+    vaultPlayer.velocity.x = 7;
+    vaultPlayer.keys.add("ShiftLeft");
+    vaultPlayer.moveAxis("x", 0.6);
+    assert(vaultCamera.position.x > 0.1, "sprint vault should preserve the horizontal move onto a medium ledge");
+    assertClose(vaultPlayer.getFeetY(), 0, 0.000001, "sprint vault should animate upward instead of snapping to the ledge");
+    vaultPlayer.update(1);
+    assertClose(vaultPlayer.getFeetY(), 2 / 3, 0.000001, "sprint vault should finish on the medium ledge");
+    assertClose(vaultPlayer.velocity.x, 7, 0.000001, "sprint vault should not zero horizontal momentum");
+    vaultPlayer.dispose();
+  } finally {
+    if (originalDocument) globals.document = originalDocument;
+    else delete globals.document;
+  }
+});
+
+test("player movement clambers onto reachable full-block ledges only while jump is held", () => {
   const originalDocument = (globalThis as { document?: Document }).document;
   const globals = globalThis as { document?: Document };
   globals.document = {
@@ -5605,35 +5675,62 @@ test("player movement clambers onto reachable full-block ledges", () => {
       reachableCamera.position.x,
       -0.45,
       0.000001,
+      "reachable wall should block when jump is not held"
+    );
+    assertClose(reachablePlayer.getFeetY(), 0, 0.000001, "reachable wall should not clamber without jump intent");
+    reachablePlayer.dispose();
+
+    const jumpClamberCamera = new THREE.PerspectiveCamera();
+    jumpClamberCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
+    const jumpClamberPlayer = new PlayerController(jumpClamberCamera, fakeCanvas, twoBlockWall);
+    jumpClamberPlayer.keys.add("Space");
+    jumpClamberPlayer.moveAxis("x", 0.6);
+    assertClose(
+      jumpClamberCamera.position.x,
+      -0.45,
+      0.000001,
       "reachable wall contact should begin from the safe pre-clamber position"
     );
     assertClose(
-      reachablePlayer.getFeetY(),
+      jumpClamberPlayer.getFeetY(),
       0,
       0.000001,
       "reachable wall should not snap to the final clamber height immediately"
     );
 
-    reachablePlayer.active = true;
-    reachablePlayer.update(0.08);
+    jumpClamberPlayer.active = true;
+    jumpClamberPlayer.update(0.08);
     assert(
-      reachablePlayer.getFeetY() > 0 && reachablePlayer.getFeetY() < 2.002,
-      "reachable wall clamber should animate upward before reaching the target ledge"
+      jumpClamberPlayer.getFeetY() > 0 && jumpClamberPlayer.getFeetY() < 2.002,
+      `reachable wall clamber should animate upward before reaching the target ledge (feet ${jumpClamberPlayer.getFeetY()})`
     );
 
-    reachablePlayer.update(1);
-    assert(reachableCamera.position.x > 0.1, "reachable wall clamber should finish the horizontal move");
+    jumpClamberPlayer.update(1);
+    assert(jumpClamberCamera.position.x > 0.1, "reachable wall clamber should finish the horizontal move");
     assertClose(
-      reachablePlayer.getFeetY(),
+      jumpClamberPlayer.getFeetY(),
       2.002,
       0.000001,
       "reachable wall should clamber just above the top surface"
     );
-    reachablePlayer.dispose();
+    jumpClamberPlayer.dispose();
+
+    const airGrabCamera = new THREE.PerspectiveCamera();
+    airGrabCamera.position.set(-0.45, PLAYER_HEIGHT + 0.2, 0.5);
+    const airGrabPlayer = new PlayerController(airGrabCamera, fakeCanvas, twoBlockWall);
+    airGrabPlayer.keys.add("Space");
+    airGrabPlayer.velocity.y = -3;
+    airGrabPlayer.moveAxis("x", 0.6);
+    airGrabPlayer.active = true;
+    airGrabPlayer.update(1);
+    assert(airGrabCamera.position.x > 0.1, "falling while holding jump should grab and climb a reachable ledge");
+    assertClose(airGrabPlayer.getFeetY(), 2.002, 0.000001, "air clamber should finish on the ledge top");
+    airGrabPlayer.dispose();
 
     const blockedCamera = new THREE.PerspectiveCamera();
     blockedCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
     const blockedPlayer = new PlayerController(blockedCamera, fakeCanvas, tooTallWall);
+    blockedPlayer.keys.add("Space");
     blockedPlayer.moveAxis("x", 0.6);
     assertClose(blockedCamera.position.x, -0.45, 0.000001, "too-tall ledge should still block horizontal movement");
     assertClose(blockedPlayer.getFeetY(), 0, 0.000001, "too-tall ledge should not clamber beyond head reach");

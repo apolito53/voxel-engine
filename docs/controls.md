@@ -25,8 +25,10 @@ the root README.
   press `Space` to spring-jump out of the slide.
 - Low damaged-terrain ledges step up automatically with a short vertical ease,
   so one-sub-block Terraformer cuts can form usable stairs without popping the
-  camera upward. Taller reachable ledges clamber with a pull-up animation if
-  their top surface is within roughly one sub-block of the player's head height.
+  camera upward. Two-to-four-sub-block ledges require a sprint vault that keeps
+  horizontal momentum. Taller reachable ledges use the pull-up clamber only
+  while `Space` is held; while falling, holding `Space` can catch a reachable
+  edge and climb.
 - `Shift` sprints on the ground or uses the stronger flight speed boost. Active
   sprint/boost widens FOV and adds peripheral speed lines.
 - `F` toggles flight mode.

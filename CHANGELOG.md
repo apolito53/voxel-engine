@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.11.20 - 2026-06-18
+
+### Changed
+
+- Split ledge traversal into three movement bands: low partial-height ledges
+  still step up smoothly, two-to-four-sub-block ledges now require a sprint
+  vault that preserves horizontal momentum, and taller reachable ledges require
+  holding jump to start the clamber pull-up.
+- Added falling edge-grabs for jump-held clambering, so a player dropping near a
+  reachable lip can catch it and climb instead of sliding down the face.
+
+### Fixed
+
+- Kept stacked full-block walls from being blocked by their internal lower
+  collision surfaces when searching for the real clamber landing.
+
+### Validation
+
+- `npm.cmd run test`
+- `npm.cmd run typecheck`
+- `npm.cmd run build`
+- `git diff --check`
+
 ## 0.11.19 - 2026-06-18
 
 ### Changed

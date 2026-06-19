@@ -73,9 +73,9 @@ ignored by git.
 - `WASD` move, `Mouse` look, `Esc` pause/release mouse
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - Low damaged-terrain ledges step up automatically with a short vertical ease,
-  so Terraformer stairs do not pop the camera upward. Taller reachable lips
-  clamber with a pull-up animation when their top is within roughly one
-  sub-block of head height.
+  so Terraformer stairs do not pop the camera upward. Two-to-four-sub-block
+  ledges need a sprint vault, while taller reachable lips clamber only while
+  `Space` is held; falling players holding `Space` can catch reachable edges.
 - `G` toggles between `Items` and `Blocks`
 - `T` toggles click actions between `Semi Auto` and `Full Auto`
 - `Mouse wheel` selects within the active lane

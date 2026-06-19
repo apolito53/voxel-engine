@@ -35,19 +35,26 @@ import {
 
 type MovementAxis = "x" | "y" | "z";
 export type PlayerMovementMode = "walk" | "crouch" | "slide" | "flight";
-const PARTIAL_SURFACE_STEP_HEIGHT = 0.55;
 const SUB_BLOCK_HEIGHT = 1 / 3;
+const PASSIVE_STEP_MAX_HEIGHT = 0.55;
+const VAULT_MAX_HEIGHT = 4 * SUB_BLOCK_HEIGHT;
+const CLAMBER_MIN_HEIGHT = 5 * SUB_BLOCK_HEIGHT;
 const CLAMBER_EXTRA_HEAD_REACH = SUB_BLOCK_HEIGHT;
 const CLAMBER_BASE_DURATION_SECONDS = 0.16;
 const CLAMBER_DURATION_PER_METER = 0.08;
 const CLAMBER_MAX_DURATION_SECONDS = 0.34;
 const CLAMBER_HORIZONTAL_DELAY = 0.22;
+const VAULT_BASE_DURATION_SECONDS = 0.09;
+const VAULT_DURATION_PER_METER = 0.035;
+const VAULT_MAX_DURATION_SECONDS = 0.16;
+const VAULT_ARC_HEIGHT = 0.12;
 const STEP_UP_BASE_DURATION_SECONDS = 0.055;
 const STEP_UP_DURATION_PER_METER = 0.06;
 const STEP_UP_MAX_DURATION_SECONDS = 0.085;
 const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
 const PLAYER_COLLISION_OVERLAP_EPSILON = 0.000001;
 const CLAMBER_CLEARANCE_EPSILON = 0.002;
+const JUMP_KEY = "Space";
 
 export type PlayerBounds = {
   readonly minX: number;
@@ -68,13 +75,15 @@ type CatchablePointerLockRequest = {
   catch(onRejected: () => void): unknown;
 };
 
-type ClamberAnimation = {
-  readonly kind: "step" | "clamber";
+type TraversalAnimation = {
+  readonly kind: "step" | "vault" | "clamber";
   readonly start: THREE.Vector3;
   readonly target: THREE.Vector3;
   elapsed: number;
   readonly duration: number;
 };
+
+type TraversalKind = TraversalAnimation["kind"];
 
 export class PlayerController {
   readonly camera: THREE.PerspectiveCamera;
@@ -97,7 +106,7 @@ export class PlayerController {
   private slideSpeedLimit = 0;
   private slideMomentumAirborne = false;
   private crouchViewOffset = 0;
-  private clamberAnimation: ClamberAnimation | null = null;
+  private traversalAnimation: TraversalAnimation | null = null;
   private readonly eventAbortController = new AbortController();
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: CollisionWorld) {
@@ -255,7 +264,7 @@ export class PlayerController {
     // Chat/input overlays need the cursor and keyboard without raising the pause
     // menu. Flip the gameplay controller inactive before releasing pointer lock
     // so the browser's pointerlockchange event does not treat this as Esc pause.
-    this.completeClamberAnimation();
+    this.completeTraversalAnimation();
     this.active = false;
     this.pendingLock = false;
     this.clearLockTimeout();
@@ -267,7 +276,7 @@ export class PlayerController {
   }
 
   pause(exitPointerLock = true): void {
-    this.completeClamberAnimation();
+    this.completeTraversalAnimation();
     this.active = false;
     this.pendingLock = false;
     this.clearLockTimeout();
@@ -294,7 +303,7 @@ export class PlayerController {
     // into the terrain. Teleporting is also a clean movement-state reset.
     this.velocity.set(0, 0, 0);
     this.keys.clear();
-    this.cancelClamberAnimation();
+    this.cancelTraversalAnimation();
     this.onGround = false;
     this.flying = false;
     this.crouching = false;
@@ -321,8 +330,8 @@ export class PlayerController {
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
-    if (this.clamberAnimation) {
-      this.updateClamberAnimation(delta);
+    if (this.traversalAnimation) {
+      this.updateTraversalAnimation(delta);
       this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
       return;
     }
@@ -386,7 +395,7 @@ export class PlayerController {
     this.velocity.y -= GRAVITY * delta;
 
     this.onGround = false;
-    if (wasGrounded && this.keys.has("Space")) {
+    if (wasGrounded && this.keys.has(JUMP_KEY)) {
       const jumpingFromSlide = this.sliding;
       this.velocity.y = getJumpSpeed(jumpingFromSlide);
       this.onGround = false;
@@ -396,8 +405,8 @@ export class PlayerController {
       if (jumpingFromSlide) this.endSlide();
     }
 
-    this.moveAxis("x", this.velocity.x * delta);
-    this.moveAxis("z", this.velocity.z * delta);
+    this.moveAxis("x", this.velocity.x * delta, wasGrounded);
+    this.moveAxis("z", this.velocity.z * delta, wasGrounded);
     this.moveAxis("y", this.velocity.y * delta);
     this.updateLandingSlideState(!wasGrounded && this.onGround);
 
@@ -412,7 +421,7 @@ export class PlayerController {
     if (this.keys.has("KeyS")) wish.sub(forward);
     if (this.keys.has("KeyD")) wish.add(right);
     if (this.keys.has("KeyA")) wish.sub(right);
-    if (this.keys.has("Space")) wish.y += 1;
+    if (this.keys.has(JUMP_KEY)) wish.y += 1;
     if (this.isCrouchOrDescendHeld()) wish.y -= 1;
 
     const hasWish = wish.lengthSq() > 0;
@@ -512,7 +521,7 @@ export class PlayerController {
   setFlightEnabled(enabled: boolean): void {
     if (this.flying === enabled) return;
 
-    this.completeClamberAnimation();
+    this.completeTraversalAnimation();
     this.flying = enabled;
     this.velocity.y = 0;
     this.endSlide();
@@ -640,12 +649,12 @@ export class PlayerController {
   }
 
   hasFlightMovementInput(): boolean {
-    return this.hasHorizontalMovementInput() || this.keys.has("Space") || this.isCrouchOrDescendHeld();
+    return this.hasHorizontalMovementInput() || this.keys.has(JUMP_KEY) || this.isCrouchOrDescendHeld();
   }
 
-  moveAxis(axis: MovementAxis, amount: number): void {
+  moveAxis(axis: MovementAxis, amount: number, groundedForTraversal = this.onGround): void {
     if (amount === 0) return;
-    if (this.clamberAnimation) return;
+    if (this.traversalAnimation) return;
 
     const movementStart = this.camera.position.clone();
     const previousFeetY = this.getFeetY();
@@ -653,7 +662,7 @@ export class PlayerController {
 
     if (!this.collides()) {
       if (axis === "y" && amount < 0 && this.snapDownToPartialSupport(previousFeetY)) return;
-      if (axis !== "y" && !this.flying) this.stepUpOntoPartialSupport(previousFeetY);
+      if (axis !== "y" && !this.flying) this.stepUpOntoPartialSupport(previousFeetY, groundedForTraversal);
       return;
     }
 
@@ -661,7 +670,11 @@ export class PlayerController {
     // before support-height queries can help. While the horizontal move is still
     // applied, inspect the blocking collision boxes directly and lift onto the
     // lowest reachable top surface that leaves the player's body clear.
-    if (axis !== "y" && !this.flying && this.traverseHorizontalObstacle(previousFeetY, movementStart)) return;
+    if (
+      axis !== "y"
+      && !this.flying
+      && this.traverseHorizontalObstacle(previousFeetY, movementStart, groundedForTraversal)
+    ) return;
 
     this.camera.position[axis] -= amount;
     if (axis === "y" && amount < 0) this.onGround = true;
@@ -728,7 +741,7 @@ export class PlayerController {
     return true;
   }
 
-  private stepUpOntoPartialSupport(previousFeetY: number): boolean {
+  private stepUpOntoPartialSupport(previousFeetY: number, groundedForTraversal: boolean): boolean {
     const bounds = this.getBounds();
     const supportY = this.world.getPlayerFootprintSupportHeight
       ? this.world.getPlayerFootprintSupportHeight(bounds)
@@ -738,13 +751,13 @@ export class PlayerController {
     const feetY = this.getFeetY();
     const stepHeight = supportY - feetY;
     if (stepHeight <= PARTIAL_SURFACE_SNAP_EPSILON) return false;
-    if (stepHeight > PARTIAL_SURFACE_STEP_HEIGHT) return false;
-    if (previousFeetY + PARTIAL_SURFACE_STEP_HEIGHT < supportY) return false;
+    const traversalKind = this.chooseTraversalKind(stepHeight, groundedForTraversal);
+    if (traversalKind === null || traversalKind === "clamber") return false;
+    if (previousFeetY + stepHeight < supportY - PARTIAL_SURFACE_SNAP_EPSILON) return false;
 
-    // Rubble and other partial-height surfaces are not full voxels, so they
-    // need a small step-up path separate from ordinary block collision. After
-    // lifting the camera, re-run full voxel collision so a low ceiling or block
-    // overhang can still reject the move cleanly.
+    // Rubble and other partial-height surfaces can be low enough to walk up
+    // without a blocking side-face collision. Apply the same traversal rules as
+    // direct ledges, then re-run full collision so ceilings still reject cleanly.
     const previousCameraY = this.camera.position.y;
     this.camera.position.y += stepHeight;
     if (this.collides()) {
@@ -754,62 +767,89 @@ export class PlayerController {
 
     this.onGround = true;
     if (this.velocity.y < 0) this.velocity.y = 0;
-    this.startStepAnimation(previousCameraY, this.camera.position.clone(), stepHeight);
+    this.startTraversalAnimation(traversalKind, previousCameraY, this.camera.position.clone(), stepHeight);
     return true;
   }
 
-  private traverseHorizontalObstacle(previousFeetY: number, movementStart: THREE.Vector3): boolean {
-    if (this.liftOntoReachableSurface(previousFeetY, PARTIAL_SURFACE_STEP_HEIGHT)) {
-      return true;
-    }
-
-    // Clamber is intentionally broader than ordinary stair stepping: if the
-    // ledge top is no higher than roughly a sub-block above the player's head,
-    // the controller may pull onto it. The collision re-check after each lift is
-    // still the final authority, so ceilings, overhangs, and too-tall stacks
-    // reject cleanly instead of letting the camera phase through terrain.
+  private traverseHorizontalObstacle(
+    previousFeetY: number,
+    movementStart: THREE.Vector3,
+    groundedForTraversal: boolean
+  ): boolean {
+    // One-sub-block ledges are passive steps, two-to-four-sub-block ledges are
+    // sprint vaults, and taller ledges become deliberate clambers only while
+    // jump is held. The same path also handles falling edge-grabs because a
+    // falling player with jump held may choose the clamber branch below.
     return this.liftOntoReachableSurface(
       previousFeetY,
       this.getCollisionHeight() + CLAMBER_EXTRA_HEAD_REACH,
-      movementStart
+      movementStart,
+      groundedForTraversal
     );
   }
 
   private liftOntoReachableSurface(
     previousFeetY: number,
     maxLiftHeight: number,
-    clamberStart?: THREE.Vector3
+    clamberStart: THREE.Vector3 | undefined,
+    groundedForTraversal: boolean
   ): boolean {
     const surfaceCandidates = this.findReachableSurfaceHeights(previousFeetY, maxLiftHeight);
+    const currentFeetY = this.getFeetY();
 
     for (const surfaceY of surfaceCandidates) {
       const previousCameraY = this.camera.position.y;
-      const liftHeight = surfaceY - this.getFeetY();
+      const liftHeight = surfaceY - currentFeetY;
       if (liftHeight <= PARTIAL_SURFACE_SNAP_EPSILON) continue;
 
       // Place the feet from the chosen surface instead of adding the lift delta.
       // Tall clambers can otherwise accumulate tiny float error and make the
       // follow-up collision pass think the player is still touching the ledge.
-      this.camera.position.y = surfaceY + this.getVisualEyeHeight();
+      const landingClearance = liftHeight > VAULT_MAX_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON
+        ? CLAMBER_CLEARANCE_EPSILON
+        : 0;
+      this.camera.position.y = surfaceY + landingClearance + this.getVisualEyeHeight();
       if (this.collides()) {
+        this.camera.position.y = previousCameraY;
+        continue;
+      }
+      const traversalKind = this.chooseTraversalKind(liftHeight, groundedForTraversal);
+      if (traversalKind === null) {
         this.camera.position.y = previousCameraY;
         continue;
       }
 
       this.onGround = true;
       if (this.velocity.y < 0) this.velocity.y = 0;
-      if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
-        this.startClamberAnimation(clamberStart ?? this.camera.position, this.camera.position.clone(), liftHeight);
-      } else {
-        this.startStepAnimation(previousCameraY, this.camera.position.clone(), liftHeight);
-      }
+      this.startTraversalAnimation(
+        traversalKind,
+        previousCameraY,
+        this.camera.position.clone(),
+        liftHeight,
+        clamberStart
+      );
       return true;
     }
 
-    return this.liftUntilClear(previousFeetY, maxLiftHeight, clamberStart);
+    const lowestCandidateLift = surfaceCandidates[0] === undefined
+      ? Number.POSITIVE_INFINITY
+      : surfaceCandidates[0] - currentFeetY;
+    const hasTallCandidate = surfaceCandidates.some(
+      (surfaceY) => surfaceY - currentFeetY > VAULT_MAX_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON
+    );
+    if (!hasTallCandidate && lowestCandidateLift <= VAULT_MAX_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
+      return false;
+    }
+
+    return this.liftUntilClear(previousFeetY, maxLiftHeight, clamberStart, groundedForTraversal);
   }
 
-  private liftUntilClear(previousFeetY: number, maxLiftHeight: number, clamberStart?: THREE.Vector3): boolean {
+  private liftUntilClear(
+    previousFeetY: number,
+    maxLiftHeight: number,
+    clamberStart: THREE.Vector3 | undefined,
+    groundedForTraversal: boolean
+  ): boolean {
     // Full-block clamber can be blocked by a lower collision box while the
     // actual top surface is one or two voxels above it. If the explicit surface
     // candidate path cannot find a clean landing, sweep upward in sub-block
@@ -823,6 +863,8 @@ export class PlayerController {
       liftHeight += SUB_BLOCK_HEIGHT
     ) {
       const previousCameraY = this.camera.position.y;
+      const traversalKind = this.chooseTraversalKind(liftHeight, groundedForTraversal);
+      if (traversalKind === null) continue;
       this.camera.position.y = previousFeetY + liftHeight + CLAMBER_CLEARANCE_EPSILON + this.getVisualEyeHeight();
       if (this.collides()) {
         this.camera.position.y = previousCameraY;
@@ -831,15 +873,40 @@ export class PlayerController {
 
       this.onGround = true;
       if (this.velocity.y < 0) this.velocity.y = 0;
-      if (liftHeight > PARTIAL_SURFACE_STEP_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
-        this.startClamberAnimation(clamberStart ?? this.camera.position, this.camera.position.clone(), liftHeight);
-      } else {
-        this.startStepAnimation(previousCameraY, this.camera.position.clone(), liftHeight);
-      }
+      this.startTraversalAnimation(
+        traversalKind,
+        previousCameraY,
+        this.camera.position.clone(),
+        liftHeight,
+        clamberStart
+      );
       return true;
     }
 
     return false;
+  }
+
+  private chooseTraversalKind(liftHeight: number, groundedForTraversal: boolean): TraversalKind | null {
+    if (liftHeight <= PASSIVE_STEP_MAX_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) return "step";
+    if (liftHeight <= VAULT_MAX_HEIGHT + PARTIAL_SURFACE_SNAP_EPSILON) {
+      return this.canStartVault(groundedForTraversal) ? "vault" : null;
+    }
+    if (liftHeight < CLAMBER_MIN_HEIGHT - PARTIAL_SURFACE_SNAP_EPSILON && !this.canStartAirClamber()) {
+      return null;
+    }
+    return this.canStartClamber() ? "clamber" : null;
+  }
+
+  private canStartVault(groundedForTraversal: boolean): boolean {
+    return groundedForTraversal && this.isSprintHeld() && !this.crouching && !this.sliding;
+  }
+
+  private canStartClamber(): boolean {
+    return this.keys.has(JUMP_KEY);
+  }
+
+  private canStartAirClamber(): boolean {
+    return this.velocity.y < -0.2 && this.canStartClamber();
   }
 
   private findReachableSurfaceHeights(previousFeetY: number, maxLiftHeight: number): readonly number[] {
@@ -886,23 +953,46 @@ export class PlayerController {
     }];
   }
 
-  private startStepAnimation(previousCameraY: number, target: THREE.Vector3, liftHeight: number): void {
+  private startTraversalAnimation(
+    kind: TraversalKind,
+    previousCameraY: number,
+    target: THREE.Vector3,
+    liftHeight: number,
+    clamberStart?: THREE.Vector3
+  ): void {
+    if (kind === "clamber") {
+      this.startClamberAnimation(clamberStart ?? this.camera.position, target, liftHeight);
+      return;
+    }
+
+    this.startStepOrVaultAnimation(kind, previousCameraY, target, liftHeight);
+  }
+
+  private startStepOrVaultAnimation(
+    kind: "step" | "vault",
+    previousCameraY: number,
+    target: THREE.Vector3,
+    liftHeight: number
+  ): void {
     const start = target.clone();
     start.y = previousCameraY;
+    const baseDuration = kind === "vault" ? VAULT_BASE_DURATION_SECONDS : STEP_UP_BASE_DURATION_SECONDS;
+    const durationPerMeter = kind === "vault" ? VAULT_DURATION_PER_METER : STEP_UP_DURATION_PER_METER;
+    const maxDuration = kind === "vault" ? VAULT_MAX_DURATION_SECONDS : STEP_UP_MAX_DURATION_SECONDS;
 
-    // Low ledges already passed the collision check at the final y position.
-    // Move x/z to that approved pose immediately, then ease only the vertical
-    // camera lift so one-sub-block stairs feel like a step instead of a pop.
+    // Low steps and sprint vaults already passed collision at the final pose.
+    // Move x/z to the approved pose immediately so vaulting does not steal
+    // horizontal momentum, then ease only the camera's vertical lift.
     this.camera.position.copy(start);
-    this.clamberAnimation = {
-      kind: "step",
+    this.traversalAnimation = {
+      kind,
       start,
       target: target.clone(),
       elapsed: 0,
       duration: clamp(
-        STEP_UP_BASE_DURATION_SECONDS + liftHeight * STEP_UP_DURATION_PER_METER,
-        STEP_UP_BASE_DURATION_SECONDS,
-        STEP_UP_MAX_DURATION_SECONDS
+        baseDuration + liftHeight * durationPerMeter,
+        baseDuration,
+        maxDuration
       )
     };
   }
@@ -918,7 +1008,7 @@ export class PlayerController {
     // landing, raising first and sliding forward second so it reads as a pull-up
     // instead of the old instant y-snap.
     this.camera.position.copy(start);
-    this.clamberAnimation = {
+    this.traversalAnimation = {
       kind: "clamber",
       start: start.clone(),
       target: target.clone(),
@@ -931,34 +1021,35 @@ export class PlayerController {
     };
   }
 
-  private updateClamberAnimation(delta: number): void {
-    const animation = this.clamberAnimation;
+  private updateTraversalAnimation(delta: number): void {
+    const animation = this.traversalAnimation;
     if (!animation) return;
 
     animation.elapsed = Math.min(animation.duration, animation.elapsed + Math.max(0, delta));
     const progress = animation.duration <= 0 ? 1 : animation.elapsed / animation.duration;
-    const verticalProgress = animation.kind === "step" ? smoothStep(progress) : easeOutCubic(progress);
-    const horizontalProgress = animation.kind === "step"
-      ? 1
-      : smoothStep(clamp((progress - CLAMBER_HORIZONTAL_DELAY) / (1 - CLAMBER_HORIZONTAL_DELAY), 0, 1));
+    const verticalProgress = animation.kind === "clamber" ? easeOutCubic(progress) : smoothStep(progress);
+    const horizontalProgress = animation.kind === "clamber"
+      ? smoothStep(clamp((progress - CLAMBER_HORIZONTAL_DELAY) / (1 - CLAMBER_HORIZONTAL_DELAY), 0, 1))
+      : 1;
+    const vaultArc = animation.kind === "vault" ? Math.sin(Math.PI * progress) * VAULT_ARC_HEIGHT : 0;
 
     this.camera.position.set(
       lerp(animation.start.x, animation.target.x, horizontalProgress),
-      lerp(animation.start.y, animation.target.y, verticalProgress),
+      lerp(animation.start.y, animation.target.y, verticalProgress) + vaultArc,
       lerp(animation.start.z, animation.target.z, horizontalProgress)
     );
 
     if (progress >= 1) {
-      this.completeClamberAnimation();
+      this.completeTraversalAnimation();
     }
   }
 
-  private completeClamberAnimation(): void {
-    const animation = this.clamberAnimation;
+  private completeTraversalAnimation(): void {
+    const animation = this.traversalAnimation;
     if (!animation) return;
 
     this.camera.position.copy(animation.target);
-    this.clamberAnimation = null;
+    this.traversalAnimation = null;
     this.onGround = true;
     if (animation.kind === "clamber") {
       this.velocity.set(0, 0, 0);
@@ -967,8 +1058,8 @@ export class PlayerController {
     }
   }
 
-  private cancelClamberAnimation(): void {
-    this.clamberAnimation = null;
+  private cancelTraversalAnimation(): void {
+    this.traversalAnimation = null;
   }
 }
 
@@ -1039,7 +1130,7 @@ function smoothStep(progress: number): number {
 
 function shouldPreventGameKeyDefault(code: string): boolean {
   return (
-    code === "Space" ||
+    code === JUMP_KEY ||
     code === "ShiftLeft" ||
     code === "ShiftRight" ||
     code === CROUCH_OR_DESCEND_KEY ||
