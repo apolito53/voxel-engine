@@ -1,7 +1,7 @@
 export const GROUND_DEBRIS_LIFETIME_STORAGE_KEY = "voxel-ground-debris-lifetime";
 export const DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS = 12;
-export const FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS = 0;
-export const MIN_GROUND_DEBRIS_LIFETIME_SECONDS = FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS;
+export const FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS = -1;
+export const MIN_GROUND_DEBRIS_LIFETIME_SECONDS = 0;
 export const MAX_GROUND_DEBRIS_LIFETIME_SECONDS = 60;
 export const GROUND_DEBRIS_LIFETIME_STEP_SECONDS = 1;
 
@@ -13,9 +13,14 @@ export function normalizeGroundDebrisLifetime(
     return normalizeGroundDebrisLifetimeFallback(fallbackSeconds);
   }
 
+  if (value === "forever") return FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS;
+
   const numericValue = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numericValue)) {
     return normalizeGroundDebrisLifetimeFallback(fallbackSeconds);
+  }
+  if (numericValue === FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS) {
+    return FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS;
   }
 
   const steppedValue = Math.round(numericValue / GROUND_DEBRIS_LIFETIME_STEP_SECONDS) *
@@ -57,6 +62,9 @@ export function formatGroundDebrisLifetime(lifetimeSeconds: number): string {
 
 function normalizeGroundDebrisLifetimeFallback(fallbackSeconds: number): number {
   if (!Number.isFinite(fallbackSeconds)) return DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS;
+  if (fallbackSeconds === FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS) {
+    return FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS;
+  }
   const steppedFallback = Math.round(fallbackSeconds / GROUND_DEBRIS_LIFETIME_STEP_SECONDS) *
     GROUND_DEBRIS_LIFETIME_STEP_SECONDS;
   return clampGroundDebrisLifetime(steppedFallback);

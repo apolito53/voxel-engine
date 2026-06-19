@@ -10106,7 +10106,12 @@ test("physics object budget clamps and steps predictably", () => {
   assertEqual(
     normalizeGroundDebrisLifetime(FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS),
     FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS,
-    "ground debris lifetime should keep zero as the forever setting"
+    "ground debris lifetime should keep the explicit forever setting"
+  );
+  assertEqual(
+    getEffectiveGroundDebrisLifetimeSeconds(0),
+    0,
+    "zero ground debris lifetime should mean immediate grounded cleanup"
   );
   assertEqual(
     getEffectiveGroundDebrisLifetimeSeconds(FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS),
@@ -10115,8 +10120,13 @@ test("physics object budget clamps and steps predictably", () => {
   );
   assertEqual(
     formatGroundDebrisLifetime(0),
+    "0s",
+    "ground debris lifetime label should keep the true minimum explicit"
+  );
+  assertEqual(
+    formatGroundDebrisLifetime(FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS),
     "Forever",
-    "ground debris lifetime label should make the zero setting obvious"
+    "ground debris lifetime label should make the forever mode obvious"
   );
   assertEqual(
     formatGroundDebrisLifetime(12),

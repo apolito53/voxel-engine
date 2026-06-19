@@ -108,6 +108,9 @@ tests.
 `Break Burst Shards` controls the initial destruction spray, while `Active
 Ground Debris Cap` trims only supported or sleeping aftermath shards after they
 touch down and survive the short burst grace.
+`Ground Debris Lifetime` now uses a true `0s..60s` cleanup slider, with
+`Keep Ground Debris Forever` as a separate explicit toggle for disabling timed
+ground cleanup.
 When shard storms exceed the rigid-body safety cap, the full visible burst still
 spawns; overflow shards stay as cheap VFX and existing rigid shards are demoted
 to VFX before anything is removed.

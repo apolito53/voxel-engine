@@ -272,6 +272,8 @@ import {
   writeGroundDebrisBudgetPreference
 } from "./rigidDebrisBudget";
 import {
+  DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS,
+  FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS,
   GROUND_DEBRIS_LIFETIME_STEP_SECONDS,
   MAX_GROUND_DEBRIS_LIFETIME_SECONDS,
   MIN_GROUND_DEBRIS_LIFETIME_SECONDS,
@@ -484,6 +486,7 @@ const groundDebrisBudgetSlider = requireElement<HTMLInputElement>("#ground-debri
 const groundDebrisBudgetValue = requireElement<HTMLElement>("#ground-debris-budget-value");
 const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-debris-lifetime-slider");
 const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
+const groundDebrisLifetimeForeverToggle = requireElement<HTMLInputElement>("#ground-debris-lifetime-forever-toggle");
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
@@ -581,6 +584,9 @@ let terraformerSize = readTerraformerSizePreference();
 let clickFireMode: ClickFireMode = readClickFireModePreference();
 let groundDebrisBudget = readGroundDebrisBudgetPreference();
 let groundDebrisLifetimeSeconds = readGroundDebrisLifetimePreference();
+let lastTimedGroundDebrisLifetimeSeconds = groundDebrisLifetimeSeconds === FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS
+  ? DEFAULT_GROUND_DEBRIS_LIFETIME_SECONDS
+  : groundDebrisLifetimeSeconds;
 let debrisPerformancePressure = createDebrisPerformancePressureState(
   getEffectiveRigidDebrisBodyBudget(physicsObjectBudget)
 );
@@ -1145,6 +1151,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   groundDebrisLifetimeSlider.addEventListener("input", () => {
     setGroundDebrisLifetime(groundDebrisLifetimeSlider.value);
+  }, eventListenerOptions);
+  groundDebrisLifetimeForeverToggle.addEventListener("change", () => {
+    setGroundDebrisLifetimeForever(groundDebrisLifetimeForeverToggle.checked);
   }, eventListenerOptions);
   coreAimPreviewToggle.addEventListener("change", () => {
     setCoreAimPreviewEnabled(coreAimPreviewToggle.checked);
@@ -4220,15 +4229,32 @@ function updateGroundDebrisBudgetControls(): void {
 
 function setGroundDebrisLifetime(nextLifetimeSeconds: unknown): void {
   groundDebrisLifetimeSeconds = normalizeGroundDebrisLifetime(nextLifetimeSeconds, groundDebrisLifetimeSeconds);
+  if (groundDebrisLifetimeSeconds !== FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS) {
+    lastTimedGroundDebrisLifetimeSeconds = groundDebrisLifetimeSeconds;
+  }
+  writeGroundDebrisLifetimePreference(groundDebrisLifetimeSeconds);
+  updateGroundDebrisLifetimeControls();
+}
+
+function setGroundDebrisLifetimeForever(enabled: boolean): void {
+  // "Forever" used to be encoded as slider value 0, which made the minimum
+  // setting surprising. Keep it as an explicit mode so 0s can mean immediate
+  // grounded cleanup while still letting testers preserve aftermath forever.
+  groundDebrisLifetimeSeconds = enabled
+    ? FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS
+    : lastTimedGroundDebrisLifetimeSeconds;
   writeGroundDebrisLifetimePreference(groundDebrisLifetimeSeconds);
   updateGroundDebrisLifetimeControls();
 }
 
 function updateGroundDebrisLifetimeControls(): void {
+  const isForever = groundDebrisLifetimeSeconds === FOREVER_GROUND_DEBRIS_LIFETIME_SECONDS;
   groundDebrisLifetimeSlider.min = String(MIN_GROUND_DEBRIS_LIFETIME_SECONDS);
   groundDebrisLifetimeSlider.max = String(MAX_GROUND_DEBRIS_LIFETIME_SECONDS);
   groundDebrisLifetimeSlider.step = String(GROUND_DEBRIS_LIFETIME_STEP_SECONDS);
-  groundDebrisLifetimeSlider.value = String(groundDebrisLifetimeSeconds);
+  groundDebrisLifetimeSlider.value = String(isForever ? lastTimedGroundDebrisLifetimeSeconds : groundDebrisLifetimeSeconds);
+  groundDebrisLifetimeSlider.disabled = isForever;
+  groundDebrisLifetimeForeverToggle.checked = isForever;
   groundDebrisLifetimeValue.textContent = formatGroundDebrisLifetime(groundDebrisLifetimeSeconds);
 }
 

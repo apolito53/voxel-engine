@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.11.22 - 2026-06-19
+
+### Changed
+
+- Changed `Ground Debris Lifetime` so the slider minimum is a real `0s`
+  cleanup setting instead of the old `Forever` sentinel.
+- Added a separate `Keep Ground Debris Forever` gameplay toggle for disabling
+  the grounded-shard cleanup timer explicitly.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.21 - 2026-06-19
 
 ### Fixed
