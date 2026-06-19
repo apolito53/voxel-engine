@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.11.21 - 2026-06-19
+
+### Fixed
+
+- Stopped support-stable rigid debris from "dancing" forever when a shard is
+  visibly parked on terrain but still has residual angular twitch. The Rapier
+  adapter now parks shards that remain position-stable on real support, so
+  normal sleeping and cleanup can proceed.
+
+### Tests
+
+- Added a regression test for a high-spin shard resting on support.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.11.20 - 2026-06-18
 
 ### Changed

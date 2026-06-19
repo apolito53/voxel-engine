@@ -31,6 +31,10 @@ const RIGID_DEBRIS_TERRAIN_FRICTION = 1.05;
 const RIGID_DEBRIS_FORCE_SLEEP_LINEAR_SPEED = 0.85;
 const RIGID_DEBRIS_FORCE_SLEEP_ANGULAR_SPEED = 3.5;
 const RIGID_DEBRIS_FORCE_SLEEP_SECONDS = 0.18;
+const RIGID_DEBRIS_FORCE_SLEEP_STABLE_LINEAR_SPEED = 0.35;
+const RIGID_DEBRIS_FORCE_SLEEP_STABLE_TRANSLATION = 0.035;
+const RIGID_DEBRIS_FORCE_SLEEP_STABLE_SECONDS = 0.45;
+const RIGID_DEBRIS_FORCE_SLEEP_STABLE_SUPPORT_CLEARANCE = 0.025;
 const RIGID_DEBRIS_FORCE_SLEEP_SUPPORT_TOLERANCE = 0.08;
 const RIGID_DEBRIS_SUPPORT_CORRECTION_SKIN = 0.004;
 const RIGID_DEBRIS_SUPPORT_RESCUE_DEPTH = 0.75;
@@ -49,7 +53,9 @@ type RigidDebrisBody = {
   readonly toy: PhysicsToy;
   readonly body: RigidBody;
   readonly colliderHalfExtents: THREE.Vector3;
+  readonly lastStableTranslation: THREE.Vector3;
   quietSeconds: number;
+  translationQuietSeconds: number;
   syncedExternalRevision: number;
 };
 
@@ -365,6 +371,8 @@ export class RigidDebrisSimulation {
       if (bodyWasSleeping) this.wokenBodiesThisFrame += 1;
       record.syncedExternalRevision = externalRevision;
       record.quietSeconds = 0;
+      record.translationQuietSeconds = 0;
+      record.lastStableTranslation.copy(position);
       this.staticCollidersDirty = true;
     }
   }
@@ -491,7 +499,9 @@ export class RigidDebrisSimulation {
         toy,
         body,
         colliderHalfExtents,
+        lastStableTranslation: toy.mesh.position.clone(),
         quietSeconds: 0,
+        translationQuietSeconds: 0,
         syncedExternalRevision: toy.rigidDebrisExternalMutationRevision
       });
       toy.attachRigidDebrisBody();
@@ -613,34 +623,68 @@ export class RigidDebrisSimulation {
   ): void {
     if (record.body.isSleeping() || record.toy.isExpired) {
       record.quietSeconds = 0;
+      record.translationQuietSeconds = 0;
       return;
     }
 
+    const translation = record.body.translation();
     const linvel = record.body.linvel();
     const angvel = record.body.angvel();
     const linearSpeedSq = getVectorLengthSq(linvel);
     const angularSpeedSq = getVectorLengthSq(angvel);
+    const support = getRigidDebrisSupport(record, collisionWorld);
+    const nearSupport = support !== null;
+    const bottomY = translation.y - record.colliderHalfExtents.y;
+    const tightlyRestingOnSupport =
+      support !== null &&
+      bottomY <= support.height + RIGID_DEBRIS_FORCE_SLEEP_STABLE_SUPPORT_CLEARANCE;
     const isQuiet =
       linearSpeedSq <= RIGID_DEBRIS_FORCE_SLEEP_LINEAR_SPEED ** 2 &&
       angularSpeedSq <= RIGID_DEBRIS_FORCE_SLEEP_ANGULAR_SPEED ** 2;
+    const stableTranslationSq =
+      (translation.x - record.lastStableTranslation.x) ** 2 +
+      (translation.y - record.lastStableTranslation.y) ** 2 +
+      (translation.z - record.lastStableTranslation.z) ** 2;
+    const translationIsStable =
+      tightlyRestingOnSupport &&
+      linearSpeedSq <= RIGID_DEBRIS_FORCE_SLEEP_STABLE_LINEAR_SPEED ** 2 &&
+      stableTranslationSq <= RIGID_DEBRIS_FORCE_SLEEP_STABLE_TRANSLATION ** 2;
 
-    if (!isQuiet) {
+    if (!nearSupport) {
       record.quietSeconds = 0;
+      record.translationQuietSeconds = 0;
+      record.lastStableTranslation.set(translation.x, translation.y, translation.z);
       return;
     }
-    if (!isRecordNearSupport(record, collisionWorld)) {
-      record.quietSeconds = 0;
-      return;
+
+    if (translationIsStable) {
+      record.translationQuietSeconds += Math.max(0, delta);
+    } else {
+      // Rapier can leave a shard visually parked but rotationally twitching on
+      // a contact edge. Track actual position drift separately from angular
+      // velocity so a non-translating support-resting shard can still park.
+      record.translationQuietSeconds = 0;
+      record.lastStableTranslation.set(translation.x, translation.y, translation.z);
     }
 
-    record.quietSeconds += Math.max(0, delta);
-    if (record.quietSeconds < RIGID_DEBRIS_FORCE_SLEEP_SECONDS) return;
+    if (isQuiet) {
+      record.quietSeconds += Math.max(0, delta);
+    } else {
+      record.quietSeconds = 0;
+    }
+
+    if (
+      record.quietSeconds < RIGID_DEBRIS_FORCE_SLEEP_SECONDS &&
+      record.translationQuietSeconds < RIGID_DEBRIS_FORCE_SLEEP_STABLE_SECONDS
+    ) return;
 
     record.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
     record.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
     record.body.sleep();
     this.forcedSleepBodiesThisFrame += 1;
     record.quietSeconds = 0;
+    record.translationQuietSeconds = 0;
+    record.lastStableTranslation.set(translation.x, translation.y, translation.z);
     this.staticCollidersDirty = true;
   }
 

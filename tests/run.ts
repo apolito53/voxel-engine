@@ -6889,6 +6889,39 @@ test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep
   assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
 });
 
+test("rigid debris adapter force-sleeps support-stable spinning shards", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const shape = createDebrisShape("flat-slab");
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.grass,
+    new THREE.Vector3(0.5, shape.colliderHalfExtents.y + 0.004, 0.5),
+    new THREE.Vector3(0.02, 0, 0),
+    1,
+    shape
+  );
+  const floorWorld: CollisionWorld = {
+    isSolid(_x, y, _z): boolean {
+      return y < 0;
+    }
+  };
+
+  // Repro for tiny "dancing" debris: the shard is visibly parked on terrain
+  // but carries enough angular velocity that the angular quiet gate alone
+  // never starts normal cleanup. Support-stable debris should still park.
+  fragment.angularVelocity.set(8, 4, 6);
+  rigidDebris.registerFragment(fragment);
+
+  for (let frame = 0; frame < 70 && !fragment.isSleeping; frame += 1) {
+    rigidDebris.update(1 / 60, floorWorld);
+  }
+
+  assert(fragment.isSleeping, "support-stable high-spin debris should stop dancing and enter rigid sleep");
+  assertEqual(fragment.angularVelocity.lengthSq(), 0, "force-slept dancing debris should have no residual spin");
+  assertEqual(rigidDebris.getStats().sleepingBodies, 1, "the rigid adapter should report the parked shard as sleeping");
+  rigidDebris.clear();
+});
+
 test("rigid debris adapter wakes sleeping shards when active debris hits them", async () => {
   const rigidDebris = new RigidDebrisSimulation();
   await rigidDebris.initialize();
