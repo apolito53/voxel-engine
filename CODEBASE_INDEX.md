@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-06-17
+Last reviewed: 2026-06-20
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -37,7 +37,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Project front door, quick start, ports, short control map, and links to focused docs: `README.md`
 - Focused docs index and living user/developer references split out of the root README: `docs/README.md`, `docs/controls.md`, `docs/destruction.md`, `docs/nova-companion.md`, `docs/performance-hitch-logging.md`, `docs/automation.md`
 - App bootstrap, render loop, input glue, world lifecycle orchestration, terrain/rubble target selection, partial-block mesh updates, damage indicator wiring, and WebGL runtime teardown: `src/main.ts`
-- HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
+- HTML shell, home screen, Create World `World Type` selector, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
 - Admin command parsing/routing, Superflat Lab launcher hook, and spawnable terrain fixtures used by Nova Terminal and the Builder panel for repeatable testing: `src/adminCommands.ts`
 - F8 scripted runtime avatar for in-browser gameplay smoke checks, including health-aware repeated core shots for sturdy terrain: `src/testAvatar.ts`
@@ -48,7 +48,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Browser-unlocked procedural Web Audio manager plus persisted Sound/Master/SFX/UI settings: `src/audioEngine.ts`, `src/audioSettings.ts`
 - Required DOM/canvas lookup helpers: `src/dom.ts`
 - WebGL GPU text helpers: `src/gpu.ts`
-- Saved-world list rendering, save deletion controls, and seed generation: `src/worldMenu.ts`
+- Saved-world list rendering, save deletion controls, seed generation, and player-facing terrain-profile labels: `src/worldMenu.ts`
 - Delete-world confirmation pane copy: `src/deleteWorldDialog.ts`
 - Debug HUD throttling, grouped Perf/Player/World/Physics/Physics CPU/Debris/Render/Combat panel rendering, rolling elapsed-time FPS/low-FPS readouts, player speed/axis velocity display, CPU timing buckets, split physics subphase timings, adaptive debris pressure display, fragment instancing stats, partial-block lattice/subvoxel pressure, worker-pool job stats, rubble cover stats, recent tool/core damage entries, persistent combat-log queue status, and renderer stats: `src/debugHud.ts`, `src/frameRateMeter.ts`, `src/combatLog.ts`
 - Frame-spike and once-per-second sub-60-FPS black-box logging, likely-cause diagnosis, runtime WebGL/error diagnostic breadcrumbs, browser-frame diagnostics for RAF gaps/unaccounted JS/long tasks/renderer counters, render-horizon/worker-pool stats, adaptive debris pressure snapshots, partial-block mesh/subvoxel pressure snapshots, console warnings, dev-server start markers, pass-versioned local `logs/` JSONL writes, persistent local `logs/combat/` damage JSONL writes, local visual-test WebM/frame review folders, Vercel Blob remote JSONL writes, and Nova Terminal performance summaries: `src/performanceHitchLog.ts`, `src/frameDiagnostics.ts`, `src/visualTestRecorder.ts`, `src/remoteHitchLog.ts`, `api/hitch-log.ts`, `scripts/dev-server.mjs`, `scripts/hitch-log-server.mjs`, `vite.config.ts`
@@ -71,8 +71,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Short-lived material-tinted poofs shared by partial-block bite-cell destruction feedback and grounded debris cleanup: `src/debrisPoof.ts`
 - Parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments: `src/fragmentRubble.ts`
 - Shared world scale, chunk dimensions, current 96m world height, legacy 48m height, and varied-terrain lift constants: `src/voxelConstants.ts`
-- IndexedDB storage adapter for saved worlds, saved terrain-profile provenance, player resume location, save deletion, edited chunk persistence, legacy 48m chunk expansion, and legacy varied-world player-height migration: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, 96m-lifted varied new-world landforms, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
+- IndexedDB storage adapter for saved worlds, saved terrain-profile provenance including explicit `floating-islands` world type selection, player resume location, save deletion, edited chunk persistence, legacy 48m chunk expansion, and legacy varied-world player-height migration: `src/chunkStorage.ts`
+- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, 96m-lifted varied new-world mountains/cliffs, floating-island void terrain, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
 - Shared chunk worker request/result message contracts, including terrain-profile generation provenance, per-face atlas UV/tile attributes, and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
 - Worker-safe chunk terrain generation and greedy mesh buffer jobs, including terrain-profile-aware generation caches and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkJobs.ts`
@@ -172,7 +172,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 
 - Add, recolor, retune, or visually distinguish block health/material identity: update `src/blocks.ts` and `src/blockMaterialRules.ts`; inspect deterministic tinting in `src/blockColors.ts`, texture tile routing in `src/blockTextureTiles.ts`, atlas drawing in `src/blockTextureAtlas.ts`, mesh color/attribute use in `src/chunk.ts`, rubble promotion in `src/rubble.ts`, and debris color/use in `src/physics.ts`.
 - Tune chunk dimensions: update `src/voxelConstants.ts`, then verify worker and main-thread paths still agree.
-- Tune terrain: update `src/terrain.ts`; terrain noise helpers live in `src/math.ts`.
+- Tune terrain or add world types: update `src/terrain.ts`, saved-world profile handling in `src/chunkStorage.ts`, Create World selection in `index.html`/`src/main.ts`, and world-list labels in `src/worldMenu.ts`; terrain noise helpers live in `src/math.ts`.
 - Add or adjust repeatable runtime test/play/build tools: `src/adminCommands.ts`, `src/builderTools.ts`, `src/testAvatar.ts`, `src/codexPilot.ts`, `src/visualTestScenarios.ts`, `src/visualTestRecorder.ts`, Nova Terminal routing in `src/novaChat.ts`/`src/novaChatPanel.ts`, local visual recording upload in `scripts/hitch-log-server.mjs`, home/HUD/pause-menu markup in `index.html`, overlay styling in `src/style.css`, and the lifecycle hooks in `src/main.ts`.
 - Tune saved worlds, player resume location, save deletion, or edit persistence: update `src/chunkStorage.ts`, home-menu glue in `src/main.ts`, list controls in `src/worldMenu.ts`, and the save/load calls in `src/world.ts`.
 - Tune chunk streaming, render visibility, partial-region worker jobs, or worker budgets: update scheduling/render-visibility policy in `src/world.ts`, preset radii in `src/qualityPresets.ts`/`src/qualityController.ts`, shared job protocol in `src/workerPool.ts`, partial mesh worker contracts in `src/partialBlockMeshWorkerProtocol.ts`, and debug display in `src/main.ts`/`src/debugHud.ts`.

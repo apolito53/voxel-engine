@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## 0.13.0 - 2026-06-20
+
+### Added
+
+- Added a Create World `World Type` selector with `Varied Terrain`,
+  `Floating Islands`, and `Classic Legacy` options.
+- Added a first-pass `Floating Islands` terrain profile with spawn-safe sky
+  islands, open void between landmasses, material-aware island tops and
+  undersides, and deterministic tree placement on broad grassy island patches.
+
+### Changed
+
+- Strengthened the default varied-terrain generator with larger mountain-scale
+  height range and cliff-like slope breaks while keeping grass as the dominant
+  traversable surface.
+- Saved-world terrain labels now show player-facing names in the home screen
+  instead of raw profile ids.
+
+### Fixed
+
+- New-world loading now swaps storage/terrain profile before computing the
+  default spawn height, so floating-island worlds start the player on the new
+  world's terrain rather than the previously active world's terrain.
+
+### Tests
+
+- Added terrain, storage, and worker-generation coverage for floating-island
+  profile selection, spawn-safe void terrain, and direct/worker chunk parity.
+- Expanded varied-terrain tests to require mountain-scale range and at least
+  one cliff-like slope break.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.12.3 - 2026-06-19
 
 ### Fixed

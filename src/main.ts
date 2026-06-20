@@ -333,7 +333,7 @@ import {
   normalizeTerraformerSize,
   stepTerraformerSize
 } from "./terraformerSettings";
-import { SUPERFLAT_WORLD_SEED } from "./terrain";
+import { SUPERFLAT_WORLD_SEED, type TerrainProfile } from "./terrain";
 import { WORLD_HEIGHT } from "./voxelConstants";
 import {
   TEST_AVATAR_QUERY_PARAM,
@@ -403,6 +403,12 @@ const PLAYER_LOCATION_SAVE_PRECISION = 1000;
 const CORE_AIM_PREVIEW_TOGGLE_KEY = "F6";
 const CLICK_FIRE_MODE_TOGGLE_KEY = "KeyT";
 const FULL_AUTO_CLICK_ACTION_INTERVAL_MS = 140;
+const DEFAULT_WORLD_TERRAIN_PROFILE: TerrainProfile = "varied";
+const CREATE_WORLD_TERRAIN_PROFILES = new Set<TerrainProfile>([
+  "varied",
+  "floating-islands",
+  "classic"
+]);
 const bootPreset = QUALITY_PRESETS[DEFAULT_QUALITY_PRESET];
 type FrameTimingSection = Exclude<keyof FrameTimings, "frameMs">;
 type VoxelRuntimeGlobal = typeof globalThis & {
@@ -435,6 +441,7 @@ const homeScreen = requireElement<HTMLElement>("#home-screen");
 const createWorldForm = requireElement<HTMLFormElement>("#create-world-form");
 const worldNameInput = requireElement<HTMLInputElement>("#world-name-input");
 const worldSeedInput = requireElement<HTMLInputElement>("#world-seed-input");
+const worldTypeSelect = requireElement<HTMLSelectElement>("#world-type-select");
 const randomSeedButton = requireElement<HTMLButtonElement>("#random-seed-button");
 const superflatWorldButton = requireElement<HTMLButtonElement>("#superflat-world-button");
 const worldSaveOrigin = requireElement<HTMLElement>("#world-save-origin");
@@ -4817,10 +4824,16 @@ async function createWorldFromForm(event: SubmitEvent): Promise<void> {
   const worlds = await registry.listWorlds();
   const name = worldNameInput.value.trim() || `World ${worlds.length + 1}`;
   const seed = worldSeedInput.value.trim() || createReadableSeed();
-  const savedWorld = await registry.createWorld(name, seed);
+  const terrainProfile = readSelectedWorldTerrainProfile();
+  const savedWorld = await registry.createWorld(name, seed, terrainProfile);
   worldNameInput.value = "";
   worldSeedInput.value = "";
   await loadWorld(savedWorld.id);
+}
+
+function readSelectedWorldTerrainProfile(): TerrainProfile {
+  const value = worldTypeSelect.value as TerrainProfile;
+  return CREATE_WORLD_TERRAIN_PROFILES.has(value) ? value : DEFAULT_WORLD_TERRAIN_PROFILE;
 }
 
 async function createSuperflatWorld(): Promise<void> {
@@ -4851,8 +4864,8 @@ async function loadWorld(worldId: string): Promise<void> {
     const activeWorldId = await registry.setActiveWorld(worldId);
     const savedWorld = await registry.getActiveWorld();
     const chunkStorage = await createStorageForSavedWorld(savedWorld);
-    const loadState = createPlayerLoadState(activeWorld, savedWorld);
-    const loadOrigin = loadState.feetPosition;
+    const savedLoadState = migrateSavedPlayerStateHeight(savedWorld);
+    const loadOrigin = savedLoadState?.feetPosition ?? { x: 2, y: 0, z: 2 };
     const shouldPersistMigratedPlayerState = hasLegacyExpandedHeightPlayerState(savedWorld);
 
     // Loading from the home screen is the only place world slots swap into the active engine.
@@ -4872,6 +4885,7 @@ async function loadWorld(worldId: string): Promise<void> {
       qualityController.initialLoadRadius
     );
     activeWorld.rebuildDirty(scene, worldMaterial, qualityController.chunkRebuildBudget);
+    const loadState = savedLoadState ?? createDefaultPlayerLocation(activeWorld, 2, 2);
     placePlayerAtSavedLocation(activePlayer, activeWorld, loadState);
     camera.getWorldDirection(direction);
     novaPilot.setActive(true, camera.position, direction, activeWorld);
@@ -4983,10 +4997,6 @@ async function exitToHome(): Promise<void> {
   } finally {
     worldTransitioning = false;
   }
-}
-
-function createPlayerLoadState(activeWorld: VoxelWorld, savedWorld: SavedWorld): SavedPlayerStateSnapshot {
-  return migrateSavedPlayerStateHeight(savedWorld) ?? createDefaultPlayerLocation(activeWorld, 2, 2);
 }
 
 function hasLegacyExpandedHeightPlayerState(savedWorld: SavedWorld): boolean {

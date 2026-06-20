@@ -2,7 +2,7 @@ import { BLOCK, type BlockId } from "./blocks";
 import { clamp, fbm2, smoothstep } from "./math";
 import { CHUNK_SIZE, EXPANDED_TERRAIN_SURFACE_OFFSET, WORLD_HEIGHT } from "./voxelConstants";
 
-export type TerrainProfile = "classic" | "varied";
+export type TerrainProfile = "classic" | "varied" | "floating-islands";
 
 export type TerrainContext = {
   readonly seed: string;
@@ -22,6 +22,8 @@ export type TerrainContext = {
   readonly climateOffsetZ: number;
   readonly terraceOffsetX: number;
   readonly terraceOffsetZ: number;
+  readonly islandOffsetX: number;
+  readonly islandOffsetZ: number;
   readonly heightOffset: number;
   readonly treeOffsetX: number;
   readonly treeOffsetZ: number;
@@ -56,6 +58,8 @@ export function createTerrainContext(seed = "", profileOverride?: TerrainProfile
       climateOffsetZ: 0,
       terraceOffsetX: 0,
       terraceOffsetZ: 0,
+      islandOffsetX: 0,
+      islandOffsetZ: 0,
       heightOffset: 0,
       treeOffsetX: 0,
       treeOffsetZ: 0,
@@ -65,6 +69,7 @@ export function createTerrainContext(seed = "", profileOverride?: TerrainProfile
 
   const hash = hashSeed(normalizedSeed);
   if (profileOverride === "classic") return createClassicTerrainContext(normalizedSeed, hash);
+  if (profileOverride === "floating-islands") return createFloatingIslandTerrainContext(normalizedSeed, hash);
 
   // Empty seed preserves the original unseeded terrain so existing default saves still line up.
   if (!normalizedSeed) {
@@ -93,6 +98,8 @@ function createClassicTerrainContext(seed: string, hash: number): TerrainContext
     climateOffsetZ: 0,
     terraceOffsetX: 0,
     terraceOffsetZ: 0,
+    islandOffsetX: 0,
+    islandOffsetZ: 0,
     heightOffset: seed ? seededRange(hash, 32, -2, 2) : 0,
     treeOffsetX: 0,
     treeOffsetZ: 0,
@@ -119,10 +126,40 @@ function createVariedTerrainContext(normalizedSeed: string, hash: number): Terra
     climateOffsetZ: seededRange(hash, 88, -1400, 1400),
     terraceOffsetX: seededRange(hash, 96, -1600, 1600),
     terraceOffsetZ: seededRange(hash, 104, -1600, 1600),
+    islandOffsetX: seededRange(hash, 132, -2100, 2100),
+    islandOffsetZ: seededRange(hash, 140, -2100, 2100),
     heightOffset: seededRange(hash, 112, -2, 2),
     treeOffsetX: seededRange(hash, 120, -1900, 1900),
     treeOffsetZ: seededRange(hash, 128, -1900, 1900),
     treeSeed: mixHash(hash ^ 0xa511e9b3)
+  };
+}
+
+function createFloatingIslandTerrainContext(normalizedSeed: string, hash: number): TerrainContext {
+  return {
+    seed: normalizedSeed,
+    mode: "generated",
+    profile: "floating-islands",
+    continentOffsetX: seededRange(hash, 0, -900, 900),
+    continentOffsetZ: seededRange(hash, 8, -900, 900),
+    detailOffsetX: seededRange(hash, 16, -1300, 1300),
+    detailOffsetZ: seededRange(hash, 24, -1300, 1300),
+    landformOffsetX: seededRange(hash, 32, -2200, 2200),
+    landformOffsetZ: seededRange(hash, 40, -2200, 2200),
+    ridgeOffsetX: seededRange(hash, 48, -1800, 1800),
+    ridgeOffsetZ: seededRange(hash, 56, -1800, 1800),
+    washOffsetX: seededRange(hash, 64, -1700, 1700),
+    washOffsetZ: seededRange(hash, 72, -1700, 1700),
+    climateOffsetX: seededRange(hash, 80, -1400, 1400),
+    climateOffsetZ: seededRange(hash, 88, -1400, 1400),
+    terraceOffsetX: seededRange(hash, 96, -1600, 1600),
+    terraceOffsetZ: seededRange(hash, 104, -1600, 1600),
+    islandOffsetX: seededRange(hash, 132, -2100, 2100),
+    islandOffsetZ: seededRange(hash, 140, -2100, 2100),
+    heightOffset: seededRange(hash, 112, -2, 2),
+    treeOffsetX: seededRange(hash, 120, -1900, 1900),
+    treeOffsetZ: seededRange(hash, 128, -1900, 1900),
+    treeSeed: mixHash(hash ^ 0xd1b54a35)
   };
 }
 
@@ -139,6 +176,11 @@ export function generateChunkBlocks(
     for (let x = 0; x < CHUNK_SIZE; x += 1) {
       const wx = ox + x;
       const wz = oz + z;
+      if (terrain.profile === "floating-islands") {
+        generateFloatingIslandColumn(blocks, x, z, wx, wz, terrain);
+        continue;
+      }
+
       const height = getTerrainHeight(wx, wz, terrain);
       const surfaceBlock = getTerrainSurfaceBlock(wx, wz, height, terrain);
 
@@ -156,6 +198,9 @@ export function generateChunkBlocks(
 export function getTerrainHeight(wx: number, wz: number, terrain: TerrainContext): number {
   if (terrain.mode === "superflat") return SUPERFLAT_TERRAIN_HEIGHT;
   if (terrain.profile === "classic") return getClassicTerrainHeight(wx, wz, terrain);
+  if (terrain.profile === "floating-islands") {
+    return getFloatingIslandColumn(wx, wz, terrain)?.top ?? 0;
+  }
 
   const landform = signedFbm2(
     wx * 0.004 + terrain.landformOffsetX,
@@ -190,13 +235,21 @@ export function getTerrainHeight(wx: number, wz: number, terrain: TerrainContext
   const wash = (1 - smoothstep(0.035, 0.17, Math.abs(washSource))) *
     (1 - smoothstep(0.35, 0.85, landform));
   const roughness = smoothstep(-0.25, 0.72, landform);
+  const mountainMask = smoothstep(0.42, 0.88, landform);
+  const cliffSource = signedFbm2(
+    wx * 0.019 + terrain.islandOffsetX,
+    wz * 0.019 + terrain.islandOffsetZ,
+    4
+  );
+  const cliffBands = Math.pow(1 - Math.abs(cliffSource), 1.45) * mountainMask;
 
   let height =
     13 +
     terrain.heightOffset +
-    landform * 13 +
-    rollingHills * (3.5 + roughness * 7) +
-    ridge * roughness * 10 -
+    landform * (14 + mountainMask * 16) +
+    rollingHills * (3.5 + roughness * 8 + mountainMask * 7) +
+    ridge * roughness * (10 + mountainMask * 14) +
+    cliffBands * 16 -
     wash * (4.5 + roughness * 3) +
     detail * (1.5 + roughness * 2.5);
 
@@ -223,6 +276,7 @@ export function getTerrainSurfaceBlock(
 ): BlockId {
   if (terrain.mode === "superflat") return BLOCK.grass;
   if (terrain.profile === "classic") return height < 14 ? BLOCK.sand : BLOCK.grass;
+  if (terrain.profile === "floating-islands") return getFloatingIslandSurfaceBlock(wx, wz, height, terrain);
 
   const climate = normalizedFbm2(
     wx * 0.013 + terrain.climateOffsetX,
@@ -272,6 +326,126 @@ function getClassicTerrainHeight(wx: number, wz: number, terrain: TerrainContext
   return Math.floor(8 + continent * 18 + detail * 5 + terrain.heightOffset);
 }
 
+type FloatingIslandColumn = {
+  readonly top: number;
+  readonly bottom: number;
+  readonly centerStrength: number;
+};
+
+function generateFloatingIslandColumn(
+  blocks: Uint8Array,
+  localX: number,
+  localZ: number,
+  wx: number,
+  wz: number,
+  terrain: TerrainContext
+): void {
+  const island = getFloatingIslandColumn(wx, wz, terrain);
+  if (!island) return;
+
+  const surfaceBlock = getFloatingIslandSurfaceBlock(wx, wz, island.top, terrain);
+  for (let y = island.bottom; y <= island.top; y += 1) {
+    blocks[index(localX, y, localZ)] = getFloatingIslandBlock(y, island.top, island.bottom, surfaceBlock);
+  }
+}
+
+function getFloatingIslandColumn(wx: number, wz: number, terrain: TerrainContext): FloatingIslandColumn | null {
+  const field = getFloatingIslandField(wx, wz, terrain);
+  const threshold = 0.52;
+  if (field.strength < threshold) return null;
+
+  // The mask strength drives both top relief and underside depth. Edges stay
+  // thin and ragged, while island centers grow enough stone belly to read as
+  // real landmass instead of single-layer platforms.
+  const centerStrength = smoothstep(threshold, 0.93, field.strength);
+  const ridgeSource = signedFbm2(
+    wx * 0.017 + terrain.ridgeOffsetX,
+    wz * 0.017 + terrain.ridgeOffsetZ,
+    4
+  );
+  const ridge = Math.pow(1 - Math.abs(ridgeSource), 1.9);
+  const detail = signedFbm2(
+    wx * 0.071 + terrain.detailOffsetX,
+    wz * 0.071 + terrain.detailOffsetZ,
+    3
+  );
+  const baseTop = 48 +
+    terrain.heightOffset +
+    field.heightNoise * 11 +
+    centerStrength * 11 +
+    ridge * centerStrength * 4 +
+    detail * 2;
+  const top = Math.floor(clamp(baseTop, 22, WORLD_HEIGHT - 9));
+  const thickness = Math.floor(clamp(3 + centerStrength * 13 + ridge * centerStrength * 4 - detail, 2, 20));
+  const bottom = Math.max(2, top - thickness);
+
+  return { top, bottom, centerStrength };
+}
+
+function getFloatingIslandField(
+  wx: number,
+  wz: number,
+  terrain: TerrainContext
+): { readonly strength: number; readonly heightNoise: number } {
+  const broad = normalizedFbm2(
+    wx * 0.006 + terrain.landformOffsetX,
+    wz * 0.006 + terrain.landformOffsetZ,
+    5
+  );
+  const blob = normalizedFbm2(
+    wx * 0.021 + terrain.islandOffsetX,
+    wz * 0.021 + terrain.islandOffsetZ,
+    4
+  );
+  const tornEdge = signedFbm2(
+    wx * 0.045 + terrain.washOffsetX,
+    wz * 0.045 + terrain.washOffsetZ,
+    3
+  );
+  const distanceFromSpawn = Math.hypot(wx - 2, wz - 2);
+  const spawnIsland = 1 - smoothstep(16, 54, distanceFromSpawn);
+  const strength = clamp(broad * 0.48 + blob * 0.42 + tornEdge * 0.08 + spawnIsland * 0.72, 0, 1);
+  const heightNoise = signedFbm2(
+    wx * 0.004 + terrain.continentOffsetX,
+    wz * 0.004 + terrain.continentOffsetZ,
+    4
+  );
+  return { strength, heightNoise };
+}
+
+function getFloatingIslandSurfaceBlock(
+  wx: number,
+  wz: number,
+  height: number,
+  terrain: TerrainContext
+): BlockId {
+  const island = getFloatingIslandColumn(wx, wz, terrain);
+  if (!island || height <= 0) return BLOCK.air;
+
+  const climate = normalizedFbm2(
+    wx * 0.013 + terrain.climateOffsetX,
+    wz * 0.013 + terrain.climateOffsetZ,
+    4
+  );
+  if (island.centerStrength < 0.18 || height >= WORLD_HEIGHT - 18) return BLOCK.stone;
+  if (climate < 0.2) return BLOCK.sand;
+  return BLOCK.grass;
+}
+
+function getFloatingIslandBlock(
+  y: number,
+  top: number,
+  bottom: number,
+  surfaceBlock: BlockId
+): BlockId {
+  const depth = top - y;
+  if (depth === 0) return surfaceBlock;
+  if (surfaceBlock === BLOCK.sand && depth <= 2) return BLOCK.sand;
+  if (surfaceBlock === BLOCK.grass && depth <= 2) return BLOCK.dirt;
+  if (y <= bottom + 1) return BLOCK.stone;
+  return depth <= 3 ? BLOCK.dirt : BLOCK.stone;
+}
+
 export function isSuperflatSeed(seed: string): boolean {
   return String(seed || "").trim().toLowerCase() === SUPERFLAT_WORLD_SEED;
 }
@@ -308,7 +482,7 @@ function decorateChunkTrees(
   blocks: Uint8Array,
   terrain: TerrainContext
 ): void {
-  if (terrain.mode !== "generated" || terrain.profile !== "varied") return;
+  if (terrain.mode !== "generated" || (terrain.profile !== "varied" && terrain.profile !== "floating-islands")) return;
 
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
@@ -423,7 +597,9 @@ function getTreeProbability(wx: number, wz: number, surfaceY: number, terrain: T
 }
 
 function getTerrainFeatureHeight(height: number, terrain: TerrainContext): number {
-  return terrain.profile === "varied" ? height - EXPANDED_TERRAIN_SURFACE_OFFSET : height;
+  if (terrain.profile === "varied") return height - EXPANDED_TERRAIN_SURFACE_OFFSET;
+  if (terrain.profile === "floating-islands") return height - 24;
+  return height;
 }
 
 function setDecoratedBlockIfInside(

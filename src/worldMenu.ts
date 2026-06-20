@@ -1,4 +1,5 @@
 import type { SavedWorld, WorldRegistry } from "./chunkStorage";
+import type { TerrainProfile } from "./terrain";
 
 export type LoadWorldHandler = (worldId: string) => void | Promise<void>;
 export type DeleteWorldHandler = (world: SavedWorld) => void | Promise<void>;
@@ -33,7 +34,7 @@ export async function renderHomeWorldList(
       button.append(
         createWorldSlotLine("world-slot-name", savedWorld.name),
         createWorldSlotLine("world-slot-meta", formatWorldMeta(savedWorld, isActive)),
-        createWorldSlotLine("world-slot-seed", `Seed: ${savedWorld.seed || "classic"} | Terrain: ${savedWorld.terrainProfile}`)
+        createWorldSlotLine("world-slot-seed", `Seed: ${savedWorld.seed || "classic"} | Terrain: ${formatTerrainProfile(savedWorld.terrainProfile)}`)
       );
       row.append(button);
 
@@ -71,4 +72,10 @@ function formatWorldMeta(savedWorld: SavedWorld, isActive: boolean): string {
     ? new Date(savedWorld.updatedAt).toLocaleDateString()
     : "new";
   return `${isActive ? "Current" : "Saved"} - ${date}`;
+}
+
+function formatTerrainProfile(profile: TerrainProfile): string {
+  if (profile === "floating-islands") return "Floating Islands";
+  if (profile === "varied") return "Varied";
+  return "Classic";
 }

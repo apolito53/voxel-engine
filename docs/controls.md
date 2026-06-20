@@ -5,7 +5,9 @@ the root README.
 
 ## World Flow
 
-- The home screen creates, loads, or deletes local IndexedDB worlds.
+- The home screen creates, loads, or deletes local IndexedDB worlds. New worlds
+  choose a `World Type`: `Varied Terrain`, `Floating Islands`, or `Classic
+  Legacy`.
 - `Superflat Lab` creates a flat grass/dirt/stone test world using the reserved
   `superflat` seed.
 - Loading a world restores the last saved player feet position and look

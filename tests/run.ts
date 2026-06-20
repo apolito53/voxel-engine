@@ -1495,6 +1495,24 @@ test("chunk generation worker job matches direct terrain generation", () => {
   );
 });
 
+test("chunk generation worker job matches direct floating-island generation", () => {
+  const terrain = createTerrainContext("chunk-floating-seed", "floating-islands");
+  const result = buildChunkGenerateJob({
+    requestId: 171,
+    cx: 0,
+    cz: 0,
+    seed: "chunk-floating-seed",
+    terrainProfile: terrain.profile
+  });
+
+  assertEqual(result.type, "generated", "floating-island chunk job should return a generated result");
+  assertUint8ArraysEqual(
+    result.blocks,
+    generateChunkBlocks(0, 0, terrain),
+    "floating-island worker generation should match direct terrain generation"
+  );
+});
+
 test("chunk mesh worker job honors partial render masks", () => {
   const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
   const partialMask = new Uint8Array(blocks.length);
@@ -1599,9 +1617,11 @@ test("chunk mesh worker job is deterministic for the same payload", () => {
 test("classic terrain profile preserves legacy seeded terrain separately from varied terrain", () => {
   const classicTerrain = createTerrainContext("legacy-profile-seed", "classic");
   const variedTerrain = createTerrainContext("legacy-profile-seed", "varied");
+  const floatingTerrain = createTerrainContext("legacy-profile-seed", "floating-islands");
 
   assertEqual(classicTerrain.profile, "classic", "explicit classic profile should stay on the old generator lane");
   assertEqual(variedTerrain.profile, "varied", "explicit varied profile should stay on the new generator lane");
+  assertEqual(floatingTerrain.profile, "floating-islands", "explicit floating-islands profile should stay on its own generator lane");
   assert(
     getTerrainHeight(11, -7, classicTerrain) !== getTerrainHeight(11, -7, variedTerrain) ||
       getTerrainHeight(41, 19, classicTerrain) !== getTerrainHeight(41, 19, variedTerrain),
@@ -1610,7 +1630,9 @@ test("classic terrain profile preserves legacy seeded terrain separately from va
 
   const classicChunk = generateChunkBlocks(1, -2, classicTerrain);
   const variedChunk = generateChunkBlocks(1, -2, variedTerrain);
+  const floatingChunk = generateChunkBlocks(1, -2, floatingTerrain);
   assert(hasAnyDifference(classicChunk, variedChunk), "terrain profiles should not collapse to the same chunk payload");
+  assert(hasAnyDifference(variedChunk, floatingChunk), "floating islands should not collapse to the varied chunk payload");
 });
 
 test("seeded terrain generation creates varied landforms and surfaces", () => {
@@ -1618,6 +1640,7 @@ test("seeded terrain generation creates varied landforms and surfaces", () => {
   const heights: number[] = [];
   const surfaceBlocks = new Set<BlockId>();
   const surfaceCounts = new Map<BlockId, number>();
+  let cliffEdges = 0;
 
   assertEqual(terrain.profile, "varied", "non-special generated seeds should use the varied terrain profile");
 
@@ -1625,9 +1648,12 @@ test("seeded terrain generation creates varied landforms and surfaces", () => {
     for (let x = -160; x <= 160; x += 8) {
       const height = getTerrainHeight(x, z, terrain);
       const surfaceBlock = getTerrainSurfaceBlock(x, z, height, terrain);
+      const eastHeight = getTerrainHeight(x + 8, z, terrain);
+      const southHeight = getTerrainHeight(x, z + 8, terrain);
       heights.push(height);
       surfaceBlocks.add(surfaceBlock);
       surfaceCounts.set(surfaceBlock, (surfaceCounts.get(surfaceBlock) ?? 0) + 1);
+      if (Math.abs(height - eastHeight) >= 6 || Math.abs(height - southHeight) >= 6) cliffEdges += 1;
     }
   }
 
@@ -1638,11 +1664,61 @@ test("seeded terrain generation creates varied landforms and surfaces", () => {
 
   assert(minHeight >= 2, "varied terrain should leave a solid lower bound above the world floor");
   assert(maxHeight <= WORLD_HEIGHT - 6, "varied terrain should leave air above the tallest generated land");
-  assert(maxHeight - minHeight >= 18, "varied terrain should have more range than endless rolling hills");
+  assert(
+    maxHeight - minHeight >= 26,
+    `varied terrain should have mountain-scale range beyond endless rolling hills, got ${maxHeight - minHeight}`
+  );
+  assert(cliffEdges > 0, "varied terrain should include cliff-like slope breaks");
   assert(surfaceBlocks.has(BLOCK.grass), "varied terrain should still produce grassy playable ground");
   assert(surfaceBlocks.has(BLOCK.sand), "varied terrain should create sandy lowlands or washes");
   assert(surfaceBlocks.has(BLOCK.stone), "varied terrain should expose rocky highland surfaces");
   assert(grassSurfaces > sandSurfaces, "varied terrain should not let sandy washes dominate the common surface");
+});
+
+test("floating-islands terrain creates spawn-safe islands with real void below", () => {
+  const terrain = createTerrainContext("skyland-test", "floating-islands");
+  const chunk = generateChunkBlocks(0, 0, terrain);
+  const at = (x: number, y: number, z: number): number => chunk[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
+  const spawnColumnX = 2;
+  const spawnColumnZ = 2;
+  const spawnTop = getTerrainHeight(spawnColumnX, spawnColumnZ, terrain);
+  let firstSolidY = -1;
+  let solidCount = 0;
+  let sampledVoidColumns = 0;
+  let sampledSolidColumns = 0;
+
+  for (let y = 0; y <= spawnTop; y += 1) {
+    if (at(spawnColumnX, y, spawnColumnZ) === BLOCK.air) continue;
+    if (firstSolidY < 0) firstSolidY = y;
+    solidCount += 1;
+  }
+
+  for (let cz = -3; cz <= 3; cz += 1) {
+    for (let cx = -3; cx <= 3; cx += 1) {
+      const sampledChunk = generateChunkBlocks(cx, cz, terrain);
+      const sampledAt = (x: number, y: number, z: number): number =>
+        sampledChunk[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
+      for (let z = 0; z < CHUNK_SIZE; z += 1) {
+        for (let x = 0; x < CHUNK_SIZE; x += 1) {
+          let columnHasSolid = false;
+          for (let y = 0; y < WORLD_HEIGHT; y += 1) {
+            columnHasSolid ||= sampledAt(x, y, z) !== BLOCK.air;
+          }
+          if (columnHasSolid) sampledSolidColumns += 1;
+          else sampledVoidColumns += 1;
+        }
+      }
+    }
+  }
+
+  assertEqual(terrain.profile, "floating-islands", "floating-islands context should preserve the requested profile");
+  assert(spawnTop > 20 && spawnTop < WORLD_HEIGHT - 8, "floating-islands spawn island should sit in open air");
+  assert(at(spawnColumnX, spawnTop, spawnColumnZ) !== BLOCK.air, "spawn column should have a playable island top");
+  assert(firstSolidY > 1, "floating islands should leave true void below the landmass");
+  assert(solidCount >= 3, "spawn island should have enough thickness to read as terrain");
+  assert(sampledSolidColumns > 0, "floating-island worlds should generate actual land columns");
+  assert(sampledVoidColumns > 0, "floating-island worlds should contain open void columns between landmasses");
+  assertEqual(at(spawnColumnX, spawnTop + 1, spawnColumnZ), BLOCK.air, "space above a floating island should stay open");
 });
 
 test("expanded world height gives varied terrain more vertical room", () => {
@@ -3755,13 +3831,32 @@ test("world registry stores terrain profile provenance", async () => {
   const registry = await createWorldRegistry(database);
   const defaultWorld = await registry.getActiveWorld();
   const variedWorld = await registry.createWorld("Varied Terrain", "new-terrain-seed");
+  const floatingWorld = await registry.createWorld("Sky Islands", "new-sky-seed", "floating-islands");
+  const classicWorld = await registry.createWorld("Classic Terrain", "classic-terrain-seed", "classic");
   const superflatWorld = await registry.createWorld("Flat Lab", SUPERFLAT_WORLD_SEED);
 
   assertEqual(defaultWorld.terrainProfile, "classic", "the built-in default world should remain classic");
   assertEqual(variedWorld.terrainProfile, "varied", "new ordinary worlds should opt into varied terrain");
+  assertEqual(floatingWorld.terrainProfile, "floating-islands", "explicit floating-island worlds should store their profile");
+  assertEqual(classicWorld.terrainProfile, "classic", "explicit classic worlds should store their profile");
   assertEqual(superflatWorld.terrainProfile, "classic", "superflat lab worlds should stay on the classic test profile");
   assertEqual(getNewWorldTerrainProfile("fresh-seed"), "varied", "new seeded worlds should use varied terrain");
+  assertEqual(
+    getNewWorldTerrainProfile("fresh-seed", "floating-islands"),
+    "floating-islands",
+    "new worlds should honor explicit floating-island profile selection"
+  );
   assertEqual(getNewWorldTerrainProfile(SUPERFLAT_WORLD_SEED), "classic", "superflat seed should keep the lab profile");
+  assertEqual(
+    getNewWorldTerrainProfile(SUPERFLAT_WORLD_SEED, "floating-islands"),
+    "classic",
+    "reserved superflat seed should keep the lab generator even if a profile is requested"
+  );
+  assertEqual(
+    normalizeSavedTerrainProfile("floating-islands", "old-sky-seed", 1),
+    "floating-islands",
+    "saved floating-island worlds should normalize as first-class terrain profile metadata"
+  );
   assertEqual(
     normalizeSavedTerrainProfile(undefined, "legacy-seed", 1),
     "classic",

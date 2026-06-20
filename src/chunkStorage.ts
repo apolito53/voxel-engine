@@ -498,14 +498,15 @@ export class WorldRegistry {
     return worldId;
   }
 
-  async createWorld(name: string, seed: string): Promise<SavedWorld> {
+  async createWorld(name: string, seed: string, terrainProfile?: TerrainProfile): Promise<SavedWorld> {
     const now = Date.now();
     const worldSeed = sanitizeWorldSeed(seed) || createRandomSeed(now);
+    const worldTerrainProfile = getNewWorldTerrainProfile(worldSeed, terrainProfile);
     const world: SavedWorld = {
       id: createWorldId(now),
       name: sanitizeWorldName(name),
       seed: worldSeed,
-      terrainProfile: getNewWorldTerrainProfile(worldSeed),
+      terrainProfile: worldTerrainProfile,
       createdAt: now,
       updatedAt: now
     };
@@ -639,8 +640,11 @@ function cloneSavedWorld(world: SavedWorld): SavedWorld {
   return clonedWorld;
 }
 
-export function getNewWorldTerrainProfile(seed: string): TerrainProfile {
-  return isSuperflatSeed(seed) ? "classic" : "varied";
+export function getNewWorldTerrainProfile(seed: string, requestedProfile?: TerrainProfile): TerrainProfile {
+  if (isSuperflatSeed(seed)) return "classic";
+  if (requestedProfile === "floating-islands") return "floating-islands";
+  if (requestedProfile === "classic" || requestedProfile === "varied") return requestedProfile;
+  return "varied";
 }
 
 export function normalizeSavedTerrainProfile(
@@ -648,7 +652,7 @@ export function normalizeSavedTerrainProfile(
   seed = "",
   createdAt = 0
 ): TerrainProfile {
-  if (value === "varied" || value === "classic") return value;
+  if (value === "varied" || value === "classic" || value === "floating-islands") return value;
   if (!seed || isSuperflatSeed(seed)) return "classic";
 
   // Legacy saved worlds predate terrain-profile metadata, so keep them on the
