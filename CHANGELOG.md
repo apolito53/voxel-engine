@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.12.3 - 2026-06-19
+
+### Fixed
+
+- Hardened rigid debris registration against corrupt fragment transforms before
+  they reach Rapier, preventing non-finite shard state from creating unsafe
+  WASM-side physics bodies.
+- Added rigid-debris adapter recovery when Rapier throws during debris update:
+  active shards detach back to cheap debris motion, the failed Rapier world is
+  cleared, and rendering can continue instead of repeatedly crashing the frame.
+- Exposed a per-frame rigid debris `fault` counter in the F3 Debris HUD so
+  future screenshots/logs show when the adapter fell back from Rapier.
+
+### Tests
+
+- Added regression coverage for non-finite debris rejection before Rapier
+  registration.
+- Added regression coverage for preserving visible debris while recovering from
+  a rigid-debris adapter fault.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+
 ## 0.12.2 - 2026-06-19
 
 ### Changed

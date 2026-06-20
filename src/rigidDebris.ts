@@ -48,6 +48,10 @@ const RIGID_DEBRIS_SUPPORT_FAST_SPEED_SQ = 10 * 10;
 const RIGID_DEBRIS_SUPPORT_HORIZONTAL_SPEED_SQ = 4 * 4;
 const RIGID_DEBRIS_SUPPORT_LOOKDOWN_METERS = 2.25;
 const RAPIER_COMPAT_INIT_WARNING = "using deprecated parameters for the initialization function";
+const RIGID_DEBRIS_MIN_COLLIDER_HALF_EXTENT = 0.002;
+const RIGID_DEBRIS_MAX_COLLIDER_HALF_EXTENT = 2;
+const RIGID_DEBRIS_MAX_SAFE_LINEAR_SPEED = 250;
+const RIGID_DEBRIS_MAX_SAFE_ANGULAR_SPEED = 250;
 
 type RigidDebrisBody = {
   readonly toy: PhysicsToy;
@@ -95,6 +99,15 @@ type RigidDebrisSupportScanCandidate = {
 };
 
 export type RigidDebrisStaticRefreshReason = "none" | "scheduled" | "dirty";
+type RigidDebrisRapierPhase = "initialize" | "flush" | "remove-expired" | "support-sync" | "step" | "sync";
+
+type RigidDebrisBodySnapshot = {
+  readonly position: { readonly x: number; readonly y: number; readonly z: number };
+  readonly rotation: { readonly x: number; readonly y: number; readonly z: number; readonly w: number };
+  readonly linearVelocity: { readonly x: number; readonly y: number; readonly z: number };
+  readonly angularVelocity: { readonly x: number; readonly y: number; readonly z: number };
+  readonly colliderHalfExtents: THREE.Vector3;
+};
 
 export type RigidDebrisFrameTimings = {
   readonly flushMs: number;
@@ -140,6 +153,7 @@ export type RigidDebrisStats = {
   readonly parkedWakesThisFrame: number;
   readonly parkedExpiredThisFrame: number;
   readonly parkedColliderCells: number;
+  readonly rapierFailuresThisFrame: number;
 };
 
 export function createEmptyRigidDebrisStats(): RigidDebrisStats {
@@ -178,7 +192,8 @@ export function createEmptyRigidDebrisStats(): RigidDebrisStats {
     parkedWakeCandidates: 0,
     parkedWakesThisFrame: 0,
     parkedExpiredThisFrame: 0,
-    parkedColliderCells: 0
+    parkedColliderCells: 0,
+    rapierFailuresThisFrame: 0
   };
 }
 
@@ -233,6 +248,7 @@ export class RigidDebrisSimulation {
   private staticColliderRemovedThisFrame = 0;
   private staticColliderReusedThisFrame = 0;
   private deniedAdmissionSinceLastUpdate = 0;
+  private rapierFailuresThisFrame = 0;
 
   initialize(): Promise<void> {
     if (this.world) return Promise.resolve();
@@ -245,8 +261,12 @@ export class RigidDebrisSimulation {
       this.world.timestep = RIGID_DEBRIS_FIXED_STEP;
       this.world.numSolverIterations = 6;
       this.world.maxCcdSubsteps = 1;
-      this.flushPendingFragments();
-      this.refreshStats();
+      try {
+        this.flushPendingFragments();
+        this.refreshStats();
+      } catch (error) {
+        this.recoverFromRapierFailure(error, "initialize");
+      }
     });
     return this.initializePromise;
   }
@@ -274,57 +294,67 @@ export class RigidDebrisSimulation {
       return this.stats;
     }
 
-    const flushStartedAt = nowMs();
-    this.flushPendingFragments();
-    if (this.admittedBodiesThisFrame > 0) {
-      // New bodies need nearby support soon, but forcing a same-frame collider
-      // rebuild immediately after Rapier body creation can churn static
-      // colliders before the solver has a stable velocity/contact picture.
-      this.staticCollidersDirty = true;
-    }
-    this.lastFrameTimings = {
-      ...this.lastFrameTimings,
-      flushMs: nowMs() - flushStartedAt
-    };
-    this.removeExpiredBodies();
-    if (this.bodiesByToy.size === 0) {
-      this.clearStaticColliders();
+    let phase: RigidDebrisRapierPhase = "flush";
+    try {
+      const flushStartedAt = nowMs();
+      this.flushPendingFragments();
+      if (this.admittedBodiesThisFrame > 0) {
+        // New bodies need nearby support soon, but forcing a same-frame collider
+        // rebuild immediately after Rapier body creation can churn static
+        // colliders before the solver has a stable velocity/contact picture.
+        this.staticCollidersDirty = true;
+      }
+      this.lastFrameTimings = {
+        ...this.lastFrameTimings,
+        flushMs: nowMs() - flushStartedAt
+      };
+
+      phase = "remove-expired";
+      this.removeExpiredBodies();
+      if (this.bodiesByToy.size === 0) {
+        this.clearStaticColliders();
+        this.refreshStats();
+        return this.stats;
+      }
+
+      phase = "support-sync";
+      this.refreshStaticCollidersIfNeeded(Math.max(0, delta), collisionWorld);
+      this.accumulatorSeconds += Math.min(Math.max(0, delta), RIGID_DEBRIS_MAX_FRAME_DELTA);
+
+      let substeps = 0;
+      phase = "step";
+      const stepStartedAt = nowMs();
+      while (
+        this.accumulatorSeconds >= RIGID_DEBRIS_FIXED_STEP &&
+        substeps < RIGID_DEBRIS_MAX_SUBSTEPS
+      ) {
+        this.world.timestep = RIGID_DEBRIS_FIXED_STEP;
+        this.world.step();
+        this.accumulatorSeconds -= RIGID_DEBRIS_FIXED_STEP;
+        substeps += 1;
+      }
+      this.lastFrameTimings = {
+        ...this.lastFrameTimings,
+        stepMs: nowMs() - stepStartedAt
+      };
+      this.substepsThisFrame = substeps;
+
+      if (substeps === RIGID_DEBRIS_MAX_SUBSTEPS) {
+        this.accumulatorSeconds = Math.min(this.accumulatorSeconds, RIGID_DEBRIS_FIXED_STEP);
+      }
+
+      phase = "sync";
+      const syncStartedAt = nowMs();
+      this.syncBodiesToToys(substeps * RIGID_DEBRIS_FIXED_STEP, collisionWorld);
+      this.lastFrameTimings = {
+        ...this.lastFrameTimings,
+        syncMs: nowMs() - syncStartedAt
+      };
       this.refreshStats();
       return this.stats;
+    } catch (error) {
+      return this.recoverFromRapierFailure(error, phase);
     }
-
-    this.refreshStaticCollidersIfNeeded(Math.max(0, delta), collisionWorld);
-    this.accumulatorSeconds += Math.min(Math.max(0, delta), RIGID_DEBRIS_MAX_FRAME_DELTA);
-
-    let substeps = 0;
-    const stepStartedAt = nowMs();
-    while (
-      this.accumulatorSeconds >= RIGID_DEBRIS_FIXED_STEP &&
-      substeps < RIGID_DEBRIS_MAX_SUBSTEPS
-    ) {
-      this.world.timestep = RIGID_DEBRIS_FIXED_STEP;
-      this.world.step();
-      this.accumulatorSeconds -= RIGID_DEBRIS_FIXED_STEP;
-      substeps += 1;
-    }
-    this.lastFrameTimings = {
-      ...this.lastFrameTimings,
-      stepMs: nowMs() - stepStartedAt
-    };
-    this.substepsThisFrame = substeps;
-
-    if (substeps === RIGID_DEBRIS_MAX_SUBSTEPS) {
-      this.accumulatorSeconds = Math.min(this.accumulatorSeconds, RIGID_DEBRIS_FIXED_STEP);
-    }
-
-    const syncStartedAt = nowMs();
-    this.syncBodiesToToys(substeps * RIGID_DEBRIS_FIXED_STEP, collisionWorld);
-    this.lastFrameTimings = {
-      ...this.lastFrameTimings,
-      syncMs: nowMs() - syncStartedAt
-    };
-    this.refreshStats();
-    return this.stats;
   }
 
   syncToyStatesToBodies(): void {
@@ -493,12 +523,15 @@ export class RigidDebrisSimulation {
     for (const toy of this.pendingFragments) {
       if (!toy.isInstancedFragment || toy.isExpired || this.bodiesByToy.has(toy)) continue;
 
-      const body = this.createBody(toy);
-      const colliderHalfExtents = getFragmentColliderHalfExtents(toy);
+      const createdBody = this.createBody(toy);
+      if (!createdBody) {
+        toy.expire();
+        continue;
+      }
       this.bodiesByToy.set(toy, {
         toy,
-        body,
-        colliderHalfExtents,
+        body: createdBody.body,
+        colliderHalfExtents: createdBody.colliderHalfExtents,
         lastStableTranslation: toy.mesh.position.clone(),
         quietSeconds: 0,
         translationQuietSeconds: 0,
@@ -510,29 +543,29 @@ export class RigidDebrisSimulation {
     this.pendingFragments.clear();
   }
 
-  private createBody(toy: PhysicsToy): RigidBody {
+  private createBody(toy: PhysicsToy): { readonly body: RigidBody; readonly colliderHalfExtents: THREE.Vector3 } | null {
     if (!this.world) {
       throw new Error("Rigid debris world is not initialized.");
     }
 
-    const position = toy.mesh.position;
-    const quaternion = toy.mesh.quaternion;
+    const snapshot = createRigidDebrisBodySnapshot(toy);
+    if (!snapshot) return null;
+
     const bodyDesc = RigidBodyDesc.dynamic()
-      .setTranslation(position.x, position.y, position.z)
-      .setRotation({ x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w })
-      .setLinvel(toy.velocity.x, toy.velocity.y, toy.velocity.z)
-      .setAngvel({ x: toy.angularVelocity.x, y: toy.angularVelocity.y, z: toy.angularVelocity.z })
+      .setTranslation(snapshot.position.x, snapshot.position.y, snapshot.position.z)
+      .setRotation(snapshot.rotation)
+      .setLinvel(snapshot.linearVelocity.x, snapshot.linearVelocity.y, snapshot.linearVelocity.z)
+      .setAngvel(snapshot.angularVelocity)
       .setLinearDamping(RIGID_DEBRIS_LINEAR_DAMPING)
       .setAngularDamping(RIGID_DEBRIS_ANGULAR_DAMPING)
       .setCanSleep(true)
       .setCcdEnabled(true);
     const body = this.world.createRigidBody(bodyDesc);
-    const colliderHalfExtents = getFragmentColliderHalfExtents(toy);
     const colliderDesc = ColliderDesc
       .cuboid(
-        colliderHalfExtents.x,
-        colliderHalfExtents.y,
-        colliderHalfExtents.z
+        snapshot.colliderHalfExtents.x,
+        snapshot.colliderHalfExtents.y,
+        snapshot.colliderHalfExtents.z
       )
       .setMass(RIGID_DEBRIS_MASS)
       .setFriction(RIGID_DEBRIS_FRICTION)
@@ -540,7 +573,7 @@ export class RigidDebrisSimulation {
       .setContactSkin(0.002);
 
     this.world.createCollider(colliderDesc, body);
-    return body;
+    return { body, colliderHalfExtents: snapshot.colliderHalfExtents };
   }
 
   private removeExpiredBodies(): void {
@@ -568,6 +601,7 @@ export class RigidDebrisSimulation {
     this.staticColliderCreatedThisFrame = 0;
     this.staticColliderRemovedThisFrame = 0;
     this.staticColliderReusedThisFrame = 0;
+    this.rapierFailuresThisFrame = 0;
   }
 
   private syncBodiesToToys(delta: number, collisionWorld: CollisionWorld): void {
@@ -1140,8 +1174,57 @@ export class RigidDebrisSimulation {
       parkedWakeCandidates: 0,
       parkedWakesThisFrame: 0,
       parkedExpiredThisFrame: 0,
-      parkedColliderCells: 0
+      parkedColliderCells: 0,
+      rapierFailuresThisFrame: this.rapierFailuresThisFrame
     };
+  }
+
+  private recoverFromRapierFailure(error: unknown, phase: RigidDebrisRapierPhase): RigidDebrisStats {
+    this.rapierFailuresThisFrame += 1;
+    console.warn(
+      `Rigid debris physics failed during ${phase}; detaching shards from Rapier and falling back to cheap debris motion.`,
+      error
+    );
+
+    for (const record of this.bodiesByToy.values()) {
+      record.toy.detachRigidDebrisBody();
+      record.toy.wakeFromTerrainSupportChange();
+      record.toy.resetGroundDebrisCleanupClock();
+    }
+    for (const toy of this.pendingFragments) {
+      toy.detachRigidDebrisBody();
+      toy.resetGroundDebrisCleanupClock();
+    }
+
+    const failedWorld = this.world;
+    this.world = null;
+    this.initializePromise = null;
+    this.pendingFragments.clear();
+    this.bodiesByToy.clear();
+    this.clearStaticColliderReferences();
+    this.accumulatorSeconds = 0;
+    this.staticCollidersDirty = true;
+    this.staticRefreshSeconds = Infinity;
+
+    try {
+      failedWorld?.free();
+    } catch (freeError) {
+      console.warn("Could not free failed rigid debris Rapier world after recovery.", freeError);
+    }
+
+    this.refreshStats();
+    return this.stats;
+  }
+
+  private clearStaticColliderReferences(): void {
+    this.terrainColliders.clear();
+    this.surfaceBoxColliders.clear();
+    this.rubbleSupportColliders.clear();
+    this.activeColliderCells.clear();
+    this.probedColliderCells.clear();
+    this.desiredTerrainColliderKeys.clear();
+    this.desiredSurfaceBoxColliderKeys.clear();
+    this.desiredRubbleSupportColliderKeys.clear();
   }
 }
 
@@ -1371,9 +1454,95 @@ function getChangedStaticColliderCellKey(
   ].map((part) => typeof part === "number" ? part.toFixed(4) : part).join("|");
 }
 
+function createRigidDebrisBodySnapshot(toy: PhysicsToy): RigidDebrisBodySnapshot | null {
+  const position = createFiniteVectorSnapshot(toy.mesh.position);
+  if (!position) return null;
+
+  const colliderHalfExtents = createSafeColliderHalfExtents(toy);
+  if (!colliderHalfExtents) return null;
+
+  return {
+    position,
+    // Rapier's WASM layer is prickly about borrowed wrapper objects. Feed it
+    // plain finite numbers captured at the boundary instead of live THREE
+    // objects whose values may be mutated by the render/game loop later.
+    rotation: createFiniteQuaternionSnapshot(toy.mesh.quaternion),
+    linearVelocity: createClampedVectorSnapshot(toy.velocity, RIGID_DEBRIS_MAX_SAFE_LINEAR_SPEED),
+    angularVelocity: createClampedVectorSnapshot(toy.angularVelocity, RIGID_DEBRIS_MAX_SAFE_ANGULAR_SPEED),
+    colliderHalfExtents
+  };
+}
+
 function getFragmentColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 {
   return toy.debrisShape?.colliderHalfExtents.clone()
     ?? createDefaultDebrisShape().colliderHalfExtents;
+}
+
+function createSafeColliderHalfExtents(toy: PhysicsToy): THREE.Vector3 | null {
+  const halfExtents = getFragmentColliderHalfExtents(toy);
+  if (!isFiniteVector(halfExtents)) return null;
+
+  halfExtents.set(
+    clampColliderHalfExtent(halfExtents.x),
+    clampColliderHalfExtent(halfExtents.y),
+    clampColliderHalfExtent(halfExtents.z)
+  );
+  return halfExtents;
+}
+
+function createFiniteVectorSnapshot(vector: THREE.Vector3): { readonly x: number; readonly y: number; readonly z: number } | null {
+  if (!isFiniteVector(vector)) return null;
+  return { x: vector.x, y: vector.y, z: vector.z };
+}
+
+function createClampedVectorSnapshot(
+  vector: THREE.Vector3,
+  maxLength: number
+): { readonly x: number; readonly y: number; readonly z: number } {
+  const safeVector = isFiniteVector(vector)
+    ? vector.clone()
+    : new THREE.Vector3();
+  const safeMaxLength = Math.max(0, maxLength);
+  if (safeVector.lengthSq() > safeMaxLength ** 2) {
+    safeVector.setLength(safeMaxLength);
+  }
+  return { x: safeVector.x, y: safeVector.y, z: safeVector.z };
+}
+
+function createFiniteQuaternionSnapshot(
+  quaternion: THREE.Quaternion
+): { readonly x: number; readonly y: number; readonly z: number; readonly w: number } {
+  if (!isFiniteQuaternion(quaternion)) return { x: 0, y: 0, z: 0, w: 1 };
+
+  const safeQuaternion = quaternion.clone();
+  if (safeQuaternion.lengthSq() <= 0.000001) {
+    return { x: 0, y: 0, z: 0, w: 1 };
+  }
+  safeQuaternion.normalize();
+  return {
+    x: safeQuaternion.x,
+    y: safeQuaternion.y,
+    z: safeQuaternion.z,
+    w: safeQuaternion.w
+  };
+}
+
+function isFiniteVector(vector: THREE.Vector3): boolean {
+  return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
+}
+
+function isFiniteQuaternion(quaternion: THREE.Quaternion): boolean {
+  return Number.isFinite(quaternion.x) &&
+    Number.isFinite(quaternion.y) &&
+    Number.isFinite(quaternion.z) &&
+    Number.isFinite(quaternion.w);
+}
+
+function clampColliderHalfExtent(value: number): number {
+  return Math.min(
+    RIGID_DEBRIS_MAX_COLLIDER_HALF_EXTENT,
+    Math.max(RIGID_DEBRIS_MIN_COLLIDER_HALF_EXTENT, value)
+  );
 }
 
 function isRecordNearSupport(record: RigidDebrisBody, collisionWorld: CollisionWorld): boolean {

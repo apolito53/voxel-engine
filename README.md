@@ -122,6 +122,9 @@ to VFX before anything is removed.
 Normal pressure cleanup now removes settled debris first and protects awake
 airborne shards; if the last-resort airborne emergency path ever fires, the F3
 HUD and hitch logs expose it directly.
+Rigid debris registration is guarded before entering Rapier, and the F3 Debris
+HUD shows a `fault` count if the adapter has to detach shards back to cheap VFX
+motion after a Rapier-side failure.
 Rigid debris support scanning prioritizes sleeping, near-ground, falling, and
 fast shards so stress tests spend less CPU creating temporary colliders for
 calm unsupported airborne fragments, and overlapping debris shares support-cell

@@ -6955,6 +6955,56 @@ test("rigid debris adapter steps a falling cuboid onto terrain and lets it sleep
   assertEqual(rigidDebris.getStats().bodies, 0, "clearing rigid debris should remove dynamic bodies");
 });
 
+test("rigid debris adapter rejects non-finite fragments before Rapier registration", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const corruptFragment = PhysicsToy.createBlockFragment(
+    BLOCK.dirt,
+    new THREE.Vector3(Number.NaN, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+
+  rigidDebris.registerFragment(corruptFragment);
+  const stats = rigidDebris.update(1 / 60, { isSolid: () => false });
+
+  assert(corruptFragment.isExpired, "corrupt debris should leave through normal pruning instead of entering Rapier");
+  assertEqual(stats.bodies, 0, "invalid debris should not create a Rapier rigid body");
+  assertEqual(stats.rapierFailuresThisFrame, 0, "finite validation should prevent a Rapier-side fault");
+  rigidDebris.clear();
+});
+
+test("rigid debris adapter recovers to cheap debris motion after a physics adapter fault", async () => {
+  const rigidDebris = new RigidDebrisSimulation();
+  await rigidDebris.initialize();
+  const fragment = PhysicsToy.createBlockFragment(
+    BLOCK.stone,
+    new THREE.Vector3(0.5, 2.5, 0.5),
+    new THREE.Vector3(0, 0, 0),
+    1
+  );
+  const throwingWorld: CollisionWorld = {
+    isSolid(): boolean {
+      throw new Error("synthetic support failure");
+    }
+  };
+
+  const originalWarn = console.warn;
+  console.warn = () => undefined;
+  try {
+    rigidDebris.registerFragment(fragment);
+    const stats = rigidDebris.update(1 / 60, throwingWorld);
+
+    assert(!fragment.isExpired, "a rigid adapter fault should preserve visible debris instead of poofing it");
+    assert(!fragment.isRigidDebrisDriven, "recovered debris should detach from the failed Rapier world");
+    assertEqual(stats.bodies, 0, "recovery should clear the failed Rapier body registry");
+    assertEqual(stats.rapierFailuresThisFrame, 1, "recovery should surface a per-frame Rapier fault counter");
+  } finally {
+    console.warn = originalWarn;
+    rigidDebris.clear();
+  }
+});
+
 test("rigid debris adapter force-sleeps support-stable spinning shards", async () => {
   const rigidDebris = new RigidDebrisSimulation();
   await rigidDebris.initialize();

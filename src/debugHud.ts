@@ -266,7 +266,8 @@ export class DebugHud {
             label: "admit",
             value: `+${snapshot.rigidDebrisStats.admittedBodiesThisFrame} ` +
               `-${snapshot.rigidDebrisStats.deniedAdmissionThisFrame} ` +
-              `q ${snapshot.rigidDebrisStats.admissionQueueDepth}`
+              `q ${snapshot.rigidDebrisStats.admissionQueueDepth}, ` +
+              `fault ${snapshot.rigidDebrisStats.rapierFailuresThisFrame}`
           },
           { label: "render", value: `${snapshot.fragmentRenderStats.instances} inst, ${snapshot.fragmentRenderStats.batches} batches, cap ${snapshot.fragmentRenderStats.capacity}` },
           { label: "settle", value: `${snapshot.debrisSettlerStats.regions} rg, ${snapshot.debrisSettlerStats.activeFragments}/${snapshot.debrisSettlerStats.fragments} active` },
