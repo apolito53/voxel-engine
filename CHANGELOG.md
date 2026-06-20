@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.13.1 - 2026-06-20
+
+### Added
+
+- Added `Moss` and `Bush` block types with material rules, texture-atlas tiles,
+  tint variation, and placeable palette entries.
+- Added sparse dark bush clumps on floating-island crowns for denser overgrowth.
+
+### Changed
+
+- Refined `Floating Islands` generation toward broader plateaus with deeper
+  tapered stone undersides and more deliberate sky gaps between landmasses.
+- Darkened leaf block colors and generated leaf texture tiles so tree canopies
+  read as foliage instead of overbright grass.
+- Floating-island crowns now prefer moss as their common green surface, with
+  sand and exposed stone still appearing on climate bands and ragged rims.
+
+### Tests
+
+- Expanded terrain tests to require thick island bellies, thin ragged rims, and
+  moss surface material in floating-island worlds.
+- Added texture/material coverage for `Moss`, `Bush`, and darker leaf color.
+
 ## 0.13.0 - 2026-06-20
 
 ### Added

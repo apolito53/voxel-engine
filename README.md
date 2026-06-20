@@ -23,8 +23,9 @@ New saved-world seeds default to the newer varied terrain profile with broader
 plains, mountain-scale ridges, cliff-like slope breaks, sandy washes, terraced
 high ground, rocky highlands, and deterministic voxel trees on grassy gentle
 ground. `Floating Islands` worlds generate spawn-safe airborne landmasses with
-real void between island columns, material-aware island tops and undersides, and
-trees on broad grassy patches. Existing saved worlds without terrain-profile
+real void between island columns, broader playable plateaus, deeper tapered
+stone undersides, mossy crowns, dark bush clumps, and trees on broad island
+patches. Existing saved worlds without terrain-profile
 metadata stay on the legacy `classic` generator so full edited chunk snapshots
 do not border newly streamed terrain from a different profile. Legacy
 varied-world chunks and player resume locations are lifted when read so touched

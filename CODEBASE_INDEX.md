@@ -61,8 +61,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Builder brush sizing, centered brush cell collection, guarded block placement, and erase/place helpers used by the pause-menu Builder panel: `src/builderTools.ts`
 - Translucent block-color Builder placement ghost for the active build brush: `src/builderPreview.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
-- Block IDs, colors, material-specific terrain HP, generated `Rubble` block, Wood/Leaves tree blocks, and placeable palette: `src/blocks.ts`, `src/blockMaterialRules.ts`
-- Deterministic per-block tint buckets plus procedural texture-atlas tile and variant mapping used by worker and fallback meshing: `src/blockColors.ts`, `src/blockTextureTiles.ts`, `src/blockTextureAtlas.ts`
+- Block IDs, colors, material-specific terrain HP, generated `Rubble` block, Wood/Leaves tree blocks, Moss/Bush overgrowth blocks, and placeable palette: `src/blocks.ts`, `src/blockMaterialRules.ts`
+- Deterministic per-block tint buckets plus procedural texture-atlas tile and variant mapping used by worker and fallback meshing, including moss/bush/leaf foliage tiles: `src/blockColors.ts`, `src/blockTextureTiles.ts`, `src/blockTextureAtlas.ts`
 - Block fracture grid, oversampled visible-fragment sampling, slider-scaled terrain chip counts, normalized block-volume material, and per-shard mass/visual-axis caps: `src/blockFragments.ts`
 - Shared low-poly shard geometry catalog, deterministic material-aware debris shape selection, small non-uniform visual scale, conservative visual-volume estimates, per-piece volume-budget fitting, and cuboid physics envelope helpers: `src/debrisShapes.ts`
 - Stuck/trapped loose-debris cleanup heuristics for poofing tunnel clutter without reviving rubble conversion: `src/debrisCleanup.ts`
@@ -72,7 +72,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Parked orphan debris-to-rubble eligibility rules retained for isolated rubble/cover tests and future experiments: `src/fragmentRubble.ts`
 - Shared world scale, chunk dimensions, current 96m world height, legacy 48m height, and varied-terrain lift constants: `src/voxelConstants.ts`
 - IndexedDB storage adapter for saved worlds, saved terrain-profile provenance including explicit `floating-islands` world type selection, player resume location, save deletion, edited chunk persistence, legacy 48m chunk expansion, and legacy varied-world player-height migration: `src/chunkStorage.ts`
-- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, 96m-lifted varied new-world mountains/cliffs, floating-island void terrain, deterministic voxel tree decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
+- Seeded terrain generation shared by fallback and worker paths, including legacy `classic` terrain provenance, 96m-lifted varied new-world mountains/cliffs, floating-island void terrain with broad mossy plateaus and tapered stone undersides, deterministic voxel tree/bush decoration, and the reserved `superflat` test-world seed: `src/terrain.ts`
 - Chunk voxel storage, top-column cache, main-thread mesh fallback, worker mesh upload, and normal-cube render suppression for carved partial cells: `src/chunk.ts`
 - Shared chunk worker request/result message contracts, including terrain-profile generation provenance, per-face atlas UV/tile attributes, and partial-block render masks sent with mesh requests: `src/chunkProtocol.ts`
 - Worker-safe chunk terrain generation and greedy mesh buffer jobs, including terrain-profile-aware generation caches and partial-block render-mask reads so carved cells are not emitted as full cubes: `src/chunkJobs.ts`

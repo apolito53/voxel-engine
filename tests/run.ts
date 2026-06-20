@@ -1686,6 +1686,9 @@ test("floating-islands terrain creates spawn-safe islands with real void below",
   let solidCount = 0;
   let sampledVoidColumns = 0;
   let sampledSolidColumns = 0;
+  let maxSampledSolidCount = 0;
+  let minSampledSolidCount = WORLD_HEIGHT;
+  let sampledMossBlocks = 0;
 
   for (let y = 0; y <= spawnTop; y += 1) {
     if (at(spawnColumnX, y, spawnColumnZ) === BLOCK.air) continue;
@@ -1700,11 +1703,18 @@ test("floating-islands terrain creates spawn-safe islands with real void below",
         sampledChunk[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
       for (let z = 0; z < CHUNK_SIZE; z += 1) {
         for (let x = 0; x < CHUNK_SIZE; x += 1) {
-          let columnHasSolid = false;
+          let columnSolidCount = 0;
           for (let y = 0; y < WORLD_HEIGHT; y += 1) {
-            columnHasSolid ||= sampledAt(x, y, z) !== BLOCK.air;
+            const block = sampledAt(x, y, z);
+            if (block === BLOCK.air) continue;
+            columnSolidCount += 1;
+            if (block === BLOCK.moss) sampledMossBlocks += 1;
           }
-          if (columnHasSolid) sampledSolidColumns += 1;
+          if (columnSolidCount > 0) {
+            sampledSolidColumns += 1;
+            maxSampledSolidCount = Math.max(maxSampledSolidCount, columnSolidCount);
+            minSampledSolidCount = Math.min(minSampledSolidCount, columnSolidCount);
+          }
           else sampledVoidColumns += 1;
         }
       }
@@ -1718,6 +1728,9 @@ test("floating-islands terrain creates spawn-safe islands with real void below",
   assert(solidCount >= 3, "spawn island should have enough thickness to read as terrain");
   assert(sampledSolidColumns > 0, "floating-island worlds should generate actual land columns");
   assert(sampledVoidColumns > 0, "floating-island worlds should contain open void columns between landmasses");
+  assert(maxSampledSolidCount >= 18, "floating islands should include thick central bellies instead of only slabs");
+  assert(minSampledSolidCount <= 6, "floating islands should taper to thin ragged rims at their edges");
+  assert(sampledMossBlocks > 0, "floating-island crowns should use the darker moss surface material");
   assertEqual(at(spawnColumnX, spawnTop + 1, spawnColumnZ), BLOCK.air, "space above a floating island should stay open");
 });
 
@@ -2094,6 +2107,7 @@ test("block color variants are deterministic and stay tied to block identity", (
 test("block texture tile mapping keeps material faces distinct", () => {
   const grassKey = createBlockMeshKey(BLOCK.grass, 2, 5, 7);
   const woodKey = createBlockMeshKey(BLOCK.wood, 2, 5, 7);
+  const mossKey = createBlockMeshKey(BLOCK.moss, 2, 5, 7);
 
   assertEqual(
     getBlockTextureBaseTileId(grassKey, [0, 1, 0]),
@@ -2124,6 +2138,30 @@ test("block texture tile mapping keeps material faces distinct", () => {
     getBlockTextureBaseTileId(createBlockMeshKey(BLOCK.leaves, 0, 0, 0), [0, 1, 0]),
     BLOCK_TEXTURE_TILE.leaves,
     "leaves should keep their own noisy leaf tile"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(mossKey, [0, 1, 0]),
+    BLOCK_TEXTURE_TILE.mossTop,
+    "moss tops should use their darker overgrowth tile"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(mossKey, [0, -1, 0]),
+    BLOCK_TEXTURE_TILE.dirt,
+    "moss undersides should still expose dirt when carved from below"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(mossKey, [1, 0, 0]),
+    BLOCK_TEXTURE_TILE.mossSide,
+    "moss sides should use the moss-over-dirt edge tile"
+  );
+  assertEqual(
+    getBlockTextureBaseTileId(createBlockMeshKey(BLOCK.bush, 0, 0, 0), [0, 1, 0]),
+    BLOCK_TEXTURE_TILE.bush,
+    "bush voxels should use their own dark foliage tile"
+  );
+  assert(
+    BLOCKS[BLOCK.leaves].color[1] < BLOCKS[BLOCK.grass].color[1],
+    "leaf block color should stay darker than grass so trees do not wash out"
   );
 });
 
@@ -6191,6 +6229,28 @@ test("block material rules keep HP, mining cadence, and debris flavor keyed by b
       visualScaleMultiplier: 0.78,
       ejectionSpeedMultiplier: 0.82,
       upwardSpeedMultiplier: 0.9
+    },
+    {
+      block: BLOCK.bush,
+      health: 2,
+      cadence: "very-fast",
+      tickSeconds: 0.08,
+      flavor: "light-shredded",
+      shapeIds: ["flat-slab", "narrow-shard", "long-splinter"],
+      visualScaleMultiplier: 0.68,
+      ejectionSpeedMultiplier: 0.76,
+      upwardSpeedMultiplier: 0.82
+    },
+    {
+      block: BLOCK.moss,
+      health: 4,
+      cadence: "fast",
+      tickSeconds: 0.12,
+      flavor: "soft-low-spray",
+      shapeIds: ["flat-slab", "chunky-chip", "squat-block"],
+      visualScaleMultiplier: 0.74,
+      ejectionSpeedMultiplier: 0.62,
+      upwardSpeedMultiplier: 0.48
     },
     {
       block: BLOCK.sand,

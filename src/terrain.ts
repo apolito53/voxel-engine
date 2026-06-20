@@ -351,32 +351,38 @@ function generateFloatingIslandColumn(
 
 function getFloatingIslandColumn(wx: number, wz: number, terrain: TerrainContext): FloatingIslandColumn | null {
   const field = getFloatingIslandField(wx, wz, terrain);
-  const threshold = 0.52;
+  const threshold = 0.58;
   if (field.strength < threshold) return null;
 
-  // The mask strength drives both top relief and underside depth. Edges stay
-  // thin and ragged, while island centers grow enough stone belly to read as
-  // real landmass instead of single-layer platforms.
-  const centerStrength = smoothstep(threshold, 0.93, field.strength);
+  // The mask strength now behaves like an island cross-section: broad enough
+  // to create playable green plateaus, but steep enough near the rim that the
+  // underside tapers into dramatic stone points instead of slabby pancakes.
+  const centerStrength = smoothstep(threshold, 0.9, field.strength);
   const ridgeSource = signedFbm2(
     wx * 0.017 + terrain.ridgeOffsetX,
     wz * 0.017 + terrain.ridgeOffsetZ,
     4
   );
-  const ridge = Math.pow(1 - Math.abs(ridgeSource), 1.9);
+  const ridge = Math.pow(1 - Math.abs(ridgeSource), 2.2);
   const detail = signedFbm2(
     wx * 0.071 + terrain.detailOffsetX,
     wz * 0.071 + terrain.detailOffsetZ,
     3
   );
-  const baseTop = 48 +
+  const plateauLift = smoothstep(0.2, 0.82, centerStrength);
+  const baseTop = 56 +
     terrain.heightOffset +
-    field.heightNoise * 11 +
-    centerStrength * 11 +
-    ridge * centerStrength * 4 +
-    detail * 2;
-  const top = Math.floor(clamp(baseTop, 22, WORLD_HEIGHT - 9));
-  const thickness = Math.floor(clamp(3 + centerStrength * 13 + ridge * centerStrength * 4 - detail, 2, 20));
+    field.heightNoise * 8 +
+    plateauLift * 5 +
+    ridge * centerStrength * 3 +
+    detail * (1 + centerStrength);
+  const top = Math.floor(clamp(baseTop, 34, WORLD_HEIGHT - 10));
+  const undersideTaper = Math.pow(centerStrength, 1.65);
+  const thickness = Math.floor(clamp(
+    2 + undersideTaper * 36 + ridge * undersideTaper * 8 + Math.max(0, -detail) * 3,
+    2,
+    48
+  ));
   const bottom = Math.max(2, top - thickness);
 
   return { top, bottom, centerStrength };
@@ -388,23 +394,29 @@ function getFloatingIslandField(
   terrain: TerrainContext
 ): { readonly strength: number; readonly heightNoise: number } {
   const broad = normalizedFbm2(
-    wx * 0.006 + terrain.landformOffsetX,
-    wz * 0.006 + terrain.landformOffsetZ,
+    wx * 0.0035 + terrain.landformOffsetX,
+    wz * 0.0035 + terrain.landformOffsetZ,
     5
   );
   const blob = normalizedFbm2(
-    wx * 0.021 + terrain.islandOffsetX,
-    wz * 0.021 + terrain.islandOffsetZ,
+    wx * 0.0105 + terrain.islandOffsetX,
+    wz * 0.0105 + terrain.islandOffsetZ,
     4
   );
   const tornEdge = signedFbm2(
-    wx * 0.045 + terrain.washOffsetX,
-    wz * 0.045 + terrain.washOffsetZ,
+    wx * 0.033 + terrain.washOffsetX,
+    wz * 0.033 + terrain.washOffsetZ,
     3
   );
+  const skyGapSource = signedFbm2(
+    wx * 0.012 + terrain.terraceOffsetX,
+    wz * 0.012 + terrain.terraceOffsetZ,
+    3
+  );
+  const skyGap = (1 - smoothstep(0.035, 0.18, Math.abs(skyGapSource))) * 0.2;
   const distanceFromSpawn = Math.hypot(wx - 2, wz - 2);
-  const spawnIsland = 1 - smoothstep(16, 54, distanceFromSpawn);
-  const strength = clamp(broad * 0.48 + blob * 0.42 + tornEdge * 0.08 + spawnIsland * 0.72, 0, 1);
+  const spawnIsland = 1 - smoothstep(28, 76, distanceFromSpawn);
+  const strength = clamp(broad * 0.34 + blob * 0.48 + tornEdge * 0.08 + spawnIsland * 0.74 - skyGap, 0, 1);
   const heightNoise = signedFbm2(
     wx * 0.004 + terrain.continentOffsetX,
     wz * 0.004 + terrain.continentOffsetZ,
@@ -427,9 +439,9 @@ function getFloatingIslandSurfaceBlock(
     wz * 0.013 + terrain.climateOffsetZ,
     4
   );
-  if (island.centerStrength < 0.18 || height >= WORLD_HEIGHT - 18) return BLOCK.stone;
-  if (climate < 0.2) return BLOCK.sand;
-  return BLOCK.grass;
+  if (island.centerStrength < 0.24 || height >= WORLD_HEIGHT - 18) return BLOCK.stone;
+  if (climate < 0.16) return BLOCK.sand;
+  return BLOCK.moss;
 }
 
 function getFloatingIslandBlock(
@@ -441,7 +453,7 @@ function getFloatingIslandBlock(
   const depth = top - y;
   if (depth === 0) return surfaceBlock;
   if (surfaceBlock === BLOCK.sand && depth <= 2) return BLOCK.sand;
-  if (surfaceBlock === BLOCK.grass && depth <= 2) return BLOCK.dirt;
+  if ((surfaceBlock === BLOCK.grass || surfaceBlock === BLOCK.moss) && depth <= 2) return BLOCK.dirt;
   if (y <= bottom + 1) return BLOCK.stone;
   return depth <= 3 ? BLOCK.dirt : BLOCK.stone;
 }
@@ -534,11 +546,15 @@ function placeTreeInChunk(
 ): void {
   const surfaceY = getTerrainHeight(wx, wz, terrain);
   if (surfaceY < 7 || surfaceY > WORLD_HEIGHT - 10) return;
-  if (getTerrainSurfaceBlock(wx, wz, surfaceY, terrain) !== BLOCK.grass) return;
+  const surfaceBlock = getTerrainSurfaceBlock(wx, wz, surfaceY, terrain);
+  if (!isTreeRootSurfaceBlock(surfaceBlock, terrain)) return;
   if (!isTreeFriendlySlope(wx, wz, surfaceY, terrain)) return;
 
   const probability = getTreeProbability(wx, wz, surfaceY, terrain);
-  if (hashUnit(hash ^ 0xc2b2ae35) > probability) return;
+  if (hashUnit(hash ^ 0xc2b2ae35) > probability) {
+    placeFloatingIslandBushPatch(wx, wz, hash, cx, cz, blocks, terrain, surfaceY);
+    return;
+  }
 
   const trunkHeight = TREE_MIN_TRUNK_HEIGHT +
     Math.floor(hashUnit(hash ^ 0x27d4eb2f) * TREE_TRUNK_HEIGHT_VARIATION);
@@ -564,6 +580,48 @@ function placeTreeInChunk(
   }
 
   setDecoratedBlockIfInside(cx, cz, blocks, wx, trunkTopY + 2, wz, BLOCK.leaves);
+}
+
+function isTreeRootSurfaceBlock(block: BlockId, terrain: TerrainContext): boolean {
+  return block === BLOCK.grass || (terrain.profile === "floating-islands" && block === BLOCK.moss);
+}
+
+function placeFloatingIslandBushPatch(
+  wx: number,
+  wz: number,
+  hash: number,
+  cx: number,
+  cz: number,
+  blocks: Uint8Array,
+  terrain: TerrainContext,
+  surfaceY: number
+): void {
+  if (terrain.profile !== "floating-islands") return;
+
+  const grove = normalizedFbm2(
+    wx * 0.022 + terrain.treeOffsetX,
+    wz * 0.022 + terrain.treeOffsetZ,
+    4
+  );
+  const probability = smoothstep(0.38, 0.76, grove) * 0.52;
+  if (hashUnit(hash ^ 0x7f4a7c15) > probability) return;
+
+  // Bushes are still full gameplay voxels for this pass. Keep them sparse,
+  // low, and clustered on island crowns so they read as dark overgrowth
+  // without pretending we already have a non-solid plant/decal layer.
+  const radius = hashUnit(hash ^ 0x94d049bb) > 0.62 ? 1 : 0;
+  for (let dz = -radius; dz <= radius; dz += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      const distance = Math.abs(dx) + Math.abs(dz);
+      if (distance > radius + 1) continue;
+      const cellHash = hashWorldCell(hash ^ 0x6c8e9cf5, wx + dx, surfaceY + 1, wz + dz);
+      if (distance > radius && hashUnit(cellHash) < 0.45) continue;
+      setDecoratedBlockIfInside(cx, cz, blocks, wx + dx, surfaceY + 1, wz + dz, BLOCK.bush);
+      if (distance === 0 && hashUnit(cellHash ^ 0x27d4eb2d) > 0.78) {
+        setDecoratedBlockIfInside(cx, cz, blocks, wx + dx, surfaceY + 2, wz + dz, BLOCK.bush);
+      }
+    }
+  }
 }
 
 function isTreeFriendlySlope(wx: number, wz: number, surfaceY: number, terrain: TerrainContext): boolean {
@@ -598,7 +656,7 @@ function getTreeProbability(wx: number, wz: number, surfaceY: number, terrain: T
 
 function getTerrainFeatureHeight(height: number, terrain: TerrainContext): number {
   if (terrain.profile === "varied") return height - EXPANDED_TERRAIN_SURFACE_OFFSET;
-  if (terrain.profile === "floating-islands") return height - 24;
+  if (terrain.profile === "floating-islands") return height - 42;
   return height;
 }
 

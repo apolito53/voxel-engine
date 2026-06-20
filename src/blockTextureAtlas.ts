@@ -99,6 +99,9 @@ export function createBlockTextureAtlas(): THREE.CanvasTexture {
   paintTileVariants(ctx, BLOCK_TEXTURE_TILE.woodSide, drawWoodSide);
   paintTileVariants(ctx, BLOCK_TEXTURE_TILE.woodTop, drawWoodTop);
   paintTileVariants(ctx, BLOCK_TEXTURE_TILE.leaves, drawLeaves);
+  paintTileVariants(ctx, BLOCK_TEXTURE_TILE.mossTop, drawMossTop);
+  paintTileVariants(ctx, BLOCK_TEXTURE_TILE.mossSide, drawMossSide);
+  paintTileVariants(ctx, BLOCK_TEXTURE_TILE.bush, drawBush);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -193,9 +196,30 @@ function drawWoodTop(ctx: CanvasRenderingContext2D, variant: number): void {
 }
 
 function drawLeaves(ctx: CanvasRenderingContext2D, variant: number): void {
-  fill(ctx, "#f2fff0");
-  drawSpeckles(ctx, 0x91c1 + variant * 0x101, 36 + variant * 3, "rgba(30, 96, 35, 0.27)", 1, 3);
-  drawShortStrokes(ctx, 0x91c2 + variant * 0x103, 20 + variant * 2, "rgba(25, 74, 32, 0.23)", 1, 2);
+  fill(ctx, "#a8c492");
+  drawSpeckles(ctx, 0x91c1 + variant * 0x101, 42 + variant * 3, "rgba(14, 51, 22, 0.38)", 1, 3);
+  drawShortStrokes(ctx, 0x91c2 + variant * 0x103, 24 + variant * 2, "rgba(10, 40, 18, 0.34)", 1, 2);
+}
+
+function drawMossTop(ctx: CanvasRenderingContext2D, variant: number): void {
+  fill(ctx, "#b2d18d");
+  drawSpeckles(ctx, 0xa1d1 + variant * 0x101, 46 + variant * 3, "rgba(18, 76, 23, 0.36)", 1, 2);
+  drawShortStrokes(ctx, 0xa1d2 + variant * 0x103, 22 + variant * 2, "rgba(13, 62, 20, 0.28)", 1, 3);
+}
+
+function drawMossSide(ctx: CanvasRenderingContext2D, variant: number): void {
+  fill(ctx, "#9eb47f");
+  fillRect(ctx, 0, 8 + (variant % 2), 16, 8, "rgba(55, 39, 24, 0.34)");
+  drawVerticalStrokes(ctx, 0xa2e1 + variant * 0x101, 18 + variant * 2, "rgba(15, 70, 22, 0.36)", 2, 11);
+  drawSpeckles(ctx, 0xa2e2 + variant * 0x103, 14 + variant, "rgba(38, 28, 17, 0.22)", 1, 1);
+}
+
+function drawBush(ctx: CanvasRenderingContext2D, variant: number): void {
+  fill(ctx, "#8aaa79");
+  drawSpeckles(ctx, 0xb1f1 + variant * 0x101, 52 + variant * 3, "rgba(8, 43, 17, 0.42)", 1, 3);
+  drawShortStrokes(ctx, 0xb1f2 + variant * 0x103, 28 + variant * 2, "rgba(5, 34, 15, 0.36)", 1, 2);
+  drawChunk(ctx, 2 + (variant % 2), 5, 5, 4, "rgba(17, 70, 22, 0.22)");
+  drawChunk(ctx, 9, 2 + (variant % 2), 4, 5, "rgba(15, 58, 20, 0.24)");
 }
 
 function fill(ctx: CanvasRenderingContext2D, color: string): void {
