@@ -166,6 +166,7 @@ import {
   type ItemUseButton
 } from "./items";
 import { SUN_OFFSET } from "./lighting";
+import { LocalLightRenderer } from "./localLightRenderer";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
 import { NovaChatPanel } from "./novaChatPanel";
@@ -489,6 +490,7 @@ const physicsBudgetSlider = requireElement<HTMLInputElement>("#physics-budget-sl
 const despawnObjectsButton = requireElement<HTMLButtonElement>("#despawn-objects-button");
 const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-slider");
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
+const debrisShadowsToggle = requireElement<HTMLInputElement>("#debris-shadows-toggle");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
 const terraformerSizeSlider = requireElement<HTMLInputElement>("#terraformer-size-slider");
@@ -578,6 +580,7 @@ scene.add(skyLight);
 
 const skybox = createSkybox(SUN_OFFSET);
 scene.add(skybox.object);
+const localLightRenderer = new LocalLightRenderer(scene);
 
 const worldMaterial = createWorldBlockMaterial();
 const partialBlockMaterial = createWorldBlockMaterial({ side: THREE.DoubleSide });
@@ -934,11 +937,13 @@ qualityController = new QualityController({
     debugHud.reset();
     minimapRenderer.reset();
     if (source === "preset") syncPhysicsBudgetToQuality();
+    physicsFragmentInstancer.setDebrisShadowsEnabled(qualityController.preset.debrisShadows);
     updateSettingsControls();
     emitQualityChanged(source);
   }
 });
 qualityController.initialize();
+physicsFragmentInstancer.setDebrisShadowsEnabled(qualityController.preset.debrisShadows);
 updateSettingsControls();
 updatePhysicsBudgetControls();
 updateTerraformerControls();
@@ -1157,6 +1162,9 @@ function wireMenuControls(): void {
   despawnObjectsButton.addEventListener("click", clearToys, eventListenerOptions);
   shadowQualitySlider.addEventListener("input", () => {
     qualityController.setShadowQualityLevel(shadowQualitySlider.value);
+  }, eventListenerOptions);
+  debrisShadowsToggle.addEventListener("change", () => {
+    qualityController.setDebrisShadowsEnabled(debrisShadowsToggle.checked);
   }, eventListenerOptions);
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
@@ -2307,6 +2315,14 @@ function animate(): void {
       debugPlayerChunk.cz,
       qualityController.chunkRenderRadius
     );
+    localLightRenderer.update(
+      activeWorld.getLocalLightSources(
+        camera.position,
+        qualityController.preset.localLightRadiusMeters,
+        qualityController.preset.localLightBudget
+      ),
+      qualityController.preset
+    );
     debugPartialMeshStats = partialBlockMeshField.getStats();
     recordTimingSection("meshMs");
     debugRubbleStats = rubbleField.getStats();
@@ -2324,6 +2340,7 @@ function animate(): void {
     recordTimingSection("minimapMs");
   } else {
     targetBlockHighlighter.hide();
+    localLightRenderer.hide();
     builderBrushPreview.hide();
     coreAimPreview.hide();
     damageIndicators.clear();
@@ -4385,6 +4402,7 @@ function updateSettingsControls(): void {
   shadowQualitySlider.step = "1";
   shadowQualitySlider.value = String(getShadowQualityLevel(preset.shadows ? preset.shadowMapSize : 0));
   shadowQualityValue.textContent = formatShadowQuality(preset.shadows ? preset.shadowMapSize : 0);
+  debrisShadowsToggle.checked = preset.debrisShadows;
 
   debrisCountSlider.min = String(BLOCK_FRAGMENT_MIN_COUNT);
   debrisCountSlider.max = String(BLOCK_FRAGMENT_MAX_COUNT);
@@ -5220,6 +5238,7 @@ function disposeRuntime(): void {
   clearPendingPartialBlockMeshJobs();
   partialBlockMeshField.dispose();
   workerPool.dispose();
+  localLightRenderer.dispose();
   skybox.dispose();
   disposeWorldBlockMaterial(worldMaterial);
   disposeWorldBlockMaterial(partialBlockMaterial);

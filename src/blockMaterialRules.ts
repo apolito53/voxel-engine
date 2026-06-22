@@ -83,6 +83,13 @@ export const BLOCK_MATERIAL_RULES: Readonly<Record<BlockId, BlockMaterialRule>> 
     ejectionSpeedMultiplier: 0.76,
     upwardSpeedMultiplier: 0.82
   }),
+  [BLOCK.lamp]: createBlockMaterialRule(BLOCK.lamp, 6, "quick", {
+    flavor: "sharp-hot-ejection",
+    preferredShapeIds: ["chunky-chip", "flat-slab", "corner-chunk"],
+    visualScaleMultiplier: 0.82,
+    ejectionSpeedMultiplier: 1.05,
+    upwardSpeedMultiplier: 0.86
+  }),
   [BLOCK.moss]: createBlockMaterialRule(BLOCK.moss, 4, "fast", {
     flavor: "soft-low-spray",
     preferredShapeIds: ["flat-slab", "chunky-chip", "squat-block"],

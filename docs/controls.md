@@ -82,6 +82,9 @@ the root README.
 - In the `Blocks` lane, `Left click` erases the targeted block brush and `Right
   click` places the selected block brush into adjacent space. Full-auto mode
   repeats held erase/place actions.
+- `Lamp` blocks are placeable from the Blocks lane and emit a local point light
+  while their chunk is loaded. Nearby lamps are budgeted by quality so lit builds
+  remain useful without making every distant bulb expensive forever.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
@@ -128,6 +131,7 @@ Pause menu `Settings` is split into three tabs.
 - Quality preset
 - Fog start distance
 - Shadow quality
+- Debris Shadows toggle for loose-fragment shadow casting
 
 `Gameplay` owns:
 
@@ -170,18 +174,20 @@ terrain.
 ## Quality Presets
 
 - `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
-  shards/block, 8m active debris bubble, short fog horizon.
+  shards/block, 8m active debris bubble, 2 local lamps, short fog horizon.
 - `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris
-  shards/block, 12m active debris bubble, short fog horizon.
+  shards/block, 12m active debris bubble, 4 local lamps, short fog horizon.
 - `Normal`: 2x clear distance, shadows, 192 physics bodies, 108 max debris
-  shards/block, 20m active debris bubble, medium fog horizon.
-- `High`: 4x clear distance, sharper local shadows, 512 physics bodies, 144 max
-  debris shards/block, 32m active debris bubble, extended fog horizon.
-- `Ultra`: 6x clear distance, sharper local shadows, 1024 physics bodies, 180
-  max debris shards/block, 48m active debris bubble, broad fog horizon.
-- `Super Ultra`: 12x clear distance, highest local shadow resolution, 4096
-  physics bodies, 216 max debris shards/block, 72m active debris bubble. This is
-  a stress-test mode and requires an opt-in from the pause menu once `Ultra` is
-  selected.
+  shards/block, 20m active debris bubble, 8 local lamps, medium fog horizon.
+- `High`: 4x clear distance, sharper shadows, debris shadows, 512 physics
+  bodies, 144 max debris shards/block, 32m active debris bubble, 12 local lamps,
+  extended fog horizon.
+- `Ultra`: 6x clear distance, sharper shadows, debris shadows, 1024 physics
+  bodies, 180 max debris shards/block, 48m active debris bubble, 16 local lamps,
+  broad fog horizon.
+- `Super Ultra`: 12x clear distance, highest shadow resolution, debris shadows,
+  4096 physics bodies, 216 max debris shards/block, 72m active debris bubble, 24
+  local lamps. This is a stress-test mode and requires an opt-in from the pause
+  menu once `Ultra` is selected.
 - `Custom`: created automatically when settings sliders are changed, using the
   selected built-in preset as its baseline.

@@ -25,6 +25,12 @@ import type {
   CollisionWorld,
   ProjectileBlockSweepHit
 } from "./collision";
+import {
+  isLocalLightBlock,
+  selectNearestLocalLightSources,
+  type LocalLightSelection,
+  type LocalLightSource
+} from "./localLights";
 import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
@@ -980,6 +986,8 @@ export class VoxelWorld implements CollisionWorld {
   private readonly urgentPartialBlockRegionKeys: Set<string>;
   private readonly partialBlockRegionRevisions: Map<string, number>;
   private readonly partialBlockMaskCache: Map<string, PartialBlockMaskCacheEntry>;
+  private readonly localLightBlockKeys: Set<string>;
+  private readonly localLightBlockKeysByChunk: Map<string, Set<string>>;
   private partialBlockGeometryRevision: number;
 
   constructor({ storage = createNullChunkStorage(), seed = "", terrainProfile, workerPool = null }: WorldOptions = {}) {
@@ -1037,6 +1045,8 @@ export class VoxelWorld implements CollisionWorld {
     this.urgentPartialBlockRegionKeys = new Set();
     this.partialBlockRegionRevisions = new Map();
     this.partialBlockMaskCache = new Map();
+    this.localLightBlockKeys = new Set();
+    this.localLightBlockKeysByChunk = new Map();
     this.partialBlockGeometryRevision = 0;
   }
 
@@ -1114,6 +1124,8 @@ export class VoxelWorld implements CollisionWorld {
     this.savedChunkResults.length = 0;
     this.blockDamage.clear();
     this.clearPartialBlockState();
+    this.localLightBlockKeys.clear();
+    this.localLightBlockKeysByChunk.clear();
     this.dirtyChunkKeys.clear();
     this.modifiedChunkKeys.clear();
   }
@@ -1165,6 +1177,7 @@ export class VoxelWorld implements CollisionWorld {
     chunk.refreshTopColumns();
     this.markChunkDirty(chunk);
     chunk.revision = 0;
+    this.reindexChunkLocalLights(chunk);
   }
 
   addGeneratedChunk(cx: number, cz: number, blocks: Uint8Array, modified = false): Chunk {
@@ -1614,6 +1627,7 @@ export class VoxelWorld implements CollisionWorld {
     this.modifiedChunkKeys.delete(this.key(chunk.cx, chunk.cz));
     chunk.revision = 0;
     chunk.refreshTopColumns();
+    this.reindexChunkLocalLights(chunk);
   }
 
   toChunkCoords(x: number, z: number): ChunkCoords {
@@ -1630,6 +1644,15 @@ export class VoxelWorld implements CollisionWorld {
     return this.getChunk(cx, cz)?.getLocal(lx, Math.floor(y), lz) ?? BLOCK.air;
   }
 
+  getLocalLightSources(
+    origin: Pick<THREE.Vector3, "x" | "y" | "z">,
+    radiusMeters: number,
+    maxSources: number
+  ): readonly LocalLightSelection[] {
+    const sources = this.iterLocalLightSources();
+    return selectNearestLocalLightSources(sources, origin, radiusMeters, maxSources);
+  }
+
   setBlock(x: number, y: number, z: number, block: number): void {
     if (y < 0 || y >= WORLD_HEIGHT) return;
     const blockX = Math.floor(x);
@@ -1638,11 +1661,13 @@ export class VoxelWorld implements CollisionWorld {
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     const key = this.key(cx, cz);
     const chunk = this.ensureChunk(cx, cz);
+    const previousBlock = chunk.getLocal(lx, blockY, lz);
     if (!chunk.setLocal(lx, blockY, lz, block)) {
       if (block === BLOCK.air) this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
       this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
       return;
     }
+    this.updateLocalLightBlockAt(key, blockX, blockY, blockZ, previousBlock, block);
     this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
     this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
     chunk.modified = true;
@@ -1654,6 +1679,77 @@ export class VoxelWorld implements CollisionWorld {
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
     if (lz === 0) this.markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+  }
+
+  private *iterLocalLightSources(): Iterable<LocalLightSource> {
+    for (const key of this.localLightBlockKeys) {
+      const position = parseBlockKey(key);
+      if (!position) continue;
+      const block = this.getBlock(position.x, position.y, position.z);
+      if (!isLocalLightBlock(block)) continue;
+      yield { ...position, block };
+    }
+  }
+
+  private reindexChunkLocalLights(chunk: Chunk): void {
+    const chunkKey = this.key(chunk.cx, chunk.cz);
+    this.removeChunkLocalLights(chunkKey);
+
+    const chunkLightKeys = new Set<string>();
+    const baseX = chunk.cx * CHUNK_SIZE;
+    const baseZ = chunk.cz * CHUNK_SIZE;
+    for (let y = 0; y < WORLD_HEIGHT; y += 1) {
+      for (let z = 0; z < CHUNK_SIZE; z += 1) {
+        for (let x = 0; x < CHUNK_SIZE; x += 1) {
+          const block = chunk.getLocal(x, y, z);
+          if (!isLocalLightBlock(block)) continue;
+          const lightKey = this.damageKey(baseX + x, y, baseZ + z);
+          this.localLightBlockKeys.add(lightKey);
+          chunkLightKeys.add(lightKey);
+        }
+      }
+    }
+
+    if (chunkLightKeys.size > 0) {
+      this.localLightBlockKeysByChunk.set(chunkKey, chunkLightKeys);
+    }
+  }
+
+  private updateLocalLightBlockAt(
+    chunkKey: string,
+    x: number,
+    y: number,
+    z: number,
+    previousBlock: number,
+    nextBlock: number
+  ): void {
+    if (!isLocalLightBlock(previousBlock) && !isLocalLightBlock(nextBlock)) return;
+
+    const lightKey = this.damageKey(x, y, z);
+    const chunkLightKeys = this.localLightBlockKeysByChunk.get(chunkKey) ?? new Set<string>();
+    if (isLocalLightBlock(nextBlock)) {
+      this.localLightBlockKeys.add(lightKey);
+      chunkLightKeys.add(lightKey);
+      this.localLightBlockKeysByChunk.set(chunkKey, chunkLightKeys);
+      return;
+    }
+
+    this.localLightBlockKeys.delete(lightKey);
+    chunkLightKeys.delete(lightKey);
+    if (chunkLightKeys.size > 0) {
+      this.localLightBlockKeysByChunk.set(chunkKey, chunkLightKeys);
+    } else {
+      this.localLightBlockKeysByChunk.delete(chunkKey);
+    }
+  }
+
+  private removeChunkLocalLights(chunkKey: string): void {
+    const chunkLightKeys = this.localLightBlockKeysByChunk.get(chunkKey);
+    if (!chunkLightKeys) return;
+    for (const lightKey of chunkLightKeys) {
+      this.localLightBlockKeys.delete(lightKey);
+    }
+    this.localLightBlockKeysByChunk.delete(chunkKey);
   }
 
   damageBlock(x: number, y: number, z: number, amount = 1): BlockDamageResult | null {
@@ -3007,6 +3103,7 @@ export class VoxelWorld implements CollisionWorld {
       chunk.disposeMesh(scene);
       this.chunks.delete(key);
       this.fogHiddenChunkKeys.delete(key);
+      this.removeChunkLocalLights(key);
       this.chunkLoadQueue.delete(key);
       this.dirtyChunkKeys.delete(key);
       this.modifiedChunkKeys.delete(key);
@@ -3759,6 +3856,15 @@ export class VoxelWorld implements CollisionWorld {
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     return this.getChunk(cx, cz)?.getTopLocal(lx, lz) ?? { block: BLOCK.air, y: 0 };
   }
+}
+
+function parseBlockKey(key: string): { readonly x: number; readonly y: number; readonly z: number } | null {
+  const [xText, yText, zText] = key.split(",");
+  const x = Number(xText);
+  const y = Number(yText);
+  const z = Number(zText);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+  return { x, y, z };
 }
 
 function getChunkRadiusOffsets(radius: number): readonly ChunkRadiusOffset[] {

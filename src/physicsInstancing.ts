@@ -29,6 +29,7 @@ export class PhysicsFragmentInstancer {
   private readonly instanceMatrix = new THREE.Matrix4();
   private readonly instanceScale = new THREE.Vector3(1, 1, 1);
   private stats: PhysicsFragmentRenderStats = EMPTY_FRAGMENT_RENDER_STATS;
+  private debrisShadowsEnabled = false;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -36,6 +37,13 @@ export class PhysicsFragmentInstancer {
 
   getStats(): PhysicsFragmentRenderStats {
     return this.stats;
+  }
+
+  setDebrisShadowsEnabled(enabled: boolean): void {
+    this.debrisShadowsEnabled = enabled;
+    for (const batch of this.batchesByKey.values()) {
+      batch.mesh.castShadow = enabled;
+    }
   }
 
   update(toys: readonly PhysicsToy[]): void {
@@ -146,7 +154,7 @@ export class PhysicsFragmentInstancer {
     // Fragment positions move every frame, and Three's computed instanced
     // bounds are not worth chasing for thousands of tiny transient shards.
     mesh.frustumCulled = false;
-    mesh.castShadow = false;
+    mesh.castShadow = this.debrisShadowsEnabled;
     mesh.receiveShadow = true;
     mesh.visible = false;
     mesh.count = 0;

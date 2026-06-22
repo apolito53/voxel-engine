@@ -17,10 +17,11 @@ export const BLOCK_TEXTURE_TILE = {
   leaves: 9,
   mossTop: 10,
   mossSide: 11,
-  bush: 12
+  bush: 12,
+  lamp: 13
 } as const;
 
-export const BLOCK_TEXTURE_BASE_TILE_COUNT = 13;
+export const BLOCK_TEXTURE_BASE_TILE_COUNT = 14;
 export const BLOCK_TEXTURE_TILE_COUNT = BLOCK_TEXTURE_BASE_TILE_COUNT * BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE;
 export const BLOCK_TEXTURE_ATLAS_COLUMNS = BLOCK_TEXTURE_TILE_COUNT;
 export const BLOCK_TEXTURE_ATLAS_ROWS = 1;
@@ -58,6 +59,7 @@ export function getBlockTextureBaseTileId(meshKey: number, normal: FaceNormal): 
     return BLOCK_TEXTURE_TILE.mossSide;
   }
   if (block === BLOCK.bush) return BLOCK_TEXTURE_TILE.bush;
+  if (block === BLOCK.lamp) return BLOCK_TEXTURE_TILE.lamp;
   if (block === BLOCK.dirt) return BLOCK_TEXTURE_TILE.dirt;
   if (block === BLOCK.stone) return BLOCK_TEXTURE_TILE.stone;
   if (block === BLOCK.sand) return BLOCK_TEXTURE_TILE.sand;

@@ -128,6 +128,10 @@ export class QualityController {
     return this.settings.shadowMapSize;
   }
 
+  get debrisShadowsEnabled(): boolean {
+    return this.settings.debrisShadows;
+  }
+
   initialize(): void {
     this.syncQualitySelect();
     this.syncSuperUltraToggle();
@@ -190,6 +194,13 @@ export class QualityController {
     this.updateSettings({
       ...this.settings,
       blockFragmentCount: Number(fragmentCount)
+    }, false);
+  }
+
+  setDebrisShadowsEnabled(enabled: boolean): void {
+    this.updateSettings({
+      ...this.settings,
+      debrisShadows: enabled
     }, false);
   }
 
@@ -333,7 +344,8 @@ export class QualityController {
       fogNear,
       fogFar,
       cameraFar,
-      blockFragmentCount: this.settings.blockFragmentCount
+      blockFragmentCount: this.settings.blockFragmentCount,
+      debrisShadows: this.settings.debrisShadows
     };
   }
 

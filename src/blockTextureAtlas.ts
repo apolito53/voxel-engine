@@ -102,6 +102,7 @@ export function createBlockTextureAtlas(): THREE.CanvasTexture {
   paintTileVariants(ctx, BLOCK_TEXTURE_TILE.mossTop, drawMossTop);
   paintTileVariants(ctx, BLOCK_TEXTURE_TILE.mossSide, drawMossSide);
   paintTileVariants(ctx, BLOCK_TEXTURE_TILE.bush, drawBush);
+  paintTileVariants(ctx, BLOCK_TEXTURE_TILE.lamp, drawLamp);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -220,6 +221,16 @@ function drawBush(ctx: CanvasRenderingContext2D, variant: number): void {
   drawShortStrokes(ctx, 0xb1f2 + variant * 0x103, 28 + variant * 2, "rgba(5, 34, 15, 0.36)", 1, 2);
   drawChunk(ctx, 2 + (variant % 2), 5, 5, 4, "rgba(17, 70, 22, 0.22)");
   drawChunk(ctx, 9, 2 + (variant % 2), 4, 5, "rgba(15, 58, 20, 0.24)");
+}
+
+function drawLamp(ctx: CanvasRenderingContext2D, variant: number): void {
+  fill(ctx, "#ffe08a");
+  fillRect(ctx, 0, 0, 16, 16, "rgba(92, 46, 16, 0.12)");
+  fillRect(ctx, 2, 2, 12, 12, "rgba(255, 212, 92, 0.78)");
+  fillRect(ctx, 5 + (variant % 2), 3, 3, 10, "rgba(255, 246, 176, 0.58)");
+  fillRect(ctx, 10, 4 + (variant % 2), 2, 8, "rgba(255, 180, 54, 0.32)");
+  strokePath(ctx, "rgba(96, 48, 18, 0.42)", [[1, 1], [14, 1], [14, 14], [1, 14], [1, 1]]);
+  drawSpeckles(ctx, 0xc1a1 + variant * 0x101, 10 + variant, "rgba(110, 55, 20, 0.18)", 1, 1);
 }
 
 function fill(ctx: CanvasRenderingContext2D, color: string): void {

@@ -108,7 +108,14 @@ unloading, and fog-hidden render visibility use a radial chunk footprint with a
 small chunk-boundary safety margin, matching the circular fog curtain instead of
 revealing square terrain corners at the horizon. Hidden-horizon chunks remain
 loaded for continuity, but stop drawing after the opaque fog curtain plus a
-safety ring to reduce far-distance draw pressure.
+safety ring to reduce far-distance draw pressure. Placeable Lamp blocks use a
+bounded local point-light pool selected nearest-first around the player; higher
+quality presets allow more local lights and a small number of local light
+shadows. `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
+but it stays off on lower presets because debris storms are already spicy.
+Directional shadow bias and baked underside face shading are tuned together so
+solid overhangs read darker instead of looking like sunlight leaks upward
+through terrain.
 Thrown Physics Cores have a hard lifetime and fade out once they stay below
 useful terrain-damage speed, so spent shots do not linger forever during stress
 tests.

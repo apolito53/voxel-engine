@@ -18,7 +18,8 @@ export const BLOCK = {
   wood: 7,
   leaves: 8,
   moss: 9,
-  bush: 10
+  bush: 10,
+  lamp: 11
 } as const;
 
 export type BlockId = (typeof BLOCK)[keyof typeof BLOCK];
@@ -37,7 +38,8 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   [BLOCK.wood]: { name: "Wood", solid: true, color: [0.36, 0.22, 0.12], health: 12 },
   [BLOCK.leaves]: { name: "Leaves", solid: true, color: [0.08, 0.31, 0.12], health: 3 },
   [BLOCK.moss]: { name: "Moss", solid: true, color: [0.12, 0.42, 0.16], health: 4 },
-  [BLOCK.bush]: { name: "Bush", solid: true, color: [0.06, 0.25, 0.10], health: 2 }
+  [BLOCK.bush]: { name: "Bush", solid: true, color: [0.06, 0.25, 0.10], health: 2 },
+  [BLOCK.lamp]: { name: "Lamp", solid: true, color: [1, 0.68, 0.22], health: 6 }
 };
 
 export const PLACEABLE_BLOCKS: readonly BlockId[] = [
@@ -49,5 +51,6 @@ export const PLACEABLE_BLOCKS: readonly BlockId[] = [
   BLOCK.wood,
   BLOCK.leaves,
   BLOCK.moss,
-  BLOCK.bush
+  BLOCK.bush,
+  BLOCK.lamp
 ];

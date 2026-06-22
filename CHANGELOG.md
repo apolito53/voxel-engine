@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## 0.14.0 - 2026-06-22
+
+### Added
+
+- Added placeable `Lamp` blocks with material rules, texture-atlas coverage,
+  block-loadout support, and a bounded local-light registry rebuilt from loaded
+  chunks and edited blocks.
+- Added renderer-owned pooled Three.js point lights for nearby lamps, with
+  per-quality light budgets, light radii, and separate shadow-casting caps so
+  local lights can be tested without quietly melting the GPU.
+- Added a `Settings > Graphics > Debris Shadows` toggle. High, Ultra, and Super
+  Ultra enable it by default, while lower settings keep loose-fragment shadows
+  off for sanity.
+
+### Fixed
+
+- Reduced directional-light normal bias and darkened baked underside face
+  shading so overhangs and block bottoms stop reading like sunlight is leaking
+  through solid terrain.
+- Wired instanced debris batches to the debris-shadow setting so loose shards
+  can cast shadows when the active quality/profile allows it.
+
+### Tests
+
+- Added coverage for lamp light registration/selection, lamp texture mapping,
+  per-quality local-light budgets, debris-shadow persistence, and darker
+  underside face shading.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `git diff --check`
+- Browser smoke at `http://127.0.0.1:5173/?lightSmoke=1779050000000`:
+  loaded `Superflat Lab`, confirmed the hotbar and Debris Shadows setting were
+  present, and checked for fresh browser errors.
+
 ## 0.13.1 - 2026-06-20
 
 ### Added

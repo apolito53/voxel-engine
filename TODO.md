@@ -8,9 +8,9 @@ promoted work, not every fun idea that crosses the room.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:
-  1. Individual light sources
-  2. Equipment and items
-  3. Sound polish/content pass
+  1. Equipment and items
+  2. Sound polish/content pass
+  3. Individual light-source follow-up polish
 - Treat rigid debris, worker scheduling, and partial terrain collision as
   maintenance/watchlist areas for now. They should not steal the whole roadmap
   unless a bug makes them unavoidable.
@@ -51,17 +51,16 @@ promoted work, not every fun idea that crosses the room.
 
 ## High Priority: Individual Light Sources
 
+- First slice shipped in `v0.14.0`: placeable `Lamp` blocks register as
+  bounded local Three.js point lights, rebuild from loaded/edited chunks, use
+  per-quality light and local-shadow budgets, and coexist with the cheaper baked
+  sun/face-shading baseline.
 - Goal: support individual local light sources so the world can have torches,
   lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
   depends on local darkness or illumination instead of only sun/sky lighting.
-- First slice should be deliberately small: add a bounded light-source registry,
-  one placeable/test light block or admin-spawned lamp, persistence for placed
-  light metadata, and a strict per-quality cap so local lights cannot silently
-  murder frame time.
-- Start with renderer-owned local lights and emissive visuals before attempting
-  full voxel light propagation. Three.js `PointLight`/`SpotLight` behavior,
-  shadow settings, culling, pooling, and quality budgets need to be proven in
-  normal play first.
+- Next slice should polish authored light identity: torch/lamp variants,
+  brighter emissive-looking block faces, optional tool/Nova/projectile glows,
+  and a simple test fixture for walking around several lights in Superflat Lab.
 - Keep baked sun/face shading and individual runtime lights conceptually
   separate. Existing `voxelLighting.ts` face shading can remain the cheap
   ambient/sun baseline while individual lights become an additive local layer.

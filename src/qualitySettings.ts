@@ -21,13 +21,15 @@ export type QualitySettings = {
   readonly loadRadius: number;
   readonly shadowMapSize: number;
   readonly blockFragmentCount: number;
+  readonly debrisShadows: boolean;
 };
 
 export function createDefaultQualitySettings(preset: QualityPreset): QualitySettings {
   return {
     loadRadius: normalizeRenderDistance(preset.fogStartRadius),
     shadowMapSize: normalizeShadowMapSize(preset.shadows ? preset.shadowMapSize : 0),
-    blockFragmentCount: normalizeBlockFragmentCountSetting(preset.blockFragmentCount)
+    blockFragmentCount: normalizeBlockFragmentCountSetting(preset.blockFragmentCount),
+    debrisShadows: preset.debrisShadows
   };
 }
 
@@ -71,7 +73,8 @@ export function normalizeQualitySettings(
     shadowMapSize: normalizeShadowMapSize(settings.shadowMapSize, fallback.shadowMapSize),
     blockFragmentCount: normalizeBlockFragmentCountSetting(
       settings.blockFragmentCount ?? fallback.blockFragmentCount
-    )
+    ),
+    debrisShadows: normalizeBooleanSetting(settings.debrisShadows, fallback.debrisShadows)
   };
 }
 
@@ -141,6 +144,15 @@ function normalizeBlockFragmentCountSetting(fragmentCount: unknown): number {
     BLOCK_FRAGMENT_MIN_COUNT,
     Math.min(BLOCK_FRAGMENT_MAX_COUNT, normalizeBlockFragmentCount(Number(fragmentCount)))
   );
+}
+
+function normalizeBooleanSetting(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value === "true") return true;
+    if (value === "false") return false;
+  }
+  return fallback;
 }
 
 function clampRenderDistance(value: number): number {

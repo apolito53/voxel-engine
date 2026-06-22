@@ -15,7 +15,7 @@ const SUN_DIRECTION_Z = SUN_HORIZONTAL_Z / SUN_LENGTH;
 const FACE_AMBIENT_SHADE = 0.58;
 const FACE_DIRECT_SHADE = 0.34;
 const FACE_SKY_FILL_SHADE = 0.2;
-const FACE_UNDERSIDE_OCCLUSION = 0.13;
+const FACE_UNDERSIDE_OCCLUSION = 0.24;
 
 export function getSunlitFaceShade(normal: FaceNormal): number {
   const sunDot = Math.max(
@@ -27,8 +27,9 @@ export function getSunlitFaceShade(normal: FaceNormal): number {
 
   // Vertex colors still carry a cheap voxel-art readability pass, but now the
   // bright side follows the real sun vector instead of pretending every wall is
-  // lit the same. Real shadow maps then add the moving/contact shadow detail.
-  return clamp(FACE_AMBIENT_SHADE + sunDot * FACE_DIRECT_SHADE + upwardSkyFill - undersideOcclusion, 0.42, 1);
+  // lit the same. Downward faces get a lower clamp so overhangs and cave
+  // ceilings stop looking like sunlight leaks through the block above them.
+  return clamp(FACE_AMBIENT_SHADE + sunDot * FACE_DIRECT_SHADE + upwardSkyFill - undersideOcclusion, 0.32, 1);
 }
 
 function degreesToRadians(degrees: number): number {

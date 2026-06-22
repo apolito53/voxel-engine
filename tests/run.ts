@@ -32,6 +32,11 @@ import {
   getTerraformerSubCellHealth
 } from "../src/blockMaterialRules";
 import {
+  getLocalLightDefinition,
+  isLocalLightBlock,
+  selectNearestLocalLightSources
+} from "../src/localLights";
+import {
   BLOCK_COLOR_VARIANT_COUNT,
   createBlockMeshKey,
   getBlockColorVariant,
@@ -2159,10 +2164,37 @@ test("block texture tile mapping keeps material faces distinct", () => {
     BLOCK_TEXTURE_TILE.bush,
     "bush voxels should use their own dark foliage tile"
   );
+  assertEqual(
+    getBlockTextureBaseTileId(createBlockMeshKey(BLOCK.lamp, 0, 0, 0), [0, 1, 0]),
+    BLOCK_TEXTURE_TILE.lamp,
+    "lamp voxels should use their warm emissive-looking tile"
+  );
   assert(
     BLOCKS[BLOCK.leaves].color[1] < BLOCKS[BLOCK.grass].color[1],
     "leaf block color should stay darker than grass so trees do not wash out"
   );
+});
+
+test("lamp blocks register as local light sources", () => {
+  const lampDefinition = getLocalLightDefinition(BLOCK.lamp);
+  const selections = selectNearestLocalLightSources(
+    [
+      { x: 10, y: 4, z: 0, block: BLOCK.lamp },
+      { x: 2, y: 4, z: 0, block: BLOCK.lamp },
+      { x: 200, y: 4, z: 0, block: BLOCK.lamp }
+    ],
+    { x: 0, y: 4.5, z: 0 },
+    32,
+    2
+  );
+
+  assert(PLACEABLE_BLOCKS.includes(BLOCK.lamp), "lamp should be available from the block loadout");
+  assert(isLocalLightBlock(BLOCK.lamp), "lamp should be recognized by the local-light registry");
+  assert(lampDefinition !== null, "lamp should have a renderer light definition");
+  assertEqual(lampDefinition?.block, BLOCK.lamp, "lamp light definition should point back to the lamp block id");
+  assertEqual(selections.length, 2, "local-light selection should filter by radius and budget");
+  assertEqual(selections[0]?.x, 2, "local-light selection should prioritize the nearest lamp");
+  assert(selections[0]?.distanceSq < selections[1]?.distanceSq, "local lights should be sorted nearest-first");
 });
 
 test("block texture tile mapping varies repeated material surfaces", () => {
@@ -10237,7 +10269,7 @@ test("quality settings clamp custom menu overrides", () => {
 
   assertDeepEqual(
     normalDefaults,
-    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 108 },
+    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 108, debrisShadows: false },
     "normal preset should expose its default tunable settings"
   );
   assertEqual(normalizeRenderDistance(-20), RENDER_DISTANCE_MIN, "render distance should keep a lower bound");
@@ -10255,7 +10287,7 @@ test("quality settings clamp custom menu overrides", () => {
   );
 
   const normalized = normalizeQualitySettings(
-    { loadRadius: 999, shadowMapSize: 3333, blockFragmentCount: 999 },
+    { loadRadius: 999, shadowMapSize: 3333, blockFragmentCount: 999, debrisShadows: "true" },
     normalDefaults
   );
 
@@ -10266,6 +10298,7 @@ test("quality settings clamp custom menu overrides", () => {
     BLOCK_FRAGMENT_MAX_COUNT,
     "custom debris count should clamp to the visible VFX shard limit"
   );
+  assertEqual(normalized.debrisShadows, true, "debris shadow toggle should normalize persisted boolean strings");
   assertEqual(
     formatRenderDistance(6),
     "6 clear chunks",
@@ -10704,6 +10737,8 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   const presetIds = [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID];
   let previousPhysicsBudget = 0;
   let previousDebrisActiveRadius = 0;
+  let previousLocalLightBudget = 0;
+  let previousLocalLightRadius = 0;
 
   for (const presetId of presetIds) {
     const preset = QUALITY_PRESETS[presetId];
@@ -10791,8 +10826,26 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       preset.debrisActiveRadiusMeters >= previousDebrisActiveRadius,
       `${preset.label} active debris bubble should not shrink as quality increases`
     );
+    assert(
+      preset.localLightBudget >= previousLocalLightBudget,
+      `${preset.label} local light budget should not shrink as quality increases`
+    );
+    assert(
+      preset.localLightRadiusMeters >= previousLocalLightRadius,
+      `${preset.label} local light radius should not shrink as quality increases`
+    );
+    assert(
+      preset.localLightShadowBudget <= preset.localLightBudget,
+      `${preset.label} local shadow-casting light budget should fit inside the light budget`
+    );
+    assert(
+      isPowerOfTwo(preset.localLightShadowMapSize),
+      `${preset.label} local light shadow map size should stay GPU-friendly`
+    );
     previousPhysicsBudget = preset.physicsObjectBudget;
     previousDebrisActiveRadius = preset.debrisActiveRadiusMeters;
+    previousLocalLightBudget = preset.localLightBudget;
+    previousLocalLightRadius = preset.localLightRadiusMeters;
   }
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
@@ -10837,6 +10890,15 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     QUALITY_PRESETS[CUSTOM_PRESET_ID].debrisActiveRadiusMeters,
     QUALITY_PRESETS.normal.debrisActiveRadiusMeters,
     "Custom should inherit Normal's active debris bubble baseline"
+  );
+  assertEqual(QUALITY_PRESETS.normal.debrisShadows, false, "Normal should keep debris shadows off by default");
+  assertEqual(QUALITY_PRESETS.high.debrisShadows, true, "High should opt into debris shadows by default");
+  assertEqual(QUALITY_PRESETS.potato.localLightBudget, 2, "Potato should keep a tiny local light pool");
+  assertEqual(QUALITY_PRESETS.normal.localLightBudget, 8, "Normal should allow a practical local light pool");
+  assertEqual(
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].localLightBudget,
+    24,
+    "Super Ultra should carry the largest local light pool"
   );
   assert(
     getShadowTexelSize(QUALITY_PRESETS.high) < getShadowTexelSize(QUALITY_PRESETS.normal),
@@ -10904,7 +10966,8 @@ test("voxel face shading follows the real sun direction", () => {
   assert(sunwardEast > shadedWest, "east-facing walls should be brighter because the sun has positive X");
   assert(sunwardNorth > shadedSouth, "north-facing walls should be brighter because the sun has negative Z");
   assert(shadedWest > bottom, "undersides should stay darker than walls");
-  assert(top <= 1 && bottom >= 0.42, "face shading should remain inside the vertex-color safety range");
+  assert(top <= 1 && bottom >= 0.32, "face shading should remain inside the vertex-color safety range");
+  assert(bottom < 0.42, "undersides should stay meaningfully dim to avoid baked light bleed under overhangs");
 });
 
 test("directional shadow anchor snaps to stable light-space texels", () => {
