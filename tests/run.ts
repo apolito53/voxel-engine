@@ -45,6 +45,14 @@ import {
   getTintedBlockColor
 } from "../src/blockColors";
 import {
+  ENCLOSED_LIGHT_BUCKET,
+  SKY_EXPOSED_LIGHT_BUCKET,
+  createChunkSkyExposure,
+  createLitBlockMeshKey,
+  getBaseBlockMeshKey,
+  getLitBlockShadeMultiplier
+} from "../src/chunkLightOcclusion";
+import {
   BLOCK_TEXTURE_TILE,
   BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE,
   getBlockTextureBaseTileId,
@@ -10968,6 +10976,49 @@ test("voxel face shading follows the real sun direction", () => {
   assert(shadedWest > bottom, "undersides should stay darker than walls");
   assert(top <= 1 && bottom >= 0.32, "face shading should remain inside the vertex-color safety range");
   assert(bottom < 0.42, "undersides should stay meaningfully dim to avoid baked light bleed under overhangs");
+});
+
+test("chunk sky exposure darkens sealed air pockets", () => {
+  const sealedExposure = createChunkSkyExposure((x, y, z) => (
+    x >= 4 &&
+    x <= 6 &&
+    y >= 4 &&
+    y <= 6 &&
+    z >= 4 &&
+    z <= 6 &&
+    !(x === 5 && y === 5 && z === 5)
+  ));
+  const openedExposure = createChunkSkyExposure((x, y, z) => {
+    const isBoxShell = (
+      x >= 4 &&
+      x <= 6 &&
+      y >= 4 &&
+      y <= 6 &&
+      z >= 4 &&
+      z <= 6 &&
+      !(x === 5 && y === 5 && z === 5)
+    );
+    const isRoofHole = x === 5 && y === 6 && z === 5;
+    return isBoxShell && !isRoofHole;
+  });
+  const baseMeshKey = createBlockMeshKey(BLOCK.stone, 4, 4, 4);
+  const enclosedMeshKey = createLitBlockMeshKey(baseMeshKey, ENCLOSED_LIGHT_BUCKET);
+
+  assertEqual(
+    sealedExposure.getLightBucketForNeighbor(5, 5, 5),
+    ENCLOSED_LIGHT_BUCKET,
+    "a sealed air cell should be marked as an interior pocket for baked lighting"
+  );
+  assertEqual(
+    openedExposure.getLightBucketForNeighbor(5, 5, 5),
+    SKY_EXPOSED_LIGHT_BUCKET,
+    "opening the roof should reconnect the same air cell to sky lighting"
+  );
+  assertEqual(getBaseBlockMeshKey(enclosedMeshKey), baseMeshKey, "light buckets should not alter block identity");
+  assert(
+    getLitBlockShadeMultiplier(enclosedMeshKey) < 1,
+    "enclosed light buckets should dim the normal sunlit face shade"
+  );
 });
 
 test("directional shadow anchor snaps to stable light-space texels", () => {

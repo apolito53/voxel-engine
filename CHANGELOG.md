@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.14.1 - 2026-06-22
+
+### Fixed
+
+- Added mesh-time sky-exposure buckets for normal chunk meshes so sealed rooms,
+  boxed-in interiors, and closed cavities bake darker vertex colors instead of
+  inheriting the same sun/ambient baseline as outdoor terrain faces.
+- Kept worker and main-thread fallback chunk meshing aligned by sharing the same
+  chunk air-connectivity helper and packed light bucket key.
+
+### Tests
+
+- Added coverage for sealed air pockets staying dark until reconnected to sky.
+
+### Validation
+
+- `npm.cmd run typecheck`
+- `npm.cmd run test`
+- `npm.cmd run build`
+- `npm.cmd run validate`
+- Browser smoke at `http://127.0.0.1:5173/?lightSmoke=1779050000000`:
+  reloaded the app, confirmed the canvas/hotbar/debug default state, and checked
+  for fresh browser errors.
+
 ## 0.14.0 - 2026-06-22
 
 ### Added

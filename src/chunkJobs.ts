@@ -1,6 +1,13 @@
 import { BLOCK, BLOCKS } from "./blocks";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import { appendBlockTextureQuadAttributes } from "./blockTextureTiles";
+import {
+  createChunkSkyExposure,
+  createLitBlockMeshKey,
+  getBaseBlockMeshKey,
+  getLitBlockShadeMultiplier,
+  type ChunkSkyExposure
+} from "./chunkLightOcclusion";
 import type {
   ChunkGeneratedResult,
   ChunkGenerateRequest,
@@ -131,10 +138,13 @@ function buildChunkMesh({
   const indices: number[] = [];
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
+  const skyExposure = createChunkSkyExposure((x, y, z) => (
+    isRenderableSolidAt(blocks, neighbors, partialBlockMasks, x, y, z)
+  ));
 
-  buildXFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
-  buildYFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
-  buildZFaces(blocks, neighbors, partialBlockMasks, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+  buildXFaces(blocks, neighbors, partialBlockMasks, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+  buildYFaces(blocks, neighbors, partialBlockMasks, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+  buildZFaces(blocks, neighbors, partialBlockMasks, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
 
   return {
     positions: new Float32Array(positions),
@@ -150,6 +160,7 @@ function buildXFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  skyExposure: ChunkSkyExposure,
   ox: number,
   oz: number,
   positions: number[],
@@ -163,7 +174,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x + 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x + 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -187,7 +198,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x - 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x - 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -214,6 +225,7 @@ function buildYFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  skyExposure: ChunkSkyExposure,
   ox: number,
   oz: number,
   positions: number[],
@@ -227,7 +239,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y + 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y + 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -251,7 +263,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y - 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y - 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -278,6 +290,7 @@ function buildZFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  skyExposure: ChunkSkyExposure,
   ox: number,
   oz: number,
   positions: number[],
@@ -291,7 +304,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y, z + 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y, z + 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -315,7 +328,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, x, y, z, x, y, z - 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y, z - 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -342,6 +355,7 @@ function exposedBlock(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  skyExposure: ChunkSkyExposure,
   x: number,
   y: number,
   z: number,
@@ -360,7 +374,10 @@ function exposedBlock(
   ) {
     return BLOCK.air;
   }
-  return createBlockMeshKey(block, worldX, worldY, worldZ);
+  return createLitBlockMeshKey(
+    createBlockMeshKey(block, worldX, worldY, worldZ),
+    skyExposure.getLightBucketForNeighbor(nx, ny, nz)
+  );
 }
 
 function isRenderableSolidAt(
@@ -513,8 +530,9 @@ function addQuad(
   corners: readonly (readonly [number, number, number])[]
 ): void {
   const base = positions.length / 3;
-  const shade = getSunlitFaceShade(normal);
-  const color = getTintedBlockColor(meshKey, shade);
+  const baseMeshKey = getBaseBlockMeshKey(meshKey);
+  const shade = getSunlitFaceShade(normal) * getLitBlockShadeMultiplier(meshKey);
+  const color = getTintedBlockColor(baseMeshKey, shade);
 
   for (const corner of corners) {
     positions.push(corner[0], corner[1], corner[2]);
@@ -522,7 +540,7 @@ function addQuad(
     colors.push(...color);
   }
 
-  appendBlockTextureQuadAttributes(uvs, textureTiles, meshKey, normal, corners);
+  appendBlockTextureQuadAttributes(uvs, textureTiles, baseMeshKey, normal, corners);
   indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
