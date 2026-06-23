@@ -2215,6 +2215,10 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "sealed terrain faces should replace sky/hemisphere fill with their baked dark diffuse color"
   );
   assert(
+    shader.fragmentShader.includes("reflectedLight.directDiffuse *= voxelSealedDirectLightScale;"),
+    "sealed terrain faces should restore direct diffuse lamp light after the baked darkness clamp"
+  );
+  assert(
     shader.fragmentShader.includes("reflectedLight.directSpecular *= diffuseColor.rgb;"),
     "terrain direct specular should be damped by baked vertex and texture darkness"
   );

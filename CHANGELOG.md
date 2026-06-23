@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.14.7 - 2026-06-23
+
+### Fixed
+
+- Restored direct lamp lighting on sealed terrain faces after the darker
+  no-light floor, so enclosed rooms stay dark without a lamp but placed Lamp
+  blocks can brighten them properly again.
+
+### Tests
+
+- Added shader coverage for the direct-light restore path on sealed faces.
+
 ## 0.14.6 - 2026-06-23
 
 ### Changed

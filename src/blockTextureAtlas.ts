@@ -6,6 +6,7 @@ import {
   BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE,
   BLOCK_TEXTURE_TILE_SIZE_PX
 } from "./blockTextureTiles";
+import { ENCLOSED_INTERIOR_SHADE } from "./chunkLightOcclusion";
 
 type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile"]>[0];
 type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
@@ -15,6 +16,7 @@ const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
 // enclosed material face, but stays below normal outdoor foliage/wall shade so
 // the indirect-light clamp does not misclassify ordinary dark terrain.
 const SEALED_VERTEX_LIGHT_THRESHOLD = 0.05;
+const SEALED_DIRECT_LIGHT_RESTORE_SCALE = 1 / ENCLOSED_INTERIOR_SHADE;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
@@ -32,7 +34,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
 
   material.onBeforeCompile = applyWorldBlockShaderPatches;
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v3";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v4";
   return material;
 }
 
@@ -93,11 +95,17 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
         // Faces inside sealed air pockets carry a deliberately tiny baked
         // vertex color. Letting the global hemisphere/sky term add on top of
         // that color creates thin contact glows at room edges, so sealed faces
-        // keep only their baked dark diffuse baseline for indirect light. Direct
-        // lights still apply, which keeps future/placed cave lamps useful.
+        // keep only their baked dark diffuse baseline for indirect light.
+        //
+        // Three.js also multiplies direct diffuse lights by vertex color before
+        // this hook runs. Undo just the sealed shade multiplier for direct
+        // diffuse so placed lamps can brighten dark rooms without restoring the
+        // global sky/hemisphere fill that caused the sealed-room edge glow.
         "#if defined(USE_COLOR)",
         `float voxelBakedLight = max(max(vColor.r, vColor.g), vColor.b);`,
         `float voxelSealedLightMask = 1.0 - step(${SEALED_VERTEX_LIGHT_THRESHOLD.toFixed(3)}, voxelBakedLight);`,
+        `float voxelSealedDirectLightScale = mix(1.0, ${SEALED_DIRECT_LIGHT_RESTORE_SCALE.toFixed(3)}, voxelSealedLightMask);`,
+        "reflectedLight.directDiffuse *= voxelSealedDirectLightScale;",
         "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, diffuseColor.rgb, voxelSealedLightMask);",
         "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, vec3(0.0), voxelSealedLightMask);",
         "#endif",
