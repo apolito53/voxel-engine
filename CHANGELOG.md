@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.14.2 - 2026-06-22
+
+### Fixed
+
+- Changed sealed-cavity mesh lighting so enclosed faces use a uniform dim
+  interior fill instead of retaining outdoor sky-facing or directional
+  brightness boosts, reducing bright seams inside boxed-in rooms.
+
+### Tests
+
+- Added coverage for enclosed upward, wall, and ceiling faces sharing the same
+  dark interior shade instead of keeping directional edge glow.
+
 ## 0.14.1 - 2026-06-22
 
 ### Fixed

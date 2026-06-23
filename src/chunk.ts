@@ -6,7 +6,7 @@ import {
   createChunkSkyExposure,
   createLitBlockMeshKey,
   getBaseBlockMeshKey,
-  getLitBlockShadeMultiplier,
+  getLitBlockFaceShade,
   type ChunkSkyExposure
 } from "./chunkLightOcclusion";
 import type { ChunkMeshData } from "./chunkProtocol";
@@ -516,7 +516,7 @@ function addQuad(
 ): void {
   const base = positions.length / 3;
   const baseMeshKey = getBaseBlockMeshKey(meshKey);
-  const shade = getSunlitFaceShade(normal) * getLitBlockShadeMultiplier(meshKey);
+  const shade = getLitBlockFaceShade(meshKey, normal, getSunlitFaceShade(normal));
   const color = getTintedBlockColor(baseMeshKey, shade);
 
   for (const corner of corners) {

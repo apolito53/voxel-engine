@@ -1,4 +1,5 @@
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
+import type { FaceNormal } from "./voxelLighting";
 
 export type ChunkRenderableSampler = (localX: number, y: number, localZ: number) => boolean;
 
@@ -13,7 +14,7 @@ const PADDED_CHUNK_SIZE = CHUNK_SIZE + 2;
 const LIGHT_BUCKET_SHIFT = 16;
 const LIGHT_BUCKET_MASK = 0xff;
 const BASE_MESH_KEY_MASK = (1 << LIGHT_BUCKET_SHIFT) - 1;
-const ENCLOSED_AIR_SHADE_MULTIPLIER = 0.3;
+const ENCLOSED_INTERIOR_SHADE = 0.07;
 
 export function createChunkSkyExposure(isRenderableSolidAt: ChunkRenderableSampler): ChunkSkyExposure {
   const skyConnected = new Uint8Array(PADDED_CHUNK_SIZE * WORLD_HEIGHT * PADDED_CHUNK_SIZE);
@@ -73,7 +74,17 @@ export function getBaseBlockMeshKey(litMeshKey: number): number {
 
 export function getLitBlockShadeMultiplier(litMeshKey: number): number {
   const lightBucket = (litMeshKey >>> LIGHT_BUCKET_SHIFT) & LIGHT_BUCKET_MASK;
-  return lightBucket === ENCLOSED_LIGHT_BUCKET ? ENCLOSED_AIR_SHADE_MULTIPLIER : 1;
+  return lightBucket === ENCLOSED_LIGHT_BUCKET ? ENCLOSED_INTERIOR_SHADE : 1;
+}
+
+export function getLitBlockFaceShade(litMeshKey: number, _normal: FaceNormal, skyExposedShade: number): number {
+  const lightBucket = (litMeshKey >>> LIGHT_BUCKET_SHIFT) & LIGHT_BUCKET_MASK;
+  if (lightBucket !== ENCLOSED_LIGHT_BUCKET) return skyExposedShade;
+
+  // Sealed air pockets should not keep any outdoor directional or sky-facing
+  // bias. A constant interior shade prevents ceiling, wall, and floor edges
+  // from glowing differently where solid blocks meet.
+  return ENCLOSED_INTERIOR_SHADE;
 }
 
 function isPaddedCell(localX: number, y: number, localZ: number): boolean {

@@ -50,6 +50,7 @@ import {
   createChunkSkyExposure,
   createLitBlockMeshKey,
   getBaseBlockMeshKey,
+  getLitBlockFaceShade,
   getLitBlockShadeMultiplier
 } from "../src/chunkLightOcclusion";
 import {
@@ -11018,6 +11019,23 @@ test("chunk sky exposure darkens sealed air pockets", () => {
   assert(
     getLitBlockShadeMultiplier(enclosedMeshKey) < 1,
     "enclosed light buckets should dim the normal sunlit face shade"
+  );
+  const enclosedTopShade = getLitBlockFaceShade(enclosedMeshKey, [0, 1, 0], getSunlitFaceShade([0, 1, 0]));
+  const enclosedWallShade = getLitBlockFaceShade(enclosedMeshKey, [1, 0, 0], getSunlitFaceShade([1, 0, 0]));
+  const enclosedCeilingShade = getLitBlockFaceShade(enclosedMeshKey, [0, -1, 0], getSunlitFaceShade([0, -1, 0]));
+  assert(
+    enclosedTopShade < 0.1,
+    "enclosed upward faces should use interior fill instead of retaining the outdoor sky boost"
+  );
+  assertEqual(
+    enclosedWallShade,
+    enclosedTopShade,
+    "enclosed wall faces should not keep directional edge glow"
+  );
+  assertEqual(
+    enclosedCeilingShade,
+    enclosedTopShade,
+    "enclosed ceiling faces should not keep directional edge glow"
   );
 });
 

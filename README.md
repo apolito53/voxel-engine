@@ -113,9 +113,10 @@ bounded local point-light pool selected nearest-first around the player; higher
 quality presets allow more local lights and a small number of local light
 shadows. `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.
-Directional shadow bias, baked underside face shading, and chunk sky-exposure
-buckets are tuned together so overhangs and sealed interiors read darker instead
-of looking like sunlight leaks upward through terrain.
+Directional shadow bias, baked underside face shading, chunk sky-exposure
+buckets, and sealed-room interior face shading are tuned together so overhangs
+and closed interiors read darker instead of looking like sunlight leaks upward
+through terrain.
 Thrown Physics Cores have a hard lifetime and fade out once they stay below
 useful terrain-damage speed, so spent shots do not linger forever during stress
 tests.
