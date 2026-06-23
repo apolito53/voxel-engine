@@ -11,6 +11,7 @@ type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile
 type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
 
 const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
+const SEALED_VERTEX_LIGHT_THRESHOLD = 0.075;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
@@ -86,6 +87,17 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
       "#include <lights_fragment_end>",
       [
         "#include <lights_fragment_end>",
+        // Faces inside sealed air pockets carry a deliberately tiny baked
+        // vertex color. Letting the global hemisphere/sky term add on top of
+        // that color creates thin contact glows at room edges, so sealed faces
+        // keep only their baked dark diffuse baseline for indirect light. Direct
+        // lights still apply, which keeps future/placed cave lamps useful.
+        "#if defined(USE_COLOR)",
+        `float voxelBakedLight = max(max(vColor.r, vColor.g), vColor.b);`,
+        `float voxelSealedLightMask = 1.0 - step(${SEALED_VERTEX_LIGHT_THRESHOLD.toFixed(3)}, voxelBakedLight);`,
+        "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, diffuseColor.rgb, voxelSealedLightMask);",
+        "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, vec3(0.0), voxelSealedLightMask);",
+        "#endif",
         "reflectedLight.directSpecular *= diffuseColor.rgb;",
         "reflectedLight.indirectSpecular *= diffuseColor.rgb;"
       ].join("\n")

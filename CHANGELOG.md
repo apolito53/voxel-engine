@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.14.5 - 2026-06-22
+
+### Fixed
+
+- Replaced global sky/hemisphere fill on sealed terrain faces with their baked
+  dark diffuse color, keeping enclosed room corners from showing a faint bottom
+  rim while still allowing direct local lights to affect sealed spaces.
+
+### Tests
+
+- Added shader coverage for the sealed-face indirect-light clamp so the dark
+  room fix does not regress back into edge glow.
+
 ## 0.14.4 - 2026-06-22
 
 ### Fixed
