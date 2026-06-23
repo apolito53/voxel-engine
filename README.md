@@ -101,14 +101,14 @@ procedural sound layer with Sound, Master Volume, SFX Volume, and UI Volume
 controls. Audio defaults are intentionally forward in the mix so terrain,
 movement, and UI cues are audible without pushing the OS volume to nonsense
 territory. Browser audio unlocks after the first normal click or key press.
-Graphics settings treat distance as the clear chunk radius where fog starts;
-the engine streams a hidden extra horizon behind the opaque part of that curtain
-so far chunks fade out instead of popping away at the edge. Streaming,
-unloading, and fog-hidden render visibility use a radial chunk footprint with a
-small chunk-boundary safety margin, matching the circular fog curtain instead of
-revealing square terrain corners at the horizon. Hidden-horizon chunks remain
-loaded for continuity, but stop drawing after the opaque fog curtain plus a
-safety ring to reduce far-distance draw pressure. Placeable Lamp blocks use a
+Graphics settings treat distance as the clear chunk radius where the hard fog
+wall starts; the engine streams a hidden extra horizon behind the opaque band so
+far chunks vanish into atmosphere instead of popping away at the edge.
+Streaming, unloading, and fog-hidden render visibility use a radial chunk
+footprint with a small chunk-boundary safety margin, matching the circular fog
+wall instead of revealing square terrain corners at the horizon. Hidden-horizon
+chunks remain loaded for continuity, but stop drawing after the opaque fog wall
+plus a safety ring to reduce far-distance draw pressure. Placeable Lamp blocks use a
 bounded local point-light pool selected nearest-first around the player; higher
 quality presets allow more local lights and a small number of local light
 shadows. `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,

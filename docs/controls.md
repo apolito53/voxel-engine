@@ -164,30 +164,30 @@ local storage. Default audio levels favor audible terrain, movement, and UI
 feedback while keeping core launch sounds from dominating the mix. The
 `Gameplay > Despawn All Objects` button performs the drastic full cleanup:
 physics cores, loose debris VFX, and any existing rubble cover.
-The fog start distance is the clear chunk radius. Far terrain fades to opaque
-fog over the preset's falloff band, while the engine streams a hidden extra
-horizon behind that opacity so the hard chunk cutoff stays out of sight.
-Chunks beyond the opaque fog plus one safety ring stay loaded but stop drawing,
-which keeps streaming continuity without paying draw calls for fully hidden
-terrain.
+The fog start distance is the clear chunk radius. Far terrain hits a short,
+dense fog wall over the preset's falloff band, while the engine streams a hidden
+extra horizon behind that opacity so the hard chunk cutoff stays out of sight.
+Chunks beyond the opaque fog wall plus one safety ring stay loaded but stop
+drawing, which keeps streaming continuity without paying draw calls for fully
+hidden terrain.
 
 ## Quality Presets
 
 - `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
-  shards/block, 8m active debris bubble, 2 local lamps, short fog horizon.
+  shards/block, 8m active debris bubble, 2 local lamps, one-chunk fog wall.
 - `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris
-  shards/block, 12m active debris bubble, 4 local lamps, short fog horizon.
+  shards/block, 12m active debris bubble, 4 local lamps, one-chunk fog wall.
 - `Normal`: 2x clear distance, shadows, 192 physics bodies, 108 max debris
-  shards/block, 20m active debris bubble, 8 local lamps, medium fog horizon.
+  shards/block, 20m active debris bubble, 8 local lamps, one-chunk fog wall.
 - `High`: 4x clear distance, sharper shadows, debris shadows, 512 physics
   bodies, 144 max debris shards/block, 32m active debris bubble, 12 local lamps,
-  extended fog horizon.
+  two-chunk fog wall.
 - `Ultra`: 6x clear distance, sharper shadows, debris shadows, 1024 physics
   bodies, 180 max debris shards/block, 48m active debris bubble, 16 local lamps,
-  broad fog horizon.
+  two-chunk fog wall.
 - `Super Ultra`: 12x clear distance, highest shadow resolution, debris shadows,
   4096 physics bodies, 216 max debris shards/block, 72m active debris bubble, 24
-  local lamps. This is a stress-test mode and requires an opt-in from the pause
-  menu once `Ultra` is selected.
+  local lamps, two-chunk fog wall. This is a stress-test mode and requires an
+  opt-in from the pause menu once `Ultra` is selected.
 - `Custom`: created automatically when settings sliders are changed, using the
   selected built-in preset as its baseline.

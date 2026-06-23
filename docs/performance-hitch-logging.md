@@ -44,7 +44,7 @@ The debug overlay and hitch logger capture:
   flush/step/sync, support-collider collection/sync, debris settling, budget
   enforcement, cleanup, broadphase, rubble settling, and render-proxy sync.
 - Chunk visibility split into loaded chunks, frustum chunks, actually rendered
-  chunks, and chunks hidden behind the opaque fog curtain.
+  chunks, and chunks hidden behind the opaque fog wall.
 - Rigid debris body/collider pressure.
 - Debris lifecycle counters for support-cell invalidations, rigid debris,
   settler-clump, and detached VFX wakeups, settled pressure expiries, airborne
@@ -131,8 +131,8 @@ pressure relief deliberately spared them.
 
 ## Render Horizon
 
-Chunk streaming and chunk rendering are now separate policies. The engine keeps
-the hidden streamed horizon loaded behind the fog curtain, but chunk meshes stop
+Chunk streaming and chunk rendering are separate policies. The engine keeps the
+hidden streamed horizon loaded behind the hard fog wall, but chunk meshes stop
 drawing once their chunk-ring distance is beyond fully opaque fog plus one
 safety ring. This lowers far-horizon draw calls and triangles without reviving
 the reverted partial-damaged-region draw cap.

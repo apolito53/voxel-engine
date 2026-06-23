@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.14.9 - 2026-06-23
+
+### Changed
+
+- Replaced the soft distant fog curtain with a short hard fog wall: Potato,
+  Low, and Normal now use a one-chunk opaque band, while High, Ultra, and Super
+  Ultra use a two-chunk band.
+- Kept the hidden streamed horizon behind the opaque wall so the visible world
+  reads as an intentional atmosphere cutoff instead of a floating square chunk
+  island.
+
+### Tests
+
+- Added quality preset coverage for hard-fog wall widths and preserved hidden
+  horizon streaming/render-radius separation.
+
 ## 0.14.8 - 2026-06-23
 
 ### Fixed

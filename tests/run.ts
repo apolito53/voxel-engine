@@ -10896,17 +10896,21 @@ test("quality presets keep scheduler and render-distance invariants", () => {
 
   for (const presetId of presetIds) {
     const preset = QUALITY_PRESETS[presetId];
+    const expectedHardWallChunks = presetId === "potato" || presetId === "low" || presetId === "normal"
+      ? 1
+      : 2;
     assert(
       preset.fogStartRadius > 0,
-      `${preset.label} should define where terrain starts fading into fog`
+      `${preset.label} should define where terrain hits the hard fog wall`
+    );
+    assertEqual(
+      preset.fogFalloffRadius,
+      expectedHardWallChunks,
+      `${preset.label} should use the expected short hard-fog wall band`
     );
     assert(
-      preset.fogFalloffRadius >= 1,
-      `${preset.label} should keep at least one chunk of fogged horizon`
-    );
-    assert(
-      preset.fogHiddenRadius >= 1,
-      `${preset.label} should stream hidden chunks behind the opaque fog curtain`
+      preset.fogHiddenRadius >= 2,
+      `${preset.label} should stream hidden chunks behind the opaque fog wall`
     );
     assertEqual(
       preset.loadRadius,
@@ -10924,7 +10928,7 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     assertEqual(
       preset.fogFar,
       (preset.fogStartRadius + preset.fogFalloffRadius) * CHUNK_SIZE,
-      `${preset.label} fog should become opaque before the streamed horizon cutoff`
+      `${preset.label} fog should become opaque at the hard wall before the streamed horizon cutoff`
     );
     assert(
       preset.loadRadius * CHUNK_SIZE > preset.fogFar,
@@ -11004,13 +11008,15 @@ test("quality presets keep scheduler and render-distance invariants", () => {
 
   assertEqual(QUALITY_PRESETS.potato.distanceScale, 0.5, "Potato should remain the 0.5x baseline");
   assertEqual(QUALITY_PRESETS.potato.fogStartRadius, 2, "Potato should start fog after 2 clear chunks");
+  assertEqual(QUALITY_PRESETS.potato.fogFalloffRadius, 1, "Potato should use a one-chunk hard fog wall");
   assertEqual(QUALITY_PRESETS.normal.distanceScale, 2, "Normal should remain 2x distance");
   assertEqual(QUALITY_PRESETS.normal.fogStartRadius, 6, "Normal should start fog after 6 clear chunks");
-  assertEqual(QUALITY_PRESETS.normal.loadRadius, 11, "Normal should stream hidden chunks behind the opaque fog curtain");
+  assertEqual(QUALITY_PRESETS.normal.fogFalloffRadius, 1, "Normal should use a one-chunk hard fog wall");
+  assertEqual(QUALITY_PRESETS.normal.loadRadius, 9, "Normal should stream hidden chunks behind the opaque fog wall");
   assertEqual(
     QUALITY_PRESETS.normal.renderRadius,
     QUALITY_PRESETS.normal.fogStartRadius + QUALITY_PRESETS.normal.fogFalloffRadius + FOG_RENDER_SAFETY_CHUNKS,
-    "Normal should draw only the clear/fog curtain plus one safety ring"
+    "Normal should draw only the clear/hard-fog wall plus one safety ring"
   );
   assert(
     QUALITY_PRESETS.normal.renderRadius < QUALITY_PRESETS.normal.loadRadius,
@@ -11018,13 +11024,25 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   );
   assertEqual(QUALITY_PRESETS[CUSTOM_PRESET_ID].label, "Custom", "Custom preset should be available for slider edits");
   assertEqual(
+    QUALITY_PRESETS[CUSTOM_PRESET_ID].fogFalloffRadius,
+    QUALITY_PRESETS.normal.fogFalloffRadius,
+    "Custom should start from the Normal hard fog wall baseline"
+  );
+  assertEqual(
     QUALITY_PRESETS[CUSTOM_PRESET_ID].physicsObjectBudget,
     QUALITY_PRESETS.normal.physicsObjectBudget,
     "Custom should start from Normal's practical baseline before slider edits"
   );
   assertEqual(QUALITY_PRESETS.high.distanceScale, 4, "High should remain 4x distance");
+  assertEqual(QUALITY_PRESETS.high.fogFalloffRadius, 2, "High should use a two-chunk hard fog wall");
   assertEqual(QUALITY_PRESETS.ultra.distanceScale, 6, "Ultra should remain 6x distance");
+  assertEqual(QUALITY_PRESETS.ultra.fogFalloffRadius, 2, "Ultra should use a two-chunk hard fog wall");
   assertEqual(QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].distanceScale, 12, "Super Ultra should remain the 12x stress preset");
+  assertEqual(
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].fogFalloffRadius,
+    2,
+    "Super Ultra should use a two-chunk hard fog wall"
+  );
   assertEqual(QUALITY_PRESETS.potato.physicsObjectBudget, 64, "Potato should allow 64 physics bodies by default");
   assertEqual(QUALITY_PRESETS.low.physicsObjectBudget, 128, "Low should allow 128 physics bodies by default");
   assertEqual(QUALITY_PRESETS.normal.physicsObjectBudget, 192, "Normal should allow 192 physics bodies by default");

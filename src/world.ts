@@ -3927,7 +3927,7 @@ function normalizeChunkRadius(radius: number): number {
 
 function isChunkOffsetInsideRadius(dx: number, dz: number, radius: number): boolean {
   // Chunk streaming works in whole-chunk coordinates, but the horizon is viewed
-  // as a circular fog curtain. The half-chunk margin keeps edge chunks from
+  // as a circular hard fog wall. The half-chunk margin keeps edge chunks from
   // popping when the player stands near a chunk boundary while still trimming
   // the square corners that made distant terrain look like a floating island.
   const radiusWithChunkMargin = radius + 0.5;
