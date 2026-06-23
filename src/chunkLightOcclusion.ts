@@ -14,7 +14,10 @@ const PADDED_CHUNK_SIZE = CHUNK_SIZE + 2;
 const LIGHT_BUCKET_SHIFT = 16;
 const LIGHT_BUCKET_MASK = 0xff;
 const BASE_MESH_KEY_MASK = (1 << LIGHT_BUCKET_SHIFT) - 1;
-const ENCLOSED_INTERIOR_SHADE = 0.07;
+// This is the baked no-light floor for fully sealed terrain pockets. Keep it
+// low enough to read as "actually dark" while leaving a tiny baseline so an
+// unlit player is not staring into pure black before placing a lamp.
+const ENCLOSED_INTERIOR_SHADE = 0.035;
 
 export function createChunkSkyExposure(isRenderableSolidAt: ChunkRenderableSampler): ChunkSkyExposure {
   const skyConnected = new Uint8Array(PADDED_CHUNK_SIZE * WORLD_HEIGHT * PADDED_CHUNK_SIZE);

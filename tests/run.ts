@@ -11122,8 +11122,8 @@ test("chunk sky exposure darkens sealed air pockets", () => {
   const enclosedWallShade = getLitBlockFaceShade(enclosedMeshKey, [1, 0, 0], getSunlitFaceShade([1, 0, 0]));
   const enclosedCeilingShade = getLitBlockFaceShade(enclosedMeshKey, [0, -1, 0], getSunlitFaceShade([0, -1, 0]));
   assert(
-    enclosedTopShade < 0.1,
-    "enclosed upward faces should use interior fill instead of retaining the outdoor sky boost"
+    enclosedTopShade <= 0.04,
+    "enclosed upward faces should use a genuinely dark no-light fill instead of retaining outdoor sky brightness"
   );
   assertEqual(
     enclosedWallShade,

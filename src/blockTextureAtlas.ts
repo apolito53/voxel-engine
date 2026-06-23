@@ -11,7 +11,10 @@ type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile
 type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
 
 const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
-const SEALED_VERTEX_LIGHT_THRESHOLD = 0.075;
+// The sealed-room baked shade is intentionally tiny. This cutoff catches every
+// enclosed material face, but stays below normal outdoor foliage/wall shade so
+// the indirect-light clamp does not misclassify ordinary dark terrain.
+const SEALED_VERTEX_LIGHT_THRESHOLD = 0.05;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.14.6 - 2026-06-23
+
+### Changed
+
+- Lowered the sealed-cavity no-light brightness floor so enclosed rooms read
+  much darker when they have no direct lamp light, while keeping a tiny
+  navigability baseline instead of pure black.
+- Tightened the terrain shader's sealed-face cutoff so the indirect-light clamp
+  stays focused on deliberately baked-dark sealed surfaces.
+
+### Tests
+
+- Updated sealed-cavity lighting coverage to require the darker no-light fill.
+
 ## 0.14.5 - 2026-06-22
 
 ### Fixed
