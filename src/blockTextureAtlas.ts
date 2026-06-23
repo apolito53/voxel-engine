@@ -26,51 +26,61 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     side: options.side ?? THREE.FrontSide
   });
 
-  material.onBeforeCompile = (shader: ShaderWithUniforms) => {
-    shader.uniforms.blockTextureAtlasGrid = {
-      value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
-    };
-    shader.uniforms.blockTextureAtlasInset = {
-      value: new THREE.Vector2(ATLAS_INSET_UV / BLOCK_TEXTURE_ATLAS_COLUMNS, ATLAS_INSET_UV / BLOCK_TEXTURE_ATLAS_ROWS)
-    };
+  material.onBeforeCompile = applyWorldBlockShaderPatches;
 
-    // The tile id is per vertex so worker-built chunk geometry can choose grass
-    // tops, dirt undersides, wood end grain, and side textures without splitting
-    // the world into separate materials or draw-call buckets.
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nattribute float blockTextureTile;\nvarying float vBlockTextureTile;"
-      )
-      .replace(
-        "#include <uv_vertex>",
-        "#include <uv_vertex>\nvBlockTextureTile = blockTextureTile;"
-      );
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v2";
+  return material;
+}
 
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nuniform vec2 blockTextureAtlasGrid;\nuniform vec2 blockTextureAtlasInset;\nvarying float vBlockTextureTile;"
-      )
-      .replace(
-        "#include <map_fragment>",
-        [
-          "#ifdef USE_MAP",
-          "  float blockTextureTileIndex = floor(vBlockTextureTile + 0.5);",
-          "  float blockTextureColumn = mod(blockTextureTileIndex, blockTextureAtlasGrid.x);",
-          "  float blockTextureRow = floor(blockTextureTileIndex / blockTextureAtlasGrid.x);",
-          "  vec2 blockTextureOrigin = vec2(blockTextureColumn, blockTextureRow) / blockTextureAtlasGrid;",
-          "  vec2 blockTextureScale = (vec2(1.0) / blockTextureAtlasGrid) - blockTextureAtlasInset * 2.0;",
-          "  vec2 blockTextureUv = blockTextureOrigin + blockTextureAtlasInset + fract(vMapUv) * blockTextureScale;",
-          "  vec4 sampledDiffuseColor = texture2D(map, blockTextureUv);",
-          "  diffuseColor *= sampledDiffuseColor;",
-          "#endif"
-        ].join("\n")
-      );
+export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
+  shader.uniforms.blockTextureAtlasGrid = {
+    value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
+  };
+  shader.uniforms.blockTextureAtlasInset = {
+    value: new THREE.Vector2(ATLAS_INSET_UV / BLOCK_TEXTURE_ATLAS_COLUMNS, ATLAS_INSET_UV / BLOCK_TEXTURE_ATLAS_ROWS)
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v1";
-  return material;
+  // The tile id is per vertex so worker-built chunk geometry can choose grass
+  // tops, dirt undersides, wood end grain, and side textures without splitting
+  // the world into separate materials or draw-call buckets.
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      "#include <common>",
+      "#include <common>\nattribute float blockTextureTile;\nvarying float vBlockTextureTile;"
+    )
+    .replace(
+      "#include <uv_vertex>",
+      "#include <uv_vertex>\nvBlockTextureTile = blockTextureTile;"
+    );
+
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      "#include <common>",
+      "#include <common>\nuniform vec2 blockTextureAtlasGrid;\nuniform vec2 blockTextureAtlasInset;\nvarying float vBlockTextureTile;"
+    )
+    .replace(
+      "#include <map_fragment>",
+      [
+        "#ifdef USE_MAP",
+        "  float blockTextureTileIndex = floor(vBlockTextureTile + 0.5);",
+        "  float blockTextureColumn = mod(blockTextureTileIndex, blockTextureAtlasGrid.x);",
+        "  float blockTextureRow = floor(blockTextureTileIndex / blockTextureAtlasGrid.x);",
+        "  vec2 blockTextureOrigin = vec2(blockTextureColumn, blockTextureRow) / blockTextureAtlasGrid;",
+        "  vec2 blockTextureScale = (vec2(1.0) / blockTextureAtlasGrid) - blockTextureAtlasInset * 2.0;",
+        "  vec2 blockTextureUv = blockTextureOrigin + blockTextureAtlasInset + fract(vMapUv) * blockTextureScale;",
+        "  vec4 sampledDiffuseColor = texture2D(map, blockTextureUv);",
+        "  diffuseColor *= sampledDiffuseColor;",
+        "#endif"
+      ].join("\n")
+    )
+    .replace(
+      "#include <lights_fragment_end>",
+      [
+        "#include <lights_fragment_end>",
+        "reflectedLight.directSpecular *= diffuseColor.rgb;",
+        "reflectedLight.indirectSpecular *= diffuseColor.rgb;"
+      ].join("\n")
+    );
 }
 
 export function disposeWorldBlockMaterial(material: THREE.MeshStandardMaterial): void {

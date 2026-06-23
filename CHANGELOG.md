@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.14.3 - 2026-06-22
+
+### Fixed
+
+- Dampened terrain material specular response through the already-baked diffuse
+  vertex/texture shade so sealed rooms no longer keep bright PBR edge rims after
+  their broad faces go dark.
+
+### Tests
+
+- Added coverage that the block texture shader suppresses direct and indirect
+  specular through the baked diffuse terrain color.
+
 ## 0.14.2 - 2026-06-22
 
 ### Fixed

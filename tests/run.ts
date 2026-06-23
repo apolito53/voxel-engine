@@ -59,6 +59,7 @@ import {
   getBlockTextureBaseTileId,
   getBlockTextureTileId
 } from "../src/blockTextureTiles";
+import { applyWorldBlockShaderPatches } from "../src/blockTextureAtlas";
 import {
   applyBuilderBrush,
   collectBuilderBrushCells,
@@ -2181,6 +2182,29 @@ test("block texture tile mapping keeps material faces distinct", () => {
   assert(
     BLOCKS[BLOCK.leaves].color[1] < BLOCKS[BLOCK.grass].color[1],
     "leaf block color should stay darker than grass so trees do not wash out"
+  );
+});
+
+test("world block shader damps specular through baked diffuse shade", () => {
+  const shader = {
+    uniforms: {},
+    vertexShader: "#include <common>\nvoid main() {\n#include <uv_vertex>\n}",
+    fragmentShader: "#include <common>\nvoid main() {\n#include <map_fragment>\n#include <lights_fragment_end>\n}"
+  } as Parameters<typeof applyWorldBlockShaderPatches>[0];
+
+  applyWorldBlockShaderPatches(shader);
+
+  assert(
+    shader.fragmentShader.includes("diffuseColor *= sampledDiffuseColor;"),
+    "block atlas sampling should still tint the diffuse terrain color"
+  );
+  assert(
+    shader.fragmentShader.includes("reflectedLight.directSpecular *= diffuseColor.rgb;"),
+    "terrain direct specular should be damped by baked vertex and texture darkness"
+  );
+  assert(
+    shader.fragmentShader.includes("reflectedLight.indirectSpecular *= diffuseColor.rgb;"),
+    "terrain indirect specular should be damped by baked vertex and texture darkness"
   );
 });
 
