@@ -4358,6 +4358,11 @@ test("physics core carving chips ordinary terrain before fracture", () => {
   );
   assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "fractured terrain should leave the voxel grid");
   assert(!world.isSolid(2, 3, 4), "fractured terrain should stop behaving like a full collision cube");
+  assertEqual(
+    finalHit.bitePoofPositions?.length,
+    finalHit.affectedVisualCellIndexes?.length,
+    "final fracture should poof every remaining presentation cell that disappears with the block"
+  );
   const surfaceCell = world.getPartialBlock(2, 3, 4);
   assertEqual(surfaceCell, null, "final fracture should clear the bite mesh instead of leaving a surface puddle");
   const supportHeight = world.getSupportHeight({
@@ -4542,6 +4547,11 @@ test("Terraformer brush sizes operate on the global sub-cell grid", () => {
   );
   const size3Result = size3World.applyTerraformerEdit(size3Input);
   assert(size3Result?.results[0]?.destroyed, "size 3 should be able to delete one entire main block");
+  assertEqual(
+    size3Result?.results[0]?.bitePoofPositions?.length,
+    27,
+    "whole-block Terraformer edits should poof every targeted sub-cell as it disappears"
+  );
   assertEqual(size3World.getBlock(2, 3, 4), BLOCK.air, "all 27 removed sub-cells should clear the main block");
   assertEqual(size3World.getPartialBlock(2, 3, 4), null, "full Terraformer deletion should clear partial state");
 
@@ -4595,6 +4605,39 @@ test("Terraformer face brushes grow inward along the targeted normal", () => {
     3,
     "right-face size 3 should grow inward through every local x depth layer"
   );
+});
+
+test("Terraformer final damage poofs untouched sub-cells removed by block cleanup", () => {
+  const world = new VoxelWorld({ seed: "terraformer-final-despawn-poof-test" });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  const maxHealth = getTerrainMaxHealth(BLOCK.stone);
+  const subCellHealth = getTerraformerSubCellHealth(BLOCK.stone);
+  world.damageBlock(2, 3, 4, maxHealth - subCellHealth);
+
+  const result = world.applyTerraformerEdit({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    size: 1
+  });
+
+  assert(result?.results[0]?.destroyed, "the single Terraformer cell should finish the damaged block");
+  assertEqual(
+    result?.results[0]?.bitePoofPositions?.length,
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+    "final cleanup should poof directly edited and indirectly despawned sub-cells"
+  );
+  assertEqual(
+    result?.results[0]?.affectedVisualCellIndexes?.length,
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT,
+    "final cleanup should expose every removed sub-cell for support/debug consumers"
+  );
+  assertEqual(world.getBlock(2, 3, 4), BLOCK.air, "final Terraformer cleanup should clear the macro block");
+  assertEqual(world.getPartialBlock(2, 3, 4), null, "final Terraformer cleanup should not leave stale partial state");
 });
 
 test("partial block carve results expose material poof positions for newly destroyed bite cells", () => {

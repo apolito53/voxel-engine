@@ -758,6 +758,27 @@ function createPartialBlockBitePoofPositions(
   });
 }
 
+function createPartialBlockDespawnPoofPositions(
+  position: VoxelBlockPosition,
+  visualCellIndexes: readonly number[]
+): readonly VoxelVector[] {
+  return visualCellIndexes.map((index) => createPartialBlockVisualCellCenter(position, index));
+}
+
+function mergeUniqueVisualCellIndexes(
+  primaryIndexes: readonly number[],
+  secondaryIndexes: readonly number[]
+): readonly number[] {
+  const merged: number[] = [];
+  const seen = new Set<number>();
+  for (const index of [...primaryIndexes, ...secondaryIndexes]) {
+    if (seen.has(index)) continue;
+    seen.add(index);
+    merged.push(index);
+  }
+  return merged;
+}
+
 function createPartialBlockVisualCellCenter(position: VoxelBlockPosition, cellIndex: number): VoxelVector {
   const visualCell = decodePartialBlockVisualCell(cellIndex);
   return {
@@ -1946,6 +1967,10 @@ export class VoxelWorld implements CollisionWorld {
 
     this.blockDamage.delete(key);
     const remainingVisualCellIndexes = this.getRemainingPartialBlockVisualCellIndexes(position);
+    const bitePoofPositions = createPartialBlockDespawnPoofPositions(
+      position,
+      remainingVisualCellIndexes
+    );
     // The damaged block has already shown its bite-lattice history while it was
     // alive. On the final health step, clear that custom mesh and leave normal
     // air instead of stamping a wrinkled support puddle into the terrain.
@@ -1964,6 +1989,7 @@ export class VoxelWorld implements CollisionWorld {
         position,
         remainingVisualCellIndexes
       ),
+      bitePoofPositions,
       ejectedRubbleMaterialUnits,
       debrisEjectionHint: createFallbackDebrisEjectionHint(position, input, ejectedRubbleMaterialUnits)
     };
@@ -2204,6 +2230,16 @@ export class VoxelWorld implements CollisionWorld {
     );
 
     if (destroyed) {
+      const remainingSilentCellIndexes = [...Array(BLOCK_FRAGMENT_GRID_SIZE ** 3).keys()]
+        .filter((cellIndex) => !removedCells.has(cellIndex));
+      const affectedVisualCellIndexes = mergeUniqueVisualCellIndexes(
+        newlyRemovedCellIndexes,
+        remainingSilentCellIndexes
+      );
+      const finalBitePoofPositions = [
+        ...bitePoofPositions,
+        ...createPartialBlockDespawnPoofPositions(position, remainingSilentCellIndexes)
+      ];
       this.blockDamage.delete(key);
       this.setBlock(position.x, position.y, position.z, BLOCK.air);
       return {
@@ -2215,12 +2251,12 @@ export class VoxelWorld implements CollisionWorld {
         damageApplied: appliedDamage,
         damageBefore: previousDamage,
         damageAfter: nextDamage,
-        affectedVisualCellIndexes: newlyRemovedCellIndexes,
+        affectedVisualCellIndexes,
         supportInvalidationCells: createTerrainSupportInvalidationCellsForVisualCells(
           position,
-          newlyRemovedCellIndexes
+          affectedVisualCellIndexes
         ),
-        bitePoofPositions,
+        bitePoofPositions: finalBitePoofPositions,
         ejectedRubbleMaterialUnits,
         debrisEjectionHint
       };

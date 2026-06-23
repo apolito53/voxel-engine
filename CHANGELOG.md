@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.14.8 - 2026-06-23
+
+### Fixed
+
+- Added material poofs for surviving partial-block sub-cells when a final
+  fracture or Terraformer cleanup clears the parent voxel, so indirectly
+  despawned bite pieces no longer disappear silently.
+
+### Tests
+
+- Added coverage for final core fractures and Terraformer cleanup poofing every
+  partial lattice cell removed by the final block clear.
+
 ## 0.14.7 - 2026-06-23
 
 ### Fixed
