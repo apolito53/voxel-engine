@@ -1,7 +1,7 @@
 import { BLOCK_FRAGMENT_COUNT, BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments";
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import { TERRAIN_DAMAGE_SCALE } from "./blockMaterialRules";
-import { getBlockTextureTileId } from "./blockTextureTiles";
+import { getBlockTextureBaseTileId } from "./blockTextureTiles";
 import type { CollisionBounds } from "./collision";
 import { getSunlitFaceShade } from "./voxelLighting";
 
@@ -1375,7 +1375,7 @@ function addCarvedFaceGeometry(
   const firstVertex = geometry.positions.length / 3;
   const meshKey = createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z);
   const normalTuple: readonly [number, number, number] = [face.normal.x, face.normal.y, face.normal.z];
-  const textureTile = getBlockTextureTileId(meshKey, normalTuple);
+  const textureTile = getBlockTextureBaseTileId(meshKey, normalTuple);
 
   for (let v = 0; v <= PARTIAL_BLOCK_FACE_SEGMENTS; v += 1) {
     for (let u = 0; u <= PARTIAL_BLOCK_FACE_SEGMENTS; u += 1) {
@@ -1418,7 +1418,7 @@ function addTriangle(
   const shade = Math.max(0.24, getSunlitFaceShade(normal) * 0.95);
   const meshKey = createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z);
   const color = getTintedBlockColor(meshKey, shade);
-  const textureTile = getBlockTextureTileId(meshKey, normal);
+  const textureTile = getBlockTextureBaseTileId(meshKey, normal);
   const base = geometry.positions.length / 3;
   geometry.positions.push(...first, ...second, ...third);
   geometry.normals.push(...normal, ...normal, ...normal);
@@ -1654,7 +1654,7 @@ function addQuad(
   const shade = getSunlitFaceShade(normalTuple) * shadeMultiplier;
   const meshKey = createBlockMeshKey(block, position.x, position.y, position.z);
   const color = getTintedBlockColor(meshKey, shade);
-  const textureTile = getBlockTextureTileId(meshKey, normalTuple);
+  const textureTile = getBlockTextureBaseTileId(meshKey, normalTuple);
 
   for (const corner of corners) {
     geometry.positions.push(corner.x, corner.y, corner.z);

@@ -42,6 +42,7 @@ import {
   getBlockColorVariant,
   getBlockColorVariantFromMeshKey,
   getBlockFromMeshKey,
+  getMaterialBlockColor,
   getTintedBlockColor
 } from "../src/blockColors";
 import {
@@ -55,7 +56,6 @@ import {
 } from "../src/chunkLightOcclusion";
 import {
   BLOCK_TEXTURE_TILE,
-  BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE,
   getBlockTextureBaseTileId,
   getBlockTextureTileId
 } from "../src/blockTextureTiles";
@@ -2199,6 +2199,14 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "block atlas sampling should still tint the diffuse terrain color"
   );
   assert(
+    shader.fragmentShader.includes("blockTextureBaseTile * blockTextureVariantsPerBaseTile + blockTextureVariant"),
+    "block atlas sampling should choose texture variants in the shader instead of splitting greedy faces"
+  );
+  assert(
+    shader.fragmentShader.includes("floor(vMapUv)"),
+    "shader texture variation should be derived from world-space meter cells"
+  );
+  assert(
     shader.fragmentShader.includes("reflectedLight.directSpecular *= diffuseColor.rgb;"),
     "terrain direct specular should be damped by baked vertex and texture darkness"
   );
@@ -2238,6 +2246,64 @@ test("block texture tile mapping varies repeated material surfaces", () => {
   }
 
   assert(sampledTiles.size > 1, "nearby repeated grass tops should sample multiple atlas variants");
+});
+
+test("chunk greedy meshing ignores visual variants on flat terrain faces", () => {
+  const chunk = new Chunk(0, 0);
+  for (let x = 2; x < 8; x += 1) {
+    for (let z = 3; z < 9; z += 1) {
+      chunk.setLocal(x, 0, z, BLOCK.stone);
+    }
+  }
+
+  const meshWorld = {
+    isSolid(x: number, y: number, z: number): boolean {
+      if (y < 0) return true;
+      return chunk.getLocal(Math.floor(x), Math.floor(y), Math.floor(z)) !== BLOCK.air;
+    },
+    isRenderableSolid(x: number, y: number, z: number): boolean {
+      return this.isSolid(x, y, z);
+    }
+  };
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const mesh = chunk.rebuildMesh(meshWorld, material);
+  const positions = mesh.geometry.getAttribute("position");
+  const normals = mesh.geometry.getAttribute("normal");
+  const colors = mesh.geometry.getAttribute("color");
+  const expectedStoneTopColor = getMaterialBlockColor(BLOCK.stone, getLitBlockFaceShade(
+    createLitBlockMeshKey(BLOCK.stone, SKY_EXPOSED_LIGHT_BUCKET),
+    [0, 1, 0],
+    getSunlitFaceShade([0, 1, 0])
+  ));
+  let topVertices = 0;
+  let matchingTopColors = 0;
+
+  for (let index = 0; index < normals.count; index += 1) {
+    if (normals.getX(index) !== 0 || normals.getY(index) !== 1 || normals.getZ(index) !== 0) continue;
+    if (positions.getY(index) !== 1) continue;
+    topVertices += 1;
+    if (
+      Math.abs(colors.getX(index) - expectedStoneTopColor[0]) < 0.0001 &&
+      Math.abs(colors.getY(index) - expectedStoneTopColor[1]) < 0.0001 &&
+      Math.abs(colors.getZ(index) - expectedStoneTopColor[2]) < 0.0001
+    ) {
+      matchingTopColors += 1;
+    }
+  }
+
+  assertEqual(
+    topVertices,
+    4,
+    "one flat stone patch should emit one greedy top quad instead of T-junction-prone color-variant tiles"
+  );
+  assertEqual(
+    matchingTopColors,
+    4,
+    "chunk vertex colors should use the material base tint while shader-side texture variants provide visual noise"
+  );
+
+  mesh.geometry.dispose();
+  material.dispose();
 });
 
 test("raycast returns hit block and entry face", () => {
@@ -5561,7 +5627,7 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   const bounds = new THREE.Box3().setFromBufferAttribute(positions);
   const baseTiles = new Set<number>();
   for (let index = 0; index < textureTiles.count; index += 1) {
-    baseTiles.add(Math.floor(textureTiles.getX(index) / BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE));
+    baseTiles.add(textureTiles.getX(index));
   }
 
   assert(field.mesh.visible, "broken partial terrain should render as a visible surface patch");

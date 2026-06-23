@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.14.4 - 2026-06-22
+
+### Fixed
+
+- Changed normal chunk meshing so greedy terrain faces merge by material and
+  sealed/sky light bucket instead of by randomized per-block color variant,
+  reducing T-junction seams that could read as light leaking through sealed
+  rooms.
+- Moved terrain texture variation for merged chunk and partial terrain faces
+  into the shader using world-space meter cells, preserving noisy surfaces
+  without fragmenting large flat faces.
+
+### Tests
+
+- Added coverage that a flat same-material chunk patch emits one greedy face
+  instead of variant-split rectangles, plus shader coverage for procedural
+  texture variant selection.
+
 ## 0.14.3 - 2026-06-22
 
 ### Fixed

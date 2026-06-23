@@ -80,15 +80,17 @@ export function appendBlockTextureQuadAttributes(
   normal: FaceNormal,
   corners: readonly QuadCorner[]
 ): void {
-  const tileId = getBlockTextureTileId(meshKey, normal);
+  const baseTileId = getBlockTextureBaseTileId(meshKey, normal);
 
   // UVs are derived from world-space face axes, not quad-local 0..1 corners.
   // That keeps greedy-meshed terrain faces tiled per meter instead of stretching
-  // one giant texture across a combined run of blocks.
+  // one giant texture across a combined run of blocks. The shader chooses the
+  // per-meter variant from those same world UVs, which keeps visual noise
+  // without forcing the greedy mesher to split faces by block variant.
   for (const corner of corners) {
     const [u, v] = getWorldFaceUv(normal, corner);
     uvs.push(u, v);
-    textureTiles.push(tileId);
+    textureTiles.push(baseTileId);
   }
 }
 

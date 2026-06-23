@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BLOCK, BLOCKS } from "./blocks";
-import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
+import { getMaterialBlockColor } from "./blockColors";
 import { appendBlockTextureQuadAttributes } from "./blockTextureTiles";
 import {
   createChunkSkyExposure,
@@ -448,8 +448,12 @@ function exposedBlock(
   const neighborRenderable = world.isRenderableSolid?.(neighborWorldX, neighborWorldY, neighborWorldZ)
     ?? world.isSolid(neighborWorldX, neighborWorldY, neighborWorldZ);
   if (!BLOCKS[block].solid || !selfRenderable || neighborRenderable) return BLOCK.air;
+  // Greedy terrain faces must merge by material and light bucket, not by the
+  // per-block visual variant. Keeping coordinate noise in this key splits flat
+  // walls into many little rectangles, creating T-junctions that show up as
+  // antialiased light leaks in sealed rooms.
   return createLitBlockMeshKey(
-    createBlockMeshKey(block, worldX, worldY, worldZ),
+    block,
     skyExposure.getLightBucketForNeighbor(neighborLocalX, neighborY, neighborLocalZ)
   );
 }
@@ -517,7 +521,7 @@ function addQuad(
   const base = positions.length / 3;
   const baseMeshKey = getBaseBlockMeshKey(meshKey);
   const shade = getLitBlockFaceShade(meshKey, normal, getSunlitFaceShade(normal));
-  const color = getTintedBlockColor(baseMeshKey, shade);
+  const color = getMaterialBlockColor(baseMeshKey, shade);
 
   for (const corner of corners) {
     positions.push(corner[0], corner[1], corner[2]);

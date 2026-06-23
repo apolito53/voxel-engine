@@ -28,7 +28,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
 
   material.onBeforeCompile = applyWorldBlockShaderPatches;
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v2";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v3";
   return material;
 }
 
@@ -39,10 +39,15 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
   shader.uniforms.blockTextureAtlasInset = {
     value: new THREE.Vector2(ATLAS_INSET_UV / BLOCK_TEXTURE_ATLAS_COLUMNS, ATLAS_INSET_UV / BLOCK_TEXTURE_ATLAS_ROWS)
   };
+  shader.uniforms.blockTextureVariantsPerBaseTile = {
+    value: BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE
+  };
 
-  // The tile id is per vertex so worker-built chunk geometry can choose grass
+  // The base tile id is per vertex so worker-built chunk geometry can choose grass
   // tops, dirt undersides, wood end grain, and side textures without splitting
-  // the world into separate materials or draw-call buckets.
+  // the world into separate materials or draw-call buckets. The exact texture
+  // variant is chosen per meter in the fragment shader, keeping visual breakup
+  // without fragmenting greedy terrain quads into T-junction-prone slivers.
   shader.vertexShader = shader.vertexShader
     .replace(
       "#include <common>",
@@ -56,13 +61,17 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
   shader.fragmentShader = shader.fragmentShader
     .replace(
       "#include <common>",
-      "#include <common>\nuniform vec2 blockTextureAtlasGrid;\nuniform vec2 blockTextureAtlasInset;\nvarying float vBlockTextureTile;"
+      "#include <common>\nuniform vec2 blockTextureAtlasGrid;\nuniform vec2 blockTextureAtlasInset;\nuniform float blockTextureVariantsPerBaseTile;\nvarying float vBlockTextureTile;"
     )
     .replace(
       "#include <map_fragment>",
       [
         "#ifdef USE_MAP",
-        "  float blockTextureTileIndex = floor(vBlockTextureTile + 0.5);",
+        "  float blockTextureBaseTile = floor(vBlockTextureTile + 0.5);",
+        "  vec2 blockTextureCell = floor(vMapUv);",
+        "  float blockTextureHash = fract(sin(dot(blockTextureCell + vec2(blockTextureBaseTile * 17.0, blockTextureBaseTile * 31.0), vec2(127.1, 311.7))) * 43758.5453123);",
+        "  float blockTextureVariant = floor(blockTextureHash * blockTextureVariantsPerBaseTile);",
+        "  float blockTextureTileIndex = blockTextureBaseTile * blockTextureVariantsPerBaseTile + blockTextureVariant;",
         "  float blockTextureColumn = mod(blockTextureTileIndex, blockTextureAtlasGrid.x);",
         "  float blockTextureRow = floor(blockTextureTileIndex / blockTextureAtlasGrid.x);",
         "  vec2 blockTextureOrigin = vec2(blockTextureColumn, blockTextureRow) / blockTextureAtlasGrid;",

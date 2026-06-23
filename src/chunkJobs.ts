@@ -1,5 +1,5 @@
 import { BLOCK, BLOCKS } from "./blocks";
-import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
+import { getMaterialBlockColor } from "./blockColors";
 import { appendBlockTextureQuadAttributes } from "./blockTextureTiles";
 import {
   createChunkSkyExposure,
@@ -374,8 +374,11 @@ function exposedBlock(
   ) {
     return BLOCK.air;
   }
+  // Keep the merge key tied to material and light bucket only. Coordinate
+  // variants belong in the shader/texture path; putting them here fragments
+  // otherwise flat greedy faces and can leave bright MSAA seams in interiors.
   return createLitBlockMeshKey(
-    createBlockMeshKey(block, worldX, worldY, worldZ),
+    block,
     skyExposure.getLightBucketForNeighbor(nx, ny, nz)
   );
 }
@@ -532,7 +535,7 @@ function addQuad(
   const base = positions.length / 3;
   const baseMeshKey = getBaseBlockMeshKey(meshKey);
   const shade = getLitBlockFaceShade(meshKey, normal, getSunlitFaceShade(normal));
-  const color = getTintedBlockColor(baseMeshKey, shade);
+  const color = getMaterialBlockColor(baseMeshKey, shade);
 
   for (const corner of corners) {
     positions.push(corner[0], corner[1], corner[2]);
