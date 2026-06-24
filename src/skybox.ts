@@ -16,7 +16,10 @@ export type Skybox = {
   dispose(): void;
 };
 
-export function createSkybox(sunOffset: THREE.Vector3): Skybox {
+export function createSkybox(
+  sunOffset: THREE.Vector3,
+  lowerHemisphereColor: THREE.ColorRepresentation
+): Skybox {
   const texture = new THREE.TextureLoader().load(SKYBOX_TEXTURE_URL);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
@@ -32,6 +35,7 @@ export function createSkybox(sunOffset: THREE.Vector3): Skybox {
     fog: false
   });
   material.toneMapped = false;
+  maskLowerHemisphereWithFog(material, new THREE.Color(lowerHemisphereColor));
 
   const object = new THREE.Mesh(geometry, material);
   object.name = "Sunlit day skybox";
@@ -52,6 +56,43 @@ export function createSkybox(sunOffset: THREE.Vector3): Skybox {
       texture.dispose();
     }
   };
+}
+
+function maskLowerHemisphereWithFog(
+  material: THREE.MeshBasicMaterial,
+  lowerHemisphereColor: THREE.Color
+): void {
+  // The generated asset is a pretty ground-facing sky panorama, not a true
+  // full-sphere environment map. If we wrap the whole image around a sphere,
+  // its lower half puts clouds below the world horizon and makes fogged terrain
+  // look like it is floating in front of painted sky. Keep the upper texture,
+  // but fade the underside of the sphere into the same color as world fog.
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.lowerHemisphereColor = { value: lowerHemisphereColor };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nvarying float vSkyboxLocalY;"
+      )
+      .replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvSkyboxLocalY = normalize(position).y;"
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform vec3 lowerHemisphereColor;\nvarying float vSkyboxLocalY;"
+      )
+      .replace(
+        "#include <map_fragment>",
+        [
+          "#include <map_fragment>",
+          "float horizonTextureBlend = smoothstep(-0.04, 0.08, vSkyboxLocalY);",
+          "diffuseColor.rgb = mix(lowerHemisphereColor, diffuseColor.rgb, horizonTextureBlend);"
+        ].join("\n")
+      );
+  };
+  material.customProgramCacheKey = () => "skybox-lower-hemisphere-fog-mask-v1";
 }
 
 export function getSkyboxYawForSunDirection(sunOffset: THREE.Vector3): number {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.14.10 - 2026-06-23
+
+### Fixed
+
+- Masked the generated skybox lower hemisphere into the world fog color, so the
+  hard fog horizon no longer reveals cloud detail below the terrain horizon.
+
 ## 0.14.9 - 2026-06-23
 
 ### Changed

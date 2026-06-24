@@ -117,7 +117,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Render quality preset definitions, hard fog wall/hidden-horizon thickness, render horizon safety ring, physics-body
   defaults, active debris bubble radii, local-light/debris-shadow budgets, Custom baseline, and tuning knobs:
   `src/qualityPresets.ts`
-- Generated sunlit skybox texture and camera-following sky dome: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
+- Generated sunlit skybox texture and camera-following sky dome with a lower-hemisphere fog mask so clouds do not appear below the terrain horizon: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
 - Generated hitscan energy-bolt texture for additive beam rendering: `src/assets/hitscan-energy-bolt.png`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`

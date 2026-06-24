@@ -578,7 +578,7 @@ scene.add(sun);
 const skyLight = new THREE.HemisphereLight(0xb9d9ff, 0x394228, bootPreset.skyIntensity);
 scene.add(skyLight);
 
-const skybox = createSkybox(SUN_OFFSET);
+const skybox = createSkybox(SUN_OFFSET, WORLD_FOG_COLOR);
 scene.add(skybox.object);
 const localLightRenderer = new LocalLightRenderer(scene);
 
