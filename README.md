@@ -78,7 +78,8 @@ ignored by git.
 - Low damaged-terrain ledges step up automatically with a short vertical ease,
   so Terraformer stairs do not pop the camera upward. Two-to-four-sub-block
   ledges need a sprint vault, while taller reachable lips clamber only while
-  `Space` is held; falling players holding `Space` can catch reachable edges.
+  `Space` is held; falling players holding `Space` can catch nearby reachable
+  edges even before direct body contact.
 - `G` toggles between `Items` and `Blocks`
 - `T` toggles click actions between `Semi Auto` and `Full Auto`
 - `Mouse wheel` selects within the active lane

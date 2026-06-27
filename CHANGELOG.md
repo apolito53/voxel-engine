@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.14.12 - 2026-06-26
+
+### Fixed
+
+- Made falling ledge grabs more forgiving during long jumps. Holding `Space`
+  now checks a short forward grab window in the movement direction, so reachable
+  lips can catch before the player's body fully collides with the wall.
+
+### Tests
+
+- Added a near-miss air-grab regression where the player long-jumps close to a
+  two-block ledge while falling with `Space` held.
+
 ## 0.14.11 - 2026-06-26
 
 ### Added

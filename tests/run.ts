@@ -6104,6 +6104,32 @@ test("player movement clambers onto reachable full-block ledges only while jump 
     assertClose(airGrabPlayer.getFeetY(), 2.002, 0.000001, "air clamber should finish on the ledge top");
     airGrabPlayer.dispose();
 
+    const longJumpCamera = new THREE.PerspectiveCamera();
+    longJumpCamera.position.set(-0.78, PLAYER_HEIGHT + 0.2, 0.5);
+    const longJumpPlayer = new PlayerController(longJumpCamera, fakeCanvas, twoBlockWall);
+    longJumpPlayer.keys.add("Space");
+    longJumpPlayer.velocity.y = -3;
+    longJumpPlayer.moveAxis("x", 0.4, false);
+    assertClose(
+      longJumpCamera.position.x,
+      -0.38,
+      0.000001,
+      "near-miss air grab should begin from the safe long-jump position instead of snapping forward"
+    );
+    longJumpPlayer.active = true;
+    longJumpPlayer.update(1);
+    assert(
+      longJumpCamera.position.x > 0.1,
+      "falling near a ledge while holding jump should grab even before direct body collision"
+    );
+    assertClose(
+      longJumpPlayer.getFeetY(),
+      2.002,
+      0.000001,
+      "near-miss air grab should finish on the ledge top"
+    );
+    longJumpPlayer.dispose();
+
     const blockedCamera = new THREE.PerspectiveCamera();
     blockedCamera.position.set(-0.45, PLAYER_HEIGHT, 0.5);
     const blockedPlayer = new PlayerController(blockedCamera, fakeCanvas, tooTallWall);

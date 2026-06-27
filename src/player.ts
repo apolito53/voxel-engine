@@ -34,6 +34,7 @@ import {
 } from "./playerMovement";
 
 type MovementAxis = "x" | "y" | "z";
+type HorizontalMovementAxis = "x" | "z";
 export type PlayerMovementMode = "walk" | "crouch" | "slide" | "flight";
 const SUB_BLOCK_HEIGHT = 1 / 3;
 const PASSIVE_STEP_MAX_HEIGHT = 0.55;
@@ -54,6 +55,11 @@ const STEP_UP_MAX_DURATION_SECONDS = 0.085;
 const PARTIAL_SURFACE_SNAP_EPSILON = 0.025;
 const PLAYER_COLLISION_OVERLAP_EPSILON = 0.000001;
 const CLAMBER_CLEARANCE_EPSILON = 0.002;
+// Long jumps can pass close enough to a ledge to feel catchable without ever
+// producing a direct body/terrain collision on that frame. This short reach
+// gives jump-held falling players a deliberate grab window without becoming a
+// broad wall magnet.
+const AIR_CLAMBER_GRAB_REACH = PLAYER_RADIUS + SUB_BLOCK_HEIGHT;
 const JUMP_KEY = "Space";
 
 export type PlayerBounds = {
@@ -84,6 +90,12 @@ type TraversalAnimation = {
 };
 
 type TraversalKind = TraversalAnimation["kind"];
+
+type AirClamberGrabCandidate = {
+  readonly target: THREE.Vector3;
+  readonly liftHeight: number;
+  readonly faceDistance: number;
+};
 
 export class PlayerController {
   readonly camera: THREE.PerspectiveCamera;
@@ -662,7 +674,10 @@ export class PlayerController {
 
     if (!this.collides()) {
       if (axis === "y" && amount < 0 && this.snapDownToPartialSupport(previousFeetY)) return;
-      if (axis !== "y" && !this.flying) this.stepUpOntoPartialSupport(previousFeetY, groundedForTraversal);
+      if (axis !== "y" && !this.flying) {
+        if (this.stepUpOntoPartialSupport(previousFeetY, groundedForTraversal)) return;
+        if (this.tryAirClamberGrab(axis, amount, previousFeetY, movementStart)) return;
+      }
       return;
     }
 
@@ -695,16 +710,20 @@ export class PlayerController {
   }
 
   getBounds(): PlayerBounds {
-    const feetY = this.getFeetY();
+    return this.getBoundsAtCameraPosition(this.camera.position);
+  }
+
+  private getBoundsAtCameraPosition(position: THREE.Vector3): PlayerBounds {
+    const feetY = position.y - this.getVisualEyeHeight();
     const height = this.getCollisionHeight();
 
     return {
-      minX: this.camera.position.x - PLAYER_RADIUS,
-      maxX: this.camera.position.x + PLAYER_RADIUS,
+      minX: position.x - PLAYER_RADIUS,
+      maxX: position.x + PLAYER_RADIUS,
       minY: feetY,
       maxY: feetY + height - 0.05,
-      minZ: this.camera.position.z - PLAYER_RADIUS,
-      maxZ: this.camera.position.z + PLAYER_RADIUS
+      minZ: position.z - PLAYER_RADIUS,
+      maxZ: position.z + PLAYER_RADIUS
     };
   }
 
@@ -786,6 +805,101 @@ export class PlayerController {
       movementStart,
       groundedForTraversal
     );
+  }
+
+  private tryAirClamberGrab(
+    axis: HorizontalMovementAxis,
+    amount: number,
+    previousFeetY: number,
+    movementStart: THREE.Vector3
+  ): boolean {
+    if (!this.canStartAirClamber()) return false;
+
+    const direction = Math.sign(amount);
+    if (direction === 0) return false;
+
+    const currentPosition = this.camera.position.clone();
+    const candidates = this.findAirClamberGrabCandidates(axis, direction, previousFeetY, movementStart);
+
+    for (const candidate of candidates) {
+      const target = candidate.target.clone();
+      this.camera.position.copy(target);
+      if (this.collides()) {
+        this.camera.position.copy(currentPosition);
+        continue;
+      }
+
+      this.onGround = true;
+      if (this.velocity.y < 0) this.velocity.y = 0;
+      this.startTraversalAnimation("clamber", currentPosition.y, target, candidate.liftHeight, currentPosition);
+      return true;
+    }
+
+    this.camera.position.copy(currentPosition);
+    return false;
+  }
+
+  private findAirClamberGrabCandidates(
+    axis: HorizontalMovementAxis,
+    direction: number,
+    previousFeetY: number,
+    movementStart: THREE.Vector3
+  ): readonly AirClamberGrabCandidate[] {
+    const currentBounds = this.getBounds();
+    const startBounds = this.getBoundsAtCameraPosition(movementStart);
+    const probeBounds = createAirClamberProbeBounds(startBounds, currentBounds, axis, direction);
+    const currentFeetY = this.getFeetY();
+    const maxSurfaceY = previousFeetY + this.getCollisionHeight() + CLAMBER_EXTRA_HEAD_REACH;
+    const candidates: AirClamberGrabCandidate[] = [];
+
+    const minX = Math.floor(probeBounds.minX);
+    const maxX = Math.floor(probeBounds.maxX);
+    const minY = Math.floor(previousFeetY - PLAYER_COLLISION_OVERLAP_EPSILON);
+    const maxY = Math.floor(maxSurfaceY + PLAYER_COLLISION_OVERLAP_EPSILON);
+    const minZ = Math.floor(probeBounds.minZ);
+    const maxZ = Math.floor(probeBounds.maxZ);
+
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        for (let x = minX; x <= maxX; x += 1) {
+          for (const box of this.getCollisionBoxesForCell(x, y, z)) {
+            if (!perpendicularBoundsOverlap(currentBounds, box, axis)) continue;
+            if (box.maxY <= currentFeetY + PARTIAL_SURFACE_SNAP_EPSILON) continue;
+            if (box.maxY > maxSurfaceY + PARTIAL_SURFACE_SNAP_EPSILON) continue;
+
+            const faceDistance = getForwardFaceDistance(currentBounds, box, axis, direction);
+            if (faceDistance < -PLAYER_COLLISION_OVERLAP_EPSILON) continue;
+            if (faceDistance > AIR_CLAMBER_GRAB_REACH + PLAYER_COLLISION_OVERLAP_EPSILON) continue;
+
+            const liftHeight = box.maxY - currentFeetY;
+            if (this.chooseTraversalKind(liftHeight, false) !== "clamber") continue;
+
+            const target = this.camera.position.clone();
+            target.y = box.maxY + CLAMBER_CLEARANCE_EPSILON + this.getVisualEyeHeight();
+            // Land just past the contacted lip, not at the center of the block.
+            // That keeps the pull-up readable and avoids an unnecessary snap
+            // across a whole voxel when the player merely brushed the edge.
+            if (axis === "x") {
+              target.x = direction > 0
+                ? box.minX + PLAYER_RADIUS + CLAMBER_CLEARANCE_EPSILON
+                : box.maxX - PLAYER_RADIUS - CLAMBER_CLEARANCE_EPSILON;
+            } else {
+              target.z = direction > 0
+                ? box.minZ + PLAYER_RADIUS + CLAMBER_CLEARANCE_EPSILON
+                : box.maxZ - PLAYER_RADIUS - CLAMBER_CLEARANCE_EPSILON;
+            }
+
+            candidates.push({ target, liftHeight, faceDistance });
+          }
+        }
+      }
+    }
+
+    return candidates.sort((left, right) => {
+      const distanceDelta = left.faceDistance - right.faceDistance;
+      if (Math.abs(distanceDelta) > PLAYER_COLLISION_OVERLAP_EPSILON) return distanceDelta;
+      return left.liftHeight - right.liftHeight;
+    });
   }
 
   private liftOntoReachableSurface(
@@ -1113,6 +1227,68 @@ function horizontalBoundsOverlap(a: CollisionBounds, b: CollisionBounds): boolea
     a.minZ < b.maxZ - PLAYER_COLLISION_OVERLAP_EPSILON &&
     a.maxZ > b.minZ + PLAYER_COLLISION_OVERLAP_EPSILON
   );
+}
+
+function createAirClamberProbeBounds(
+  startBounds: PlayerBounds,
+  currentBounds: PlayerBounds,
+  axis: HorizontalMovementAxis,
+  direction: number
+): PlayerBounds {
+  const bounds = {
+    minX: Math.min(startBounds.minX, currentBounds.minX),
+    maxX: Math.max(startBounds.maxX, currentBounds.maxX),
+    minY: Math.min(startBounds.minY, currentBounds.minY),
+    maxY: Math.max(startBounds.maxY, currentBounds.maxY),
+    minZ: Math.min(startBounds.minZ, currentBounds.minZ),
+    maxZ: Math.max(startBounds.maxZ, currentBounds.maxZ)
+  };
+
+  if (axis === "x") {
+    if (direction > 0) bounds.maxX += AIR_CLAMBER_GRAB_REACH;
+    else bounds.minX -= AIR_CLAMBER_GRAB_REACH;
+  } else if (direction > 0) {
+    bounds.maxZ += AIR_CLAMBER_GRAB_REACH;
+  } else {
+    bounds.minZ -= AIR_CLAMBER_GRAB_REACH;
+  }
+
+  return bounds;
+}
+
+function perpendicularBoundsOverlap(
+  playerBounds: PlayerBounds,
+  blockBounds: CollisionBounds,
+  movementAxis: HorizontalMovementAxis
+): boolean {
+  if (movementAxis === "x") {
+    return (
+      playerBounds.minZ < blockBounds.maxZ - PLAYER_COLLISION_OVERLAP_EPSILON &&
+      playerBounds.maxZ > blockBounds.minZ + PLAYER_COLLISION_OVERLAP_EPSILON
+    );
+  }
+
+  return (
+    playerBounds.minX < blockBounds.maxX - PLAYER_COLLISION_OVERLAP_EPSILON &&
+    playerBounds.maxX > blockBounds.minX + PLAYER_COLLISION_OVERLAP_EPSILON
+  );
+}
+
+function getForwardFaceDistance(
+  playerBounds: PlayerBounds,
+  blockBounds: CollisionBounds,
+  movementAxis: HorizontalMovementAxis,
+  direction: number
+): number {
+  if (movementAxis === "x") {
+    return direction > 0
+      ? blockBounds.minX - playerBounds.maxX
+      : playerBounds.minX - blockBounds.maxX;
+  }
+
+  return direction > 0
+    ? blockBounds.minZ - playerBounds.maxZ
+    : playerBounds.minZ - blockBounds.maxZ;
 }
 
 function lerp(start: number, end: number, amount: number): number {
