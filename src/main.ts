@@ -323,6 +323,7 @@ import {
   getPlayerCameraTargetFov,
   smoothSprintFeedbackFov
 } from "./sprintFeedback";
+import { HorizonMatte, type HorizonMatteSurfaceProvider } from "./horizonMatte";
 import { createSkybox } from "./skybox";
 import { TargetBlockHighlighter } from "./targetHighlighter";
 import {
@@ -580,6 +581,8 @@ scene.add(skyLight);
 
 const skybox = createSkybox(SUN_OFFSET, WORLD_FOG_COLOR);
 scene.add(skybox.object);
+const horizonMatte = new HorizonMatte(WORLD_FOG_COLOR);
+scene.add(horizonMatte.object);
 const localLightRenderer = new LocalLightRenderer(scene);
 
 const worldMaterial = createWorldBlockMaterial();
@@ -600,6 +603,19 @@ let selectedToolHotbarIndex = 0;
 let selectedBlockHotbarIndex = 0;
 let builderBrushSize = BUILDER_BRUSH_MIN_SIZE;
 let qualityController: QualityController;
+
+const horizonMatteSurfaceProvider: HorizonMatteSurfaceProvider = {
+  getTerrainProfile: () => world?.terrainProfile ?? null,
+  getReferenceHeight: (cameraPosition) => {
+    const activeWorld = world;
+    if (!activeWorld) return null;
+
+    // Keep the first pass deliberately local and cheap. The provider seam lets
+    // a later version swap this for coarse terrain-generator sampling or biome
+    // silhouettes without coupling fake horizon art to chunk streaming.
+    return activeWorld.highestSolidY(cameraPosition.x, cameraPosition.z);
+  }
+};
 let physicsObjectBudget = bootPreset.physicsObjectBudget;
 let pendingWorldDeletion: SavedWorld | null = null;
 let lastSavedPlayerLocation: SavedPlayerStateSnapshot | null = null;
@@ -2350,6 +2366,12 @@ function animate(): void {
 
   updateSunShadowAnchor();
   skybox.update(camera);
+  horizonMatte.update({
+    camera,
+    inWorld,
+    quality: qualityController.preset,
+    surfaceProvider: world ? horizonMatteSurfaceProvider : null
+  });
   novaPilotReactions.update();
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
@@ -5239,6 +5261,7 @@ function disposeRuntime(): void {
   partialBlockMeshField.dispose();
   workerPool.dispose();
   localLightRenderer.dispose();
+  horizonMatte.dispose();
   skybox.dispose();
   disposeWorldBlockMaterial(worldMaterial);
   disposeWorldBlockMaterial(partialBlockMaterial);

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.14.11 - 2026-06-26
+
+### Added
+
+- Added a render-only horizon matte behind the hard fog wall so high-altitude
+  views read as distant world/fog continuation instead of empty sky where
+  chunks are intentionally not drawn.
+
+### Changed
+
+- Kept the matte outside terrain streaming, collision, ray picking, shadows,
+  and worker jobs; it is disabled for `floating-islands` worlds so their void
+  silhouette stays intentional.
+
+### Tests
+
+- Added radius/profile tests covering the matte's inside-the-wall start,
+  100-chunk far extension, invalid-distance clamping, and floating-islands
+  opt-out.
+
 ## 0.14.10 - 2026-06-23
 
 ### Fixed

@@ -487,6 +487,12 @@ import {
 import { VoxelWorld, type BlockDamageBrushPreview } from "../src/world";
 import { WorkerPool, getDefaultWorkerPoolSize, normalizeWorkerPoolSize } from "../src/workerPool";
 import { getSkyboxAlignedSunDirection } from "../src/skybox";
+import {
+  HORIZON_MATTE_EXTENSION_CHUNKS,
+  HORIZON_MATTE_INSET_CHUNKS,
+  getHorizonMatteRadii,
+  shouldShowHorizonMatte
+} from "../src/horizonMatte";
 
 type TestCase = {
   readonly name: string;
@@ -11108,6 +11114,63 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     shouldShowSuperUltraOptIn(SUPER_ULTRA_PRESET_ID),
     "Super Ultra opt-in should remain visible while active so players can disable it"
   );
+});
+
+test("horizon matte radius policy hides beyond the hard fog wall", () => {
+  for (const presetId of [...QUALITY_PRESET_ORDER, CUSTOM_PRESET_ID, SUPER_ULTRA_PRESET_ID]) {
+    const preset = QUALITY_PRESETS[presetId];
+    const radii = getHorizonMatteRadii(preset);
+    const expectedInnerRadius = Math.max(0, preset.fogFar - HORIZON_MATTE_INSET_CHUNKS * CHUNK_SIZE);
+    const expectedOuterRadius = preset.fogFar + HORIZON_MATTE_EXTENSION_CHUNKS * CHUNK_SIZE;
+
+    assertClose(
+      radii.innerRadius,
+      expectedInnerRadius,
+      0.000001,
+      `${preset.label} matte should begin tucked inside the opaque fog wall`
+    );
+    assertClose(
+      radii.outerRadius,
+      expectedOuterRadius,
+      0.000001,
+      `${preset.label} matte should extend 100 chunks past the fog wall`
+    );
+    assert(
+      radii.innerRadius >= 0,
+      `${preset.label} matte should never build negative-radius geometry`
+    );
+    assert(
+      radii.innerRadius < preset.fogFar,
+      `${preset.label} matte should start before the wall is fully opaque`
+    );
+    assert(
+      radii.outerRadius > preset.loadRadius * CHUNK_SIZE,
+      `${preset.label} matte should extend beyond the hidden streamed horizon`
+    );
+  }
+
+  const tinyRadii = getHorizonMatteRadii({ fogFar: CHUNK_SIZE * 0.25 });
+  assertEqual(tinyRadii.innerRadius, 0, "tiny fog distances should clamp matte inner radius to zero");
+  assert(tinyRadii.outerRadius > tinyRadii.innerRadius, "tiny fog distances should still produce drawable geometry");
+
+  const invalidRadii = getHorizonMatteRadii({ fogFar: Number.NaN });
+  assertEqual(invalidRadii.innerRadius, 0, "invalid fog distances should clamp matte inner radius to zero");
+  assertEqual(
+    invalidRadii.outerRadius,
+    HORIZON_MATTE_EXTENSION_CHUNKS * CHUNK_SIZE,
+    "invalid fog distances should fall back to the extension radius"
+  );
+});
+
+test("horizon matte stays disabled for floating-islands worlds", () => {
+  assertEqual(shouldShowHorizonMatte("classic"), true, "classic terrain should allow the matte");
+  assertEqual(shouldShowHorizonMatte("varied"), true, "varied terrain should allow the matte");
+  assertEqual(
+    shouldShowHorizonMatte("floating-islands"),
+    false,
+    "floating-islands worlds should keep their intended void instead of drawing a fake floor"
+  );
+  assertEqual(shouldShowHorizonMatte(null), false, "inactive worlds should not show the matte");
 });
 
 test("skybox sun direction lines up with the real directional light", () => {

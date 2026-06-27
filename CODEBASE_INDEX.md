@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-06-20
+Last reviewed: 2026-06-26
 
 Purpose: a compact map for surgical codebase reads. Keep this file current when module ownership, commands, or architecture changes.
 
@@ -117,7 +117,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Render quality preset definitions, hard fog wall/hidden-horizon thickness, render horizon safety ring, physics-body
   defaults, active debris bubble radii, local-light/debris-shadow budgets, Custom baseline, and tuning knobs:
   `src/qualityPresets.ts`
-- Generated sunlit skybox texture and camera-following sky dome with a lower-hemisphere fog mask so clouds do not appear below the terrain horizon: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`
+- Generated sunlit skybox texture, camera-following sky dome with a lower-hemisphere fog mask, and render-only horizon matte that paints a fog-colored far-world base behind the hard fog wall without creating terrain: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`, `src/horizonMatte.ts`
 - Generated hitscan energy-bolt texture for additive beam rendering: `src/assets/hitscan-energy-bolt.png`
 - Directional shadow-map texel snapping helpers: `src/shadows.ts`
 - Clamp, noise, and terrain math helpers: `src/math.ts`
@@ -133,7 +133,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 ## Runtime Flow
 
 1. `index.html` loads `src/main.ts`.
-2. `main.ts` creates the Three.js renderer, scene, lights, camera-following generated skybox, browser-unlocked audio engine, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
+2. `main.ts` creates the Three.js renderer, scene, lights, camera-following generated skybox, render-only horizon matte, browser-unlocked audio engine, `VoxelWorld`, `PlayerController`, and small UI helpers for quality, debug HUD, minimap, and world list rendering.
 3. `main.ts` opens the async IndexedDB save registry, then starts on the home screen; `worldMenu.ts` renders saved-world rows, and loading, creating, Superflat Lab creation, or confirmed deletion updates the saved-world slots, active seed, and optional player resume location.
 4. `VoxelWorld` reads the saved chunk key index when a world loads, but chunk payloads stay lazy and stream from IndexedDB only when needed.
 5. `VoxelWorld.ensureChunksAround` creates initial spawn chunks after a world is loaded; generated chunks use seeded `fbm2` terrain noise from `src/terrain.ts`.
@@ -206,7 +206,7 @@ When adding a new mature feature, add it to this list with three things: owning 
   not split into T-junction seams again.
 - Worker meshes treat missing neighbor chunks as temporarily solid so streaming does not draw chunk-edge walls before neighbors load and trigger a remesh.
 - Chunk `revision` values invalidate worker mesh results for both local block edits and neighbor-driven dirty marks; do not let stale neighbor snapshots clear `dirty`.
-- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts, full chunk-radius queue refreshes, full unload sweeps, or all-loaded-chunk dirty scans on every frame. The settings slider is the fog-start/clear-distance radius; `QualityController.streamLoadRadius` is the farther hidden horizon that keeps the hard chunk cutoff behind fully opaque fog, while `QualityController.chunkRenderRadius` is the nearer draw radius that hides only fully fogged loaded meshes plus one safety ring. Chunk queue, unload, and fog-hidden visibility footprints are radial with a half-chunk margin so the streamed horizon matches the circular hard fog wall instead of revealing square terrain corners. Keep the wall short and dense; do not collapse `fogFar` back onto `streamLoadRadius`, or distant chunks become a visible square terrain cutoff again; do not expand `chunkRenderRadius` back to the full stream radius, or hidden-horizon draw pressure returns. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work. If code loads or creates chunks directly, keep the unload-window and dirty/modified indexes in sync.
+- Large render-distance presets depend on bounded frustum-biased chunk and mesh selection in `src/world.ts`; avoid reintroducing full queue sorts, full chunk-radius queue refreshes, full unload sweeps, or all-loaded-chunk dirty scans on every frame. The settings slider is the fog-start/clear-distance radius; `QualityController.streamLoadRadius` is the farther hidden horizon that keeps the hard chunk cutoff behind fully opaque fog, while `QualityController.chunkRenderRadius` is the nearer draw radius that hides only fully fogged loaded meshes plus one safety ring. Chunk queue, unload, and fog-hidden visibility footprints are radial with a half-chunk margin so the streamed horizon matches the circular hard fog wall instead of revealing square terrain corners. Keep the wall short and dense; do not collapse `fogFar` back onto `streamLoadRadius`, or distant chunks become a visible square terrain cutoff again; do not expand `chunkRenderRadius` back to the full stream radius, or hidden-horizon draw pressure returns. The horizon matte in `src/horizonMatte.ts` is a render-only fog-colored floor behind the wall; do not use it for chunk streaming, collision, ray picking, saves, or floating-islands worlds. If code clears pending load state or makes a saved chunk fall back to generated terrain, call the queue-window invalidation path so unchanged-center streaming can safely repopulate missing work. If code loads or creates chunks directly, keep the unload-window and dirty/modified indexes in sync.
 - `Super Ultra` is intentionally gated by a pause-menu opt-in that only appears at `Ultra` or while `Super Ultra` is active.
 - Pause-menu tuning controls live behind the `Settings` button and admin build controls live behind the `Builder` button so normal pause/resume stays quick; opening a submenu hides `Resume` and the red `Exit to Home` action until the user backs out. The settings panel is viewport-constrained and split into `Graphics`, `Gameplay`, and `Experimental` tabs to keep smaller windows reachable while putting risky physics/debris stress controls behind a warning.
 - Slider edits intentionally fork into the single `Custom` preset instead of mutating built-in presets; named custom preset management is future UI work.
