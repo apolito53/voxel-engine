@@ -12,6 +12,7 @@ type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile
 type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
 
 const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
+const WORLD_FOG_CAMERA_UNIFORM = "voxelHorizontalFogCameraPosition";
 // The sealed-room baked shade is intentionally tiny. This cutoff catches every
 // enclosed material face, but stays below normal outdoor foliage/wall shade so
 // the indirect-light clamp does not misclassify ordinary dark terrain.
@@ -31,14 +32,22 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     metalness: 0,
     side: options.side ?? THREE.FrontSide
   });
+  const fogCameraPosition = new THREE.Vector3();
+  material.userData[WORLD_FOG_CAMERA_UNIFORM] = fogCameraPosition;
 
-  material.onBeforeCompile = applyWorldBlockShaderPatches;
+  material.onBeforeCompile = (shader) => {
+    applyWorldBlockShaderPatches(shader, fogCameraPosition);
+    material.userData.shader = shader;
+  };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v4";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v5-horizontal-fog";
   return material;
 }
 
-export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
+export function applyWorldBlockShaderPatches(
+  shader: ShaderWithUniforms,
+  fogCameraPosition = new THREE.Vector3()
+): void {
   shader.uniforms.blockTextureAtlasGrid = {
     value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
   };
@@ -47,6 +56,9 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
   };
   shader.uniforms.blockTextureVariantsPerBaseTile = {
     value: BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE
+  };
+  shader.uniforms[WORLD_FOG_CAMERA_UNIFORM] = {
+    value: fogCameraPosition
   };
 
   // The base tile id is per vertex so worker-built chunk geometry can choose grass
@@ -57,17 +69,34 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
   shader.vertexShader = shader.vertexShader
     .replace(
       "#include <common>",
-      "#include <common>\nattribute float blockTextureTile;\nvarying float vBlockTextureTile;"
+      [
+        "#include <common>",
+        "attribute float blockTextureTile;",
+        "varying float vBlockTextureTile;",
+        "varying vec3 vVoxelWorldPosition;"
+      ].join("\n")
     )
     .replace(
       "#include <uv_vertex>",
       "#include <uv_vertex>\nvBlockTextureTile = blockTextureTile;"
+    )
+    .replace(
+      "#include <worldpos_vertex>",
+      "#include <worldpos_vertex>\nvVoxelWorldPosition = worldPosition.xyz;"
     );
 
   shader.fragmentShader = shader.fragmentShader
     .replace(
       "#include <common>",
-      "#include <common>\nuniform vec2 blockTextureAtlasGrid;\nuniform vec2 blockTextureAtlasInset;\nuniform float blockTextureVariantsPerBaseTile;\nvarying float vBlockTextureTile;"
+      [
+        "#include <common>",
+        "uniform vec2 blockTextureAtlasGrid;",
+        "uniform vec2 blockTextureAtlasInset;",
+        "uniform float blockTextureVariantsPerBaseTile;",
+        `uniform vec3 ${WORLD_FOG_CAMERA_UNIFORM};`,
+        "varying float vBlockTextureTile;",
+        "varying vec3 vVoxelWorldPosition;"
+      ].join("\n")
     )
     .replace(
       "#include <map_fragment>",
@@ -85,6 +114,25 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
         "  vec2 blockTextureUv = blockTextureOrigin + blockTextureAtlasInset + fract(vMapUv) * blockTextureScale;",
         "  vec4 sampledDiffuseColor = texture2D(map, blockTextureUv);",
         "  diffuseColor *= sampledDiffuseColor;",
+        "#endif"
+      ].join("\n")
+    )
+    .replace(
+      "#include <fog_fragment>",
+      [
+        "#ifdef USE_FOG",
+        // Terrain chunks stream and hide in a horizontal-radius circle. Three's
+        // stock fog fades by camera-space depth, which turns the hard fog wall
+        // into a screen-aligned rectangle from high altitude. Match the chunk
+        // policy by fogging terrain from horizontal X/Z distance instead.
+        `  vec2 voxelHorizontalFogDelta = vVoxelWorldPosition.xz - ${WORLD_FOG_CAMERA_UNIFORM}.xz;`,
+        "  float voxelHorizontalFogDistance = length(voxelHorizontalFogDelta);",
+        "  #ifdef FOG_EXP2",
+        "    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * voxelHorizontalFogDistance * voxelHorizontalFogDistance );",
+        "  #else",
+        "    float fogFactor = smoothstep( fogNear, fogFar, voxelHorizontalFogDistance );",
+        "  #endif",
+        "  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );",
         "#endif"
       ].join("\n")
     )
@@ -115,9 +163,35 @@ export function applyWorldBlockShaderPatches(shader: ShaderWithUniforms): void {
     );
 }
 
+export function updateWorldBlockMaterialFogCenter(
+  material: THREE.Material,
+  cameraPosition: THREE.Vector3
+): void {
+  const userDataFogPosition = material.userData[WORLD_FOG_CAMERA_UNIFORM];
+  if (userDataFogPosition instanceof THREE.Vector3) {
+    userDataFogPosition.copy(cameraPosition);
+    return;
+  }
+
+  const shader = getWorldBlockShader(material);
+  const cameraUniform = shader?.uniforms[WORLD_FOG_CAMERA_UNIFORM]?.value;
+  if (cameraUniform instanceof THREE.Vector3) {
+    cameraUniform.copy(cameraPosition);
+  }
+}
+
 export function disposeWorldBlockMaterial(material: THREE.MeshStandardMaterial): void {
   material.map?.dispose();
   material.dispose();
+}
+
+function getWorldBlockShader(material: THREE.Material): ShaderWithUniforms | null {
+  const materialWithShader = material as THREE.Material & {
+    userData: {
+      shader?: ShaderWithUniforms;
+    };
+  };
+  return materialWithShader.userData.shader ?? null;
 }
 
 export function createBlockTextureAtlas(): THREE.CanvasTexture {

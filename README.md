@@ -109,7 +109,9 @@ Streaming, unloading, and fog-hidden render visibility use a radial chunk
 footprint with a small chunk-boundary safety margin, matching the circular fog
 wall instead of revealing square terrain corners at the horizon. Hidden-horizon
 chunks remain loaded for continuity, but stop drawing after the opaque fog wall
-plus a safety ring to reduce far-distance draw pressure. A render-only
+plus a safety ring to reduce far-distance draw pressure. Voxel terrain fog is
+also computed from horizontal world distance so high-altitude views keep that
+same circular horizon instead of a screen-shaped fog slab. A render-only
 fog-colored horizon matte fills the far world below the wall in normal terrain
 worlds, so high-altitude views read as atmospheric continuation instead of
 empty sky. Placeable Lamp blocks use a

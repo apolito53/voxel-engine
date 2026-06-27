@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.14.13 - 2026-06-27
+
+### Fixed
+
+- Changed voxel terrain fog to use horizontal world-space distance from the
+  camera instead of camera-depth fog, so the hard fog wall follows the radial
+  chunk horizon instead of reading as a square/screen-aligned slab from high
+  altitude.
+- Lowered the skybox lower-hemisphere fog mask so the improved wall stays close
+  to the terrain horizon instead of climbing high into the sky.
+
+### Tests
+
+- Added shader patch coverage that verifies terrain fog uses the horizontal
+  world-distance path and does not fall back to `vFogDepth`.
+
 ## 0.14.12 - 2026-06-26
 
 ### Fixed

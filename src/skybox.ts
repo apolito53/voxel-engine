@@ -3,6 +3,11 @@ import * as THREE from "three";
 const SKYBOX_TEXTURE_URL = new URL("./assets/skybox-sunlit-day.png", import.meta.url).href;
 const SKYBOX_RADIUS_METERS = 96;
 const SKYBOX_UP_AXIS = new THREE.Vector3(0, 1, 0);
+// Keep the fake lower-sky fog mask below the true horizon. It hides the
+// generated panorama's under-world clouds without turning the chunk horizon
+// into a tall pale wall when the player flies high above terrain.
+export const SKYBOX_LOWER_FOG_MASK_START_Y = -0.1;
+export const SKYBOX_LOWER_FOG_MASK_END_Y = -0.02;
 
 // Measured from the generated panorama's brightest sun-disc centroid. Three's
 // SphereGeometry maps horizontal UVs with 0.25 at +Z, 0.5 at +X, and 0.75 at
@@ -87,12 +92,12 @@ function maskLowerHemisphereWithFog(
         "#include <map_fragment>",
         [
           "#include <map_fragment>",
-          "float horizonTextureBlend = smoothstep(-0.04, 0.08, vSkyboxLocalY);",
+          `float horizonTextureBlend = smoothstep(${SKYBOX_LOWER_FOG_MASK_START_Y.toFixed(3)}, ${SKYBOX_LOWER_FOG_MASK_END_Y.toFixed(3)}, vSkyboxLocalY);`,
           "diffuseColor.rgb = mix(lowerHemisphereColor, diffuseColor.rgb, horizonTextureBlend);"
         ].join("\n")
       );
   };
-  material.customProgramCacheKey = () => "skybox-lower-hemisphere-fog-mask-v1";
+  material.customProgramCacheKey = () => "skybox-lower-hemisphere-fog-mask-v2";
 }
 
 export function getSkyboxYawForSunDirection(sunOffset: THREE.Vector3): number {

@@ -36,7 +36,11 @@ import {
   getDebrisSpawnProfile,
   type DebrisSpawnProfile
 } from "./blockMaterialRules";
-import { createWorldBlockMaterial, disposeWorldBlockMaterial } from "./blockTextureAtlas";
+import {
+  createWorldBlockMaterial,
+  disposeWorldBlockMaterial,
+  updateWorldBlockMaterialFogCenter
+} from "./blockTextureAtlas";
 import {
   BUILDER_BRUSH_MAX_SIZE,
   BUILDER_BRUSH_MIN_SIZE,
@@ -2372,6 +2376,8 @@ function animate(): void {
     quality: qualityController.preset,
     surfaceProvider: world ? horizonMatteSurfaceProvider : null
   });
+  updateWorldBlockMaterialFogCenter(worldMaterial, camera.position);
+  updateWorldBlockMaterialFogCenter(partialBlockMaterial, camera.position);
   novaPilotReactions.update();
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();

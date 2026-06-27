@@ -486,7 +486,11 @@ import {
 } from "../src/voxelConstants";
 import { VoxelWorld, type BlockDamageBrushPreview } from "../src/world";
 import { WorkerPool, getDefaultWorkerPoolSize, normalizeWorkerPoolSize } from "../src/workerPool";
-import { getSkyboxAlignedSunDirection } from "../src/skybox";
+import {
+  SKYBOX_LOWER_FOG_MASK_END_Y,
+  SKYBOX_LOWER_FOG_MASK_START_Y,
+  getSkyboxAlignedSunDirection
+} from "../src/skybox";
 import {
   HORIZON_MATTE_EXTENSION_CHUNKS,
   HORIZON_MATTE_INSET_CHUNKS,
@@ -2194,8 +2198,8 @@ test("block texture tile mapping keeps material faces distinct", () => {
 test("world block shader damps specular through baked diffuse shade", () => {
   const shader = {
     uniforms: {},
-    vertexShader: "#include <common>\nvoid main() {\n#include <uv_vertex>\n}",
-    fragmentShader: "#include <common>\nvoid main() {\n#include <map_fragment>\n#include <lights_fragment_end>\n}"
+    vertexShader: "#include <common>\nvoid main() {\n#include <uv_vertex>\n#include <worldpos_vertex>\n}",
+    fragmentShader: "#include <common>\nvoid main() {\n#include <map_fragment>\n#include <lights_fragment_end>\n#include <fog_fragment>\n}"
   } as Parameters<typeof applyWorldBlockShaderPatches>[0];
 
   applyWorldBlockShaderPatches(shader);
@@ -2231,6 +2235,18 @@ test("world block shader damps specular through baked diffuse shade", () => {
   assert(
     shader.fragmentShader.includes("reflectedLight.indirectSpecular *= diffuseColor.rgb;"),
     "terrain indirect specular should be damped by baked vertex and texture darkness"
+  );
+  assert(
+    shader.vertexShader.includes("vVoxelWorldPosition = worldPosition.xyz;"),
+    "terrain shader should pass world-space positions to the fragment fog path"
+  );
+  assert(
+    shader.fragmentShader.includes("voxelHorizontalFogDistance"),
+    "terrain fog should use horizontal world distance so the hard fog wall matches the radial chunk horizon"
+  );
+  assert(
+    !shader.fragmentShader.includes("smoothstep( fogNear, fogFar, vFogDepth )"),
+    "terrain fog should not fall back to camera-depth fog that creates a rectangular horizon from high altitude"
   );
 });
 
@@ -11212,6 +11228,10 @@ test("skybox sun direction lines up with the real directional light", () => {
   assert(
     sunElevation > 35 && sunElevation < 45,
     `sun elevation should stay visually readable instead of overhead; got ${sunElevation.toFixed(2)} degrees`
+  );
+  assert(
+    SKYBOX_LOWER_FOG_MASK_START_Y < SKYBOX_LOWER_FOG_MASK_END_Y && SKYBOX_LOWER_FOG_MASK_END_Y < 0,
+    "skybox fog mask should stay below the true horizon so the hard fog wall does not climb into the sky"
   );
 });
 

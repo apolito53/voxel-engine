@@ -169,7 +169,9 @@ dense fog wall over the preset's falloff band, while the engine streams a hidden
 extra horizon behind that opacity so the hard chunk cutoff stays out of sight.
 Chunks beyond the opaque fog wall plus one safety ring stay loaded but stop
 drawing, which keeps streaming continuity without paying draw calls for fully
-hidden terrain. Normal terrain worlds also draw a cheap fog-colored horizon
+hidden terrain. Voxel terrain uses horizontal world-distance fog, so the dense
+wall stays aligned with the radial chunk horizon even from high altitude.
+Normal terrain worlds also draw a cheap fog-colored horizon
 matte below the wall, so flying high shows a distant atmospheric base instead
 of the skybox where chunks are intentionally hidden. Floating-islands worlds
 leave this fake floor disabled so the void remains visible.
