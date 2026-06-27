@@ -13,11 +13,12 @@ World units are metric: `1 block = 1 meter`. The active world volume is 96m
 tall, with legacy 48m edited chunk saves expanded on read so older maps remain
 aligned with the current terrain profile.
 
-Edited chunks and the last player location persist in IndexedDB browser storage.
-Clear this site's browser data to reset saved worlds. The home screen creates,
-loads, and deletes local saved worlds, with a `World Type` selector for `Varied
-Terrain`, `Floating Islands`, and `Classic Legacy`; `Superflat Lab` creates a
-flat test world using the reserved `superflat` seed.
+Edited chunk snapshots, partial-block terrain damage, and the last player
+location persist in IndexedDB browser storage. Clear this site's browser data to
+reset saved worlds. The home screen creates, loads, and deletes local saved
+worlds, with a `World Type` selector for `Varied Terrain`, `Floating Islands`,
+and `Classic Legacy`; `Superflat Lab` creates a flat test world using the
+reserved `superflat` seed.
 
 New saved-world seeds default to the newer varied terrain profile with broader
 plains, mountain-scale ridges, cliff-like slope breaks, sandy washes, terraced

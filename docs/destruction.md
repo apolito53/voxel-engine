@@ -44,8 +44,10 @@ visible partial material in front.
 
 Final fractures release only the block material still left inside, clear the
 bite mesh, and leave air instead of stamping the old wrinkled surface puddle.
-Carved shapes are not persisted to saves yet; leaving the active world clears
-partial-block state.
+Saved chunk snapshots persist the partial-block cells that remain after
+Terraformer, Physics Core, or Hitscan Core damage, so carved shapes survive world
+exit, browser restart, and chunk unload/reload. Loose debris, rubble experiments,
+active cores, and damage indicators stay transient.
 
 ## Projectile And Hitscan Cores
 

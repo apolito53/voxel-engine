@@ -19,6 +19,7 @@ const DEFAULT_WORLD_SEED = "";
 const VARIED_TERRAIN_PROFILE_INTRODUCED_AT = Date.UTC(2026, 4, 25, 4, 31, 0);
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
 const LEGACY_CHUNK_BYTE_LENGTH = CHUNK_SIZE * LEGACY_WORLD_HEIGHT * CHUNK_SIZE;
+const PARTIAL_BLOCK_VISUAL_CELL_COUNT = 27;
 
 export type SavedWorld = {
   readonly id: string;
@@ -47,6 +48,45 @@ export type SavedPlayerState = SavedPlayerStateSnapshot & {
   readonly worldHeight: number;
 };
 
+export type SavedPartialBlockVector = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+
+export type SavedPartialBlockSurfaceSample = {
+  readonly localX: number;
+  readonly localZ: number;
+  readonly height: number;
+  readonly weight: number;
+};
+
+export type SavedPartialBlockCut = {
+  readonly normal: SavedPartialBlockVector;
+  readonly localPoint: SavedPartialBlockVector;
+  readonly trajectory?: SavedPartialBlockVector;
+  readonly coreRadius?: number;
+  readonly exactRemovedVisualCellIndexes?: readonly number[];
+  readonly radius: number;
+  readonly depth: number;
+  readonly seed: number;
+};
+
+export type SavedPartialBlockCell = {
+  readonly block: number;
+  readonly position: SavedPartialBlockVector;
+  readonly cuts: readonly SavedPartialBlockCut[];
+  readonly removedVisualCellIndexes?: readonly number[];
+  readonly surfaceSamples?: readonly SavedPartialBlockSurfaceSample[];
+  readonly damage: number;
+  readonly maxHealth: number;
+};
+
+export type SavedChunkSnapshot = {
+  readonly blocks: Uint8Array;
+  readonly partialBlocks: readonly SavedPartialBlockCell[];
+};
+
 export interface SaveDatabase {
   getMetadata(key: string): Promise<string | null>;
   setMetadata(key: string, value: string): Promise<void>;
@@ -57,6 +97,8 @@ export interface SaveDatabase {
   updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null>;
   deleteWorld(worldId: string): Promise<void>;
   listChunkKeys(worldId: string): Promise<string[]>;
+  loadChunkSnapshot(worldId: string, chunkKey: string, options?: ChunkLoadOptions): Promise<SavedChunkSnapshot | null>;
+  saveChunkSnapshot(worldId: string, chunkKey: string, snapshot: SavedChunkSnapshot): Promise<void>;
   loadChunk(worldId: string, chunkKey: string, options?: ChunkLoadOptions): Promise<Uint8Array | null>;
   saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void>;
   deleteChunk(worldId: string, chunkKey: string): Promise<void>;
@@ -65,6 +107,8 @@ export interface SaveDatabase {
 export interface ChunkStorage {
   readonly worldId: string;
   listChunkKeys(): Promise<string[]>;
+  loadChunkSnapshot(key: string): Promise<SavedChunkSnapshot | null>;
+  saveChunkSnapshot(key: string, snapshot: SavedChunkSnapshot): Promise<void>;
   loadChunk(key: string): Promise<Uint8Array | null>;
   saveChunk(key: string, blocks: Uint8Array): Promise<void>;
   deleteChunk(key: string): Promise<void>;
@@ -88,6 +132,7 @@ type ChunkRecord = {
   worldId: string;
   chunkKey: string;
   blocks: ArrayBuffer | Uint8Array;
+  partialBlocks?: unknown;
   updatedAt: number;
 };
 
@@ -246,21 +291,43 @@ class IndexedDbSaveDatabase implements SaveDatabase {
       .map((recordId) => recordId.slice(prefix.length));
   }
 
-  async loadChunk(worldId: string, chunkKey: string, options: ChunkLoadOptions = {}): Promise<Uint8Array | null> {
+  async loadChunkSnapshot(
+    worldId: string,
+    chunkKey: string,
+    options: ChunkLoadOptions = {}
+  ): Promise<SavedChunkSnapshot | null> {
     const record = await this.getRecord<ChunkRecord>(CHUNKS_STORE, chunkRecordId(worldId, chunkKey));
-    return decodeStoredBlocks(record?.blocks, options);
+    const blocks = decodeStoredBlocks(record?.blocks, options);
+    if (!blocks) return null;
+
+    return {
+      blocks,
+      partialBlocks: normalizeSavedPartialBlockCells(record?.partialBlocks)
+    };
   }
 
-  async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
+  async saveChunkSnapshot(worldId: string, chunkKey: string, snapshot: SavedChunkSnapshot): Promise<void> {
     // Store the raw ArrayBuffer, not base64 text. IndexedDB can clone binary data directly.
     await this.putRecord(CHUNKS_STORE, {
       id: chunkRecordId(worldId, chunkKey),
       worldId,
       chunkKey,
-      blocks: cloneChunkBuffer(blocks),
+      blocks: cloneChunkBuffer(snapshot.blocks),
+      partialBlocks: cloneSavedPartialBlockCells(snapshot.partialBlocks),
       updatedAt: Date.now()
     });
     await this.updateWorldTimestamp(worldId);
+  }
+
+  async loadChunk(worldId: string, chunkKey: string, options: ChunkLoadOptions = {}): Promise<Uint8Array | null> {
+    return (await this.loadChunkSnapshot(worldId, chunkKey, options))?.blocks ?? null;
+  }
+
+  async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
+    await this.saveChunkSnapshot(worldId, chunkKey, {
+      blocks,
+      partialBlocks: []
+    });
   }
 
   async deleteChunk(worldId: string, chunkKey: string): Promise<void> {
@@ -325,7 +392,7 @@ class IndexedDbSaveDatabase implements SaveDatabase {
 class MemorySaveDatabase implements SaveDatabase {
   private readonly metadata = new Map<string, string>();
   private readonly worlds = new Map<string, SavedWorld>();
-  private readonly chunks = new Map<string, Uint8Array>();
+  private readonly chunks = new Map<string, SavedChunkSnapshot>();
 
   async getMetadata(key: string): Promise<string | null> {
     return this.metadata.get(key) ?? null;
@@ -388,14 +455,35 @@ class MemorySaveDatabase implements SaveDatabase {
       .map((recordId) => recordId.slice(prefix.length));
   }
 
+  async loadChunkSnapshot(
+    worldId: string,
+    chunkKey: string,
+    options: ChunkLoadOptions = {}
+  ): Promise<SavedChunkSnapshot | null> {
+    const snapshot = this.chunks.get(chunkRecordId(worldId, chunkKey));
+    const blocks = decodeStoredBlocks(snapshot?.blocks, options);
+    if (!blocks) return null;
+
+    return {
+      blocks,
+      partialBlocks: cloneSavedPartialBlockCells(snapshot?.partialBlocks ?? [])
+    };
+  }
+
+  async saveChunkSnapshot(worldId: string, chunkKey: string, snapshot: SavedChunkSnapshot): Promise<void> {
+    this.chunks.set(chunkRecordId(worldId, chunkKey), cloneSavedChunkSnapshot(snapshot));
+    await this.updateWorldTimestamp(worldId);
+  }
+
   async loadChunk(worldId: string, chunkKey: string, options: ChunkLoadOptions = {}): Promise<Uint8Array | null> {
-    const blocks = this.chunks.get(chunkRecordId(worldId, chunkKey));
-    return decodeStoredBlocks(blocks, options);
+    return (await this.loadChunkSnapshot(worldId, chunkKey, options))?.blocks ?? null;
   }
 
   async saveChunk(worldId: string, chunkKey: string, blocks: Uint8Array): Promise<void> {
-    this.chunks.set(chunkRecordId(worldId, chunkKey), blocks.slice());
-    await this.updateWorldTimestamp(worldId);
+    await this.saveChunkSnapshot(worldId, chunkKey, {
+      blocks,
+      partialBlocks: []
+    });
   }
 
   async deleteChunk(worldId: string, chunkKey: string): Promise<void> {
@@ -419,9 +507,9 @@ class IndexedDbChunkStorage implements ChunkStorage {
     return this.database.listChunkKeys(this.worldId);
   }
 
-  async loadChunk(key: string): Promise<Uint8Array | null> {
+  async loadChunkSnapshot(key: string): Promise<SavedChunkSnapshot | null> {
     try {
-      return await this.database.loadChunk(this.worldId, key, {
+      return await this.database.loadChunkSnapshot(this.worldId, key, {
         legacyHeightOffset: this.legacyHeightOffset
       });
     } catch (error) {
@@ -430,9 +518,29 @@ class IndexedDbChunkStorage implements ChunkStorage {
     }
   }
 
+  async saveChunkSnapshot(key: string, snapshot: SavedChunkSnapshot): Promise<void> {
+    try {
+      await this.database.saveChunkSnapshot(this.worldId, key, snapshot);
+    } catch (error) {
+      console.warn("Could not persist chunk edit", key, error);
+    }
+  }
+
+  async loadChunk(key: string): Promise<Uint8Array | null> {
+    try {
+      return (await this.loadChunkSnapshot(key))?.blocks ?? null;
+    } catch (error) {
+      console.warn("Could not load persisted chunk edit", key, error);
+      return null;
+    }
+  }
+
   async saveChunk(key: string, blocks: Uint8Array): Promise<void> {
     try {
-      await this.database.saveChunk(this.worldId, key, blocks);
+      await this.saveChunkSnapshot(key, {
+        blocks,
+        partialBlocks: []
+      });
     } catch (error) {
       console.warn("Could not persist chunk edit", key, error);
     }
@@ -462,7 +570,13 @@ class NullChunkStorage implements ChunkStorage {
     return null;
   }
 
+  async loadChunkSnapshot(): Promise<SavedChunkSnapshot | null> {
+    return null;
+  }
+
   async saveChunk(): Promise<void> {}
+
+  async saveChunkSnapshot(): Promise<void> {}
 
   async deleteChunk(): Promise<void> {}
 }
@@ -723,6 +837,162 @@ function readPositiveInteger(value: unknown): number | null {
 
 function readFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readFiniteInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+function readNonNegativeFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function cloneSavedChunkSnapshot(snapshot: SavedChunkSnapshot): SavedChunkSnapshot {
+  return {
+    blocks: snapshot.blocks.slice(),
+    partialBlocks: cloneSavedPartialBlockCells(snapshot.partialBlocks)
+  };
+}
+
+function cloneSavedPartialBlockCells(cells: readonly SavedPartialBlockCell[]): SavedPartialBlockCell[] {
+  return cells.map(cloneSavedPartialBlockCell);
+}
+
+function cloneSavedPartialBlockCell(cell: SavedPartialBlockCell): SavedPartialBlockCell {
+  return {
+    block: cell.block,
+    position: { ...cell.position },
+    cuts: cell.cuts.map(cloneSavedPartialBlockCut),
+    ...(cell.removedVisualCellIndexes
+      ? { removedVisualCellIndexes: [...cell.removedVisualCellIndexes] }
+      : {}),
+    ...(cell.surfaceSamples
+      ? { surfaceSamples: cell.surfaceSamples.map(cloneSavedPartialBlockSurfaceSample) }
+      : {}),
+    damage: cell.damage,
+    maxHealth: cell.maxHealth
+  };
+}
+
+function cloneSavedPartialBlockCut(cut: SavedPartialBlockCut): SavedPartialBlockCut {
+  return {
+    normal: { ...cut.normal },
+    localPoint: { ...cut.localPoint },
+    ...(cut.trajectory ? { trajectory: { ...cut.trajectory } } : {}),
+    ...(typeof cut.coreRadius === "number" ? { coreRadius: cut.coreRadius } : {}),
+    ...(cut.exactRemovedVisualCellIndexes
+      ? { exactRemovedVisualCellIndexes: [...cut.exactRemovedVisualCellIndexes] }
+      : {}),
+    radius: cut.radius,
+    depth: cut.depth,
+    seed: cut.seed
+  };
+}
+
+function cloneSavedPartialBlockSurfaceSample(sample: SavedPartialBlockSurfaceSample): SavedPartialBlockSurfaceSample {
+  return { ...sample };
+}
+
+function normalizeSavedPartialBlockCells(value: unknown): SavedPartialBlockCell[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(normalizeSavedPartialBlockCell)
+    .filter((cell): cell is SavedPartialBlockCell => Boolean(cell));
+}
+
+function normalizeSavedPartialBlockCell(value: unknown): SavedPartialBlockCell | null {
+  if (!isRecord(value)) return null;
+
+  const block = readFiniteInteger(value.block);
+  const position = normalizeSavedPartialBlockVector(value.position, true);
+  const damage = readNonNegativeFiniteNumber(value.damage);
+  const maxHealth = readNonNegativeFiniteNumber(value.maxHealth);
+  if (block === null || !position || damage === null || maxHealth === null || maxHealth <= 0) return null;
+
+  const cuts = Array.isArray(value.cuts)
+    ? value.cuts
+      .map(normalizeSavedPartialBlockCut)
+      .filter((cut): cut is SavedPartialBlockCut => Boolean(cut))
+    : [];
+  const removedVisualCellIndexes = normalizeSavedCellIndexes(value.removedVisualCellIndexes);
+  const surfaceSamples = Array.isArray(value.surfaceSamples)
+    ? value.surfaceSamples
+      .map(normalizeSavedPartialBlockSurfaceSample)
+      .filter((sample): sample is SavedPartialBlockSurfaceSample => Boolean(sample))
+    : [];
+
+  return {
+    block,
+    position,
+    cuts,
+    ...(removedVisualCellIndexes.length > 0 ? { removedVisualCellIndexes } : {}),
+    ...(surfaceSamples.length > 0 ? { surfaceSamples } : {}),
+    damage: Math.min(damage, maxHealth),
+    maxHealth
+  };
+}
+
+function normalizeSavedPartialBlockCut(value: unknown): SavedPartialBlockCut | null {
+  if (!isRecord(value)) return null;
+
+  const normal = normalizeSavedPartialBlockVector(value.normal);
+  const localPoint = normalizeSavedPartialBlockVector(value.localPoint);
+  const trajectory = normalizeSavedPartialBlockVector(value.trajectory);
+  const radius = readNonNegativeFiniteNumber(value.radius);
+  const depth = readNonNegativeFiniteNumber(value.depth);
+  const seed = readFiniteInteger(value.seed);
+  if (!normal || !localPoint || radius === null || depth === null || seed === null) return null;
+
+  const coreRadius = readNonNegativeFiniteNumber(value.coreRadius);
+  const exactRemovedVisualCellIndexes = normalizeSavedCellIndexes(value.exactRemovedVisualCellIndexes);
+  return {
+    normal,
+    localPoint,
+    ...(trajectory ? { trajectory } : {}),
+    ...(coreRadius !== null ? { coreRadius } : {}),
+    ...(exactRemovedVisualCellIndexes.length > 0 ? { exactRemovedVisualCellIndexes } : {}),
+    radius,
+    depth,
+    seed
+  };
+}
+
+function normalizeSavedPartialBlockVector(value: unknown, integer = false): SavedPartialBlockVector | null {
+  if (!isRecord(value)) return null;
+
+  const x = integer ? readFiniteInteger(value.x) : readFiniteNumber(value.x);
+  const y = integer ? readFiniteInteger(value.y) : readFiniteNumber(value.y);
+  const z = integer ? readFiniteInteger(value.z) : readFiniteNumber(value.z);
+  if (x === null || y === null || z === null) return null;
+  return { x, y, z };
+}
+
+function normalizeSavedPartialBlockSurfaceSample(value: unknown): SavedPartialBlockSurfaceSample | null {
+  if (!isRecord(value)) return null;
+
+  const localX = readFiniteNumber(value.localX);
+  const localZ = readFiniteNumber(value.localZ);
+  const height = readFiniteNumber(value.height);
+  const weight = readNonNegativeFiniteNumber(value.weight);
+  if (localX === null || localZ === null || height === null || weight === null) return null;
+
+  return {
+    localX: Math.max(0, Math.min(1, localX)),
+    localZ: Math.max(0, Math.min(1, localZ)),
+    height: Math.max(0, Math.min(1, height)),
+    weight
+  };
+}
+
+function normalizeSavedCellIndexes(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const uniqueIndexes = new Set<number>();
+  for (const entry of value) {
+    const index = readFiniteInteger(entry);
+    if (index === null || index < 0 || index >= PARTIAL_BLOCK_VISUAL_CELL_COUNT) continue;
+    uniqueIndexes.add(index);
+  }
+  return [...uniqueIndexes].sort((left, right) => left - right);
 }
 
 function cloneChunkBuffer(blocks: Uint8Array): ArrayBuffer {

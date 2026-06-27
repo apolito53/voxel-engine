@@ -31,7 +31,12 @@ import {
   type LocalLightSelection,
   type LocalLightSource
 } from "./localLights";
-import { createNullChunkStorage, type ChunkStorage } from "./chunkStorage";
+import {
+  createNullChunkStorage,
+  type ChunkStorage,
+  type SavedChunkSnapshot,
+  type SavedPartialBlockCell
+} from "./chunkStorage";
 import {
   PARTIAL_BLOCK_MAX_CUTS_PER_CELL,
   PARTIAL_BLOCK_MESH_REGION_SIZE_XZ,
@@ -918,7 +923,7 @@ type PendingSavedChunkLoad = PendingChunkLoadBase & {
 };
 
 type SavedChunkLoadResult = PendingSavedChunkLoad & {
-  readonly blocks: Uint8Array | null;
+  readonly snapshot: SavedChunkSnapshot | null;
 };
 
 type PendingMeshBuild = {
@@ -960,7 +965,7 @@ export class VoxelWorld implements CollisionWorld {
   terrainProfile: TerrainProfile;
   terrain: TerrainContext;
   savedChunkKeys: Set<string>;
-  savedChunks: Map<string, Uint8Array>;
+  savedChunks: Map<string, SavedChunkSnapshot>;
   chunkLoadQueue: Map<string, ChunkQueueEntry>;
   pendingChunkLoads: Map<number, PendingChunkLoad>;
   pendingChunkKeys: Set<string>;
@@ -972,7 +977,7 @@ export class VoxelWorld implements CollisionWorld {
   savedChunkResults: SavedChunkLoadResult[];
   storageOperations: Set<Promise<void>>;
   chunkStorageChains: Map<string, Promise<void>>;
-  pendingSavedChunkWrites: Map<string, Uint8Array>;
+  pendingSavedChunkWrites: Map<string, SavedChunkSnapshot>;
   storageGeneration: number;
   storageFlushTimer: ReturnType<typeof setTimeout> | null;
   workerRequestId: number;
@@ -1108,7 +1113,7 @@ export class VoxelWorld implements CollisionWorld {
 
   async preloadSavedChunksAround(x: number, z: number, radius = LOAD_RADIUS): Promise<void> {
     const center = this.toChunkCoords(x, z);
-    const loads: Promise<Uint8Array | null>[] = [];
+    const loads: Promise<SavedChunkSnapshot | null>[] = [];
 
     // Initial spawn gets a blocking preload so saved edits near spawn are visible immediately.
     for (const offset of getChunkRadiusOffsets(radius)) {
@@ -1177,10 +1182,12 @@ export class VoxelWorld implements CollisionWorld {
     let chunk = this.chunks.get(key);
     if (!chunk) {
       chunk = new Chunk(cx, cz);
-      const savedBlocks = this.savedChunks.get(key);
-      if (savedBlocks) {
-        // Saved chunks are full block snapshots, so loading one replaces terrain generation.
-        this.populateChunk(chunk, savedBlocks);
+      const savedSnapshot = this.savedChunks.get(key);
+      if (savedSnapshot) {
+        // Saved chunks replace generation and now carry their partial-terrain cells
+        // beside block bytes. Hydration happens after the chunk enters the map so
+        // masks, dirty regions, and local light lookups all see a normal loaded chunk.
+        this.populateChunk(chunk, savedSnapshot.blocks);
         chunk.modified = true;
       } else {
         this.generateChunk(chunk);
@@ -1188,6 +1195,7 @@ export class VoxelWorld implements CollisionWorld {
       this.chunks.set(key, chunk);
       this.trackLoadedChunk(key, chunk);
       this.chunkLoadQueue.delete(key);
+      if (savedSnapshot) this.hydrateSavedPartialBlocksForChunk(key, savedSnapshot.partialBlocks);
       this.markNeighborChunksDirty(cx, cz);
     }
     return chunk;
@@ -1201,7 +1209,13 @@ export class VoxelWorld implements CollisionWorld {
     this.reindexChunkLocalLights(chunk);
   }
 
-  addGeneratedChunk(cx: number, cz: number, blocks: Uint8Array, modified = false): Chunk {
+  addGeneratedChunk(
+    cx: number,
+    cz: number,
+    blocks: Uint8Array,
+    modified = false,
+    partialBlocks: readonly SavedPartialBlockCell[] = []
+  ): Chunk {
     const key = this.key(cx, cz);
     const existingChunk = this.chunks.get(key);
     if (existingChunk) return existingChunk;
@@ -1213,6 +1227,7 @@ export class VoxelWorld implements CollisionWorld {
     this.trackLoadedChunk(key, chunk);
     this.chunkLoadQueue.delete(key);
     this.pendingChunkKeys.delete(key);
+    if (partialBlocks.length > 0) this.hydrateSavedPartialBlocksForChunk(key, partialBlocks);
     this.markNeighborChunksDirty(cx, cz);
     return chunk;
   }
@@ -1493,13 +1508,13 @@ export class VoxelWorld implements CollisionWorld {
     this.pendingSavedChunkKeys.add(key);
     this.pendingSavedChunkLoads.set(key, { key, cx, cz, generation });
 
-    this.storage.loadChunk(key)
-      .then((blocks) => {
-        this.savedChunkResults.push({ key, cx, cz, blocks, generation });
+    this.storage.loadChunkSnapshot(key)
+      .then((snapshot) => {
+        this.savedChunkResults.push({ key, cx, cz, snapshot, generation });
       })
       .catch((error) => {
         console.warn("Could not stream saved chunk", key, error);
-        this.savedChunkResults.push({ key, cx, cz, blocks: null, generation });
+        this.savedChunkResults.push({ key, cx, cz, snapshot: null, generation });
       });
   }
 
@@ -1521,14 +1536,20 @@ export class VoxelWorld implements CollisionWorld {
       this.pendingSavedChunkLoads.delete(result.key);
       this.pendingSavedChunkKeys.delete(result.key);
 
-      if (!result.blocks) {
+      if (!result.snapshot) {
         this.forgetSavedChunk(result.key);
         continue;
       }
 
-      this.savedChunks.set(result.key, result.blocks);
+      this.savedChunks.set(result.key, result.snapshot);
       if (!this.chunks.has(result.key)) {
-        this.addGeneratedChunk(result.cx, result.cz, result.blocks, true);
+        this.addGeneratedChunk(
+          result.cx,
+          result.cz,
+          result.snapshot.blocks,
+          true,
+          result.snapshot.partialBlocks
+        );
         this.lastLoadedChunks += 1;
       }
     }
@@ -1690,7 +1711,7 @@ export class VoxelWorld implements CollisionWorld {
     }
     this.updateLocalLightBlockAt(key, blockX, blockY, blockZ, previousBlock, block);
     this.blockDamage.delete(this.damageKey(blockX, blockY, blockZ));
-    this.removePartialBlock({ x: blockX, y: blockY, z: blockZ });
+    this.removePartialBlock({ x: blockX, y: blockY, z: blockZ }, { persist: false });
     chunk.modified = true;
     this.dirtyChunkKeys.add(key);
     this.modifiedChunkKeys.add(key);
@@ -2865,7 +2886,9 @@ export class VoxelWorld implements CollisionWorld {
     }));
   }
 
-  private removePartialBlock(position: VoxelBlockPosition): void {
+  private removePartialBlock(position: VoxelBlockPosition, { persist = true }: {
+    readonly persist?: boolean;
+  } = {}): void {
     const key = createPartialBlockKey(position);
     const existing = this.partialBlocks.get(key);
     if (!existing) return;
@@ -2874,10 +2897,12 @@ export class VoxelWorld implements CollisionWorld {
     this.removePartialBlockFromIndexes(key, existing);
     this.markPartialBlockVisualDirty(position, true);
     this.markPartialBlockMaskDirty(position);
+    if (persist) this.rememberPartialBlockChunkModified(position);
   }
 
-  private setPartialBlockCell(cell: PartialBlockCell, { urgentVisual = false }: {
+  private setPartialBlockCell(cell: PartialBlockCell, { urgentVisual = false, persist = true }: {
     readonly urgentVisual?: boolean;
+    readonly persist?: boolean;
   } = {}): void {
     const key = createPartialBlockKey(cell.position);
     const existing = this.partialBlocks.get(key);
@@ -2888,12 +2913,14 @@ export class VoxelWorld implements CollisionWorld {
       // mesh already knows this macro voxel is represented by partial geometry.
       this.updatePartialBlockIndexes(key, cell);
       this.markPartialBlockVisualDirty(cell.position, urgentVisual);
+      if (persist) this.rememberPartialBlockChunkModified(cell.position);
       return;
     }
 
     this.addPartialBlockToIndexes(key, cell);
     this.markPartialBlockVisualDirty(cell.position, true);
     this.markPartialBlockMaskDirty(cell.position);
+    if (persist) this.rememberPartialBlockChunkModified(cell.position);
   }
 
   private clearPartialBlockState(): void {
@@ -2959,6 +2986,130 @@ export class VoxelWorld implements CollisionWorld {
     return this.key(cx, cz);
   }
 
+  private hydrateSavedPartialBlocksForChunk(
+    key: string,
+    savedCells: readonly SavedPartialBlockCell[]
+  ): void {
+    if (savedCells.length === 0) return;
+
+    for (const savedCell of savedCells) {
+      const cell = this.createRuntimePartialBlockCellFromSaved(key, savedCell);
+      if (!cell) continue;
+
+      const damageKey = this.damageKey(cell.position.x, cell.position.y, cell.position.z);
+      if (isPartialBlockSurfaceCell(cell)) {
+        this.blockDamage.delete(damageKey);
+      } else {
+        this.blockDamage.set(damageKey, cell.damage);
+      }
+      this.setPartialBlockCell(cell, { urgentVisual: true, persist: false });
+    }
+  }
+
+  private createRuntimePartialBlockCellFromSaved(
+    expectedChunkKey: string,
+    savedCell: SavedPartialBlockCell
+  ): PartialBlockCell | null {
+    const position = {
+      x: Math.floor(savedCell.position.x),
+      y: Math.floor(savedCell.position.y),
+      z: Math.floor(savedCell.position.z)
+    };
+    if (position.y < 0 || position.y >= WORLD_HEIGHT) return null;
+    if (this.getPartialBlockChunkKey(position) !== expectedChunkKey) return null;
+
+    const savedBlock = Math.floor(savedCell.block);
+    const savedDefinition = BLOCKS[savedBlock] ?? BLOCKS[BLOCK.air];
+    if (!savedDefinition.solid) return null;
+
+    // Bite cells replace an existing solid block. Surface patches are the one
+    // exception: they can intentionally live in an air macro-cell as a thin
+    // saved support skin, so do not reject them just because the block byte is air.
+    const isSurfaceCell = savedCell.surfaceSamples !== undefined && savedCell.surfaceSamples.length > 0;
+    const currentBlock = this.getBlock(position.x, position.y, position.z);
+    const currentDefinition = BLOCKS[currentBlock] ?? BLOCKS[BLOCK.air];
+    if (!isSurfaceCell && !currentDefinition.solid) return null;
+
+    const maxHealth = Math.max(1, savedCell.maxHealth);
+    const damage = Math.max(0, Math.min(savedCell.damage, maxHealth));
+    const removedVisualCellIndexes = savedCell.removedVisualCellIndexes
+      ? [...savedCell.removedVisualCellIndexes]
+      : undefined;
+    if (!isSurfaceCell && damage <= 0 && (!removedVisualCellIndexes || removedVisualCellIndexes.length === 0)) {
+      return null;
+    }
+
+    return {
+      block: isSurfaceCell ? savedBlock : currentBlock,
+      position,
+      cuts: savedCell.cuts.map((cut) => ({
+        normal: { ...cut.normal },
+        localPoint: { ...cut.localPoint },
+        ...(cut.trajectory ? { trajectory: { ...cut.trajectory } } : {}),
+        ...(typeof cut.coreRadius === "number" ? { coreRadius: cut.coreRadius } : {}),
+        ...(cut.exactRemovedVisualCellIndexes
+          ? { exactRemovedVisualCellIndexes: [...cut.exactRemovedVisualCellIndexes] }
+          : {}),
+        radius: cut.radius,
+        depth: cut.depth,
+        seed: cut.seed
+      })),
+      ...(removedVisualCellIndexes ? { removedVisualCellIndexes } : {}),
+      ...(savedCell.surfaceSamples ? {
+        surfaceSamples: savedCell.surfaceSamples.map((sample) => ({ ...sample }))
+      } : {}),
+      damage,
+      maxHealth
+    };
+  }
+
+  private rememberPartialBlockChunkModified(position: PartialBlockPosition): void {
+    const { cx, cz } = this.toChunkCoords(position.x, position.z);
+    const key = this.key(cx, cz);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) return;
+
+    chunk.modified = true;
+    this.modifiedChunkKeys.add(key);
+    this.rememberModifiedChunk(key, chunk.blocks);
+  }
+
+  private createSavedChunkSnapshot(key: string, blocks: Uint8Array): SavedChunkSnapshot {
+    return {
+      blocks: blocks.slice(),
+      partialBlocks: sortPartialBlockCells([
+        ...(this.partialBlocksByChunk.get(key)?.values() ?? [])
+      ]).map((cell) => this.createSavedPartialBlockCell(cell))
+    };
+  }
+
+  private createSavedPartialBlockCell(cell: PartialBlockCell): SavedPartialBlockCell {
+    return {
+      block: cell.block,
+      position: { ...cell.position },
+      cuts: cell.cuts.map((cut) => ({
+        normal: { ...cut.normal },
+        localPoint: { ...cut.localPoint },
+        ...(cut.trajectory ? { trajectory: { ...cut.trajectory } } : {}),
+        ...(typeof cut.coreRadius === "number" ? { coreRadius: cut.coreRadius } : {}),
+        ...(cut.exactRemovedVisualCellIndexes
+          ? { exactRemovedVisualCellIndexes: [...cut.exactRemovedVisualCellIndexes] }
+          : {}),
+        radius: cut.radius,
+        depth: cut.depth,
+        seed: cut.seed
+      })),
+      ...(cell.removedVisualCellIndexes ? {
+        removedVisualCellIndexes: [...cell.removedVisualCellIndexes]
+      } : {}),
+      ...(cell.surfaceSamples ? {
+        surfaceSamples: cell.surfaceSamples.map((sample) => ({ ...sample }))
+      } : {}),
+      damage: cell.damage,
+      maxHealth: cell.maxHealth
+    };
+  }
+
   private createPartialBlockMeshRegionUpdate(key: string, urgent = false): PartialBlockMeshRegionUpdate {
     const coords = parsePartialBlockMeshRegionKey(key);
     const cells = sortPartialBlockCells([...(this.partialBlocksByRegion.get(key)?.values() ?? [])]);
@@ -3018,8 +3169,9 @@ export class VoxelWorld implements CollisionWorld {
     // Copy before saving so later in-memory edits cannot mutate the stored snapshot by reference.
     // The actual IndexedDB write is debounced/coalesced per chunk; rapid destruction can touch
     // the same chunk dozens of times in a second, and writing every intermediate snapshot is
-    // wasted main-thread pressure.
-    const snapshot = blocks.slice();
+    // wasted main-thread pressure. Partial cells ride with the chunk snapshot so full cubes do
+    // not resurrect over Terraformer/core cuts after reload.
+    const snapshot = this.createSavedChunkSnapshot(key, blocks);
     this.savedChunkKeys.add(key);
     this.savedChunks.set(key, snapshot);
     this.pendingSavedChunkWrites.set(key, snapshot);
@@ -3035,18 +3187,18 @@ export class VoxelWorld implements CollisionWorld {
     this.queueChunkStorageOperation(key, () => this.storage.deleteChunk(key));
   }
 
-  async loadSavedChunkNow(key: string): Promise<Uint8Array | null> {
-    const cachedBlocks = this.savedChunks.get(key);
-    if (cachedBlocks) return cachedBlocks;
+  async loadSavedChunkNow(key: string): Promise<SavedChunkSnapshot | null> {
+    const cachedSnapshot = this.savedChunks.get(key);
+    if (cachedSnapshot) return cachedSnapshot;
 
-    const blocks = await this.storage.loadChunk(key);
-    if (!blocks) {
+    const snapshot = await this.storage.loadChunkSnapshot(key);
+    if (!snapshot) {
       this.forgetSavedChunk(key);
       return null;
     }
 
-    this.savedChunks.set(key, blocks);
-    return blocks;
+    this.savedChunks.set(key, snapshot);
+    return snapshot;
   }
 
   schedulePendingChunkSaveFlush(): void {
@@ -3069,7 +3221,7 @@ export class VoxelWorld implements CollisionWorld {
     this.pendingSavedChunkWrites.clear();
 
     for (const [key, snapshot] of pendingWrites) {
-      this.queueChunkStorageOperation(key, () => this.storage.saveChunk(key, snapshot));
+      this.queueChunkStorageOperation(key, () => this.storage.saveChunkSnapshot(key, snapshot));
     }
   }
 

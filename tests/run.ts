@@ -321,6 +321,7 @@ import {
   migrateSavedPlayerStateHeight,
   normalizeSavedTerrainProfile,
   type ChunkStorage,
+  type SavedChunkSnapshot,
   type SavedWorld
 } from "../src/chunkStorage";
 import { parseChangelogEntries } from "../src/changelog";
@@ -3774,7 +3775,10 @@ test("world reports pending runtime work before idle hibernation", () => {
   assert(world.hasPendingRuntimeWork(), "queued chunk loads should keep the frame loop awake");
   world.chunkLoadQueue.clear();
 
-  world.pendingSavedChunkWrites.set("0,0", new Uint8Array(4));
+  world.pendingSavedChunkWrites.set("0,0", {
+    blocks: new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE),
+    partialBlocks: []
+  });
   assert(world.hasPendingRuntimeWork(), "pending save writes should keep the heartbeat alive until storage drains");
   world.pendingSavedChunkWrites.clear();
 
@@ -3874,17 +3878,29 @@ test("world block reads, writes, and solidity follow bounds", async () => {
 });
 
 test("world coalesces repeated chunk saves before flushing storage", async () => {
-  const savedSnapshots: Uint8Array[] = [];
+  const savedSnapshots: SavedChunkSnapshot[] = [];
   const storage: ChunkStorage = {
     worldId: "coalesce-test",
     async listChunkKeys(): Promise<string[]> {
       return [];
     },
+    async loadChunkSnapshot(): Promise<SavedChunkSnapshot | null> {
+      return null;
+    },
+    async saveChunkSnapshot(_key: string, snapshot: SavedChunkSnapshot): Promise<void> {
+      savedSnapshots.push({
+        blocks: snapshot.blocks.slice(),
+        partialBlocks: [...snapshot.partialBlocks]
+      });
+    },
     async loadChunk(): Promise<Uint8Array | null> {
       return null;
     },
     async saveChunk(_key: string, blocks: Uint8Array): Promise<void> {
-      savedSnapshots.push(blocks.slice());
+      savedSnapshots.push({
+        blocks: blocks.slice(),
+        partialBlocks: []
+      });
     },
     async deleteChunk(): Promise<void> {}
   };
@@ -3901,11 +3917,277 @@ test("world coalesces repeated chunk saves before flushing storage", async () =>
 
   assertEqual(savedSnapshots.length, 1, "flushing should persist the coalesced chunk snapshot once");
   const snapshot = savedSnapshots[0];
-  assert(snapshot instanceof Uint8Array, "flush should provide a concrete saved chunk snapshot");
+  assert(snapshot?.blocks instanceof Uint8Array, "flush should provide a concrete saved chunk snapshot");
   assertEqual(
-    snapshot[1 + CHUNK_SIZE * (4 + CHUNK_SIZE * (WORLD_HEIGHT - 2))],
+    snapshot.blocks[1 + CHUNK_SIZE * (4 + CHUNK_SIZE * (WORLD_HEIGHT - 2))],
     BLOCK.sand,
     "coalesced save should contain the latest edit"
+  );
+  assertDeepEqual(snapshot.partialBlocks, [], "ordinary full-block edits should not invent partial cells");
+});
+
+test("chunk storage round-trips saved partial chunk snapshots", async () => {
+  const database = createMemorySaveDatabase();
+  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+  const index = (x: number, y: number, z: number): number => x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
+  blocks[index(2, 3, 4)] = BLOCK.stone;
+
+  const partialBlock = {
+    block: BLOCK.stone,
+    position: { x: 2, y: 3, z: 4 },
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      trajectory: { x: 1, y: 0, z: 0 },
+      coreRadius: 0.25,
+      exactRemovedVisualCellIndexes: [0, 13, 26],
+      radius: 0.45,
+      depth: 0.35,
+      seed: 12345
+    }],
+    removedVisualCellIndexes: [0, 13, 26],
+    surfaceSamples: [{ localX: 0.5, localZ: 0.5, height: 0.25, weight: 1 }],
+    damage: 60,
+    maxHealth: 1620
+  };
+
+  await database.saveChunkSnapshot("partial-storage-world", "0,0", {
+    blocks,
+    partialBlocks: [partialBlock]
+  });
+
+  const snapshot = await database.loadChunkSnapshot("partial-storage-world", "0,0");
+  assert(snapshot, "saved chunk snapshots should load back from storage");
+  assertEqual(snapshot.blocks[index(2, 3, 4)], BLOCK.stone, "snapshot should round-trip block bytes");
+  assertEqual(snapshot.partialBlocks.length, 1, "snapshot should round-trip one partial terrain cell");
+  assertDeepEqual(
+    snapshot.partialBlocks[0]?.removedVisualCellIndexes ?? [],
+    [0, 13, 26],
+    "snapshot should preserve removed sub-cell indexes"
+  );
+  assertDeepEqual(
+    snapshot.partialBlocks[0]?.cuts[0]?.exactRemovedVisualCellIndexes ?? [],
+    [0, 13, 26],
+    "snapshot should preserve deterministic Terraformer-style cuts"
+  );
+  assertEqual(
+    snapshot.partialBlocks[0]?.surfaceSamples?.[0]?.height,
+    0.25,
+    "snapshot should preserve surface samples for rebuilt partial visuals"
+  );
+  assertEqual(snapshot.partialBlocks[0]?.damage, 60, "snapshot should preserve saved partial damage");
+  assertEqual(snapshot.partialBlocks[0]?.maxHealth, 1620, "snapshot should preserve saved partial max health");
+
+  const legacyBlocks = await database.loadChunk("partial-storage-world", "0,0");
+  assert(legacyBlocks, "legacy block-only wrapper should still load the block bytes");
+  assertEqual(
+    legacyBlocks[index(2, 3, 4)],
+    BLOCK.stone,
+    "legacy block-only wrapper should ignore partial payloads without corrupting blocks"
+  );
+});
+
+test("world restores carved partial blocks from saved chunk snapshots", async () => {
+  const database = createMemorySaveDatabase();
+  const worldId = "partial-persist-core-world";
+  const storage = await createChunkStorage(worldId, database);
+  const world = new VoxelWorld({ seed: "partial-persist-core", storage });
+  const maskIndex = (x: number, y: number, z: number): number => x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
+
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  const firstHit = world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  const partialBefore = world.getPartialBlock(2, 3, 4);
+  assert(firstHit && !firstHit.destroyed, "the setup core hit should create saved partial terrain");
+  assert(partialBefore, "the setup core hit should leave a runtime partial cell");
+
+  await world.flushStorageWrites();
+  const storedSnapshot = await database.loadChunkSnapshot(worldId, "0,0");
+  assertEqual(storedSnapshot?.partialBlocks.length, 1, "flushed storage should include the partial cell");
+
+  const reloadedStorage = await createChunkStorage(worldId, database);
+  const reloadedWorld = new VoxelWorld({ seed: "partial-persist-core", storage: reloadedStorage });
+  await reloadedWorld.loadSavedChunkIndex();
+  await reloadedWorld.loadSavedChunkNow("0,0");
+  reloadedWorld.ensureChunk(0, 0);
+
+  const partialAfter = reloadedWorld.getPartialBlock(2, 3, 4);
+  assertEqual(reloadedWorld.getBlock(2, 3, 4), BLOCK.stone, "reloaded partial terrain keeps its block byte");
+  assertEqual(
+    reloadedWorld.getBlockDamage(2, 3, 4),
+    firstHit.damageAfter,
+    "reloaded partial terrain restores its shared block damage"
+  );
+  assert(partialAfter, "reloaded partial terrain should hydrate the partial cell");
+  assertDeepEqual(
+    partialAfter?.removedVisualCellIndexes ?? [],
+    partialBefore.removedVisualCellIndexes ?? [],
+    "reloaded partial terrain should preserve the removed presentation cells"
+  );
+  assertDeepEqual(
+    partialAfter?.cuts ?? [],
+    partialBefore.cuts,
+    "reloaded partial terrain should preserve cut history for visual reconstruction"
+  );
+  assertEqual(
+    reloadedWorld.createPartialBlockMask(0, 0)?.[maskIndex(2, 3, 4)],
+    1,
+    "reloaded partial terrain should suppress the normal full-cube mesh"
+  );
+});
+
+test("world restores Terraformer exact sub-cell edits from saved chunk snapshots", async () => {
+  const database = createMemorySaveDatabase();
+  const worldId = "partial-persist-terraformer-world";
+  const storage = await createChunkStorage(worldId, database);
+  const world = new VoxelWorld({ seed: "partial-persist-terraformer", storage });
+  const input = {
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    size: 1
+  };
+
+  world.setBlock(2, 3, 4, BLOCK.stone);
+  const preview = world.previewTerraformerEdit(input);
+  const edit = world.applyTerraformerEdit(input);
+  const removedIndex = preview?.cells[0]?.cellIndex;
+  assert(edit, "the setup Terraformer edit should remove one exact sub-cell");
+  assert(typeof removedIndex === "number", "the setup Terraformer preview should expose its sub-cell index");
+  await world.flushStorageWrites();
+
+  const reloadedStorage = await createChunkStorage(worldId, database);
+  const reloadedWorld = new VoxelWorld({ seed: "partial-persist-terraformer", storage: reloadedStorage });
+  await reloadedWorld.loadSavedChunkIndex();
+  await reloadedWorld.loadSavedChunkNow("0,0");
+  reloadedWorld.ensureChunk(0, 0);
+
+  const partialAfter = reloadedWorld.getPartialBlock(2, 3, 4);
+  assert(partialAfter, "Terraformer partial cells should hydrate after reload");
+  assertDeepEqual(
+    partialAfter?.removedVisualCellIndexes ?? [],
+    [removedIndex],
+    "Terraformer removed sub-cell indexes should survive reload exactly"
+  );
+  assertDeepEqual(
+    partialAfter?.cuts[0]?.exactRemovedVisualCellIndexes ?? [],
+    [removedIndex],
+    "Terraformer exact-cut metadata should survive reload for deterministic reconstruction"
+  );
+  assertEqual(
+    reloadedWorld.getBlockDamage(2, 3, 4),
+    getTerraformerSubCellHealth(BLOCK.stone),
+    "Terraformer reload should restore the shared terrain damage pool"
+  );
+});
+
+test("world clears stale saved partial cells when a damaged block is destroyed", async () => {
+  const database = createMemorySaveDatabase();
+  const worldId = "partial-persist-destroyed-world";
+  const storage = await createChunkStorage(worldId, database);
+  const world = new VoxelWorld({ seed: "partial-persist-destroyed", storage });
+
+  world.setBlock(2, 3, 4, BLOCK.grass);
+  const result = world.applyTerraformerEdit({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 6,
+    size: 3
+  });
+  assert(result?.results[0]?.destroyed, "the setup Terraformer edit should fully clear the block");
+  await world.flushStorageWrites();
+
+  const storedSnapshot = await database.loadChunkSnapshot(worldId, "0,0");
+  assertEqual(storedSnapshot?.partialBlocks.length, 0, "destroyed blocks should not leave stale saved partial cells");
+
+  const reloadedStorage = await createChunkStorage(worldId, database);
+  const reloadedWorld = new VoxelWorld({ seed: "partial-persist-destroyed", storage: reloadedStorage });
+  await reloadedWorld.loadSavedChunkIndex();
+  await reloadedWorld.loadSavedChunkNow("0,0");
+  reloadedWorld.ensureChunk(0, 0);
+
+  assertEqual(reloadedWorld.getBlock(2, 3, 4), BLOCK.air, "destroyed partial blocks should reload as air");
+  assertEqual(reloadedWorld.getBlockDamage(2, 3, 4), 0, "destroyed partial blocks should reload with no damage");
+  assertEqual(reloadedWorld.getPartialBlock(2, 3, 4), null, "destroyed partial blocks should reload with no partial cell");
+  assertEqual(reloadedWorld.createPartialBlockMask(0, 0), null, "destroyed partial blocks should not leave a mask");
+});
+
+test("partial terrain edits coalesce into the existing pending chunk save", async () => {
+  const savedSnapshots: SavedChunkSnapshot[] = [];
+  const storage: ChunkStorage = {
+    worldId: "partial-coalesce-test",
+    async listChunkKeys(): Promise<string[]> {
+      return [];
+    },
+    async loadChunkSnapshot(): Promise<SavedChunkSnapshot | null> {
+      return null;
+    },
+    async saveChunkSnapshot(_key: string, snapshot: SavedChunkSnapshot): Promise<void> {
+      savedSnapshots.push({
+        blocks: snapshot.blocks.slice(),
+        partialBlocks: [...snapshot.partialBlocks]
+      });
+    },
+    async loadChunk(): Promise<Uint8Array | null> {
+      return null;
+    },
+    async saveChunk(_key: string, blocks: Uint8Array): Promise<void> {
+      savedSnapshots.push({
+        blocks: blocks.slice(),
+        partialBlocks: []
+      });
+    },
+    async deleteChunk(): Promise<void> {}
+  };
+  const world = new VoxelWorld({ seed: "partial-save-coalesce-test", storage });
+  world.setBlock(2, 3, 4, BLOCK.stone);
+
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  world.carveBlock({
+    x: 2,
+    y: 3,
+    z: 4,
+    point: new THREE.Vector3(2, 3.55, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    incomingDirection: new THREE.Vector3(1, 0, 0),
+    speed: 18,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+
+  assertEqual(world.getStats().pendingChunkSaves, 1, "rapid partial edits should coalesce to one pending save");
+  await world.flushStorageWrites();
+
+  assertEqual(savedSnapshots.length, 1, "flushing partial edits should persist one coalesced snapshot");
+  assertEqual(savedSnapshots[0]?.partialBlocks.length, 1, "the coalesced snapshot should contain the latest partial cell");
+  assertEqual(
+    savedSnapshots[0]?.partialBlocks[0]?.cuts.length,
+    2,
+    "the coalesced snapshot should contain the latest partial cut history"
   );
 });
 

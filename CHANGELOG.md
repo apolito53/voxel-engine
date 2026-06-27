@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.15.0 - 2026-06-27
+
+### Added
+
+- Persisted partial-block terrain damage inside saved chunk snapshots. Terraformer
+  edits, projectile-core bites, and hitscan-core bites now survive world exit,
+  browser restart, and chunk unload/reload instead of returning as full cubes.
+- Added backward-compatible saved chunk snapshot APIs that store block bytes plus
+  optional partial-block cells while keeping the old block-only load/save wrappers
+  for legacy callers and tests.
+
+### Fixed
+
+- Hydrated saved partial terrain before remeshing saved chunks, so sparse partial
+  masks still suppress normal cube geometry after reload.
+- Fully destroyed partial blocks now save as air with no stale partial-cell
+  payload.
+
+### Tests
+
+- Added storage and world persistence coverage for partial snapshot round-trips,
+  legacy block-only wrappers, core-carved partial cells, Terraformer exact
+  sub-cell edits, destroyed partial blocks, and coalesced partial chunk saves.
+
 ## 0.14.13 - 2026-06-27
 
 ### Fixed
