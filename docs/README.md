@@ -13,3 +13,6 @@ This folder keeps the living design notes out of the project front door.
   combat damage logs, debug HUD metrics, server markers, and visual recordings.
 - [automation.md](automation.md): F8 avatar, Codex pilot bridge, visual scenarios,
   and Chrome/playtest automation.
+- [shelved-webgl-gpu-experiment.md](shelved-webgl-gpu-experiment.md): lessons
+  from the retired `experiment/gpu-ripple-field` WebGL2 renderer branch and the
+  recommended future WebGPU direction.

@@ -36,7 +36,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 ## Fast Lookup
 
 - Project front door, quick start, ports, short control map, and links to focused docs: `README.md`
-- Focused docs index and living user/developer references split out of the root README: `docs/README.md`, `docs/controls.md`, `docs/destruction.md`, `docs/nova-companion.md`, `docs/performance-hitch-logging.md`, `docs/automation.md`
+- Focused docs index and living user/developer references split out of the root README: `docs/README.md`, `docs/controls.md`, `docs/destruction.md`, `docs/nova-companion.md`, `docs/performance-hitch-logging.md`, `docs/automation.md`, `docs/shelved-webgl-gpu-experiment.md`
+- Shelved branch note: `experiment/gpu-ripple-field` is now reference material only. Do not merge it wholesale into modern `main`; start a future WebGPU overhaul from current `main` and use `docs/shelved-webgl-gpu-experiment.md` for lessons.
 - App bootstrap, render loop, input glue, world lifecycle orchestration, terrain/rubble target selection, partial-block mesh updates, damage indicator wiring, and WebGL runtime teardown: `src/main.ts`
 - HTML shell, home screen, HUD nodes, pause menu, minimap canvas: `index.html`
 - Visual styling and overlays: `src/style.css`
