@@ -34,10 +34,10 @@ export class LocalLightRenderer {
 
       light.visible = true;
       light.color.setHex(definition.color);
-      light.intensity = definition.intensity;
-      light.distance = definition.distance;
+      light.intensity = definition.intensity * source.intensityScale;
+      light.distance = definition.distance * source.distanceScale;
       light.decay = definition.decay;
-      light.position.set(source.x + 0.5, source.y + 0.5, source.z + 0.5);
+      light.position.set(source.centerX, source.centerY, source.centerZ);
 
       // Point-light shadows are cubemap shadows, so the cap is deliberately
       // separate from "how many lamps can glow." This keeps local lights useful
@@ -47,7 +47,7 @@ export class LocalLightRenderer {
       if (castsShadow) {
         light.shadow.mapSize.set(preset.localLightShadowMapSize, preset.localLightShadowMapSize);
         light.shadow.camera.near = 0.05;
-        light.shadow.camera.far = definition.distance;
+        light.shadow.camera.far = light.distance;
         light.shadow.bias = -0.00008;
         light.shadow.normalBias = 0.012;
       }

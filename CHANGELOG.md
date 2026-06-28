@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.15.1 - 2026-06-27
+
+### Fixed
+
+- Clustered connected Lamp blocks into stable aggregate local lights before
+  applying the quality light budget, so large lamp fixtures no longer gain or
+  lose individual point lights as the player walks around them.
+
+### Tests
+
+- Added local-light coverage for connected lamp fixtures spending one light
+  budget slot while separate lamps remain independent.
+
 ## 0.15.0 - 2026-06-27
 
 ### Added

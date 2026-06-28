@@ -115,10 +115,10 @@ also computed from horizontal world distance so high-altitude views keep that
 same circular horizon instead of a screen-shaped fog slab. A render-only
 fog-colored horizon matte fills the far world below the wall in normal terrain
 worlds, so high-altitude views read as atmospheric continuation instead of
-empty sky. Placeable Lamp blocks use a
-bounded local point-light pool selected nearest-first around the player; higher
-quality presets allow more local lights and a small number of local light
-shadows. `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
+empty sky. Connected placeable Lamp blocks are clustered into stable local
+fixture lights before the bounded nearest-first point-light budget is applied;
+higher quality presets allow more local lights and a small number of local
+light shadows. `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.
 Directional shadow bias, baked underside face shading, chunk sky-exposure
 buckets, sealed-room interior face shading, and diffuse-tinted terrain specular

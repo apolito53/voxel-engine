@@ -2270,7 +2270,34 @@ test("lamp blocks register as local light sources", () => {
   assertEqual(lampDefinition?.block, BLOCK.lamp, "lamp light definition should point back to the lamp block id");
   assertEqual(selections.length, 2, "local-light selection should filter by radius and budget");
   assertEqual(selections[0]?.x, 2, "local-light selection should prioritize the nearest lamp");
+  assertEqual(selections[0]?.sourceCount, 1, "isolated lamp lights should remain single-source selections");
   assert(selections[0]?.distanceSq < selections[1]?.distanceSq, "local lights should be sorted nearest-first");
+});
+
+test("connected lamp fixtures spend one stable local light budget slot", () => {
+  const selections = selectNearestLocalLightSources(
+    [
+      { x: 0, y: 4, z: 0, block: BLOCK.lamp },
+      { x: 1, y: 4, z: 0, block: BLOCK.lamp },
+      { x: 1, y: 5, z: 0, block: BLOCK.lamp },
+      { x: 1, y: 5, z: 1, block: BLOCK.lamp },
+      { x: 8, y: 4, z: 0, block: BLOCK.lamp }
+    ],
+    { x: 0, y: 4.5, z: 0 },
+    32,
+    2
+  );
+
+  assertEqual(selections.length, 2, "fixture clustering should still allow separated lamps into the budget");
+  assertEqual(selections[0]?.sourceCount, 4, "connected lamp voxels should collapse into one cluster selection");
+  assertClose(selections[0]?.centerX ?? 0, 1.25, 0.000001, "lamp fixture light should be centered on the cluster x");
+  assertClose(selections[0]?.centerY ?? 0, 5, 0.000001, "lamp fixture light should be centered on the cluster y");
+  assertClose(selections[0]?.centerZ ?? 0, 0.75, 0.000001, "lamp fixture light should be centered on the cluster z");
+  assert(
+    (selections[0]?.intensityScale ?? 1) > 1 && (selections[0]?.intensityScale ?? 99) <= 1.85,
+    "connected lamp fixtures should get a capped intensity boost"
+  );
+  assertEqual(selections[1]?.sourceCount, 1, "separated lamps should remain independent local lights");
 });
 
 test("block texture tile mapping varies repeated material surfaces", () => {
