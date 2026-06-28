@@ -13,3 +13,6 @@ This folder keeps the living design notes out of the project front door.
   combat damage logs, debug HUD metrics, server markers, and visual recordings.
 - [automation.md](automation.md): F8 avatar, Codex pilot bridge, visual scenarios,
   and Chrome/playtest automation.
+- [future-webgpu-overhaul.md](future-webgpu-overhaul.md): parked notes for a
+  future WebGPU renderer/debris overhaul, including lessons from the shelved
+  WebGL2 GPU experiment branch.

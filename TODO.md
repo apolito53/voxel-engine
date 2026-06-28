@@ -18,6 +18,24 @@ promoted work, not every fun idea that crosses the room.
   repeatable stress scenes before optimizing something just because it feels
   suspicious.
 
+## Parked: Future WebGPU Overhaul
+
+- The old `experiment/gpu-ripple-field` WebGL2 branch is shelved. It proved
+  useful renderer seams, compact terrain records, and diagnostics, but current
+  `main` has moved too far ahead to merge that branch wholesale.
+- Future GPU renderer work should start from current `main` on a fresh branch
+  such as `experiment/webgpu-overhaul`, using
+  `docs/future-webgpu-overhaul.md` as the planning breadcrumb.
+- Keep the first WebGPU pass renderer-focused: backend contract, capability
+  layer, explicit buffers, terrain pages, diagnostics, and disposal.
+- Material-specific high-count debris belongs in the WebGPU visual lane later:
+  leaves as floaty wind-sensitive particles, sand as clouds/spray, stone as
+  chunky shards, and wood as long splinters. CPU/Rapier should keep only the
+  gameplay-relevant pieces.
+- Do not reopen this lane until we intentionally choose renderer architecture
+  work again; sound, equipment/items, and light-source polish remain the current
+  mainline priorities.
+
 ## High Priority: Sound
 
 - First engine slice shipped in `v0.12.0`: `src/audioEngine.ts` owns a
