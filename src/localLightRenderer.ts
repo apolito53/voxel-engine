@@ -14,12 +14,12 @@ export class LocalLightRenderer {
   }
 
   update(sources: readonly LocalLightSelection[], preset: QualityPreset): void {
-    this.ensureLightPool(preset.localLightBudget);
+    this.ensureLightPool(sources.length);
 
     for (let index = 0; index < this.lights.length; index += 1) {
       const light = this.lights[index];
       const source = sources[index];
-      if (!source || index >= preset.localLightBudget) {
+      if (!source) {
         light.visible = false;
         light.castShadow = false;
         continue;
@@ -39,10 +39,9 @@ export class LocalLightRenderer {
       light.decay = definition.decay;
       light.position.set(source.centerX, source.centerY, source.centerZ);
 
-      // Point-light shadows are cubemap shadows, so the cap is deliberately
-      // separate from "how many lamps can glow." This keeps local lights useful
-      // on modest settings while letting high settings spend shadow work nearby.
-      const castsShadow = preset.shadows && index < preset.localLightShadowBudget;
+      // Local lamps use the same shadow switch as the rest of the preset. The
+      // useful-work guard is the source radius, not a hidden count cap.
+      const castsShadow = preset.shadows;
       light.castShadow = castsShadow;
       if (castsShadow) {
         light.shadow.mapSize.set(preset.localLightShadowMapSize, preset.localLightShadowMapSize);

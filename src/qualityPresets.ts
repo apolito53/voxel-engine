@@ -40,9 +40,7 @@ export type QualityPreset = {
   readonly blockFragmentCount: number;
   readonly debrisActiveRadiusMeters: number;
   readonly debrisShadows: boolean;
-  readonly localLightBudget: number;
   readonly localLightRadiusMeters: number;
-  readonly localLightShadowBudget: number;
   readonly localLightShadowMapSize: number;
   readonly minimapInterval: number;
   readonly minimapRowsPerFrame: number;
@@ -104,9 +102,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 54,
     debrisActiveRadiusMeters: 8,
     debrisShadows: false,
-    localLightBudget: 2,
     localLightRadiusMeters: 28,
-    localLightShadowBudget: 0,
     localLightShadowMapSize: 256,
     minimapInterval: 0.45,
     minimapRowsPerFrame: 3,
@@ -134,9 +130,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 72,
     debrisActiveRadiusMeters: 12,
     debrisShadows: false,
-    localLightBudget: 4,
     localLightRadiusMeters: 40,
-    localLightShadowBudget: 0,
     localLightShadowMapSize: 256,
     minimapInterval: 0.35,
     minimapRowsPerFrame: 4,
@@ -164,9 +158,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 108,
     debrisActiveRadiusMeters: 20,
     debrisShadows: false,
-    localLightBudget: 8,
     localLightRadiusMeters: 56,
-    localLightShadowBudget: 1,
     localLightShadowMapSize: 512,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
@@ -194,9 +186,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 108,
     debrisActiveRadiusMeters: 20,
     debrisShadows: false,
-    localLightBudget: 8,
     localLightRadiusMeters: 56,
-    localLightShadowBudget: 1,
     localLightShadowMapSize: 512,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 8,
@@ -224,9 +214,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 144,
     debrisActiveRadiusMeters: 32,
     debrisShadows: true,
-    localLightBudget: 12,
     localLightRadiusMeters: 72,
-    localLightShadowBudget: 2,
     localLightShadowMapSize: 512,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 10,
@@ -254,9 +242,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 180,
     debrisActiveRadiusMeters: 48,
     debrisShadows: true,
-    localLightBudget: 16,
     localLightRadiusMeters: 96,
-    localLightShadowBudget: 3,
     localLightShadowMapSize: 1024,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 12,
@@ -284,9 +270,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     blockFragmentCount: 216,
     debrisActiveRadiusMeters: 72,
     debrisShadows: true,
-    localLightBudget: 24,
     localLightRadiusMeters: 128,
-    localLightShadowBudget: 4,
     localLightShadowMapSize: 1024,
     minimapInterval: 0.15,
     minimapRowsPerFrame: 14,

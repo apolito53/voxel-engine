@@ -83,8 +83,9 @@ the root README.
   click` places the selected block brush into adjacent space. Full-auto mode
   repeats held erase/place actions.
 - `Lamp` blocks are placeable from the Blocks lane and emit a local point light
-  while their chunk is loaded. Nearby lamps are budgeted by quality so lit builds
-  remain useful without making every distant bulb expensive forever.
+  while their chunk is loaded. Connected lamp voxels are clustered into stable
+  fixture lights, and every fixture inside the local-light radius participates;
+  shadows follow the active quality preset's normal shadow toggle.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
@@ -179,20 +180,20 @@ leave this fake floor disabled so the void remains visible.
 ## Quality Presets
 
 - `Potato`: 0.5x clear distance, no shadows, 64 physics bodies, 54 max debris
-  shards/block, 8m active debris bubble, 2 local lamps, one-chunk fog wall.
+  shards/block, 8m active debris bubble, 28m local-light radius, one-chunk fog wall.
 - `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris
-  shards/block, 12m active debris bubble, 4 local lamps, one-chunk fog wall.
+  shards/block, 12m active debris bubble, 40m local-light radius, one-chunk fog wall.
 - `Normal`: 2x clear distance, shadows, 192 physics bodies, 108 max debris
-  shards/block, 20m active debris bubble, 8 local lamps, one-chunk fog wall.
+  shards/block, 20m active debris bubble, 56m local-light radius, one-chunk fog wall.
 - `High`: 4x clear distance, sharper shadows, debris shadows, 512 physics
-  bodies, 144 max debris shards/block, 32m active debris bubble, 12 local lamps,
+  bodies, 144 max debris shards/block, 32m active debris bubble, 72m local-light radius,
   two-chunk fog wall.
 - `Ultra`: 6x clear distance, sharper shadows, debris shadows, 1024 physics
-  bodies, 180 max debris shards/block, 48m active debris bubble, 16 local lamps,
+  bodies, 180 max debris shards/block, 48m active debris bubble, 96m local-light radius,
   two-chunk fog wall.
 - `Super Ultra`: 12x clear distance, highest shadow resolution, debris shadows,
-  4096 physics bodies, 216 max debris shards/block, 72m active debris bubble, 24
-  local lamps, two-chunk fog wall. This is a stress-test mode and requires an
+  4096 physics bodies, 216 max debris shards/block, 72m active debris bubble, 128m
+  local-light radius, two-chunk fog wall. This is a stress-test mode and requires an
   opt-in from the pause menu once `Ultra` is selected.
 - `Custom`: created automatically when settings sliders are changed, using the
   selected built-in preset as its baseline.

@@ -52,9 +52,9 @@ promoted work, not every fun idea that crosses the room.
 ## High Priority: Individual Light Sources
 
 - First slice shipped in `v0.14.0`: placeable `Lamp` blocks register as
-  bounded local Three.js point lights, rebuild from loaded/edited chunks, use
-  per-quality light and local-shadow budgets, and coexist with the cheaper baked
-  sun/face-shading baseline.
+  radius-selected clustered Three.js point lights, rebuild from loaded/edited
+  chunks, use quality-tuned light radius and shadow map size, and coexist with
+  the cheaper baked sun/face-shading baseline.
 - Goal: support individual local light sources so the world can have torches,
   lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
   depends on local darkness or illumination instead of only sun/sky lighting.
@@ -68,7 +68,7 @@ promoted work, not every fun idea that crosses the room.
   light permeability, colored/emissive blocks, day/night interaction, dynamic
   projectile glows, and tool/Nova light pulses.
 - Validation shape: include a Superflat Lab scene with multiple lights, a
-  quality-budget stress pass, a save/load check for placed light sources, and a
+  dense-fixture stress pass, a save/load check for placed light sources, and a
   visual smoke check that moving around chunk boundaries does not pop or leak
   lights weirdly.
 

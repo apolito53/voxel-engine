@@ -36,6 +36,7 @@ import {
   isLocalLightBlock,
   selectNearestLocalLightSources
 } from "../src/localLights";
+import { LocalLightRenderer } from "../src/localLightRenderer";
 import {
   BLOCK_COLOR_VARIANT_COUNT,
   createBlockMeshKey,
@@ -2260,21 +2261,20 @@ test("lamp blocks register as local light sources", () => {
       { x: 200, y: 4, z: 0, block: BLOCK.lamp }
     ],
     { x: 0, y: 4.5, z: 0 },
-    32,
-    2
+    32
   );
 
   assert(PLACEABLE_BLOCKS.includes(BLOCK.lamp), "lamp should be available from the block loadout");
   assert(isLocalLightBlock(BLOCK.lamp), "lamp should be recognized by the local-light registry");
   assert(lampDefinition !== null, "lamp should have a renderer light definition");
   assertEqual(lampDefinition?.block, BLOCK.lamp, "lamp light definition should point back to the lamp block id");
-  assertEqual(selections.length, 2, "local-light selection should filter by radius and budget");
+  assertEqual(selections.length, 2, "local-light selection should filter by radius");
   assertEqual(selections[0]?.x, 2, "local-light selection should prioritize the nearest lamp");
   assertEqual(selections[0]?.sourceCount, 1, "isolated lamp lights should remain single-source selections");
   assert(selections[0]?.distanceSq < selections[1]?.distanceSq, "local lights should be sorted nearest-first");
 });
 
-test("connected lamp fixtures spend one stable local light budget slot", () => {
+test("connected lamp fixtures become one stable local light", () => {
   const selections = selectNearestLocalLightSources(
     [
       { x: 0, y: 4, z: 0, block: BLOCK.lamp },
@@ -2284,11 +2284,10 @@ test("connected lamp fixtures spend one stable local light budget slot", () => {
       { x: 8, y: 4, z: 0, block: BLOCK.lamp }
     ],
     { x: 0, y: 4.5, z: 0 },
-    32,
-    2
+    32
   );
 
-  assertEqual(selections.length, 2, "fixture clustering should still allow separated lamps into the budget");
+  assertEqual(selections.length, 2, "fixture clustering should still allow separated lamps nearby");
   assertEqual(selections[0]?.sourceCount, 4, "connected lamp voxels should collapse into one cluster selection");
   assertClose(selections[0]?.centerX ?? 0, 1.25, 0.000001, "lamp fixture light should be centered on the cluster x");
   assertClose(selections[0]?.centerY ?? 0, 5, 0.000001, "lamp fixture light should be centered on the cluster y");
@@ -2298,6 +2297,61 @@ test("connected lamp fixtures spend one stable local light budget slot", () => {
     "connected lamp fixtures should get a capped intensity boost"
   );
   assertEqual(selections[1]?.sourceCount, 1, "separated lamps should remain independent local lights");
+});
+
+test("local light selection keeps every clustered lamp inside the radius", () => {
+  const selections = selectNearestLocalLightSources(
+    Array.from({ length: 12 }, (_, index) => ({
+      x: index * 2,
+      y: 4,
+      z: 0,
+      block: BLOCK.lamp
+    })),
+    { x: 0, y: 4.5, z: 0 },
+    64
+  );
+
+  assertEqual(selections.length, 12, "nearby lamps should not be sliced by a hidden quality budget");
+  assert(selections.every((selection) => selection.sourceCount === 1), "separated lamps should stay independent");
+});
+
+test("local light renderer activates and shadows all selected lamps when shadows are enabled", () => {
+  const scene = new THREE.Scene();
+  const renderer = new LocalLightRenderer(scene);
+  const sources = selectNearestLocalLightSources(
+    Array.from({ length: 10 }, (_, index) => ({
+      x: index * 3,
+      y: 8,
+      z: 0,
+      block: BLOCK.lamp
+    })),
+    { x: 0, y: 8.5, z: 0 },
+    64
+  );
+
+  renderer.update(sources, QUALITY_PRESETS.normal);
+  const pointLights = scene.children.filter((child): child is THREE.PointLight => child instanceof THREE.PointLight);
+  assertEqual(pointLights.length, sources.length, "renderer should grow the point-light pool to the active source count");
+  assertEqual(pointLights.filter((light) => light.visible).length, sources.length, "every selected lamp should be visible");
+  assertEqual(
+    pointLights.filter((light) => light.castShadow).length,
+    sources.length,
+    "shadow-enabled presets should let every active local lamp cast shadows"
+  );
+
+  renderer.update(sources, QUALITY_PRESETS.potato);
+  assertEqual(
+    pointLights.filter((light) => light.castShadow).length,
+    0,
+    "shadow-disabled presets should still disable local lamp shadows"
+  );
+
+  renderer.dispose();
+  assertEqual(
+    scene.children.filter((child) => child instanceof THREE.PointLight).length,
+    0,
+    "disposing the renderer should remove pooled local lights from the scene"
+  );
 });
 
 test("block texture tile mapping varies repeated material surfaces", () => {
@@ -11248,7 +11302,6 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   const presetIds = [...QUALITY_PRESET_ORDER, SUPER_ULTRA_PRESET_ID];
   let previousPhysicsBudget = 0;
   let previousDebrisActiveRadius = 0;
-  let previousLocalLightBudget = 0;
   let previousLocalLightRadius = 0;
 
   for (const presetId of presetIds) {
@@ -11342,16 +11395,8 @@ test("quality presets keep scheduler and render-distance invariants", () => {
       `${preset.label} active debris bubble should not shrink as quality increases`
     );
     assert(
-      preset.localLightBudget >= previousLocalLightBudget,
-      `${preset.label} local light budget should not shrink as quality increases`
-    );
-    assert(
       preset.localLightRadiusMeters >= previousLocalLightRadius,
       `${preset.label} local light radius should not shrink as quality increases`
-    );
-    assert(
-      preset.localLightShadowBudget <= preset.localLightBudget,
-      `${preset.label} local shadow-casting light budget should fit inside the light budget`
     );
     assert(
       isPowerOfTwo(preset.localLightShadowMapSize),
@@ -11359,7 +11404,6 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     );
     previousPhysicsBudget = preset.physicsObjectBudget;
     previousDebrisActiveRadius = preset.debrisActiveRadiusMeters;
-    previousLocalLightBudget = preset.localLightBudget;
     previousLocalLightRadius = preset.localLightRadiusMeters;
   }
 
@@ -11422,12 +11466,12 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   );
   assertEqual(QUALITY_PRESETS.normal.debrisShadows, false, "Normal should keep debris shadows off by default");
   assertEqual(QUALITY_PRESETS.high.debrisShadows, true, "High should opt into debris shadows by default");
-  assertEqual(QUALITY_PRESETS.potato.localLightBudget, 2, "Potato should keep a tiny local light pool");
-  assertEqual(QUALITY_PRESETS.normal.localLightBudget, 8, "Normal should allow a practical local light pool");
+  assertEqual(QUALITY_PRESETS.potato.localLightRadiusMeters, 28, "Potato should keep a compact local light radius");
+  assertEqual(QUALITY_PRESETS.normal.localLightRadiusMeters, 56, "Normal should keep a practical local light radius");
   assertEqual(
-    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].localLightBudget,
-    24,
-    "Super Ultra should carry the largest local light pool"
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].localLightRadiusMeters,
+    128,
+    "Super Ultra should carry the largest local light radius"
   );
   assert(
     getShadowTexelSize(QUALITY_PRESETS.high) < getShadowTexelSize(QUALITY_PRESETS.normal),

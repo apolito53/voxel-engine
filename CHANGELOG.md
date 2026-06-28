@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.15.2 - 2026-06-27
+
+### Changed
+
+- Removed local lamp and local-shadow count budgets. Every clustered Lamp
+  fixture inside the active local-light radius now glows, and local lamp shadows
+  follow the quality preset's normal shadow toggle instead of a tiny separate
+  cap.
+
+### Tests
+
+- Added coverage proving local light selection keeps all nearby lamp fixtures
+  and the renderer activates/shadows every selected fixture when shadows are
+  enabled.
+
 ## 0.15.1 - 2026-06-27
 
 ### Fixed

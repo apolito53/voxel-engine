@@ -108,14 +108,14 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Shared visible-sun direction used by lighting, skybox alignment, and shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants, chunk sky-exposure buckets, and light-aware baked voxel face shading:
   `src/voxelLighting.ts`, `src/chunkLightOcclusion.ts`
-- Local light-source registry, connected-lamp fixture clustering, nearest-first quality-budgeted aggregate lamp selection, and renderer-owned pooled Three.js point lights for loaded Lamp blocks: `src/localLights.ts`, `src/localLightRenderer.ts`
+- Local light-source registry, connected-lamp fixture clustering, radius-selected aggregate lamp selection, and renderer-owned pooled Three.js point lights for loaded Lamp blocks: `src/localLights.ts`, `src/localLightRenderer.ts`
 - Render quality controller, fog-start-to-opaque-to-hidden-horizon policy, separate chunk render radius,
   Custom preset for slider edits, persistence, and renderer/light/camera application:
   `src/qualityController.ts`
 - Custom quality settings storage, fog-start slider bounds, and menu label
   formatting, including the debris-shadow toggle: `src/qualitySettings.ts`
 - Render quality preset definitions, hard fog wall/hidden-horizon thickness, render horizon safety ring, physics-body
-  defaults, active debris bubble radii, local-light/debris-shadow budgets, Custom baseline, and tuning knobs:
+  defaults, active debris bubble radii, local-light radii, debris-shadow defaults, Custom baseline, and tuning knobs:
   `src/qualityPresets.ts`
 - Generated sunlit skybox texture, camera-following sky dome with a lower-hemisphere fog mask, and render-only horizon matte that paints a fog-colored far-world base behind the hard fog wall without creating terrain: `src/assets/skybox-sunlit-day.png`, `src/skybox.ts`, `src/horizonMatte.ts`
 - Generated hitscan energy-bolt texture for additive beam rendering: `src/assets/hitscan-energy-bolt.png`
@@ -182,7 +182,7 @@ When adding a new mature feature, add it to this list with three things: owning 
 - Change Nova's companion behavior or pilot-thrown cores: `src/novaPilot.ts`, `KeyN`/`KeyB` hooks in `src/main.ts`, and shared physics-core construction in `createPhysicsCore`.
 - Add Nova chat context or local reply behavior: event payloads in `src/engineEvents.ts`, journal rules in `src/novaContext.ts`, reply selection in `src/novaChat.ts`, panel behavior in `src/novaChatPanel.ts`, and input/pointer-lock wiring in `src/main.ts`.
 - Add gameplay/system reactions without coupling features together: define payloads in `src/engineEvents.ts`, emit from the owning runtime path, and subscribe from a focused consumer like `src/novaPilotReactions.ts`, `src/novaContext.ts`, or `src/audioEngine.ts`.
-- Tune render/performance modes, hard fog wall distance, local-light budgets, debris shadows, settings tabs, or builder/admin panels: quality preset constants in `src/qualityPresets.ts`, Custom slider bounds/storage in `src/qualitySettings.ts`, worker-pool policy in `src/workerPool.ts`, projectile physics-core tuning in `src/physicsCoreSettings.ts`, builder brush sizing in `src/builderTools.ts`, the Super Ultra opt-in toggle, pause-menu HTML/CSS in `index.html` and `src/style.css`, and application logic in `src/qualityController.ts`/`src/main.ts`.
+- Tune render/performance modes, hard fog wall distance, local-light radii/shadow map size, debris shadows, settings tabs, or builder/admin panels: quality preset constants in `src/qualityPresets.ts`, Custom slider bounds/storage in `src/qualitySettings.ts`, worker-pool policy in `src/workerPool.ts`, projectile physics-core tuning in `src/physicsCoreSettings.ts`, builder brush sizing in `src/builderTools.ts`, the Super Ultra opt-in toggle, pause-menu HTML/CSS in `index.html` and `src/style.css`, and application logic in `src/qualityController.ts`/`src/main.ts`.
 - Tune baked voxel face shading, sealed-cavity sky exposure, visible sun direction, or local lamp selection/rendering: update `src/voxelLighting.ts`, `src/chunkLightOcclusion.ts`, `src/lighting.ts`, `src/localLights.ts`, `src/localLightRenderer.ts`, `src/assets/skybox-sunlit-day.png`, and `src/skybox.ts` together so worker mesh colors, runtime lights, skybox alignment, and shadows agree.
 - Tune shadow stability or shimmer behavior: anchor snapping in `src/shadows.ts`, sun anchor wiring in `src/main.ts`, local-light shadow tuning in `src/localLightRenderer.ts`, and preset shadow bounds in `src/qualityPresets.ts`.
 - Change held item definitions, action mapping, Terraformer/place reach, hit behavior, item/block lane selection, builder brush behavior or placement preview, terrain/rubble target picking, or target outline: `src/items.ts`, `src/hotbar.ts`, `src/terraformerSettings.ts`, `src/builderTools.ts`, `src/builderPreview.ts`, `src/raycast.ts`, `src/targetHighlighter.ts`, `src/rubble.ts`, and pointer/highlight hooks in `src/main.ts`.

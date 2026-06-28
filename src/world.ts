@@ -1688,11 +1688,10 @@ export class VoxelWorld implements CollisionWorld {
 
   getLocalLightSources(
     origin: Pick<THREE.Vector3, "x" | "y" | "z">,
-    radiusMeters: number,
-    maxSources: number
+    radiusMeters: number
   ): readonly LocalLightSelection[] {
     const sources = this.iterLocalLightSources();
-    return selectNearestLocalLightSources(sources, origin, radiusMeters, maxSources);
+    return selectNearestLocalLightSources(sources, origin, radiusMeters);
   }
 
   setBlock(x: number, y: number, z: number, block: number): void {

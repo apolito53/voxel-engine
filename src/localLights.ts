@@ -60,11 +60,9 @@ const LOCAL_LIGHT_CLUSTER_MAX_DISTANCE_SCALE = 1.35;
 export function selectNearestLocalLightSources(
   sources: Iterable<LocalLightSource>,
   origin: Pick<LocalLightSource, "x" | "y" | "z">,
-  radiusMeters: number,
-  maxSources: number
+  radiusMeters: number
 ): readonly LocalLightSelection[] {
-  const budget = Math.max(0, Math.floor(maxSources));
-  if (budget <= 0 || radiusMeters <= 0) return [];
+  if (radiusMeters <= 0) return [];
 
   const radiusSq = radiusMeters * radiusMeters;
   const selections: LocalLightSelection[] = [];
@@ -93,11 +91,11 @@ export function selectNearestLocalLightSources(
     });
   }
 
-  // Budgets are spent on connected lamp clusters instead of individual lamp
-  // blocks. That keeps large player-built fixtures stable as the camera moves
-  // instead of making nearby lamp voxels flicker in and out of the light pool.
+  // Connected lamp clusters share one fixture light. That keeps large
+  // player-built lamps stable as the camera moves without imposing a hidden
+  // quality cap on how many nearby fixtures can glow.
   selections.sort((a, b) => a.distanceSq - b.distanceSq || b.sourceCount - a.sourceCount);
-  return selections.slice(0, budget);
+  return selections;
 }
 
 type LocalLightCluster = {

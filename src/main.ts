@@ -2338,8 +2338,7 @@ function animate(): void {
     localLightRenderer.update(
       activeWorld.getLocalLightSources(
         camera.position,
-        qualityController.preset.localLightRadiusMeters,
-        qualityController.preset.localLightBudget
+        qualityController.preset.localLightRadiusMeters
       ),
       qualityController.preset
     );
