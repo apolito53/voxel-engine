@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.15.3 - 2026-06-28
+
+### Fixed
+
+- Changed Lamp fixtures to emit from exposed surface blocks instead of one
+  buried connected-cluster center, so solid player-built lamp shapes no longer
+  read as dead orange blocks unless carved open.
+- Kept the local point-light pool at its high-water size with zero-intensity
+  inactive slots, reducing the shader-count churn that could hitch when placing
+  Lamp blocks.
+
+### Changed
+
+- Parked local Lamp shadow maps until the renderer can exclude the emitting
+  Lamp volume from its own point-light shadow pass. Lamps still emit locally;
+  they just avoid self-shadowing themselves into darkness.
+
+### Tests
+
+- Replaced the clustered-fixture light test with coverage for exposed-surface
+  Lamp emitters and stable high-water light-pool reuse.
+
 ## 0.15.2 - 2026-06-27
 
 ### Changed

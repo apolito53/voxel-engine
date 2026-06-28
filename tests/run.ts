@@ -2274,32 +2274,39 @@ test("lamp blocks register as local light sources", () => {
   assert(selections[0]?.distanceSq < selections[1]?.distanceSq, "local lights should be sorted nearest-first");
 });
 
-test("connected lamp fixtures become one stable local light", () => {
-  const selections = selectNearestLocalLightSources(
-    [
-      { x: 0, y: 4, z: 0, block: BLOCK.lamp },
-      { x: 1, y: 4, z: 0, block: BLOCK.lamp },
-      { x: 1, y: 5, z: 0, block: BLOCK.lamp },
-      { x: 1, y: 5, z: 1, block: BLOCK.lamp },
-      { x: 8, y: 4, z: 0, block: BLOCK.lamp }
-    ],
-    { x: 0, y: 4.5, z: 0 },
-    32
-  );
+test("lamp fixtures emit from exposed surfaces instead of buried centers", () => {
+  const world = new VoxelWorld({ seed: "lamp-surface-emitter-test" });
+  const baseY = 80;
 
-  assertEqual(selections.length, 2, "fixture clustering should still allow separated lamps nearby");
-  assertEqual(selections[0]?.sourceCount, 4, "connected lamp voxels should collapse into one cluster selection");
-  assertClose(selections[0]?.centerX ?? 0, 1.25, 0.000001, "lamp fixture light should be centered on the cluster x");
-  assertClose(selections[0]?.centerY ?? 0, 5, 0.000001, "lamp fixture light should be centered on the cluster y");
-  assertClose(selections[0]?.centerZ ?? 0, 0.75, 0.000001, "lamp fixture light should be centered on the cluster z");
+  for (let y = baseY - 1; y <= baseY + 3; y += 1) {
+    for (let z = -1; z <= 3; z += 1) {
+      for (let x = -1; x <= 3; x += 1) {
+        world.setBlock(x, y, z, BLOCK.air);
+      }
+    }
+  }
+
+  for (let y = baseY; y < baseY + 3; y += 1) {
+    for (let z = 0; z < 3; z += 1) {
+      for (let x = 0; x < 3; x += 1) {
+        world.setBlock(x, y, z, BLOCK.lamp);
+      }
+    }
+  }
+
+  const selections = world.getLocalLightSources({ x: 1.5, y: baseY + 1.5, z: -4 }, 64);
+  assert(selections.length > 1, "large lamp fixtures should expose multiple surface emitters");
   assert(
-    (selections[0]?.intensityScale ?? 1) > 1 && (selections[0]?.intensityScale ?? 99) <= 1.85,
-    "connected lamp fixtures should get a capped intensity boost"
+    selections.some((selection) => selection.centerZ < 0),
+    "front surface lamps should emit just outside the visible face instead of from the buried block center"
   );
-  assertEqual(selections[1]?.sourceCount, 1, "separated lamps should remain independent local lights");
+  assert(
+    !selections.some((selection) => selection.x === 1 && selection.y === baseY + 1 && selection.z === 1),
+    "fully buried lamp filler should not create a local light source"
+  );
 });
 
-test("local light selection keeps every clustered lamp inside the radius", () => {
+test("local light selection keeps every nearby lamp source inside the radius", () => {
   const selections = selectNearestLocalLightSources(
     Array.from({ length: 12 }, (_, index) => ({
       x: index * 2,
@@ -2315,7 +2322,7 @@ test("local light selection keeps every clustered lamp inside the radius", () =>
   assert(selections.every((selection) => selection.sourceCount === 1), "separated lamps should stay independent");
 });
 
-test("local light renderer activates and shadows all selected lamps when shadows are enabled", () => {
+test("local light renderer keeps a stable high-water pool while selected lamps glow", () => {
   const scene = new THREE.Scene();
   const renderer = new LocalLightRenderer(scene);
   const sources = selectNearestLocalLightSources(
@@ -2331,19 +2338,30 @@ test("local light renderer activates and shadows all selected lamps when shadows
 
   renderer.update(sources, QUALITY_PRESETS.normal);
   const pointLights = scene.children.filter((child): child is THREE.PointLight => child instanceof THREE.PointLight);
-  assertEqual(pointLights.length, sources.length, "renderer should grow the point-light pool to the active source count");
-  assertEqual(pointLights.filter((light) => light.visible).length, sources.length, "every selected lamp should be visible");
+  assertEqual(pointLights.length, 16, "renderer should grow the point-light pool in stable chunks");
+  assertEqual(pointLights.filter((light) => light.visible).length, pointLights.length, "pooled lights stay visible to avoid shader-count churn");
   assertEqual(
-    pointLights.filter((light) => light.castShadow).length,
+    pointLights.filter((light) => light.intensity > 0).length,
     sources.length,
-    "shadow-enabled presets should let every active local lamp cast shadows"
+    "every selected lamp should glow while idle pool slots stay zero-intensity"
   );
-
-  renderer.update(sources, QUALITY_PRESETS.potato);
   assertEqual(
     pointLights.filter((light) => light.castShadow).length,
     0,
-    "shadow-disabled presets should still disable local lamp shadows"
+    "local lamp shadows stay disabled until emitter volumes can be excluded from their own shadow maps"
+  );
+
+  renderer.update(sources.slice(0, 2), QUALITY_PRESETS.normal);
+  assertEqual(pointLights.length, 16, "the pool should not shrink and force another point-light shader variant");
+  assertEqual(
+    pointLights.filter((light) => light.intensity > 0).length,
+    2,
+    "unused high-water pool slots should remain zero-intensity placeholders"
+  );
+  assertEqual(
+    pointLights.filter((light) => light.castShadow).length,
+    0,
+    "disabled local lamp shadows should stay disabled after pool reuse"
   );
 
   renderer.dispose();

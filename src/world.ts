@@ -93,6 +93,15 @@ const PARTIAL_BLOCK_PIERCE_MIN_EXIT_SPEED = 8;
 const PARTIAL_BLOCK_PIERCE_CELL_SPEED_COST = 2.8;
 const PARTIAL_BLOCK_PIERCE_EXIT_MARGIN = 0.02;
 const TERRAFORMER_TARGET_EPSILON = 0.0001;
+const LOCAL_LIGHT_EMITTER_FACE_OFFSET = 0.58;
+const LOCAL_LIGHT_EXPOSED_FACE_DIRECTIONS = [
+  { key: "px", dx: 1, dy: 0, dz: 0 },
+  { key: "nx", dx: -1, dy: 0, dz: 0 },
+  { key: "py", dx: 0, dy: 1, dz: 0 },
+  { key: "ny", dx: 0, dy: -1, dz: 0 },
+  { key: "pz", dx: 0, dy: 0, dz: 1 },
+  { key: "nz", dx: 0, dy: 0, dz: -1 }
+] as const;
 
 export type WorldStats = {
   readonly loadedChunks: number;
@@ -1728,8 +1737,55 @@ export class VoxelWorld implements CollisionWorld {
       if (!position) continue;
       const block = this.getBlock(position.x, position.y, position.z);
       if (!isLocalLightBlock(block)) continue;
-      yield { ...position, block };
+
+      const surfaceEmitter = this.createLocalLightSurfaceEmitter(position);
+      if (!surfaceEmitter) continue;
+      yield { ...position, block, ...surfaceEmitter };
     }
+  }
+
+  private createLocalLightSurfaceEmitter(position: PartialBlockPosition): {
+    readonly lightX: number;
+    readonly lightY: number;
+    readonly lightZ: number;
+    readonly sourceKey: string;
+  } | null {
+    let normalX = 0;
+    let normalY = 0;
+    let normalZ = 0;
+    const exposedFaceKeys: string[] = [];
+
+    for (const direction of LOCAL_LIGHT_EXPOSED_FACE_DIRECTIONS) {
+      const neighborBlock = this.getBlock(
+        position.x + direction.dx,
+        position.y + direction.dy,
+        position.z + direction.dz
+      );
+      const neighborDefinition = BLOCKS[neighborBlock] ?? BLOCKS[BLOCK.air];
+      if (neighborDefinition.solid) continue;
+
+      normalX += direction.dx;
+      normalY += direction.dy;
+      normalZ += direction.dz;
+      exposedFaceKeys.push(direction.key);
+    }
+
+    if (exposedFaceKeys.length === 0) {
+      return null;
+    }
+
+    const normalLength = Math.hypot(normalX, normalY, normalZ) || 1;
+    const emitterOffset = LOCAL_LIGHT_EMITTER_FACE_OFFSET / normalLength;
+
+    // Lamp blocks are solid terrain, so a light at the block center can bury
+    // itself inside a player-built fixture. Emit from the averaged exposed
+    // surface instead; exterior lamp faces glow, interior lamp filler does not.
+    return {
+      lightX: position.x + 0.5 + normalX * emitterOffset,
+      lightY: position.y + 0.5 + normalY * emitterOffset,
+      lightZ: position.z + 0.5 + normalZ * emitterOffset,
+      sourceKey: `${position.x},${position.y},${position.z}:surface:${exposedFaceKeys.join("")}`
+    };
   }
 
   private reindexChunkLocalLights(chunk: Chunk): void {

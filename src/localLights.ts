@@ -13,6 +13,10 @@ export type LocalLightSource = {
   readonly y: number;
   readonly z: number;
   readonly block: BlockId;
+  readonly lightX?: number;
+  readonly lightY?: number;
+  readonly lightZ?: number;
+  readonly sourceKey?: string;
 };
 
 export type LocalLightSelection = LocalLightSource & {
@@ -45,18 +49,6 @@ export function getLocalLightDefinition(block: number): LocalLightDefinition | n
   return LOCAL_LIGHT_DEFINITIONS.get(block as BlockId) ?? null;
 }
 
-const LOCAL_LIGHT_CLUSTER_NEIGHBORS = [
-  [1, 0, 0],
-  [-1, 0, 0],
-  [0, 1, 0],
-  [0, -1, 0],
-  [0, 0, 1],
-  [0, 0, -1]
-] as const;
-
-const LOCAL_LIGHT_CLUSTER_MAX_INTENSITY_SCALE = 1.85;
-const LOCAL_LIGHT_CLUSTER_MAX_DISTANCE_SCALE = 1.35;
-
 export function selectNearestLocalLightSources(
   sources: Iterable<LocalLightSource>,
   origin: Pick<LocalLightSource, "x" | "y" | "z">,
@@ -66,131 +58,51 @@ export function selectNearestLocalLightSources(
 
   const radiusSq = radiusMeters * radiusMeters;
   const selections: LocalLightSelection[] = [];
-  const sourceMap = new Map<string, LocalLightSource>();
+  const seenSourceKeys = new Set<string>();
   for (const source of sources) {
-    sourceMap.set(createLocalLightSourceKey(source), source);
-  }
+    const sourceKey = createLocalLightSourceKey(source);
+    if (seenSourceKeys.has(sourceKey)) continue;
+    seenSourceKeys.add(sourceKey);
 
-  const visited = new Set<string>();
-  for (const [sourceKey, source] of sourceMap) {
-    if (visited.has(sourceKey)) continue;
+    const centerX = getLocalLightSourceX(source);
+    const centerY = getLocalLightSourceY(source);
+    const centerZ = getLocalLightSourceZ(source);
+    const distanceSq = getDistanceSq(centerX, centerY, centerZ, origin);
+    if (distanceSq > radiusSq) continue;
 
-    const cluster = collectLocalLightCluster(source, sourceMap, visited, origin);
-    if (cluster.nearestDistanceSq > radiusSq) continue;
-
-    const scale = getLocalLightClusterScale(cluster.sourceCount);
     selections.push({
-      ...cluster.representative,
-      centerX: cluster.centerX,
-      centerY: cluster.centerY,
-      centerZ: cluster.centerZ,
-      distanceSq: cluster.centerDistanceSq,
-      sourceCount: cluster.sourceCount,
-      intensityScale: scale.intensityScale,
-      distanceScale: scale.distanceScale
+      ...source,
+      centerX,
+      centerY,
+      centerZ,
+      distanceSq,
+      sourceCount: 1,
+      intensityScale: 1,
+      distanceScale: 1
     });
   }
 
-  // Connected lamp clusters share one fixture light. That keeps large
-  // player-built lamps stable as the camera moves without imposing a hidden
-  // quality cap on how many nearby fixtures can glow.
-  selections.sort((a, b) => a.distanceSq - b.distanceSq || b.sourceCount - a.sourceCount);
+  // Lamps are emitted as surface sources now, not cluster centers. Sorting
+  // nearest-first keeps the renderer deterministic while avoiding a hidden
+  // "nearest N lights" cap; everything inside the radius is returned.
+  selections.sort((a, b) => a.distanceSq - b.distanceSq || createLocalLightSourceKey(a).localeCompare(createLocalLightSourceKey(b)));
   return selections;
 }
 
-type LocalLightCluster = {
-  readonly representative: LocalLightSource;
-  readonly centerX: number;
-  readonly centerY: number;
-  readonly centerZ: number;
-  readonly centerDistanceSq: number;
-  readonly nearestDistanceSq: number;
-  readonly sourceCount: number;
-};
-
-function collectLocalLightCluster(
-  firstSource: LocalLightSource,
-  sourceMap: ReadonlyMap<string, LocalLightSource>,
-  visited: Set<string>,
-  origin: Pick<LocalLightSource, "x" | "y" | "z">
-): LocalLightCluster {
-  const queue: LocalLightSource[] = [firstSource];
-  visited.add(createLocalLightSourceKey(firstSource));
-
-  let representative = firstSource;
-  let sourceCount = 0;
-  let sumX = 0;
-  let sumY = 0;
-  let sumZ = 0;
-  let nearestDistanceSq = Number.POSITIVE_INFINITY;
-
-  while (queue.length > 0) {
-    const source = queue.pop();
-    if (!source) continue;
-
-    sourceCount += 1;
-    const centerX = source.x + 0.5;
-    const centerY = source.y + 0.5;
-    const centerZ = source.z + 0.5;
-    sumX += centerX;
-    sumY += centerY;
-    sumZ += centerZ;
-
-    const memberDistanceSq = getDistanceSq(centerX, centerY, centerZ, origin);
-    if (memberDistanceSq < nearestDistanceSq) {
-      nearestDistanceSq = memberDistanceSq;
-      representative = source;
-    }
-
-    for (const [dx, dy, dz] of LOCAL_LIGHT_CLUSTER_NEIGHBORS) {
-      const neighborKey = createLocalLightSourceKey({
-        x: source.x + dx,
-        y: source.y + dy,
-        z: source.z + dz,
-        block: source.block
-      });
-      if (visited.has(neighborKey)) continue;
-
-      const neighbor = sourceMap.get(neighborKey);
-      if (!neighbor) continue;
-      visited.add(neighborKey);
-      queue.push(neighbor);
-    }
-  }
-
-  const centerX = sumX / sourceCount;
-  const centerY = sumY / sourceCount;
-  const centerZ = sumZ / sourceCount;
-  return {
-    representative,
-    centerX,
-    centerY,
-    centerZ,
-    centerDistanceSq: getDistanceSq(centerX, centerY, centerZ, origin),
-    nearestDistanceSq,
-    sourceCount
-  };
-}
-
-function getLocalLightClusterScale(sourceCount: number): {
-  readonly intensityScale: number;
-  readonly distanceScale: number;
-} {
-  if (sourceCount <= 1) {
-    return { intensityScale: 1, distanceScale: 1 };
-  }
-
-  // A block-built lamp should read a little stronger than one lamp voxel, but
-  // the cap prevents dense fixtures from becoming a surprise orange sun.
-  const logarithmicSize = Math.log2(sourceCount + 1);
-  return {
-    intensityScale: Math.min(LOCAL_LIGHT_CLUSTER_MAX_INTENSITY_SCALE, 1 + logarithmicSize * 0.18),
-    distanceScale: Math.min(LOCAL_LIGHT_CLUSTER_MAX_DISTANCE_SCALE, 1 + logarithmicSize * 0.06)
-  };
-}
-
 function createLocalLightSourceKey(source: LocalLightSource): string {
-  return `${source.block}:${source.x},${source.y},${source.z}`;
+  return source.sourceKey ?? `${source.block}:${source.x},${source.y},${source.z}`;
+}
+
+function getLocalLightSourceX(source: LocalLightSource): number {
+  return source.lightX ?? source.x + 0.5;
+}
+
+function getLocalLightSourceY(source: LocalLightSource): number {
+  return source.lightY ?? source.y + 0.5;
+}
+
+function getLocalLightSourceZ(source: LocalLightSource): number {
+  return source.lightZ ?? source.z + 0.5;
 }
 
 function getDistanceSq(

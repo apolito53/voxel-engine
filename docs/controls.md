@@ -82,10 +82,11 @@ the root README.
 - In the `Blocks` lane, `Left click` erases the targeted block brush and `Right
   click` places the selected block brush into adjacent space. Full-auto mode
   repeats held erase/place actions.
-- `Lamp` blocks are placeable from the Blocks lane and emit a local point light
-  while their chunk is loaded. Connected lamp voxels are clustered into stable
-  fixture lights, and every fixture inside the local-light radius participates;
-  shadows follow the active quality preset's normal shadow toggle.
+- `Lamp` blocks are placeable from the Blocks lane and emit local point lights
+  from exposed fixture surfaces while their chunk is loaded. Solid Lamp filler
+  buried inside a shape does not create a hidden center light, so authored
+  fixtures glow from their visible exterior. Local Lamp shadow maps are parked
+  until the emitter volume can be excluded from its own shadows.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core

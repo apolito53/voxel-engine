@@ -51,10 +51,11 @@ promoted work, not every fun idea that crosses the room.
 
 ## High Priority: Individual Light Sources
 
-- First slice shipped in `v0.14.0`: placeable `Lamp` blocks register as
-  radius-selected clustered Three.js point lights, rebuild from loaded/edited
-  chunks, use quality-tuned light radius and shadow map size, and coexist with
-  the cheaper baked sun/face-shading baseline.
+- First slice shipped in `v0.14.0` and was corrected through `v0.15.3`:
+  placeable `Lamp` blocks register as radius-selected Three.js point lights
+  from exposed fixture surfaces, rebuild from loaded/edited chunks, use a
+  quality-tuned light radius, and coexist with the cheaper baked
+  sun/face-shading baseline.
 - Goal: support individual local light sources so the world can have torches,
   lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
   depends on local darkness or illumination instead of only sun/sky lighting.
