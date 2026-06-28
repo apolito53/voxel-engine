@@ -36,7 +36,10 @@ import {
   isLocalLightBlock,
   selectNearestLocalLightSources
 } from "../src/localLights";
-import { LocalLightRenderer } from "../src/localLightRenderer";
+import {
+  LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+  LocalLightRenderer
+} from "../src/localLightRenderer";
 import {
   BLOCK_COLOR_VARIANT_COUNT,
   createBlockMeshKey,
@@ -2211,6 +2214,10 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "block atlas sampling should still tint the diffuse terrain color"
   );
   assert(
+    shader.fragmentShader.includes("voxelTextureDiffuseColor = sampledDiffuseColor.rgb;"),
+    "block atlas sampling should preserve raw texture color for self-lit lamp faces"
+  );
+  assert(
     shader.fragmentShader.includes("blockTextureBaseTile * blockTextureVariantsPerBaseTile + blockTextureVariant"),
     "block atlas sampling should choose texture variants in the shader instead of splitting greedy faces"
   );
@@ -2245,6 +2252,18 @@ test("world block shader damps specular through baked diffuse shade", () => {
   assert(
     shader.fragmentShader.includes("voxelHorizontalFogDistance"),
     "terrain fog should use horizontal world distance so the hard fog wall matches the radial chunk horizon"
+  );
+  assert(
+    shader.fragmentShader.includes("voxelLampTileMask"),
+    "terrain shader should detect lamp tiles for material-level glow"
+  );
+  assert(
+    shader.fragmentShader.includes("reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, vec3(0.0), voxelLampTileMask);"),
+    "lamp faces should opt out of camera-dependent point-light diffuse hot spots"
+  );
+  assert(
+    shader.fragmentShader.includes("totalEmissiveRadiance = mix(totalEmissiveRadiance, voxelLampEmission, voxelLampTileMask);"),
+    "lamp faces should replace lighting with warm material emission so every visible lamp block matches"
   );
   assert(
     !shader.fragmentShader.includes("smoothstep( fogNear, fogFar, vFogDepth )"),
@@ -2322,28 +2341,37 @@ test("local light selection keeps every nearby lamp source inside the radius", (
   assert(selections.every((selection) => selection.sourceCount === 1), "separated lamps should stay independent");
 });
 
-test("local light renderer keeps a stable high-water pool while selected lamps glow", () => {
+test("local light renderer keeps fixed point-light proxies while overflow lamps stay emissive-only", () => {
   const scene = new THREE.Scene();
   const renderer = new LocalLightRenderer(scene);
+  const overflowSourceCount = LOCAL_LIGHT_POINT_PROXY_CAPACITY + 8;
   const sources = selectNearestLocalLightSources(
-    Array.from({ length: 10 }, (_, index) => ({
-      x: index * 3,
+    Array.from({ length: overflowSourceCount }, (_, index) => ({
+      x: index * 2,
       y: 8,
       z: 0,
       block: BLOCK.lamp
     })),
     { x: 0, y: 8.5, z: 0 },
-    64
+    256
   );
 
   renderer.update(sources, QUALITY_PRESETS.normal);
   const pointLights = scene.children.filter((child): child is THREE.PointLight => child instanceof THREE.PointLight);
-  assertEqual(pointLights.length, 16, "renderer should grow the point-light pool in stable chunks");
+  const initialStats = renderer.getStats();
+  assertEqual(pointLights.length, LOCAL_LIGHT_POINT_PROXY_CAPACITY, "renderer should keep a fixed point-light proxy pool");
   assertEqual(pointLights.filter((light) => light.visible).length, pointLights.length, "pooled lights stay visible to avoid shader-count churn");
   assertEqual(
     pointLights.filter((light) => light.intensity > 0).length,
-    sources.length,
-    "every selected lamp should glow while idle pool slots stay zero-intensity"
+    LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+    "only proxy-backed nearest lamps should create real PointLight spill"
+  );
+  assertEqual(initialStats.sourceCount, sources.length, "renderer stats should report every selected lamp source");
+  assertEqual(initialStats.activePointLights, LOCAL_LIGHT_POINT_PROXY_CAPACITY, "stats should report the active proxy count");
+  assertEqual(
+    initialStats.emissiveOnlySources,
+    overflowSourceCount - LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+    "overflow lamps should be reported as emissive-only instead of disappearing"
   );
   assertEqual(
     pointLights.filter((light) => light.castShadow).length,
@@ -2352,12 +2380,14 @@ test("local light renderer keeps a stable high-water pool while selected lamps g
   );
 
   renderer.update(sources.slice(0, 2), QUALITY_PRESETS.normal);
-  assertEqual(pointLights.length, 16, "the pool should not shrink and force another point-light shader variant");
+  const reducedStats = renderer.getStats();
+  assertEqual(pointLights.length, LOCAL_LIGHT_POINT_PROXY_CAPACITY, "the fixed pool should not shrink and force another point-light shader variant");
   assertEqual(
     pointLights.filter((light) => light.intensity > 0).length,
     2,
     "unused high-water pool slots should remain zero-intensity placeholders"
   );
+  assertEqual(reducedStats.emissiveOnlySources, 0, "all remaining lamps should fit in the proxy layer");
   assertEqual(
     pointLights.filter((light) => light.castShadow).length,
     0,
@@ -3112,13 +3142,22 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
       textures: 4
     }
   });
+  const pressuredLocalLights = {
+    sourceCount: LOCAL_LIGHT_POINT_PROXY_CAPACITY + 6,
+    activePointLights: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+    pointLightCapacity: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+    emissiveOnlySources: 6,
+    shadowCastingPointLights: 0
+  };
   const record = createPerformanceHitchRecord(7, 700, {
     kind: "low-fps",
     frameMs: 220,
     observedFps: 4.5,
     timings,
     diagnostics,
-    stats: createTestHitchStats()
+    stats: createTestHitchStats({
+      localLights: pressuredLocalLights
+    })
   });
 
   assert(
@@ -3161,7 +3200,9 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
         textures: 6
       }
     }),
-    stats: createTestHitchStats()
+    stats: createTestHitchStats({
+      localLights: pressuredLocalLights
+    })
   });
   assert(
     renderRecord.details.some((detail) => detail.includes("1800 draw calls")),
@@ -3174,6 +3215,18 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
   assert(
     renderRecord.details.some((detail) => detail.includes("seen recently")),
     "stale recent long-task context should remain available as supporting evidence"
+  );
+  assert(
+    renderRecord.details.some((detail) =>
+      detail.includes(`${LOCAL_LIGHT_POINT_PROXY_CAPACITY + 6} lamp sources`) &&
+      detail.includes("emissive-only")
+    ),
+    "render hitches should explain when lamp sources exceed the fixed point-light proxy layer"
+  );
+  assertEqual(
+    renderRecord.stats.localLights.emissiveOnlySources,
+    6,
+    "hitch snapshots should clone local light pressure stats"
   );
   assert(
     renderRecord.details.some((detail) => detail.includes("outside measured buckets")),
@@ -11806,6 +11859,13 @@ function createTestHitchStats(
       averageWorkerTimeMs: 0,
       averageMainThreadUploadMs: 0,
       jobsByType: []
+    },
+    localLights: {
+      sourceCount: 0,
+      activePointLights: 0,
+      pointLightCapacity: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+      emissiveOnlySources: 0,
+      shadowCastingPointLights: 0
     },
     ...overrides
   };

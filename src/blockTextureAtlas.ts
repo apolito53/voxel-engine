@@ -18,6 +18,7 @@ const WORLD_FOG_CAMERA_UNIFORM = "voxelHorizontalFogCameraPosition";
 // the indirect-light clamp does not misclassify ordinary dark terrain.
 const SEALED_VERTEX_LIGHT_THRESHOLD = 0.05;
 const SEALED_DIRECT_LIGHT_RESTORE_SCALE = 1 / ENCLOSED_INTERIOR_SHADE;
+const LAMP_EMISSIVE_STRENGTH = 2.35;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
@@ -40,7 +41,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v5-horizontal-fog";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v7-uniform-lamp-emission-horizontal-fog";
   return material;
 }
 
@@ -94,6 +95,7 @@ export function applyWorldBlockShaderPatches(
         "uniform vec2 blockTextureAtlasInset;",
         "uniform float blockTextureVariantsPerBaseTile;",
         `uniform vec3 ${WORLD_FOG_CAMERA_UNIFORM};`,
+        `const float voxelLampBaseTile = ${BLOCK_TEXTURE_TILE.lamp.toFixed(1)};`,
         "varying float vBlockTextureTile;",
         "varying vec3 vVoxelWorldPosition;"
       ].join("\n")
@@ -101,8 +103,12 @@ export function applyWorldBlockShaderPatches(
     .replace(
       "#include <map_fragment>",
       [
+        "float blockTextureBaseTile = floor(vBlockTextureTile + 0.5);",
+        // Lamp faces need a stable self-lit texture color. `diffuseColor`
+        // already carries baked vertex lighting, so keep the raw atlas sample
+        // around and use it for lamp emission below.
+        "vec3 voxelTextureDiffuseColor = diffuseColor.rgb;",
         "#ifdef USE_MAP",
-        "  float blockTextureBaseTile = floor(vBlockTextureTile + 0.5);",
         "  vec2 blockTextureCell = floor(vMapUv);",
         "  float blockTextureHash = fract(sin(dot(blockTextureCell + vec2(blockTextureBaseTile * 17.0, blockTextureBaseTile * 31.0), vec2(127.1, 311.7))) * 43758.5453123);",
         "  float blockTextureVariant = floor(blockTextureHash * blockTextureVariantsPerBaseTile);",
@@ -113,6 +119,7 @@ export function applyWorldBlockShaderPatches(
         "  vec2 blockTextureScale = (vec2(1.0) / blockTextureAtlasGrid) - blockTextureAtlasInset * 2.0;",
         "  vec2 blockTextureUv = blockTextureOrigin + blockTextureAtlasInset + fract(vMapUv) * blockTextureScale;",
         "  vec4 sampledDiffuseColor = texture2D(map, blockTextureUv);",
+        "  voxelTextureDiffuseColor = sampledDiffuseColor.rgb;",
         "  diffuseColor *= sampledDiffuseColor;",
         "#endif"
       ].join("\n")
@@ -158,7 +165,18 @@ export function applyWorldBlockShaderPatches(
         "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, vec3(0.0), voxelSealedLightMask);",
         "#endif",
         "reflectedLight.directSpecular *= diffuseColor.rgb;",
-        "reflectedLight.indirectSpecular *= diffuseColor.rgb;"
+        "reflectedLight.indirectSpecular *= diffuseColor.rgb;",
+        "float voxelLampTileMask = 1.0 - step(0.5, abs(blockTextureBaseTile - voxelLampBaseTile));",
+        // PointLight proxies are only for spill on nearby non-lamp surfaces.
+        // Lamp terrain itself should look self-lit and identical no matter
+        // which proxy source is nearest to the player/camera.
+        "vec3 voxelLampEmission = voxelTextureDiffuseColor * vec3(1.20, 0.92, 0.48) * " +
+          `${LAMP_EMISSIVE_STRENGTH.toFixed(2)};`,
+        "reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, vec3(0.0), voxelLampTileMask);",
+        "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, vec3(0.0), voxelLampTileMask);",
+        "reflectedLight.directSpecular = mix(reflectedLight.directSpecular, vec3(0.0), voxelLampTileMask);",
+        "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, vec3(0.0), voxelLampTileMask);",
+        "totalEmissiveRadiance = mix(totalEmissiveRadiance, voxelLampEmission, voxelLampTileMask);"
       ].join("\n")
     );
 }

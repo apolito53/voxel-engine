@@ -88,8 +88,8 @@ ignored by git.
   or erases in the Blocks lane; full-auto mode repeats while held
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
-- `F3` toggles the debug overlay, including the recent combat/damage log and
-  local disk-write status
+- `F3` toggles the debug overlay, including collapsible performance, lighting,
+  combat/damage, and local disk-write diagnostics
 - `F4` cycles quality presets
 - `F6` toggles Core Aim Preview
 - `F8` toggles the scripted test avatar
@@ -115,12 +115,14 @@ also computed from horizontal world distance so high-altitude views keep that
 same circular horizon instead of a screen-shaped fog slab. A render-only
 fog-colored horizon matte fills the far world below the wall in normal terrain
 worlds, so high-altitude views read as atmospheric continuation instead of
-empty sky. Placeable Lamp blocks emit local point lights from exposed fixture
-surfaces while their chunks are loaded, so solid authored lamp shapes glow from
-the visible exterior instead of from a buried center. The local-light renderer
-keeps a high-water pool of zero-intensity inactive lights to reduce placement
-hitches from browser shader-count churn; Lamp shadow maps are parked until the
-emitter volume can be excluded from its own shadows. `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
+empty sky. Placeable Lamp blocks are shader-emissive on every visible Lamp face,
+so dense fixtures and Lamp walls read as the same glowing material regardless
+of camera/player position. The local-light renderer keeps a fixed 32-source
+nearest-point proxy layer for warm spill onto surrounding blocks; overflow Lamp
+sources remain emissive-only instead of going dark, and Lamp shadow maps are
+parked until the emitter volume can be excluded from its own shadows. The F3
+`Lights` panel reports source/proxy pressure directly.
+`Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.
 Directional shadow bias, baked underside face shading, chunk sky-exposure
 buckets, sealed-room interior face shading, and diffuse-tinted terrain specular

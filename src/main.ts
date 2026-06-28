@@ -2418,7 +2418,8 @@ function animate(): void {
       debrisSettler: debrisSettlerStats,
       debrisLifecycle: debrisLifecycleDiagnostics,
       rubble: debugRubbleStats ?? rubbleField.getStats(),
-      workerPool: workerPool.getStats()
+      workerPool: workerPool.getStats(),
+      localLights: localLightRenderer.getStats()
     };
 
     if (frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
@@ -2471,6 +2472,7 @@ function animate(): void {
       debrisLifecycleDiagnostics,
       debugRubbleStats,
       workerPool.getStats(),
+      localLightRenderer.getStats(),
       [combatLog.getPersistenceStatusLine(), ...combatLog.getRecentLines(5)],
       physicsTimingSample,
       smoothedFrameTimings
@@ -2673,7 +2675,8 @@ function createCurrentPerformanceStatsSnapshot(
     debrisSettler: debrisSettlerStats,
     debrisLifecycle: debrisLifecycleDiagnostics,
     rubble: overrides.rubble ?? rubbleField.getStats(),
-    workerPool: workerPool.getStats()
+    workerPool: workerPool.getStats(),
+    localLights: localLightRenderer.getStats()
   };
 }
 

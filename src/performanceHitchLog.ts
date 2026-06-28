@@ -3,6 +3,7 @@ import type { DebrisSettlerStats } from "./debrisSettler";
 import type { DebrisLifecycleDiagnostics } from "./debrisSupportInvalidation";
 import type { FrameDiagnosticsSnapshot } from "./frameDiagnostics";
 import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
+import type { LocalLightRendererStats } from "./localLightRenderer";
 import type { PartialBlockMeshStats } from "./partialBlockMeshField";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
@@ -43,6 +44,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly debrisLifecycle: DebrisLifecycleDiagnostics;
   readonly rubble: RubbleFieldStats;
   readonly workerPool: WorkerPoolStats;
+  readonly localLights: LocalLightRendererStats;
 };
 
 export type PerformanceHitchLogPass = {
@@ -585,6 +587,13 @@ function addRenderDetails(
       `${diagnostics.renderer.geometries} geo, ${diagnostics.renderer.textures} tex`
     );
   }
+  if (stats.localLights.sourceCount > 0) {
+    details.push(
+      `${stats.localLights.sourceCount} lamp sources, ` +
+      `${stats.localLights.activePointLights}/${stats.localLights.pointLightCapacity} point proxies, ` +
+      `${stats.localLights.emissiveOnlySources} emissive-only`
+    );
+  }
   if (stats.fragmentRender.instances > 0) {
     details.push(`${stats.fragmentRender.instances} debris instances across ${stats.fragmentRender.batches} batches`);
   }
@@ -624,6 +633,12 @@ function addCrossCuttingPressureDetails(
   }
   if (stats.fragmentRender.instances >= 100) {
     details.push(`${stats.fragmentRender.instances} live fragment render instances`);
+  }
+  if (stats.localLights.emissiveOnlySources > 0) {
+    details.push(
+      `light pressure ${stats.localLights.emissiveOnlySources} emissive-only lamp sources beyond ` +
+      `${stats.localLights.pointLightCapacity} point proxies`
+    );
   }
   if (stats.debrisLifecycle.emergencyAirborneExpiries > 0) {
     details.push(`${stats.debrisLifecycle.emergencyAirborneExpiries} emergency airborne debris expiries this frame`);
@@ -715,7 +730,8 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     debrisSettler: { ...stats.debrisSettler },
     debrisLifecycle: { ...stats.debrisLifecycle },
     rubble: { ...stats.rubble },
-    workerPool: { ...stats.workerPool }
+    workerPool: { ...stats.workerPool },
+    localLights: { ...stats.localLights }
   };
 }
 

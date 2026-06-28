@@ -1372,7 +1372,7 @@ body.controls-hidden #hud {
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 10.5px;
   line-height: 1.25;
-  pointer-events: none;
+  pointer-events: auto;
   text-align: left;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(5px);
@@ -1407,6 +1407,34 @@ body.controls-hidden #hud {
   white-space: nowrap;
 }
 
+.debug-hud-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.debug-hud-menu-button,
+.debug-hud-section-title {
+  border: 1px solid rgba(237, 244, 248, 0.11);
+  border-radius: 5px;
+  background: rgba(237, 244, 248, 0.045);
+  color: rgba(223, 242, 237, 0.58);
+  font: inherit;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.debug-hud-menu-button {
+  padding: 3px 5px;
+  font-size: 9.5px;
+}
+
+.debug-hud-menu-button.is-active {
+  border-color: rgba(143, 216, 255, 0.26);
+  color: rgba(143, 216, 255, 0.9);
+}
+
 .debug-hud-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1428,10 +1456,19 @@ body.controls-hidden #hud {
 }
 
 .debug-hud-section-title {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: rgba(143, 216, 255, 0.82);
   font-size: 10px;
   font-weight: 950;
+  text-align: left;
   text-transform: uppercase;
+}
+
+.debug-hud-section.is-collapsed {
+  gap: 0;
 }
 
 .debug-hud-row {

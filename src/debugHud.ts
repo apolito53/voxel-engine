@@ -5,6 +5,7 @@ import type { DebrisLifecycleDiagnostics } from "./debrisSupportInvalidation";
 import { RollingFrameRateMeter, type FrameRateSample } from "./frameRateMeter";
 import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
+import type { LocalLightRendererStats } from "./localLightRenderer";
 import type { PartialBlockMeshStats } from "./partialBlockMeshField";
 import type { PhysicsToyCollisionStats } from "./physics";
 import type { PhysicsFragmentRenderStats } from "./physicsInstancing";
@@ -27,6 +28,7 @@ type DebugHudOptions = {
 };
 
 type DebugHudSection = {
+  readonly id: string;
   readonly title: string;
   readonly rows: readonly DebugHudRow[];
   readonly wide?: boolean;
@@ -47,6 +49,8 @@ export class DebugHud {
   private accumulator = Infinity;
   private peakFrameMs = 0;
   private peakFrameHoldSeconds = 0;
+  private readonly collapsedSections = new Set<string>();
+  private readonly hiddenSections = new Set<string>();
 
   constructor(options: DebugHudOptions) {
     this.panel = options.panel;
@@ -86,6 +90,7 @@ export class DebugHud {
     debrisLifecycleDiagnostics: DebrisLifecycleDiagnostics,
     rubbleStats: RubbleFieldStats,
     workerPoolStats: WorkerPoolStats,
+    localLightStats: LocalLightRendererStats,
     combatLogLines: readonly string[],
     physicsTiming: PhysicsTimingStats,
     timings: FrameTimings
@@ -117,6 +122,7 @@ export class DebugHud {
       debrisLifecycleDiagnostics,
       rubbleStats,
       workerPoolStats,
+      localLightStats,
       combatLogLines,
       physicsTiming,
       timings,
@@ -157,6 +163,7 @@ export class DebugHud {
     readonly debrisLifecycleDiagnostics: DebrisLifecycleDiagnostics;
     readonly rubbleStats: RubbleFieldStats;
     readonly workerPoolStats: WorkerPoolStats;
+    readonly localLightStats: LocalLightRendererStats;
     readonly combatLogLines: readonly string[];
     readonly physicsTiming: PhysicsTimingStats;
     readonly timings: FrameTimings;
@@ -171,6 +178,7 @@ export class DebugHud {
       : "normal";
     const sections: DebugHudSection[] = [
       {
+        id: "perf",
         title: "Perf",
         rows: [
           { label: "fps", value: `${formatHudFps(snapshot.frameRate.fps)} avg | low ${formatHudFps(snapshot.frameRate.lowFps)}` },
@@ -182,6 +190,7 @@ export class DebugHud {
         ]
       },
       {
+        id: "player",
         title: "Player",
         rows: [
           { label: "speed", value: formatPlayerSpeedMetersPerSecond(snapshot.playerVelocity) },
@@ -189,6 +198,7 @@ export class DebugHud {
         ]
       },
       {
+        id: "world",
         title: "World",
         rows: [
           { label: "chunk", value: `${snapshot.playerChunk.cx}, ${snapshot.playerChunk.cz}` },
@@ -210,6 +220,7 @@ export class DebugHud {
         ]
       },
       {
+        id: "physics",
         title: "Physics",
         rows: [
           { label: "bodies", value: `${snapshot.physicsBodyCount}/${snapshot.physicsBodyBudget}` },
@@ -219,6 +230,7 @@ export class DebugHud {
         ]
       },
       {
+        id: "physics-cpu",
         title: "Physics CPU",
         rows: [
           {
@@ -248,6 +260,7 @@ export class DebugHud {
         ]
       },
       {
+        id: "debris",
         title: "Debris",
         rows: [
           { label: "rigid", value: `${snapshot.rigidDebrisStats.awakeBodies}/${snapshot.rigidDebrisStats.bodies}/${snapshot.rigidDebrisBodyBudget}, sleep ${snapshot.rigidDebrisStats.sleepingBodies}` },
@@ -288,6 +301,23 @@ export class DebugHud {
         ]
       },
       {
+        id: "lights",
+        title: "Lights",
+        rows: [
+          { label: "sources", value: `${snapshot.localLightStats.sourceCount} lamp sources` },
+          {
+            label: "point",
+            value: `${snapshot.localLightStats.activePointLights}/${snapshot.localLightStats.pointLightCapacity} proxies`
+          },
+          { label: "emit", value: `${snapshot.localLightStats.emissiveOnlySources} emissive-only` },
+          {
+            label: "shadow",
+            value: `${snapshot.localLightStats.shadowCastingPointLights} casting, lamp shadows off`
+          }
+        ]
+      },
+      {
+        id: "render",
         title: "Render",
         rows: [
           {
@@ -311,6 +341,7 @@ export class DebugHud {
         ]
       },
       {
+        id: "combat",
         title: "Combat",
         wide: true,
         rows: snapshot.combatLogLines.length > 0
@@ -328,10 +359,36 @@ export class DebugHud {
     );
     fragment.append(header);
 
+    const sectionMenu = document.createElement("div");
+    sectionMenu.className = "debug-hud-menu";
+    for (const section of sections) {
+      const button = document.createElement("button");
+      button.className = this.hiddenSections.has(section.id)
+        ? "debug-hud-menu-button"
+        : "debug-hud-menu-button is-active";
+      button.type = "button";
+      button.textContent = section.title;
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleSetMembership(this.hiddenSections, section.id);
+        this.renderPanel(snapshot);
+      });
+      sectionMenu.append(button);
+    }
+    fragment.append(sectionMenu);
+
     const grid = document.createElement("div");
     grid.className = "debug-hud-grid";
     for (const section of sections) {
-      grid.append(createDebugSection(section));
+      if (this.hiddenSections.has(section.id)) continue;
+      grid.append(createDebugSection(
+        section,
+        this.collapsedSections.has(section.id),
+        () => {
+          toggleSetMembership(this.collapsedSections, section.id);
+          this.renderPanel(snapshot);
+        }
+      ));
     }
     fragment.append(grid);
     this.panel.replaceChildren(fragment);
@@ -369,10 +426,29 @@ function compactWorkerJobType(type: string): string {
   return compactText(type, 16);
 }
 
-function createDebugSection(section: DebugHudSection): HTMLElement {
+function createDebugSection(
+  section: DebugHudSection,
+  collapsed: boolean,
+  onToggle: () => void
+): HTMLElement {
   const node = document.createElement("section");
-  node.className = section.wide ? "debug-hud-section debug-hud-section-wide" : "debug-hud-section";
-  node.append(createTextNode("div", "debug-hud-section-title", section.title));
+  node.className = [
+    "debug-hud-section",
+    section.wide ? "debug-hud-section-wide" : "",
+    collapsed ? "is-collapsed" : ""
+  ].filter(Boolean).join(" ");
+
+  const titleButton = document.createElement("button");
+  titleButton.className = "debug-hud-section-title";
+  titleButton.type = "button";
+  titleButton.textContent = `${collapsed ? "+" : "-"} ${section.title}`;
+  titleButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onToggle();
+  });
+  node.append(titleButton);
+
+  if (collapsed) return node;
 
   for (const row of section.rows) {
     const rowNode = document.createElement("div");
@@ -385,6 +461,14 @@ function createDebugSection(section: DebugHudSection): HTMLElement {
   }
 
   return node;
+}
+
+function toggleSetMembership(values: Set<string>, value: string): void {
+  if (values.has(value)) {
+    values.delete(value);
+    return;
+  }
+  values.add(value);
 }
 
 function createTextNode(tagName: string, className: string, text: string): HTMLElement {

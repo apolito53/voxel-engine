@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.15.4 - 2026-06-28
+
+### Fixed
+
+- Made every Lamp terrain face shader-emissive so dense fixtures and Lamp walls
+  read as one stable lit material instead of depending on whichever nearby
+  source wins a dynamic point-light slot.
+- Replaced source-count point-light growth with a fixed 32-source nearest-point
+  proxy layer. Overflow Lamp sources stay visibly emissive-only, which avoids
+  the camera-dependent "chosen glowing tile" effect and prevents shader-count
+  churn from causing placement hitches.
+
+### Changed
+
+- Added a `Lights` section to the F3 debug HUD with total Lamp sources, active
+  point-light proxies, emissive-only overflow, proxy capacity, and shadow state.
+- Made F3 debug HUD sections collapsible and hideable from an in-panel section
+  menu, so the richer diagnostics do not turn the overlay into alphabet soup.
+- Extended hitch snapshots with local-light pressure details.
+
+### Tests
+
+- Added coverage for Lamp shader emission, fixed point-light proxy capacity,
+  emissive-only overflow diagnostics, and local-light hitch snapshots.
+
 ## 0.15.3 - 2026-06-28
 
 ### Fixed

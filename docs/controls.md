@@ -42,9 +42,11 @@ the root README.
 - Quick controls are hidden by default. Enable `Control Hints` in
   `Settings > Gameplay` to show the left-aligned hint stack.
 - The debug overlay starts hidden on every page load.
-- `F3` toggles the grouped debug overlay. It shows Perf, Player, World, Physics,
-  Debris, Render, and Combat panels with smoothed FPS, frame time, player speed,
-  signed X/Y/Z velocity, CPU buckets, rigid debris counts, partial-block
+- `F3` toggles the grouped debug overlay. Its section menu can hide panels, and
+  each visible panel can collapse in place. It shows Perf, Player, World,
+  Physics, Debris, Lights, Render, and Combat panels with smoothed FPS, frame
+  time, player speed, signed X/Y/Z velocity, CPU buckets, rigid debris counts,
+  Lamp source/proxy pressure, partial-block
   pressure, instanced debris counts, debris support-wake/cleanup counters,
   renderer stats, and the latest tool/core damage events with affected terrain
   sub-cell indexes. The Combat panel also
@@ -82,11 +84,12 @@ the root README.
 - In the `Blocks` lane, `Left click` erases the targeted block brush and `Right
   click` places the selected block brush into adjacent space. Full-auto mode
   repeats held erase/place actions.
-- `Lamp` blocks are placeable from the Blocks lane and emit local point lights
-  from exposed fixture surfaces while their chunk is loaded. Solid Lamp filler
-  buried inside a shape does not create a hidden center light, so authored
-  fixtures glow from their visible exterior. Local Lamp shadow maps are parked
-  until the emitter volume can be excluded from its own shadows.
+- `Lamp` blocks are placeable from the Blocks lane. Every visible Lamp face is
+  shader-emissive so dense fixtures and Lamp walls glow consistently regardless
+  of camera/player position, while a fixed 32-source nearest-point proxy layer
+  adds warm spill onto surrounding terrain. Extra Lamp sources stay
+  emissive-only instead of going dark. Local Lamp shadow maps are parked until
+  the emitter volume can be excluded from its own shadows.
 - A translucent selected-block-color ghost previews the placement volume before
   committing it.
 - In the `Items` lane, selected Physics Core uses `Left click` to throw a core
