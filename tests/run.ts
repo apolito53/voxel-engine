@@ -2273,6 +2273,14 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "terrain fog should use horizontal world distance so the hard fog wall matches the radial chunk horizon"
   );
   assert(
+    shader.fragmentShader.includes("reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, reflectedLight.indirectDiffuse * voxelOutdoorCycleScale, voxelOutdoorCycleMask);"),
+    "day-night outdoor exposure should still tint sky and hemisphere fill"
+  );
+  assert(
+    !shader.fragmentShader.includes("reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, reflectedLight.directDiffuse * voxelOutdoorCycleScale"),
+    "day-night outdoor exposure should not crush direct local lamp spill in open rooms"
+  );
+  assert(
     shader.fragmentShader.includes("voxelLampTileMask"),
     "terrain shader should detect lamp tiles for material-level glow"
   );
@@ -11697,6 +11705,14 @@ test("day-night visual states stay finite across the main sky phases", () => {
   const midnight = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0 }));
   assert(noon.sunIntensityScale > midnight.sunIntensityScale, "noon should have stronger sun light than midnight");
   assert(midnight.starIntensity > noon.starIntensity, "stars should be strongest at night");
+  assert(
+    midnight.terrainOutdoorExposure >= 0.13,
+    "midnight terrain exposure should keep night readable without making it daylight"
+  );
+  assert(
+    midnight.skyIntensityScale >= 0.08,
+    "midnight sky fill should keep outdoor terrain from collapsing into pure black"
+  );
   assert(
     createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.25 })).twilightFactor > 0,
     "sunrise should produce a twilight blend"

@@ -189,9 +189,10 @@ export function applyWorldBlockShaderPatches(
         "float voxelLampTileMask = 1.0 - step(0.5, abs(blockTextureBaseTile - voxelLampBaseTile));",
         "float voxelOutdoorCycleMask = (1.0 - voxelSealedLightMask) * (1.0 - voxelLampTileMask);",
         `vec3 voxelOutdoorCycleScale = ${WORLD_DAY_NIGHT_TINT_UNIFORM} * ${WORLD_DAY_NIGHT_EXPOSURE_UNIFORM};`,
-        "reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, reflectedLight.directDiffuse * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
+        // Day/night tint should change the sky/hemisphere fill, not crush
+        // direct local PointLight spill. Otherwise an open lamp room looks
+        // unlit until it becomes sealed and takes the sealed-room restore path.
         "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, reflectedLight.indirectDiffuse * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
-        "reflectedLight.directSpecular = mix(reflectedLight.directSpecular, reflectedLight.directSpecular * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
         "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, reflectedLight.indirectSpecular * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
         // PointLight proxies are only for spill on nearby non-lamp surfaces.
         // Lamp terrain itself should look self-lit and identical no matter

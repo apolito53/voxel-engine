@@ -122,7 +122,9 @@ come from a procedural dome with a gradient sky, fixed-direction sun/moon
 disks, sparse stars, and cloud bands that stay above the horizon. Fog,
 background, horizon matte, and outdoor terrain exposure shift together as the
 world clock moves, while the directional shadow direction stays fixed for this
-first pass. Placeable Lamp blocks are shader-emissive on every visible Lamp
+first pass. The night exposure pass dims sky and hemisphere fill, but direct
+local Lamp spill remains intact so open and sealed Lamp-lit rooms read
+consistently. Placeable Lamp blocks are shader-emissive on every visible Lamp
 face, so dense fixtures and Lamp walls read as the same glowing material
 regardless of camera/player position or time of day. The local-light renderer
 keeps a fixed 32-source nearest-point proxy layer for warm spill onto

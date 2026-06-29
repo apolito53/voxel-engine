@@ -178,11 +178,11 @@ export function createDayNightVisualState(state: DayNightState): DayNightVisualS
     nightFactor,
     twilightFactor,
     sunIntensityScale: clampNumber(dayFactor + twilightFactor * 0.18, 0, 1.08),
-    skyIntensityScale: clampNumber(0.045 + dayFactor * 0.95 + twilightFactor * 0.18, 0.045, 1.1),
-    terrainOutdoorExposure: clampNumber(0.07 + dayFactor * 0.93 + twilightFactor * 0.1, 0.07, 1.06),
+    skyIntensityScale: clampNumber(0.08 + dayFactor * 0.91 + twilightFactor * 0.18, 0.08, 1.1),
+    terrainOutdoorExposure: clampNumber(0.13 + dayFactor * 0.87 + twilightFactor * 0.1, 0.13, 1.06),
     terrainOutdoorTint: normalizeColor(
       addWeightedColors([
-        [hexToRgb(0x42546b), nightFactor],
+        [hexToRgb(0x53667c), nightFactor],
         [hexToRgb(0xffc58f), twilightFactor * 0.32],
         [hexToRgb(0xffffff), dayFactor]
       ])

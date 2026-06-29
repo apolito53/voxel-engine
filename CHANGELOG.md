@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.16.1 - 2026-06-29
+
+### Fixed
+
+- Stopped the day/night outdoor exposure pass from dimming direct local Lamp
+  spill, so an unsealed Lamp-lit room no longer looks much darker than the same
+  room after it is sealed from the outside.
+
+### Changed
+
+- Lifted the midnight outdoor terrain and sky-fill floor slightly so night stays
+  dark without collapsing unlit outdoor terrain into near-black.
+
 ## 0.16.0 - 2026-06-28
 
 ### Added
