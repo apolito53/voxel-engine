@@ -10,8 +10,8 @@ the root README.
   Legacy`.
 - `Superflat Lab` creates a flat grass/dirt/stone test world using the reserved
   `superflat` seed.
-- Loading a world restores the last saved player feet position and look
-  direction.
+- Loading a world restores the last saved player feet position, look direction,
+  and world time of day.
 - `Resume` captures the mouse after pausing.
 - `Exit to Home` returns to the world list. Switch worlds from the home screen,
   not the pause menu.
@@ -44,10 +44,11 @@ the root README.
 - The debug overlay starts hidden on every page load.
 - `F3` toggles the grouped debug overlay. Its section menu can hide panels, and
   each visible panel can collapse in place. It shows Perf, Player, World,
-  Physics, Debris, Lights, Render, and Combat panels with smoothed FPS, frame
+  Physics, Debris, Lights, Sky, Render, and Combat panels with smoothed FPS, frame
   time, player speed, signed X/Y/Z velocity, CPU buckets, rigid debris counts,
   Lamp source/proxy pressure, partial-block
   pressure, instanced debris counts, debris support-wake/cleanup counters,
+  current clock/phase/cycle state, day/night light scales, fog color,
   renderer stats, and the latest tool/core damage events with affected terrain
   sub-cell indexes. The Combat panel also
   shows whether those events are queued, written, or failed for local disk
@@ -144,6 +145,8 @@ Pause menu `Settings` is split into three tabs.
 - Projectile core velocity
 - Projectile core bounce count
 - Terraformer size
+- Day/Night Cycle toggle
+- Time of Day slider
 - Projectile/hitscan core color
 - Projectile core trail toggle
 - Core Aim Preview toggle
@@ -159,6 +162,8 @@ Pause menu `Settings` is split into three tabs.
 - Active Ground Debris Cap, the post-impact cap for loose shard bodies kept
   around after they touch support or sleep past the short burst grace
 - Ground Debris Lifetime
+- Cycle Length, which changes the default 20-minute day/night cycle from 5 to
+  60 minutes
 - Allow Super Ultra Mode
 
 Quality slider edits switch the dropdown to `Custom` so built-in presets stay
@@ -178,8 +183,15 @@ hidden terrain. Voxel terrain uses horizontal world-distance fog, so the dense
 wall stays aligned with the radial chunk horizon even from high altitude.
 Normal terrain worlds also draw a cheap fog-colored horizon
 matte below the wall, so flying high shows a distant atmospheric base instead
-of the skybox where chunks are intentionally hidden. Floating-islands worlds
+of open sky where chunks are intentionally hidden. Floating-islands worlds
 leave this fake floor disabled so the void remains visible.
+Runtime sky visuals are procedural: the old sunlit skybox remains in the repo
+as a legacy asset, but active worlds render a gradient sky dome with sun/moon
+disks, stars, and cloud bands that stay above the horizon. The world clock
+shifts fog, background, horizon matte, outdoor terrain exposure, and sky/light
+colors together. The sun and moon visuals move through the sky, but the
+directional shadow anchor remains fixed in this first pass so terrain shading
+and chunk meshes do not remesh during the cycle.
 
 ## Quality Presets
 

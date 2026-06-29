@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.16.0 - 2026-06-28
+
+### Added
+
+- Added a 20-minute procedural day/night cycle with per-world saved time,
+  pause/hidden-tab delta guards, and Settings controls for cycle enable,
+  time-of-day scrubbing, and cycle length.
+- Replaced the runtime daytime skybox with a procedural sky dome that renders
+  gradient sky, sun and moon disks, sparse stars, and horizon-safe cloud bands.
+- Added day/night fog, background, horizon-matte, terrain exposure, and light
+  tint synchronization without moving the fixed shadow direction.
+
+### Changed
+
+- Extended saved-world metadata with optional day/night state; old worlds load
+  into the default late-morning time.
+- Added a `Sky` section to the F3 debug HUD with clock, phase, cycle state,
+  light scales, and compact fog color.
+- Updated full-block and partial-block terrain materials with day/night tint
+  uniforms while keeping Lamp emissive output stable across the cycle.
+
+### Tests
+
+- Added coverage for day/night time normalization, cycle clamping, pause and
+  hidden-tab behavior, visual phase state, saved-world round-tripping, and
+  hitch-log day/night snapshot cloning.
+
 ## 0.15.4 - 2026-06-28
 
 ### Fixed

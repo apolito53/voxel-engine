@@ -76,6 +76,10 @@ export class HorizonMatte {
     };
   }
 
+  setColor(color: THREE.ColorRepresentation): void {
+    this.object.material.color.set(color);
+  }
+
   update(options: HorizonMatteUpdateOptions): void {
     const provider = options.surfaceProvider;
     const terrainProfile = provider?.getTerrainProfile() ?? null;

@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { SUN_ELEVATION_DEGREES, SUN_HORIZONTAL_X, SUN_HORIZONTAL_Z, SUN_OFFSET_Y } from "./voxelLighting";
 
-// The visible skybox sun sits around 40 degrees above the horizon. Keep the
-// real directional light at the same readable angle so shadows point away from
-// the sun players can actually see instead of looking like overhead noon mush.
+// The visible procedural sky sun sits around 40 degrees above the horizon.
+// Keep the real directional light at the same readable angle so shadows point
+// away from the sun players can actually see instead of overhead noon mush.
 export const SUN_OFFSET = new THREE.Vector3(
   SUN_HORIZONTAL_X,
   SUN_OFFSET_Y,

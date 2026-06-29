@@ -1,4 +1,5 @@
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
+import type { DayNightDebugSnapshot } from "./dayNightCycle";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { DebrisLifecycleDiagnostics } from "./debrisSupportInvalidation";
 import type { FrameDiagnosticsSnapshot } from "./frameDiagnostics";
@@ -45,6 +46,7 @@ export type PerformanceHitchStatsSnapshot = {
   readonly rubble: RubbleFieldStats;
   readonly workerPool: WorkerPoolStats;
   readonly localLights: LocalLightRendererStats;
+  readonly dayNight: DayNightDebugSnapshot;
 };
 
 export type PerformanceHitchLogPass = {
@@ -640,6 +642,9 @@ function addCrossCuttingPressureDetails(
       `${stats.localLights.pointLightCapacity} point proxies`
     );
   }
+  if (stats.dayNight.phase === "dusk" || stats.dayNight.phase === "dawn") {
+    details.push(`sky transition ${stats.dayNight.clockLabel} ${stats.dayNight.phase}, fog ${stats.dayNight.fogHex}`);
+  }
   if (stats.debrisLifecycle.emergencyAirborneExpiries > 0) {
     details.push(`${stats.debrisLifecycle.emergencyAirborneExpiries} emergency airborne debris expiries this frame`);
   }
@@ -731,7 +736,8 @@ function cloneStatsSnapshot(stats: PerformanceHitchStatsSnapshot): PerformanceHi
     debrisLifecycle: { ...stats.debrisLifecycle },
     rubble: { ...stats.rubble },
     workerPool: { ...stats.workerPool },
-    localLights: { ...stats.localLights }
+    localLights: { ...stats.localLights },
+    dayNight: { ...stats.dayNight }
   };
 }
 

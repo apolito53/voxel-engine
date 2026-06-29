@@ -1,134 +1,229 @@
 import * as THREE from "three";
 
-const SKYBOX_TEXTURE_URL = new URL("./assets/skybox-sunlit-day.png", import.meta.url).href;
+import type { DayNightVisualState, RgbColorTuple } from "./dayNightCycle";
+
 const SKYBOX_RADIUS_METERS = 96;
-const SKYBOX_UP_AXIS = new THREE.Vector3(0, 1, 0);
-// Keep the fake lower-sky fog mask below the true horizon. It hides the
-// generated panorama's under-world clouds without turning the chunk horizon
-// into a tall pale wall when the player flies high above terrain.
+const SKYBOX_SEGMENTS = 96;
+const SKYBOX_RINGS = 48;
+
+// Kept for old tests/docs that describe why the retired image skybox needed a
+// lower mask. The procedural sky now generates its lower hemisphere directly.
 export const SKYBOX_LOWER_FOG_MASK_START_Y = -0.1;
 export const SKYBOX_LOWER_FOG_MASK_END_Y = -0.02;
 
-// Measured from the generated panorama's brightest sun-disc centroid. Three's
-// SphereGeometry maps horizontal UVs with 0.25 at +Z, 0.5 at +X, and 0.75 at
-// -Z, so these asset-space values need a real conversion before yaw alignment.
-const GENERATED_SKYBOX_SUN_U = 0.7637;
-const GENERATED_SKYBOX_SUN_TOP_V = 0.2756;
+export type ProceduralSkyState = {
+  readonly timeOfDay: number;
+  readonly topColor: RgbColorTuple;
+  readonly horizonColor: RgbColorTuple;
+  readonly lowerColor: RgbColorTuple;
+  readonly sunColor: RgbColorTuple;
+  readonly moonColor: RgbColorTuple;
+  readonly starIntensity: number;
+  readonly cloudOpacity: number;
+  readonly sunDiscIntensity: number;
+  readonly moonDiscIntensity: number;
+};
+
+type SkyboxUniforms = {
+  readonly skyTopColor: { value: THREE.Color };
+  readonly skyHorizonColor: { value: THREE.Color };
+  readonly skyLowerColor: { value: THREE.Color };
+  readonly sunColor: { value: THREE.Color };
+  readonly moonColor: { value: THREE.Color };
+  readonly sunDirection: { value: THREE.Vector3 };
+  readonly moonDirection: { value: THREE.Vector3 };
+  readonly timeOfDay: { value: number };
+  readonly starIntensity: { value: number };
+  readonly cloudOpacity: { value: number };
+  readonly sunDiscIntensity: { value: number };
+  readonly moonDiscIntensity: { value: number };
+};
 
 export type Skybox = {
-  readonly object: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  readonly object: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
+  setState(state: ProceduralSkyState): void;
   update(camera: THREE.Camera): void;
   dispose(): void;
 };
 
 export function createSkybox(
   sunOffset: THREE.Vector3,
-  lowerHemisphereColor: THREE.ColorRepresentation
+  initialState: ProceduralSkyState
 ): Skybox {
-  const texture = new THREE.TextureLoader().load(SKYBOX_TEXTURE_URL);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
+  const geometry = new THREE.SphereGeometry(SKYBOX_RADIUS_METERS, SKYBOX_SEGMENTS, SKYBOX_RINGS);
+  const uniforms: SkyboxUniforms = {
+    skyTopColor: { value: colorFromTuple(initialState.topColor) },
+    skyHorizonColor: { value: colorFromTuple(initialState.horizonColor) },
+    skyLowerColor: { value: colorFromTuple(initialState.lowerColor) },
+    sunColor: { value: colorFromTuple(initialState.sunColor) },
+    moonColor: { value: colorFromTuple(initialState.moonColor) },
+    sunDirection: { value: getProceduralSkySunDirection(initialState.timeOfDay, sunOffset) },
+    moonDirection: { value: getProceduralSkyMoonDirection(initialState.timeOfDay, sunOffset) },
+    timeOfDay: { value: initialState.timeOfDay },
+    starIntensity: { value: initialState.starIntensity },
+    cloudOpacity: { value: initialState.cloudOpacity },
+    sunDiscIntensity: { value: initialState.sunDiscIntensity },
+    moonDiscIntensity: { value: initialState.moonDiscIntensity }
+  };
 
-  const geometry = new THREE.SphereGeometry(SKYBOX_RADIUS_METERS, 64, 32);
-  const material = new THREE.MeshBasicMaterial({
-    map: texture,
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: [
+      "varying vec3 vSkyDirection;",
+      "void main() {",
+      "  vSkyDirection = normalize(position);",
+      "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+      "}"
+    ].join("\n"),
+    fragmentShader: [
+      "precision highp float;",
+      "uniform vec3 skyTopColor;",
+      "uniform vec3 skyHorizonColor;",
+      "uniform vec3 skyLowerColor;",
+      "uniform vec3 sunColor;",
+      "uniform vec3 moonColor;",
+      "uniform vec3 sunDirection;",
+      "uniform vec3 moonDirection;",
+      "uniform float timeOfDay;",
+      "uniform float starIntensity;",
+      "uniform float cloudOpacity;",
+      "uniform float sunDiscIntensity;",
+      "uniform float moonDiscIntensity;",
+      "varying vec3 vSkyDirection;",
+      "float hash13(vec3 p) {",
+      "  p = fract(p * 0.1031);",
+      "  p += dot(p, p.yzx + 33.33);",
+      "  return fract((p.x + p.y) * p.z);",
+      "}",
+      "float cloudBand(vec3 dir) {",
+      "  float aboveHorizon = smoothstep(0.02, 0.28, dir.y);",
+      "  float highFade = 1.0 - smoothstep(0.62, 0.92, dir.y);",
+      "  float bandA = sin(dir.x * 14.0 + dir.z * 4.5 + timeOfDay * 6.28318);",
+      "  float bandB = sin(dir.z * 19.0 - dir.x * 3.0 + timeOfDay * 3.2);",
+      "  float detail = sin((dir.x + dir.z) * 46.0);",
+      "  return smoothstep(0.58, 0.88, bandA * 0.45 + bandB * 0.35 + detail * 0.12 + 0.5) * aboveHorizon * highFade;",
+      "}",
+      "void main() {",
+      "  vec3 dir = normalize(vSkyDirection);",
+      "  float horizonBlend = smoothstep(-0.12, 0.18, dir.y);",
+      "  float upperBlend = smoothstep(0.08, 0.78, dir.y);",
+      "  vec3 color = mix(skyLowerColor, skyHorizonColor, horizonBlend);",
+      "  color = mix(color, skyTopColor, upperBlend);",
+      "  float sunDot = max(dot(dir, normalize(sunDirection)), 0.0);",
+      "  float sunDisc = smoothstep(0.99925, 0.99985, sunDot) * sunDiscIntensity;",
+      "  float sunGlow = pow(sunDot, 96.0) * 0.52 * sunDiscIntensity;",
+      "  color += sunColor * (sunDisc + sunGlow);",
+      "  float moonDot = max(dot(dir, normalize(moonDirection)), 0.0);",
+      "  float moonDisc = smoothstep(0.9994, 0.99988, moonDot) * moonDiscIntensity;",
+      "  float moonGlow = pow(moonDot, 92.0) * 0.16 * moonDiscIntensity;",
+      "  color += moonColor * (moonDisc + moonGlow);",
+      "  float starCell = hash13(floor(dir * 190.0));",
+      "  float star = smoothstep(0.993, 1.0, starCell) * smoothstep(0.04, 0.18, dir.y) * starIntensity;",
+      "  color += vec3(star);",
+      "  float clouds = cloudBand(dir) * cloudOpacity;",
+      "  color = mix(color, color + vec3(0.76, 0.84, 0.92), clouds * 0.55);",
+      "  gl_FragColor = vec4(color, 1.0);",
+      "}"
+    ].join("\n"),
     side: THREE.BackSide,
     depthWrite: false,
     depthTest: false,
     fog: false
   });
   material.toneMapped = false;
-  maskLowerHemisphereWithFog(material, new THREE.Color(lowerHemisphereColor));
 
   const object = new THREE.Mesh(geometry, material);
-  object.name = "Sunlit day skybox";
+  object.name = "Procedural day-night sky";
   object.frustumCulled = false;
   object.renderOrder = -1000;
-  object.rotation.y = getSkyboxYawForSunDirection(sunOffset);
 
   return {
     object,
+    setState(state: ProceduralSkyState): void {
+      setColorUniform(uniforms.skyTopColor.value, state.topColor);
+      setColorUniform(uniforms.skyHorizonColor.value, state.horizonColor);
+      setColorUniform(uniforms.skyLowerColor.value, state.lowerColor);
+      setColorUniform(uniforms.sunColor.value, state.sunColor);
+      setColorUniform(uniforms.moonColor.value, state.moonColor);
+      uniforms.sunDirection.value.copy(getProceduralSkySunDirection(state.timeOfDay, sunOffset));
+      uniforms.moonDirection.value.copy(getProceduralSkyMoonDirection(state.timeOfDay, sunOffset));
+      uniforms.timeOfDay.value = state.timeOfDay;
+      uniforms.starIntensity.value = state.starIntensity;
+      uniforms.cloudOpacity.value = state.cloudOpacity;
+      uniforms.sunDiscIntensity.value = state.sunDiscIntensity;
+      uniforms.moonDiscIntensity.value = state.moonDiscIntensity;
+    },
     update(camera: THREE.Camera): void {
-      // The sphere is just a visual background. Keep it centered on the camera
-      // so quality presets and render-distance changes never clip the sky.
       object.position.copy(camera.position);
     },
     dispose(): void {
       geometry.dispose();
       material.dispose();
-      texture.dispose();
     }
   };
 }
 
-function maskLowerHemisphereWithFog(
-  material: THREE.MeshBasicMaterial,
-  lowerHemisphereColor: THREE.Color
-): void {
-  // The generated asset is a pretty ground-facing sky panorama, not a true
-  // full-sphere environment map. If we wrap the whole image around a sphere,
-  // its lower half puts clouds below the world horizon and makes fogged terrain
-  // look like it is floating in front of painted sky. Keep the upper texture,
-  // but fade the underside of the sphere into the same color as world fog.
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.lowerHemisphereColor = { value: lowerHemisphereColor };
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nvarying float vSkyboxLocalY;"
-      )
-      .replace(
-        "#include <begin_vertex>",
-        "#include <begin_vertex>\nvSkyboxLocalY = normalize(position).y;"
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nuniform vec3 lowerHemisphereColor;\nvarying float vSkyboxLocalY;"
-      )
-      .replace(
-        "#include <map_fragment>",
-        [
-          "#include <map_fragment>",
-          `float horizonTextureBlend = smoothstep(${SKYBOX_LOWER_FOG_MASK_START_Y.toFixed(3)}, ${SKYBOX_LOWER_FOG_MASK_END_Y.toFixed(3)}, vSkyboxLocalY);`,
-          "diffuseColor.rgb = mix(lowerHemisphereColor, diffuseColor.rgb, horizonTextureBlend);"
-        ].join("\n")
-      );
+export function createProceduralSkyState(visual: DayNightVisualState): ProceduralSkyState {
+  return {
+    timeOfDay: visual.timeOfDay,
+    topColor: visual.skyTopColor,
+    horizonColor: visual.skyHorizonColor,
+    lowerColor: visual.skyLowerColor,
+    sunColor: visual.sunColor,
+    moonColor: visual.moonColor,
+    starIntensity: visual.starIntensity,
+    cloudOpacity: visual.cloudOpacity,
+    sunDiscIntensity: visual.sunDiscIntensity,
+    moonDiscIntensity: visual.moonDiscIntensity
   };
-  material.customProgramCacheKey = () => "skybox-lower-hemisphere-fog-mask-v2";
 }
 
-export function getSkyboxYawForSunDirection(sunOffset: THREE.Vector3): number {
-  const targetAzimuth = getHorizontalAzimuth(sunOffset);
-  const generatedSunAzimuth = getHorizontalAzimuth(getGeneratedSkyboxSunDirection());
-  return targetAzimuth - generatedSunAzimuth;
+export function getProceduralSkySunDirection(
+  timeOfDay: number,
+  sunOffset: THREE.Vector3,
+  target = new THREE.Vector3()
+): THREE.Vector3 {
+  const noonDirection = sunOffset.clone().normalize();
+  const horizontal = new THREE.Vector3(noonDirection.x, 0, noonDirection.z);
+  if (horizontal.lengthSq() < 1e-6) {
+    horizontal.set(1, 0, 0);
+  } else {
+    horizontal.normalize();
+  }
+
+  const solarHeight = Math.sin((timeOfDay - 0.25) * Math.PI * 2);
+  const y = solarHeight >= 0
+    ? solarHeight * Math.max(0.2, noonDirection.y)
+    : solarHeight * 0.35;
+  const horizontalScale = Math.sqrt(Math.max(0.0001, 1 - y * y));
+  return target
+    .set(horizontal.x * horizontalScale, y, horizontal.z * horizontalScale)
+    .normalize();
+}
+
+export function getProceduralSkyMoonDirection(
+  timeOfDay: number,
+  sunOffset: THREE.Vector3,
+  target = new THREE.Vector3()
+): THREE.Vector3 {
+  return getProceduralSkySunDirection(timeOfDay, sunOffset, target).multiplyScalar(-1);
+}
+
+export function getSkyboxYawForSunDirection(_sunOffset: THREE.Vector3): number {
+  return 0;
 }
 
 export function getSkyboxAlignedSunDirection(
   sunOffset: THREE.Vector3,
   target = new THREE.Vector3()
 ): THREE.Vector3 {
-  return getGeneratedSkyboxSunDirection(target)
-    .applyAxisAngle(SKYBOX_UP_AXIS, getSkyboxYawForSunDirection(sunOffset))
-    .normalize();
+  return getProceduralSkySunDirection(0.5, sunOffset, target);
 }
 
-function getGeneratedSkyboxSunDirection(target = new THREE.Vector3()): THREE.Vector3 {
-  const phi = GENERATED_SKYBOX_SUN_U * Math.PI * 2;
-  const theta = GENERATED_SKYBOX_SUN_TOP_V * Math.PI;
-  const horizontal = Math.sin(theta);
-
-  return target
-    .set(
-      -Math.cos(phi) * horizontal,
-      Math.cos(theta),
-      Math.sin(phi) * horizontal
-    )
-    .normalize();
+function colorFromTuple(color: RgbColorTuple): THREE.Color {
+  return new THREE.Color(color[0], color[1], color[2]);
 }
 
-function getHorizontalAzimuth(direction: THREE.Vector3): number {
-  return Math.atan2(direction.x, direction.z);
+function setColorUniform(target: THREE.Color, color: RgbColorTuple): void {
+  target.setRGB(color[0], color[1], color[2]);
 }

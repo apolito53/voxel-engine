@@ -4,6 +4,12 @@ import {
   LEGACY_WORLD_HEIGHT,
   WORLD_HEIGHT
 } from "./voxelConstants";
+import {
+  createSavedDayNightState,
+  normalizeSavedDayNightState,
+  type DayNightState,
+  type SavedDayNightState
+} from "./dayNightCycle";
 import { isSuperflatSeed, type TerrainProfile } from "./terrain";
 
 const DATABASE_NAME = "voxel-engine";
@@ -29,6 +35,7 @@ export type SavedWorld = {
   createdAt: number;
   updatedAt: number;
   playerState?: SavedPlayerState;
+  dayNightState?: SavedDayNightState;
 };
 
 export type SavedPlayerPosition = {
@@ -95,6 +102,7 @@ export interface SaveDatabase {
   putWorld(world: SavedWorld): Promise<void>;
   updateWorldTimestamp(worldId: string): Promise<void>;
   updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null>;
+  updateWorldDayNightState(worldId: string, dayNightState: SavedDayNightState): Promise<SavedWorld | null>;
   deleteWorld(worldId: string): Promise<void>;
   listChunkKeys(worldId: string): Promise<string[]>;
   loadChunkSnapshot(worldId: string, chunkKey: string, options?: ChunkLoadOptions): Promise<SavedChunkSnapshot | null>;
@@ -250,6 +258,17 @@ class IndexedDbSaveDatabase implements SaveDatabase {
     return this.updateWorldRecord(worldId, (world) => ({
       ...world,
       playerState: cloneSavedPlayerState(playerState),
+      updatedAt: Date.now()
+    }));
+  }
+
+  async updateWorldDayNightState(
+    worldId: string,
+    dayNightState: SavedDayNightState
+  ): Promise<SavedWorld | null> {
+    return this.updateWorldRecord(worldId, (world) => ({
+      ...world,
+      dayNightState: cloneSavedDayNightState(dayNightState),
       updatedAt: Date.now()
     }));
   }
@@ -431,6 +450,22 @@ class MemorySaveDatabase implements SaveDatabase {
     const updatedWorld = cloneSavedWorld({
       ...world,
       playerState: cloneSavedPlayerState(playerState),
+      updatedAt: Date.now()
+    });
+    this.worlds.set(worldId, updatedWorld);
+    return cloneSavedWorld(updatedWorld);
+  }
+
+  async updateWorldDayNightState(
+    worldId: string,
+    dayNightState: SavedDayNightState
+  ): Promise<SavedWorld | null> {
+    const world = this.worlds.get(worldId);
+    if (!world) return null;
+
+    const updatedWorld = cloneSavedWorld({
+      ...world,
+      dayNightState: cloneSavedDayNightState(dayNightState),
       updatedAt: Date.now()
     });
     this.worlds.set(worldId, updatedWorld);
@@ -622,7 +657,8 @@ export class WorldRegistry {
       seed: worldSeed,
       terrainProfile: worldTerrainProfile,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      dayNightState: createSavedDayNightState(undefined, now)
     };
 
     await this.database.putWorld(world);
@@ -661,7 +697,8 @@ export class WorldRegistry {
       seed: DEFAULT_WORLD_SEED,
       terrainProfile: "classic",
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      dayNightState: createSavedDayNightState(undefined, now)
     });
   }
 
@@ -673,6 +710,13 @@ export class WorldRegistry {
     if (!playerState) return null;
 
     return this.database.updateWorldPlayerState(worldId, playerState);
+  }
+
+  async updateDayNightState(
+    worldId: string,
+    state: DayNightState
+  ): Promise<SavedWorld | null> {
+    return this.database.updateWorldDayNightState(worldId, createSavedDayNightState(state));
   }
 }
 
@@ -741,6 +785,9 @@ function normalizeWorld(world: unknown): SavedWorld | null {
   const playerState = normalizeSavedPlayerState(world.playerState);
   if (playerState) normalizedWorld.playerState = playerState;
 
+  const dayNightState = normalizeSavedDayNightState(world.dayNightState);
+  if (dayNightState) normalizedWorld.dayNightState = dayNightState;
+
   return normalizedWorld;
 }
 
@@ -751,7 +798,12 @@ function cloneWorld(world: SavedWorld | undefined | null): SavedWorld | null {
 function cloneSavedWorld(world: SavedWorld): SavedWorld {
   const clonedWorld: SavedWorld = { ...world };
   if (world.playerState) clonedWorld.playerState = cloneSavedPlayerState(world.playerState);
+  if (world.dayNightState) clonedWorld.dayNightState = cloneSavedDayNightState(world.dayNightState);
   return clonedWorld;
+}
+
+function cloneSavedDayNightState(state: SavedDayNightState): SavedDayNightState {
+  return createSavedDayNightState(state, state.savedAt);
 }
 
 export function getNewWorldTerrainProfile(seed: string, requestedProfile?: TerrainProfile): TerrainProfile {

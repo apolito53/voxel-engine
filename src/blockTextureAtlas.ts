@@ -13,6 +13,8 @@ type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
 
 const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
 const WORLD_FOG_CAMERA_UNIFORM = "voxelHorizontalFogCameraPosition";
+const WORLD_DAY_NIGHT_TINT_UNIFORM = "voxelDayNightOutdoorTint";
+const WORLD_DAY_NIGHT_EXPOSURE_UNIFORM = "voxelDayNightOutdoorExposure";
 // The sealed-room baked shade is intentionally tiny. This cutoff catches every
 // enclosed material face, but stays below normal outdoor foliage/wall shade so
 // the indirect-light clamp does not misclassify ordinary dark terrain.
@@ -22,6 +24,11 @@ const LAMP_EMISSIVE_STRENGTH = 2.35;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
+};
+
+export type WorldBlockDayNightUniforms = {
+  readonly outdoorTint: THREE.ColorRepresentation | readonly [number, number, number];
+  readonly outdoorExposure: number;
 };
 
 export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}): THREE.MeshStandardMaterial {
@@ -34,20 +41,26 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     side: options.side ?? THREE.FrontSide
   });
   const fogCameraPosition = new THREE.Vector3();
+  const dayNightTint = new THREE.Color(1, 1, 1);
+  const dayNightExposure = { value: 1 };
   material.userData[WORLD_FOG_CAMERA_UNIFORM] = fogCameraPosition;
+  material.userData[WORLD_DAY_NIGHT_TINT_UNIFORM] = dayNightTint;
+  material.userData[WORLD_DAY_NIGHT_EXPOSURE_UNIFORM] = dayNightExposure;
 
   material.onBeforeCompile = (shader) => {
-    applyWorldBlockShaderPatches(shader, fogCameraPosition);
+    applyWorldBlockShaderPatches(shader, fogCameraPosition, dayNightTint, dayNightExposure);
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v7-uniform-lamp-emission-horizontal-fog";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v8-day-night-lamp-emission-horizontal-fog";
   return material;
 }
 
 export function applyWorldBlockShaderPatches(
   shader: ShaderWithUniforms,
-  fogCameraPosition = new THREE.Vector3()
+  fogCameraPosition = new THREE.Vector3(),
+  dayNightTint = new THREE.Color(1, 1, 1),
+  dayNightExposure = { value: 1 }
 ): void {
   shader.uniforms.blockTextureAtlasGrid = {
     value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
@@ -61,6 +74,10 @@ export function applyWorldBlockShaderPatches(
   shader.uniforms[WORLD_FOG_CAMERA_UNIFORM] = {
     value: fogCameraPosition
   };
+  shader.uniforms[WORLD_DAY_NIGHT_TINT_UNIFORM] = {
+    value: dayNightTint
+  };
+  shader.uniforms[WORLD_DAY_NIGHT_EXPOSURE_UNIFORM] = dayNightExposure;
 
   // The base tile id is per vertex so worker-built chunk geometry can choose grass
   // tops, dirt undersides, wood end grain, and side textures without splitting
@@ -95,6 +112,8 @@ export function applyWorldBlockShaderPatches(
         "uniform vec2 blockTextureAtlasInset;",
         "uniform float blockTextureVariantsPerBaseTile;",
         `uniform vec3 ${WORLD_FOG_CAMERA_UNIFORM};`,
+        `uniform vec3 ${WORLD_DAY_NIGHT_TINT_UNIFORM};`,
+        `uniform float ${WORLD_DAY_NIGHT_EXPOSURE_UNIFORM};`,
         `const float voxelLampBaseTile = ${BLOCK_TEXTURE_TILE.lamp.toFixed(1)};`,
         "varying float vBlockTextureTile;",
         "varying vec3 vVoxelWorldPosition;"
@@ -156,9 +175,10 @@ export function applyWorldBlockShaderPatches(
         // this hook runs. Undo just the sealed shade multiplier for direct
         // diffuse so placed lamps can brighten dark rooms without restoring the
         // global sky/hemisphere fill that caused the sealed-room edge glow.
+        "float voxelSealedLightMask = 0.0;",
         "#if defined(USE_COLOR)",
         `float voxelBakedLight = max(max(vColor.r, vColor.g), vColor.b);`,
-        `float voxelSealedLightMask = 1.0 - step(${SEALED_VERTEX_LIGHT_THRESHOLD.toFixed(3)}, voxelBakedLight);`,
+        `voxelSealedLightMask = 1.0 - step(${SEALED_VERTEX_LIGHT_THRESHOLD.toFixed(3)}, voxelBakedLight);`,
         `float voxelSealedDirectLightScale = mix(1.0, ${SEALED_DIRECT_LIGHT_RESTORE_SCALE.toFixed(3)}, voxelSealedLightMask);`,
         "reflectedLight.directDiffuse *= voxelSealedDirectLightScale;",
         "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, diffuseColor.rgb, voxelSealedLightMask);",
@@ -167,6 +187,12 @@ export function applyWorldBlockShaderPatches(
         "reflectedLight.directSpecular *= diffuseColor.rgb;",
         "reflectedLight.indirectSpecular *= diffuseColor.rgb;",
         "float voxelLampTileMask = 1.0 - step(0.5, abs(blockTextureBaseTile - voxelLampBaseTile));",
+        "float voxelOutdoorCycleMask = (1.0 - voxelSealedLightMask) * (1.0 - voxelLampTileMask);",
+        `vec3 voxelOutdoorCycleScale = ${WORLD_DAY_NIGHT_TINT_UNIFORM} * ${WORLD_DAY_NIGHT_EXPOSURE_UNIFORM};`,
+        "reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, reflectedLight.directDiffuse * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
+        "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, reflectedLight.indirectDiffuse * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
+        "reflectedLight.directSpecular = mix(reflectedLight.directSpecular, reflectedLight.directSpecular * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
+        "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, reflectedLight.indirectSpecular * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
         // PointLight proxies are only for spill on nearby non-lamp surfaces.
         // Lamp terrain itself should look self-lit and identical no matter
         // which proxy source is nearest to the player/camera.
@@ -198,6 +224,31 @@ export function updateWorldBlockMaterialFogCenter(
   }
 }
 
+export function updateWorldBlockMaterialDayNight(
+  material: THREE.Material,
+  uniforms: WorldBlockDayNightUniforms
+): void {
+  const tint = material.userData[WORLD_DAY_NIGHT_TINT_UNIFORM];
+  if (tint instanceof THREE.Color) {
+    setColorFromRepresentation(tint, uniforms.outdoorTint);
+  }
+
+  const exposure = material.userData[WORLD_DAY_NIGHT_EXPOSURE_UNIFORM];
+  if (isUniformNumber(exposure)) {
+    exposure.value = uniforms.outdoorExposure;
+  }
+
+  const shader = getWorldBlockShader(material);
+  const shaderTint = shader?.uniforms[WORLD_DAY_NIGHT_TINT_UNIFORM]?.value;
+  if (shaderTint instanceof THREE.Color) {
+    setColorFromRepresentation(shaderTint, uniforms.outdoorTint);
+  }
+  const shaderExposure = shader?.uniforms[WORLD_DAY_NIGHT_EXPOSURE_UNIFORM];
+  if (isUniformNumber(shaderExposure)) {
+    shaderExposure.value = uniforms.outdoorExposure;
+  }
+}
+
 export function disposeWorldBlockMaterial(material: THREE.MeshStandardMaterial): void {
   material.map?.dispose();
   material.dispose();
@@ -210,6 +261,27 @@ function getWorldBlockShader(material: THREE.Material): ShaderWithUniforms | nul
     };
   };
   return materialWithShader.userData.shader ?? null;
+}
+
+function setColorFromRepresentation(
+  color: THREE.Color,
+  value: THREE.ColorRepresentation | readonly [number, number, number]
+): void {
+  if (Array.isArray(value)) {
+    const rgb = value as readonly [number, number, number];
+    color.setRGB(rgb[0], rgb[1], rgb[2]);
+    return;
+  }
+  color.set(value as THREE.ColorRepresentation);
+}
+
+function isUniformNumber(value: unknown): value is { value: number } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "value" in value &&
+    typeof (value as { readonly value?: unknown }).value === "number"
+  );
 }
 
 export function createBlockTextureAtlas(): THREE.CanvasTexture {

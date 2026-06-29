@@ -328,6 +328,25 @@ import {
   type SavedChunkSnapshot,
   type SavedWorld
 } from "../src/chunkStorage";
+import {
+  DAY_NIGHT_DEFAULT_CYCLE_SECONDS,
+  DAY_NIGHT_DEFAULT_TIME_OF_DAY,
+  DAY_NIGHT_FRAME_DELTA_CLAMP_SECONDS,
+  DAY_NIGHT_MAX_CYCLE_SECONDS,
+  DAY_NIGHT_MIN_CYCLE_SECONDS,
+  advanceDayNightState,
+  createDayNightDebugSnapshot,
+  createDayNightVisualState,
+  createDefaultDayNightState,
+  createSavedDayNightState,
+  formatCycleLengthSeconds,
+  formatTimeOfDay,
+  normalizeCycleLengthSeconds,
+  normalizeDayNightState,
+  normalizeSavedDayNightState,
+  normalizeTimeOfDay,
+  type RgbColorTuple
+} from "../src/dayNightCycle";
 import { parseChangelogEntries } from "../src/changelog";
 import { createDeleteWorldDialogCopy } from "../src/deleteWorldDialog";
 import {
@@ -4591,6 +4610,33 @@ test("world registry stores player location with saved-world metadata", async ()
     (await registry.getActiveWorld()).playerState?.feetPosition.x,
     12.5,
     "registry reads should deep-clone player location metadata"
+  );
+});
+
+test("world registry stores day-night state with saved-world metadata", async () => {
+  const database = createMemorySaveDatabase();
+  const registry = await createWorldRegistry(database);
+  const world = await registry.createWorld("Clock Test", "clock-seed");
+
+  const written = await registry.updateDayNightState(world.id, createSavedDayNightState({
+    timeOfDay: 0.73,
+    cycleEnabled: false,
+    cycleLengthSeconds: 900
+  }, 12345));
+
+  assert(written, "day-night save should update an existing world");
+  assertEqual(written.dayNightState?.timeOfDay, 0.73, "saved world should expose the new time of day");
+  assertEqual(written.dayNightState?.cycleEnabled, false, "saved world should expose the cycle toggle");
+  assertEqual(written.dayNightState?.cycleLengthSeconds, 900, "saved world should expose the cycle length");
+  assert((written.dayNightState?.savedAt ?? 0) > 0, "saved world should expose a write timestamp");
+
+  const savedWorld = await registry.getActiveWorld();
+  assertEqual(savedWorld.dayNightState?.timeOfDay, 0.73, "registry reads should retain saved world time");
+  (savedWorld.dayNightState as { timeOfDay: number }).timeOfDay = 0.1;
+  assertEqual(
+    (await registry.getActiveWorld()).dayNightState?.timeOfDay,
+    0.73,
+    "registry reads should deep-clone day-night metadata"
   );
 });
 
@@ -11582,6 +11628,115 @@ test("quality presets keep scheduler and render-distance invariants", () => {
   );
 });
 
+test("day-night time model normalizes, clamps, pauses, and limits large deltas", () => {
+  const defaultState = createDefaultDayNightState();
+  assertClose(
+    defaultState.timeOfDay,
+    DAY_NIGHT_DEFAULT_TIME_OF_DAY,
+    0.000001,
+    "new worlds should start in late morning"
+  );
+  assertEqual(defaultState.cycleLengthSeconds, DAY_NIGHT_DEFAULT_CYCLE_SECONDS, "default cycle should be 20 minutes");
+  assertEqual(formatTimeOfDay(0), "00:00", "midnight should format as 00:00");
+  assertEqual(formatTimeOfDay(0.5), "12:00", "noon should format as 12:00");
+  assertEqual(normalizeTimeOfDay(1.25), 0.25, "time should wrap past one day");
+  assertEqual(normalizeCycleLengthSeconds(1), DAY_NIGHT_MIN_CYCLE_SECONDS, "cycle length should clamp low");
+  assertEqual(
+    normalizeCycleLengthSeconds(999999),
+    DAY_NIGHT_MAX_CYCLE_SECONDS,
+    "cycle length should clamp high"
+  );
+
+  const state = createDefaultDayNightState({ timeOfDay: 0.4, cycleLengthSeconds: 1000 });
+  assertDeepEqual(
+    advanceDayNightState(state, 10, { active: false, unpaused: true, visible: true }),
+    state,
+    "inactive worlds should not advance time"
+  );
+  assertDeepEqual(
+    advanceDayNightState(state, 10, { active: true, unpaused: false, visible: true }),
+    state,
+    "paused gameplay should not advance time"
+  );
+  assertDeepEqual(
+    advanceDayNightState(state, 10, { active: true, unpaused: true, visible: false }),
+    state,
+    "hidden documents should not advance time"
+  );
+
+  const advanced = advanceDayNightState(state, 10, { active: true, unpaused: true, visible: true });
+  assertClose(
+    advanced.timeOfDay,
+    state.timeOfDay + DAY_NIGHT_FRAME_DELTA_CLAMP_SECONDS / state.cycleLengthSeconds,
+    0.000001,
+    "large frame deltas should clamp so PC sleep cannot jump the sky"
+  );
+});
+
+test("day-night visual states stay finite across the main sky phases", () => {
+  const expectedPhases = [
+    [0, "midnight"],
+    [0.25, "dawn"],
+    [0.5, "day"],
+    [0.75, "dusk"]
+  ] as const;
+
+  for (const [timeOfDay, expectedPhase] of expectedPhases) {
+    const visual = createDayNightVisualState(createDefaultDayNightState({ timeOfDay }));
+    assertFiniteColor(visual.fogColor, `fog color at ${timeOfDay}`);
+    assertFiniteColor(visual.skyTopColor, `sky top color at ${timeOfDay}`);
+    assertFiniteColor(visual.terrainOutdoorTint, `terrain tint at ${timeOfDay}`);
+    assert(Number.isFinite(visual.sunIntensityScale), "sun intensity should be finite");
+    assert(Number.isFinite(visual.skyIntensityScale), "sky intensity should be finite");
+    assert(Number.isFinite(visual.terrainOutdoorExposure), "terrain exposure should be finite");
+    assert(visual.fogHex.startsWith("#"), "debug fog label should be a compact hex color");
+    assertEqual(visual.phase, expectedPhase, `time ${timeOfDay} should report the expected sky phase`);
+  }
+
+  const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
+  const midnight = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0 }));
+  assert(noon.sunIntensityScale > midnight.sunIntensityScale, "noon should have stronger sun light than midnight");
+  assert(midnight.starIntensity > noon.starIntensity, "stars should be strongest at night");
+  assert(
+    createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.25 })).twilightFactor > 0,
+    "sunrise should produce a twilight blend"
+  );
+  assert(
+    createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.75 })).twilightFactor > 0,
+    "sunset should produce a twilight blend"
+  );
+});
+
+test("day-night saved state normalizes old and malformed worlds safely", () => {
+  const defaultState = normalizeDayNightState(undefined);
+  assertClose(
+    defaultState.timeOfDay,
+    DAY_NIGHT_DEFAULT_TIME_OF_DAY,
+    0.000001,
+    "missing state should use default morning time"
+  );
+
+  const saved = createSavedDayNightState({ timeOfDay: 1.2, cycleEnabled: true, cycleLengthSeconds: 120 }, 222);
+  assertClose(saved.timeOfDay, 0.2, 0.000001, "saved time should normalize into one day");
+  assertEqual(
+    saved.cycleLengthSeconds,
+    DAY_NIGHT_MIN_CYCLE_SECONDS,
+    "saved cycle length should clamp to the supported UI range"
+  );
+
+  const loaded = normalizeSavedDayNightState({
+    timeOfDay: -0.25,
+    cycleEnabled: false,
+    cycleLengthSeconds: 7200,
+    savedAt: 333
+  });
+  assert(loaded, "valid saved metadata should reload");
+  assertEqual(loaded.timeOfDay, 0.75, "loaded saved time should wrap negative values");
+  assertEqual(loaded.cycleEnabled, false, "loaded saved state should preserve cycle toggle");
+  assertEqual(loaded.cycleLengthSeconds, DAY_NIGHT_MAX_CYCLE_SECONDS, "loaded saved cycle should clamp high");
+  assertEqual(loaded.savedAt, 333, "loaded saved state should preserve timestamp");
+});
+
 test("horizon matte radius policy hides beyond the hard fog wall", () => {
   for (const presetId of [...QUALITY_PRESET_ORDER, CUSTOM_PRESET_ID, SUPER_ULTRA_PRESET_ID]) {
     const preset = QUALITY_PRESETS[presetId];
@@ -11639,15 +11794,15 @@ test("horizon matte stays disabled for floating-islands worlds", () => {
   assertEqual(shouldShowHorizonMatte(null), false, "inactive worlds should not show the matte");
 });
 
-test("skybox sun direction lines up with the real directional light", () => {
+test("procedural sky sun direction lines up with the real directional light", () => {
   const realSunDirection = SUN_OFFSET.clone().normalize();
-  const skyboxSunDirection = getSkyboxAlignedSunDirection(SUN_OFFSET);
+  const skySunDirection = getSkyboxAlignedSunDirection(SUN_OFFSET);
   const sunElevation = getSunElevationDegrees(SUN_OFFSET);
 
   assertVectorNearlyEqual(
-    skyboxSunDirection,
+    skySunDirection,
     realSunDirection,
-    "generated skybox sun should align with the directional light vector"
+    "procedural sky sun should align with the directional light vector"
   );
   assert(
     sunElevation > 35 && sunElevation < 45,
@@ -11655,7 +11810,7 @@ test("skybox sun direction lines up with the real directional light", () => {
   );
   assert(
     SKYBOX_LOWER_FOG_MASK_START_Y < SKYBOX_LOWER_FOG_MASK_END_Y && SKYBOX_LOWER_FOG_MASK_END_Y < 0,
-    "skybox fog mask should stay below the true horizon so the hard fog wall does not climb into the sky"
+    "procedural sky lower fog mask should stay below the true horizon so the hard fog wall does not climb into the sky"
   );
 });
 
@@ -11867,6 +12022,10 @@ function createTestHitchStats(
       emissiveOnlySources: 0,
       shadowCastingPointLights: 0
     },
+    dayNight: createDayNightDebugSnapshot(
+      createDefaultDayNightState({ timeOfDay: 0.5 }),
+      createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }))
+    ),
     ...overrides
   };
 }
@@ -11918,6 +12077,13 @@ function assertNearlyInteger(value: number, message: string): void {
 
 function assertNearlyEqual(actual: number, expected: number, message: string): void {
   assert(Math.abs(actual - expected) < 0.000001, `${message}. Expected ${expected}, got ${actual}.`);
+}
+
+function assertFiniteColor(color: RgbColorTuple, message: string): void {
+  assert(
+    color.every((component) => Number.isFinite(component) && component >= 0 && component <= 1),
+    `${message} should be a finite normalized RGB color`
+  );
 }
 
 function assertVectorNearlyEqual(

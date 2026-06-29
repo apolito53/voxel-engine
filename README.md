@@ -13,9 +13,9 @@ World units are metric: `1 block = 1 meter`. The active world volume is 96m
 tall, with legacy 48m edited chunk saves expanded on read so older maps remain
 aligned with the current terrain profile.
 
-Edited chunk snapshots, partial-block terrain damage, and the last player
-location persist in IndexedDB browser storage. Clear this site's browser data to
-reset saved worlds. The home screen creates, loads, and deletes local saved
+Edited chunk snapshots, partial-block terrain damage, last player location, and
+per-world time of day persist in IndexedDB browser storage. Clear this site's
+browser data to reset saved worlds. The home screen creates, loads, and deletes local saved
 worlds, with a `World Type` selector for `Varied Terrain`, `Floating Islands`,
 and `Classic Legacy`; `Superflat Lab` creates a flat test world using the
 reserved `superflat` seed.
@@ -97,12 +97,14 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
-Gameplay settings include Terraformer size, Physics Core size, velocity,
-terrain-damaging bounce count, color, and trail controls, plus a first-pass
-procedural sound layer with Sound, Master Volume, SFX Volume, and UI Volume
-controls. Audio defaults are intentionally forward in the mix so terrain,
-movement, and UI cues are audible without pushing the OS volume to nonsense
-territory. Browser audio unlocks after the first normal click or key press.
+Gameplay settings include Terraformer size, Day/Night Cycle, Time of Day,
+Physics Core size, velocity, terrain-damaging bounce count, color, and trail
+controls, plus a first-pass procedural sound layer with Sound, Master Volume,
+SFX Volume, and UI Volume controls. Experimental settings include the Cycle
+Length slider for stretching or compressing the default 20-minute sky cycle.
+Audio defaults are intentionally forward in the mix so terrain, movement, and
+UI cues are audible without pushing the OS volume to nonsense territory.
+Browser audio unlocks after the first normal click or key press.
 Graphics settings treat distance as the clear chunk radius where the hard fog
 wall starts; the engine streams a hidden extra horizon behind the opaque band so
 far chunks vanish into atmosphere instead of popping away at the edge.
@@ -115,13 +117,19 @@ also computed from horizontal world distance so high-altitude views keep that
 same circular horizon instead of a screen-shaped fog slab. A render-only
 fog-colored horizon matte fills the far world below the wall in normal terrain
 worlds, so high-altitude views read as atmospheric continuation instead of
-empty sky. Placeable Lamp blocks are shader-emissive on every visible Lamp face,
-so dense fixtures and Lamp walls read as the same glowing material regardless
-of camera/player position. The local-light renderer keeps a fixed 32-source
-nearest-point proxy layer for warm spill onto surrounding blocks; overflow Lamp
-sources remain emissive-only instead of going dark, and Lamp shadow maps are
-parked until the emitter volume can be excluded from its own shadows. The F3
-`Lights` panel reports source/proxy pressure directly.
+empty sky. The old daytime skybox is now a legacy asset; runtime sky visuals
+come from a procedural dome with a gradient sky, fixed-direction sun/moon
+disks, sparse stars, and cloud bands that stay above the horizon. Fog,
+background, horizon matte, and outdoor terrain exposure shift together as the
+world clock moves, while the directional shadow direction stays fixed for this
+first pass. Placeable Lamp blocks are shader-emissive on every visible Lamp
+face, so dense fixtures and Lamp walls read as the same glowing material
+regardless of camera/player position or time of day. The local-light renderer
+keeps a fixed 32-source nearest-point proxy layer for warm spill onto
+surrounding blocks; overflow Lamp sources remain emissive-only instead of going
+dark, and Lamp shadow maps are parked until the emitter volume can be excluded
+from its own shadows. The F3 `Lights` and `Sky` panels report source/proxy
+pressure plus the current clock, phase, cycle state, light scales, and fog color.
 `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.
 Directional shadow bias, baked underside face shading, chunk sky-exposure

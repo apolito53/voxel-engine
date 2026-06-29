@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { DebrisPerformancePressureState } from "./debrisPerformanceGovernor";
 import type { DebrisSettlerStats } from "./debrisSettler";
 import type { DebrisLifecycleDiagnostics } from "./debrisSupportInvalidation";
+import type { DayNightDebugSnapshot } from "./dayNightCycle";
 import { RollingFrameRateMeter, type FrameRateSample } from "./frameRateMeter";
 import type { FrameTimings, PhysicsTimingStats } from "./frameTimings";
 import { compactText, type GpuInfo } from "./gpu";
@@ -91,6 +92,7 @@ export class DebugHud {
     rubbleStats: RubbleFieldStats,
     workerPoolStats: WorkerPoolStats,
     localLightStats: LocalLightRendererStats,
+    dayNightStats: DayNightDebugSnapshot,
     combatLogLines: readonly string[],
     physicsTiming: PhysicsTimingStats,
     timings: FrameTimings
@@ -123,6 +125,7 @@ export class DebugHud {
       rubbleStats,
       workerPoolStats,
       localLightStats,
+      dayNightStats,
       combatLogLines,
       physicsTiming,
       timings,
@@ -164,6 +167,7 @@ export class DebugHud {
     readonly rubbleStats: RubbleFieldStats;
     readonly workerPoolStats: WorkerPoolStats;
     readonly localLightStats: LocalLightRendererStats;
+    readonly dayNightStats: DayNightDebugSnapshot;
     readonly combatLogLines: readonly string[];
     readonly physicsTiming: PhysicsTimingStats;
     readonly timings: FrameTimings;
@@ -314,6 +318,20 @@ export class DebugHud {
             label: "shadow",
             value: `${snapshot.localLightStats.shadowCastingPointLights} casting, lamp shadows off`
           }
+        ]
+      },
+      {
+        id: "sky",
+        title: "Sky",
+        rows: [
+          { label: "clock", value: `${snapshot.dayNightStats.clockLabel}, ${snapshot.dayNightStats.phase}` },
+          { label: "cycle", value: snapshot.dayNightStats.cycleLabel },
+          {
+            label: "scale",
+            value: `sun ${snapshot.dayNightStats.sunIntensityScale.toFixed(2)}, ` +
+              `sky ${snapshot.dayNightStats.skyIntensityScale.toFixed(2)}`
+          },
+          { label: "fog", value: snapshot.dayNightStats.fogHex }
         ]
       },
       {

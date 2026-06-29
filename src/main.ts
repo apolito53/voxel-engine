@@ -39,6 +39,7 @@ import {
 import {
   createWorldBlockMaterial,
   disposeWorldBlockMaterial,
+  updateWorldBlockMaterialDayNight,
   updateWorldBlockMaterialFogCenter
 } from "./blockTextureAtlas";
 import {
@@ -89,6 +90,26 @@ import {
 } from "./combatLog";
 import type { CollisionBounds, CollisionWorld } from "./collision";
 import { DamageIndicatorOverlay } from "./damageIndicators";
+import {
+  DAY_NIGHT_DEFAULT_CYCLE_SECONDS,
+  DAY_NIGHT_FRAME_DELTA_CLAMP_SECONDS,
+  DAY_NIGHT_MAX_CYCLE_SECONDS,
+  DAY_NIGHT_MIN_CYCLE_SECONDS,
+  advanceDayNightState,
+  createDayNightDebugSnapshot,
+  createDayNightVisualState,
+  createDefaultDayNightState,
+  createSavedDayNightState,
+  formatCycleLengthSeconds,
+  formatTimeOfDay,
+  normalizeCycleLengthSeconds,
+  normalizeDayNightState,
+  normalizeTimeOfDay,
+  type DayNightDebugSnapshot,
+  type DayNightState,
+  type DayNightVisualState,
+  type RgbColorTuple
+} from "./dayNightCycle";
 import {
   createDebrisPerformancePressureState,
   getDebrisPressureEffectiveRigidDebrisBodyBudget,
@@ -328,7 +349,7 @@ import {
   smoothSprintFeedbackFov
 } from "./sprintFeedback";
 import { HorizonMatte, type HorizonMatteSurfaceProvider } from "./horizonMatte";
-import { createSkybox } from "./skybox";
+import { createProceduralSkyState, createSkybox } from "./skybox";
 import { TargetBlockHighlighter } from "./targetHighlighter";
 import {
   TERRAFORMER_SIZE_DEFAULT,
@@ -406,6 +427,8 @@ const PLAYER_LOCATION_AUTOSAVE_MS = 5000;
 const PLAYER_LOCATION_POSITION_EPSILON = 0.05;
 const PLAYER_LOCATION_LOOK_EPSILON = 0.002;
 const PLAYER_LOCATION_SAVE_PRECISION = 1000;
+const DAY_NIGHT_AUTOSAVE_MS = 30000;
+const TIME_OF_DAY_SLIDER_SCALE = 1000;
 const CORE_AIM_PREVIEW_TOGGLE_KEY = "F6";
 const CLICK_FIRE_MODE_TOGGLE_KEY = "KeyT";
 const FULL_AUTO_CLICK_ACTION_INTERVAL_MS = 140;
@@ -500,6 +523,11 @@ const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
 const terraformerSizeSlider = requireElement<HTMLInputElement>("#terraformer-size-slider");
 const terraformerSizeValue = requireElement<HTMLElement>("#terraformer-size-value");
+const dayNightCycleToggle = requireElement<HTMLInputElement>("#day-night-cycle-toggle");
+const timeOfDaySlider = requireElement<HTMLInputElement>("#time-of-day-slider");
+const timeOfDayValue = requireElement<HTMLElement>("#time-of-day-value");
+const cycleLengthSlider = requireElement<HTMLInputElement>("#cycle-length-slider");
+const cycleLengthValue = requireElement<HTMLElement>("#cycle-length-value");
 const coreSizeSlider = requireElement<HTMLInputElement>("#core-size-slider");
 const coreSizeValue = requireElement<HTMLElement>("#core-size-value");
 const coreVelocitySlider = requireElement<HTMLInputElement>("#core-velocity-slider");
@@ -562,8 +590,13 @@ app.appendChild(renderer.domElement);
 
 const WORLD_FOG_COLOR = 0xb6d8ee;
 
+let dayNightState: DayNightState = createDefaultDayNightState();
+let dayNightVisualState: DayNightVisualState = createDayNightVisualState(dayNightState);
+let dayNightDebugStats: DayNightDebugSnapshot = createDayNightDebugSnapshot(dayNightState, dayNightVisualState);
+const sceneBackgroundColor = new THREE.Color(WORLD_FOG_COLOR);
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(WORLD_FOG_COLOR);
+scene.background = sceneBackgroundColor;
 const sceneFog = new THREE.Fog(WORLD_FOG_COLOR, bootPreset.fogNear, bootPreset.fogFar);
 scene.fog = sceneFog;
 
@@ -583,7 +616,7 @@ scene.add(sun);
 const skyLight = new THREE.HemisphereLight(0xb9d9ff, 0x394228, bootPreset.skyIntensity);
 scene.add(skyLight);
 
-const skybox = createSkybox(SUN_OFFSET, WORLD_FOG_COLOR);
+const skybox = createSkybox(SUN_OFFSET, createProceduralSkyState(dayNightVisualState));
 scene.add(skybox.object);
 const horizonMatte = new HorizonMatte(WORLD_FOG_COLOR);
 scene.add(horizonMatte.object);
@@ -625,6 +658,8 @@ let pendingWorldDeletion: SavedWorld | null = null;
 let lastSavedPlayerLocation: SavedPlayerStateSnapshot | null = null;
 let nextPlayerLocationAutosaveAt = 0;
 let playerLocationSaveChain: Promise<void> = Promise.resolve();
+let nextDayNightAutosaveAt = 0;
+let dayNightSaveChain: Promise<void> = Promise.resolve();
 let runtimeDisposed = false;
 let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
@@ -958,15 +993,18 @@ qualityController = new QualityController({
     minimapRenderer.reset();
     if (source === "preset") syncPhysicsBudgetToQuality();
     physicsFragmentInstancer.setDebrisShadowsEnabled(qualityController.preset.debrisShadows);
+    applyDayNightVisuals();
     updateSettingsControls();
     emitQualityChanged(source);
   }
 });
 qualityController.initialize();
 physicsFragmentInstancer.setDebrisShadowsEnabled(qualityController.preset.debrisShadows);
+applyDayNightVisuals();
 updateSettingsControls();
 updatePhysicsBudgetControls();
 updateTerraformerControls();
+updateDayNightControls();
 updatePhysicsCoreControls();
 updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
@@ -1126,6 +1164,7 @@ function wireMenuControls(): void {
     if (paused) {
       clearPointerHoldState();
       void queueActivePlayerLocationSave(true);
+      void queueActiveDayNightStateSave(true);
     }
     if (!paused) closePauseSubmenus();
   };
@@ -1191,6 +1230,15 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   terraformerSizeSlider.addEventListener("input", () => {
     setTerraformerSize(terraformerSizeSlider.value);
+  }, eventListenerOptions);
+  dayNightCycleToggle.addEventListener("change", () => {
+    setDayNightCycleEnabled(dayNightCycleToggle.checked);
+  }, eventListenerOptions);
+  timeOfDaySlider.addEventListener("input", () => {
+    setTimeOfDayFromSlider(timeOfDaySlider.value);
+  }, eventListenerOptions);
+  cycleLengthSlider.addEventListener("input", () => {
+    setCycleLengthFromSlider(cycleLengthSlider.value);
   }, eventListenerOptions);
   coreSizeSlider.addEventListener("input", () => {
     setPhysicsCoreSizePercent(coreSizeSlider.value);
@@ -1622,6 +1670,108 @@ function writeTerraformerSizePreference(size: number): void {
   }
 }
 
+function setDayNightCycleEnabled(enabled: boolean): void {
+  setDayNightState({
+    ...dayNightState,
+    cycleEnabled: enabled
+  }, { persist: true });
+}
+
+function setTimeOfDayFromSlider(value: unknown): void {
+  const numericValue = Number(value);
+  const normalizedValue = Number.isFinite(numericValue)
+    ? numericValue / TIME_OF_DAY_SLIDER_SCALE
+    : dayNightState.timeOfDay;
+  setDayNightState({
+    ...dayNightState,
+    timeOfDay: normalizeTimeOfDay(normalizedValue)
+  }, { persist: true });
+}
+
+function setCycleLengthFromSlider(value: unknown): void {
+  const numericValue = Number(value);
+  const minutes = Number.isFinite(numericValue)
+    ? numericValue
+    : DAY_NIGHT_DEFAULT_CYCLE_SECONDS / 60;
+  setDayNightState({
+    ...dayNightState,
+    cycleLengthSeconds: normalizeCycleLengthSeconds(minutes * 60, dayNightState.cycleLengthSeconds)
+  }, { persist: true });
+}
+
+function setDayNightState(
+  nextState: DayNightState,
+  options: { readonly persist?: boolean; readonly updateControls?: boolean } = {}
+): void {
+  dayNightState = normalizeDayNightState(nextState, dayNightState);
+  applyDayNightVisuals();
+  if (options.updateControls ?? true) updateDayNightControls();
+  if (options.persist) void queueActiveDayNightStateSave(true);
+}
+
+function updateDayNightCycle(deltaSeconds: number, now: number): void {
+  maybeAutosaveDayNightState(now);
+  const activePlayer = player;
+  if (!inWorld || !activePlayer?.active || document.hidden) return;
+
+  const previousTime = dayNightState.timeOfDay;
+  dayNightState = advanceDayNightState(
+    dayNightState,
+    Math.min(deltaSeconds, DAY_NIGHT_FRAME_DELTA_CLAMP_SECONDS),
+    { active: true, unpaused: true, visible: true }
+  );
+  if (dayNightState.timeOfDay !== previousTime) {
+    applyDayNightVisuals();
+    updateDayNightControls();
+  }
+}
+
+function applyDayNightVisuals(): void {
+  dayNightVisualState = createDayNightVisualState(dayNightState);
+  dayNightDebugStats = createDayNightDebugSnapshot(dayNightState, dayNightVisualState);
+
+  copyRgbColor(sceneBackgroundColor, dayNightVisualState.fogColor);
+  scene.background = sceneBackgroundColor;
+  sceneFog.color.copy(sceneBackgroundColor);
+  skybox.setState(createProceduralSkyState(dayNightVisualState));
+  horizonMatte.setColor(sceneBackgroundColor);
+
+  sun.intensity = qualityController.preset.sunIntensity * dayNightVisualState.sunIntensityScale;
+  copyRgbColor(sun.color, dayNightVisualState.directionalLightColor);
+  skyLight.intensity = qualityController.preset.skyIntensity * dayNightVisualState.skyIntensityScale;
+  copyRgbColor(skyLight.color, dayNightVisualState.skyLightColor);
+  copyRgbColor(skyLight.groundColor, dayNightVisualState.groundLightColor);
+
+  // Terrain and damaged partial terrain share the same block material shader.
+  // Lamp emissive tiles opt out inside the shader so night tint does not make
+  // player-built light fixtures look like dead orange blocks.
+  const materialDayNightUniforms = {
+    outdoorTint: dayNightVisualState.terrainOutdoorTint,
+    outdoorExposure: dayNightVisualState.terrainOutdoorExposure
+  };
+  updateWorldBlockMaterialDayNight(worldMaterial, materialDayNightUniforms);
+  updateWorldBlockMaterialDayNight(partialBlockMaterial, materialDayNightUniforms);
+}
+
+function copyRgbColor(target: THREE.Color, color: RgbColorTuple): void {
+  target.setRGB(color[0], color[1], color[2], THREE.SRGBColorSpace);
+}
+
+function updateDayNightControls(): void {
+  dayNightCycleToggle.checked = dayNightState.cycleEnabled;
+  timeOfDaySlider.min = "0";
+  timeOfDaySlider.max = String(TIME_OF_DAY_SLIDER_SCALE);
+  timeOfDaySlider.step = "1";
+  timeOfDaySlider.value = String(Math.round(normalizeTimeOfDay(dayNightState.timeOfDay) * TIME_OF_DAY_SLIDER_SCALE));
+  timeOfDayValue.textContent = formatTimeOfDay(dayNightState.timeOfDay);
+
+  cycleLengthSlider.min = String(DAY_NIGHT_MIN_CYCLE_SECONDS / 60);
+  cycleLengthSlider.max = String(DAY_NIGHT_MAX_CYCLE_SECONDS / 60);
+  cycleLengthSlider.step = "1";
+  cycleLengthSlider.value = String(Math.round(dayNightState.cycleLengthSeconds / 60));
+  cycleLengthValue.textContent = formatCycleLengthSeconds(dayNightState.cycleLengthSeconds);
+}
+
 function readClickFireModePreference(): ClickFireMode {
   try {
     return normalizeClickFireMode(
@@ -1832,6 +1982,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     clearPointerHoldState();
     void queueActivePlayerLocationSave(true);
+    void queueActiveDayNightStateSave(true);
     enterIdleHeartbeat();
     return;
   }
@@ -1851,6 +2002,7 @@ window.addEventListener("pageshow", () => {
 window.addEventListener("pagehide", () => {
   clearPointerHoldState();
   void queueActivePlayerLocationSave(true);
+  void queueActiveDayNightStateSave(true);
   enterIdleHeartbeat();
 }, eventListenerOptions);
 window.addEventListener("blur", () => {
@@ -1858,6 +2010,7 @@ window.addEventListener("blur", () => {
 }, eventListenerOptions);
 window.addEventListener("beforeunload", () => {
   void queueActivePlayerLocationSave(true);
+  void queueActiveDayNightStateSave(true);
   disposeRuntime();
 }, eventListenerOptions);
 
@@ -2230,6 +2383,7 @@ function animate(): void {
     updateHeldClickActions(frameStartedAt);
     testAvatar.update(delta);
     maybeAutosavePlayerLocation(frameStartedAt);
+    updateDayNightCycle(delta, frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
     novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
     recordTimingSection("playerMs");
@@ -2419,7 +2573,8 @@ function animate(): void {
       debrisLifecycle: debrisLifecycleDiagnostics,
       rubble: debugRubbleStats ?? rubbleField.getStats(),
       workerPool: workerPool.getStats(),
-      localLights: localLightRenderer.getStats()
+      localLights: localLightRenderer.getStats(),
+      dayNight: dayNightDebugStats
     };
 
     if (frameTimingSample.frameMs >= FRAME_SPIKE_EVENT_MS) {
@@ -2473,6 +2628,7 @@ function animate(): void {
       debugRubbleStats,
       workerPool.getStats(),
       localLightRenderer.getStats(),
+      dayNightDebugStats,
       [combatLog.getPersistenceStatusLine(), ...combatLog.getRecentLines(5)],
       physicsTimingSample,
       smoothedFrameTimings
@@ -2511,7 +2667,10 @@ function handleIdleHeartbeat(): void {
   if (runtimeDisposed) return;
 
   drainFrameClockAfterIdle();
-  if (document.hidden) void queueActivePlayerLocationSave(true);
+  if (document.hidden) {
+    void queueActivePlayerLocationSave(true);
+    void queueActiveDayNightStateSave(true);
+  }
 
   if (shouldSuspendAnimationLoop(performance.now())) {
     enterIdleHeartbeat();
@@ -2676,7 +2835,8 @@ function createCurrentPerformanceStatsSnapshot(
     debrisLifecycle: debrisLifecycleDiagnostics,
     rubble: overrides.rubble ?? rubbleField.getStats(),
     workerPool: workerPool.getStats(),
-    localLights: localLightRenderer.getStats()
+    localLights: localLightRenderer.getStats(),
+    dayNight: dayNightDebugStats
   };
 }
 
@@ -4440,6 +4600,7 @@ function updateSettingsControls(): void {
   debrisCountSlider.value = String(preset.blockFragmentCount);
   debrisCountValue.textContent = formatBlockFragmentCount(preset.blockFragmentCount);
 
+  updateDayNightControls();
   updateGroundDebrisBudgetControls();
   updateGroundDebrisLifetimeControls();
 }
@@ -4896,6 +5057,7 @@ async function createSuperflatWorld(): Promise<void> {
   worldSeedInput.value = "";
   if (inWorld) {
     await queueActivePlayerLocationSave(true);
+    await queueActiveDayNightStateSave(true);
     clearToys();
   }
   await loadWorld(savedWorld.id);
@@ -4915,6 +5077,10 @@ async function loadWorld(worldId: string): Promise<void> {
     const savedLoadState = migrateSavedPlayerStateHeight(savedWorld);
     const loadOrigin = savedLoadState?.feetPosition ?? { x: 2, y: 0, z: 2 };
     const shouldPersistMigratedPlayerState = hasLegacyExpandedHeightPlayerState(savedWorld);
+    setDayNightState(normalizeDayNightState(savedWorld.dayNightState), {
+      persist: false,
+      updateControls: true
+    });
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
@@ -4939,6 +5105,7 @@ async function loadWorld(worldId: string): Promise<void> {
     novaPilot.setActive(true, camera.position, direction, activeWorld);
     lastSavedPlayerLocation = capturePlayerLocationSnapshot();
     nextPlayerLocationAutosaveAt = performance.now() + PLAYER_LOCATION_AUTOSAVE_MS;
+    nextDayNightAutosaveAt = performance.now() + DAY_NIGHT_AUTOSAVE_MS;
     updateSunShadowAnchor();
     homeScreen.classList.add("is-hidden");
     pauseMenu.classList.add("is-hidden");
@@ -5021,6 +5188,7 @@ async function exitToHome(): Promise<void> {
     // Leaving play unloads the active chunks first, so the next world starts from a clean scene.
     const activeWorld = requireWorld();
     await queueActivePlayerLocationSave(true);
+    await queueActiveDayNightStateSave(true);
     if (novaChatPanel.isOpen) {
       novaChatPanel.close();
     }
@@ -5131,6 +5299,35 @@ function queuePlayerLocationSave(snapshot: SavedPlayerStateSnapshot, force: bool
   return playerLocationSaveChain;
 }
 
+function maybeAutosaveDayNightState(now: number): void {
+  if (now < nextDayNightAutosaveAt) return;
+
+  nextDayNightAutosaveAt = now + DAY_NIGHT_AUTOSAVE_MS;
+  void queueActiveDayNightStateSave(false);
+}
+
+function queueActiveDayNightStateSave(force = false): Promise<void> {
+  const registry = worldRegistry;
+  const activeWorld = world;
+  if (!inWorld || !registry || !activeWorld) return Promise.resolve();
+  if (!force && !dayNightState.cycleEnabled) return Promise.resolve();
+
+  const worldId = activeWorld.storage.worldId;
+  const savedState = createSavedDayNightState(dayNightState, Date.now());
+  dayNightSaveChain = dayNightSaveChain
+    .catch(() => {
+      // Keep later autosaves alive if one IndexedDB write hiccups.
+    })
+    .then(async () => {
+      await registry.updateDayNightState(worldId, savedState);
+    })
+    .catch((error) => {
+      console.warn("Could not persist day/night state", error);
+    });
+
+  return dayNightSaveChain;
+}
+
 function capturePlayerLocationSnapshot(): SavedPlayerStateSnapshot | null {
   if (!inWorld || !player) return null;
 
@@ -5239,6 +5436,7 @@ function disposeRuntime(): void {
   mainAbortController.abort();
   if (inWorld) {
     void queueActivePlayerLocationSave(true);
+    void queueActiveDayNightStateSave(true);
   }
 
   // The explicit teardown matters mostly in dev: Vite reloads and repeated

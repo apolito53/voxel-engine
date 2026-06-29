@@ -44,7 +44,7 @@ Preferred format:
 
 ## World Feel
 
-- Day/night cycle with simple lighting mood shifts before any survival loop.
+- Weather and calendar hooks layered on top of the shipped day/night cycle.
 - Weather passes: rain, fog banks, wind gusts, lightning flashes, dust in sandy
   washes.
 - Better biome identity: colder highlands, dry washes, denser groves, exposed

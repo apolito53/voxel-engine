@@ -295,6 +295,33 @@
                   value="1"
                 />
               </label>
+              <label class="settings-toggle" for="day-night-cycle-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Day/Night Cycle</span>
+                  <span class="settings-toggle-hint">Advance world time while gameplay is active and visible</span>
+                </span>
+                <input
+                  id="day-night-cycle-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                  checked
+                />
+              </label>
+              <label class="settings-field" for="time-of-day-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Time of Day</span>
+                  <span id="time-of-day-value" class="settings-value">10:05</span>
+                </span>
+                <input
+                  id="time-of-day-slider"
+                  class="range-input"
+                  type="range"
+                  min="0"
+                  max="999"
+                  step="1"
+                  value="420"
+                />
+              </label>
               <label class="settings-field" for="core-size-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Core Size</span>
@@ -479,6 +506,24 @@
                   These controls can absolutely body your framerate. If your computer spontaneously combusts, that's on you.
                 </span>
               </div>
+              <label class="settings-field" for="cycle-length-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Cycle Length</span>
+                  <span id="cycle-length-value" class="settings-value">20 min</span>
+                </span>
+                <span class="settings-field-hint">
+                  Full midnight-to-midnight duration for the procedural sky.
+                </span>
+                <input
+                  id="cycle-length-slider"
+                  class="range-input"
+                  type="range"
+                  min="5"
+                  max="60"
+                  step="1"
+                  value="20"
+                />
+              </label>
               <div class="budget-control" aria-labelledby="physics-budget-label">
                 <div class="budget-copy">
                   <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
