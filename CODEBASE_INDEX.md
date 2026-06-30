@@ -108,7 +108,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Shared visible-sun direction used by lighting, procedural sky alignment, and fixed shadow anchoring: `src/lighting.ts`
 - Worker-safe sun constants, chunk sky-exposure buckets, and light-aware baked voxel face shading:
   `src/voxelLighting.ts`, `src/chunkLightOcclusion.ts`
-- Local light-source registry, exposed-surface Lamp emitters, radius-selected local light sources, fixed 32-source nearest-point Three.js proxy spill lights, and emissive-only overflow diagnostics for loaded Lamp blocks: `src/localLights.ts`, `src/localLightRenderer.ts`
+- Local light-source registry, exposed-surface Lamp emitters, radius-selected local light sources, fixed 128-source nearest-point Three.js proxy spill lights, and emissive-only overflow diagnostics for loaded Lamp blocks: `src/localLights.ts`, `src/localLightRenderer.ts`
 - Render quality controller, fog-start-to-opaque-to-hidden-horizon policy, separate chunk render radius,
   Custom preset for slider edits, persistence, and renderer/light/camera application:
   `src/qualityController.ts`

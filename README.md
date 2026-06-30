@@ -127,10 +127,11 @@ local Lamp spill remains intact so open and sealed Lamp-lit rooms read
 consistently. Placeable Lamp blocks are shader-emissive on every visible Lamp
 face, so dense fixtures and Lamp walls read as the same glowing material
 regardless of camera/player position or time of day. The local-light renderer
-keeps a fixed 32-source nearest-point proxy layer for warm spill onto
-surrounding blocks; overflow Lamp sources remain emissive-only instead of going
-dark, and Lamp shadow maps are parked until the emitter volume can be excluded
-from its own shadows. The F3 `Lights` and `Sky` panels report source/proxy
+keeps a fixed 128-source nearest-point proxy layer for warm spill onto
+surrounding blocks; only extremely dense overflow Lamp sources remain
+emissive-only instead of going dark, and Lamp shadow maps are parked until the
+emitter volume can be excluded from its own shadows. The F3 `Lights` and `Sky`
+panels report source/proxy
 pressure plus the current clock, phase, cycle state, light scales, and fog color.
 `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.

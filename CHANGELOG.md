@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.16.2 - 2026-06-29
+
+### Changed
+
+- Raised the fixed local Lamp point-light proxy pool from 32 to 128 sources so
+  dense visible Lamp fields cast consistent warm spill before falling back to
+  emissive-only overflow.
+
+### Tests
+
+- Added coverage for a 72-source Lamp field so below-cap fixtures keep real
+  point-light spill instead of only glowing as material emission.
+
 ## 0.16.1 - 2026-06-29
 
 ### Fixed

@@ -5,7 +5,7 @@ import {
 } from "./localLights";
 import type { QualityPreset } from "./qualityPresets";
 
-export const LOCAL_LIGHT_POINT_PROXY_CAPACITY = 32;
+export const LOCAL_LIGHT_POINT_PROXY_CAPACITY = 128;
 const LOCAL_LIGHT_IDLE_Y = -10000;
 
 export type LocalLightRendererStats = {
@@ -82,8 +82,8 @@ export class LocalLightRenderer {
       activePointLights,
       pointLightCapacity: this.lights.length,
       // Every lamp tile now emits in the terrain shader. Sources beyond the
-      // fixed proxy pool still visibly glow; they just skip expensive dynamic
-      // light spill for this frame.
+      // larger fixed proxy pool still visibly glow; they just skip expensive
+      // dynamic light spill for this frame.
       emissiveOnlySources: Math.max(0, sources.length - activePointLights),
       shadowCastingPointLights
     };
@@ -119,8 +119,10 @@ export class LocalLightRenderer {
       // browser-side hitch that barely shows up in our JS timing buckets.
       //
       // The pool is intentionally generous now, but still finite: lamp faces
-      // glow in the terrain shader, while these real PointLights are only the
-      // optional warm spill that brightens nearby stone, dirt, and wood.
+      // glow in the terrain shader, while these real PointLights are the warm
+      // spill that brightens nearby stone, dirt, and wood. This keeps normal
+      // dense fixtures consistent without pretending WebGL point lights are
+      // free forever.
       light.visible = true;
       light.castShadow = false;
       light.position.set(0, LOCAL_LIGHT_IDLE_Y, 0);

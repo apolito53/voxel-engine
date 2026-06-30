@@ -2374,13 +2374,13 @@ test("local light renderer keeps fixed point-light proxies while overflow lamps 
   const overflowSourceCount = LOCAL_LIGHT_POINT_PROXY_CAPACITY + 8;
   const sources = selectNearestLocalLightSources(
     Array.from({ length: overflowSourceCount }, (_, index) => ({
-      x: index * 2,
+      x: (index % 17) * 2,
       y: 8,
-      z: 0,
+      z: Math.floor(index / 17) * 2,
       block: BLOCK.lamp
     })),
-    { x: 0, y: 8.5, z: 0 },
-    256
+    { x: 16, y: 8.5, z: 8 },
+    64
   );
 
   renderer.update(sources, QUALITY_PRESETS.normal);
@@ -2427,6 +2427,38 @@ test("local light renderer keeps fixed point-light proxies while overflow lamps 
     0,
     "disposing the renderer should remove pooled local lights from the scene"
   );
+});
+
+test("local light renderer gives dense visible lamp fields real spill below the lifted cap", () => {
+  const scene = new THREE.Scene();
+  const renderer = new LocalLightRenderer(scene);
+  const denseLampCount = 72;
+  const sources = selectNearestLocalLightSources(
+    Array.from({ length: denseLampCount }, (_, index) => ({
+      x: (index % 9) * 2,
+      y: 8,
+      z: Math.floor(index / 9) * 2,
+      block: BLOCK.lamp
+    })),
+    { x: 8, y: 8.5, z: 7 },
+    64
+  );
+
+  renderer.update(sources, QUALITY_PRESETS.superUltra);
+
+  const pointLights = scene.children.filter((child): child is THREE.PointLight => child instanceof THREE.PointLight);
+  const stats = renderer.getStats();
+  assertEqual(sources.length, denseLampCount, "the dense lamp fixture should fit inside the local-light radius");
+  assertEqual(stats.sourceCount, denseLampCount, "renderer stats should count every dense-fixture source");
+  assertEqual(stats.activePointLights, denseLampCount, "every below-cap lamp source should get real point-light spill");
+  assertEqual(stats.emissiveOnlySources, 0, "below-cap dense lamps should not be reduced to emissive-only glow");
+  assertEqual(
+    pointLights.filter((light) => light.intensity > 0).length,
+    denseLampCount,
+    "below-cap lamps should activate one warm spill proxy per selected source"
+  );
+
+  renderer.dispose();
 });
 
 test("block texture tile mapping varies repeated material surfaces", () => {
