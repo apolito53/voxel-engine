@@ -59,6 +59,18 @@ import {
   getLitBlockShadeMultiplier
 } from "../src/chunkLightOcclusion";
 import {
+  BLOCK_LIGHT_MAX_LEVEL,
+  BLOCK_LIGHT_RADIUS,
+  buildChunkBlockLight,
+  createBlockLightNeighborKey,
+  createEmptyChunkBlockLight,
+  getBlockLightEmission,
+  getBlockLightIndex,
+  getDirtyBlockLightChunkCoordsForEdit,
+  isBlockLightOpaque,
+  normalizeBlockLightLevel
+} from "../src/voxelBlockLight";
+import {
   BLOCK_TEXTURE_TILE,
   getBlockTextureBaseTileId,
   getBlockTextureTileId
@@ -2295,6 +2307,133 @@ test("world block shader damps specular through baked diffuse shade", () => {
   assert(
     !shader.fragmentShader.includes("smoothstep( fogNear, fogFar, vFogDepth )"),
     "terrain fog should not fall back to camera-depth fog that creates a rectangular horizon from high altitude"
+  );
+});
+
+function createEmptyBlockLightChunkSnapshot(): Uint8Array {
+  return new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+}
+
+test("voxel block light emits lamp sources and falls off through open air", () => {
+  const blocks = createEmptyBlockLightChunkSnapshot();
+  const lampIndex = getBlockLightIndex(4, 10, 4);
+  blocks[lampIndex] = BLOCK.lamp;
+
+  const result = buildChunkBlockLight({ blocks });
+
+  assertEqual(getBlockLightEmission(BLOCK.lamp), BLOCK_LIGHT_MAX_LEVEL, "Lamp blocks should emit max block light");
+  assertEqual(getBlockLightEmission(BLOCK.stone), 0, "non-light terrain should not emit block light");
+  assertEqual(result.sourceCount, 1, "one lamp source should be discovered in the chunk snapshot");
+  assertEqual(result.blockLight[lampIndex], 15, "the lamp cell should keep its source light level");
+  assertEqual(result.blockLight[getBlockLightIndex(5, 10, 4)], 14, "adjacent cells should receive one-step falloff");
+  assertEqual(result.blockLight[getBlockLightIndex(6, 10, 4)], 13, "two orthogonal steps should lose two levels");
+  assertEqual(result.blockLight[getBlockLightIndex(5, 11, 4)], 13, "Manhattan falloff should include vertical steps");
+  assert(result.litCellCount > 0, "open-air propagation should light at least the source cell");
+  assert(result.maxQueueDepth > 0, "propagation should report queue pressure for diagnostics");
+  assert(
+    result.blockLight.every((level) => Number.isInteger(level) && level >= 0 && level <= BLOCK_LIGHT_MAX_LEVEL),
+    "block-light output should stay in the 0..15 integer range"
+  );
+  assertEqual(normalizeBlockLightLevel(20.4), 15, "light normalization should clamp high inputs");
+  assertEqual(normalizeBlockLightLevel(Number.NaN), 0, "light normalization should treat invalid inputs as darkness");
+});
+
+test("voxel block light treats terrain and partial cells as opaque", () => {
+  const blocks = createEmptyBlockLightChunkSnapshot();
+  const lampIndex = getBlockLightIndex(1, 12, 8);
+  blocks[lampIndex] = BLOCK.lamp;
+
+  for (let y = 0; y < WORLD_HEIGHT; y += 1) {
+    for (let z = 0; z < CHUNK_SIZE; z += 1) {
+      blocks[getBlockLightIndex(2, y, z)] = BLOCK.stone;
+    }
+  }
+
+  const result = buildChunkBlockLight({ blocks });
+
+  assert(isBlockLightOpaque(BLOCK.stone), "solid terrain should be opaque to block light");
+  assert(!isBlockLightOpaque(BLOCK.air), "air should stay transparent to block light");
+  assertEqual(result.blockLight[lampIndex], 15, "a lamp source should stay lit even though lamp blocks are solid");
+  assertEqual(
+    result.blockLight[getBlockLightIndex(3, 12, 8)],
+    0,
+    "a full solid wall should stop direct block-light propagation"
+  );
+
+  const partialBlocks = createEmptyBlockLightChunkSnapshot();
+  const partialMask = createEmptyChunkBlockLight();
+  partialBlocks[lampIndex] = BLOCK.lamp;
+  for (let y = 0; y < WORLD_HEIGHT; y += 1) {
+    for (let z = 0; z < CHUNK_SIZE; z += 1) {
+      partialBlocks[getBlockLightIndex(2, y, z)] = BLOCK.grass;
+      partialMask[getBlockLightIndex(2, y, z)] = 1;
+    }
+  }
+
+  const partialResult = buildChunkBlockLight({ blocks: partialBlocks, partialBlockMask: partialMask });
+  assert(isBlockLightOpaque(BLOCK.grass, 1), "first-pass partial terrain should be opaque to block light");
+  assertEqual(
+    partialResult.blockLight[getBlockLightIndex(3, 12, 8)],
+    0,
+    "partial terrain masks should stop block-light propagation until sub-cell leakage is deliberately implemented"
+  );
+});
+
+test("voxel block light reads neighbor halo sources across chunk borders", () => {
+  const currentBlocks = createEmptyBlockLightChunkSnapshot();
+  const westBlocks = createEmptyBlockLightChunkSnapshot();
+  westBlocks[getBlockLightIndex(CHUNK_SIZE - 1, 9, 6)] = BLOCK.lamp;
+
+  const result = buildChunkBlockLight({
+    blocks: currentBlocks,
+    neighbors: {
+      [createBlockLightNeighborKey(-1, 0)]: westBlocks
+    }
+  });
+
+  assertEqual(result.sourceCount, 1, "neighbor halo lamp should be discovered once");
+  assertEqual(result.blockLight[getBlockLightIndex(0, 9, 6)], 14, "light should cross from the west neighbor into x=0");
+  assertEqual(result.blockLight[getBlockLightIndex(1, 9, 6)], 13, "cross-border light should keep Manhattan falloff");
+});
+
+test("voxel block light rebuilds without stale removed lamp data", () => {
+  const blocks = createEmptyBlockLightChunkSnapshot();
+  blocks[getBlockLightIndex(8, 8, 8)] = BLOCK.lamp;
+
+  const lit = buildChunkBlockLight({ blocks });
+  blocks[getBlockLightIndex(8, 8, 8)] = BLOCK.air;
+  const dark = buildChunkBlockLight({ blocks });
+
+  assert(lit.litCellCount > 0, "lamp snapshot should produce lit cells before removal");
+  assertEqual(dark.sourceCount, 0, "removing the lamp should remove the source from a fresh build");
+  assertEqual(dark.litCellCount, 0, "fresh builds should not preserve stale light after source removal");
+  assert(dark.blockLight.every((level) => level === 0), "removed-source output should be all darkness");
+});
+
+test("voxel block light dirty bounds cover the full 15-block source radius", () => {
+  const centered = getDirtyBlockLightChunkCoordsForEdit(CHUNK_SIZE, CHUNK_SIZE);
+  assertDeepEqual(
+    centered,
+    [
+      { cx: 0, cz: 0 },
+      { cx: 1, cz: 0 },
+      { cx: 0, cz: 1 },
+      { cx: 1, cz: 1 }
+    ],
+    "an edit one block inside chunk 1,1 should dirty the four chunks touched by a 15-block radius"
+  );
+
+  const edge = getDirtyBlockLightChunkCoordsForEdit(0, 0);
+  assertEqual(edge.length, 4, "an edit at world origin should touch the four chunks reached by a corner radius");
+  assert(edge.some((coord) => coord.cx === -1 && coord.cz === -1), "negative neighbor chunk should be included");
+  assert(edge.some((coord) => coord.cx === 0 && coord.cz === 0), "the owning corner chunk should be included");
+  const midChunk = getDirtyBlockLightChunkCoordsForEdit(8, 8);
+  assertEqual(midChunk.length, 9, "a mid-chunk edit should touch the full 3x3 dirty-light chunk square");
+  assert(midChunk.some((coord) => coord.cx === 1 && coord.cz === 1), "positive neighbor chunk should be included");
+  assertEqual(
+    getDirtyBlockLightChunkCoordsForEdit(4, 4, BLOCK_LIGHT_RADIUS).length,
+    9,
+    "explicit default radius should match the exported block-light radius"
   );
 });
 

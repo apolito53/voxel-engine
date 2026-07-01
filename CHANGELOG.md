@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.17.0 - 2026-07-01
+
+### Added
+
+- Added a pure worker-safe voxel block-light solver that derives 0..15 Lamp
+  light arrays from cloned chunk snapshots plus one-chunk neighbor halos.
+- Added dirty block-light chunk bounds helpers for future remeshing/lightmap
+  invalidation when Lamp or solid terrain edits affect cells within the
+  15-block propagation radius.
+
+### Changed
+
+- Documented that block-light data is available as runtime groundwork only;
+  rendered terrain still uses the existing emissive Lamp material plus fixed
+  local point-light proxy layer.
+
+### Tests
+
+- Added coverage for Lamp emission, Manhattan falloff, solid and partial-cell
+  occlusion, cross-chunk halo propagation, stale-source removal,
+  dirty-light bounds, and finite 0..15 output.
+
 ## 0.16.2 - 2026-06-29
 
 ### Changed

@@ -74,18 +74,22 @@ promoted work, not every fun idea that crosses the room.
   from exposed fixture surfaces, rebuild from loaded/edited chunks, use a
   quality-tuned light radius, and coexist with the cheaper baked
   sun/face-shading baseline.
+- Data foundation shipped in `v0.17.0`: `src/voxelBlockLight.ts` builds
+  worker-safe 0..15 Lamp block-light arrays from cloned chunk snapshots and
+  one-chunk neighbor halos, with solid and partial terrain currently treated as
+  opaque. This is not rendered yet.
 - Goal: support individual local light sources so the world can have torches,
   lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
   depends on local darkness or illumination instead of only sun/sky lighting.
-- Next slice should polish authored light identity: torch/lamp variants,
-  brighter emissive-looking block faces, optional tool/Nova/projectile glows,
-  and a simple test fixture for walking around several lights in Superflat Lab.
+- Next serious slice should feed block-light arrays into chunk and partial
+  terrain color attributes or shader uniforms so all Lamp blocks illuminate
+  nearby terrain without needing one Three.js point light per block.
 - Keep baked sun/face shading and individual runtime lights conceptually
   separate. Existing `voxelLighting.ts` face shading can remain the cheap
-  ambient/sun baseline while individual lights become an additive local layer.
-- Future path: optional chunk-aware light influence data for blocks/materials,
-  light permeability, colored/emissive blocks, day/night interaction, dynamic
-  projectile glows, and tool/Nova light pulses.
+  ambient/sun baseline while block-light data becomes an additive local layer.
+- Future path: rendered chunk-aware block light, sub-cell light leakage through
+  damaged partial terrain, colored/emissive blocks, day/night interaction,
+  dynamic projectile glows, and tool/Nova light pulses.
 - Validation shape: include a Superflat Lab scene with multiple lights, a
   dense-fixture stress pass, a save/load check for placed light sources, and a
   visual smoke check that moving around chunk boundaries does not pop or leak
