@@ -39,6 +39,7 @@ import {
 import {
   createWorldBlockMaterial,
   disposeWorldBlockMaterial,
+  updateWorldBlockMaterialBlockLightRange,
   updateWorldBlockMaterialDayNight,
   updateWorldBlockMaterialFogCenter
 } from "./blockTextureAtlas";
@@ -288,11 +289,15 @@ import { DEFAULT_QUALITY_PRESET, QUALITY_PRESETS } from "./qualityPresets";
 import {
   BLOCK_FRAGMENT_MAX_COUNT,
   BLOCK_FRAGMENT_MIN_COUNT,
+  BLOCK_LIGHT_LEVEL_MAX,
+  BLOCK_LIGHT_LEVEL_MIN,
+  BLOCK_LIGHT_LEVEL_STEP,
   RENDER_DISTANCE_MAX,
   RENDER_DISTANCE_MIN,
   RENDER_DISTANCE_STEP,
   SHADOW_QUALITY_MAX_LEVEL,
   SHADOW_QUALITY_MIN_LEVEL,
+  formatBlockLightLevel,
   formatBlockFragmentCount,
   formatRenderDistance,
   formatShadowQuality,
@@ -518,6 +523,10 @@ const physicsBudgetSlider = requireElement<HTMLInputElement>("#physics-budget-sl
 const despawnObjectsButton = requireElement<HTMLButtonElement>("#despawn-objects-button");
 const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-slider");
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
+const blockLightMinSlider = requireElement<HTMLInputElement>("#block-light-min-slider");
+const blockLightMinValue = requireElement<HTMLElement>("#block-light-min-value");
+const blockLightMaxSlider = requireElement<HTMLInputElement>("#block-light-max-slider");
+const blockLightMaxValue = requireElement<HTMLElement>("#block-light-max-value");
 const debrisShadowsToggle = requireElement<HTMLInputElement>("#debris-shadows-toggle");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
@@ -993,6 +1002,7 @@ qualityController = new QualityController({
     minimapRenderer.reset();
     if (source === "preset") syncPhysicsBudgetToQuality();
     physicsFragmentInstancer.setDebrisShadowsEnabled(qualityController.preset.debrisShadows);
+    applyBlockLightRange();
     applyDayNightVisuals();
     updateSettingsControls();
     emitQualityChanged(source);
@@ -1000,6 +1010,7 @@ qualityController = new QualityController({
 });
 qualityController.initialize();
 physicsFragmentInstancer.setDebrisShadowsEnabled(qualityController.preset.debrisShadows);
+applyBlockLightRange();
 applyDayNightVisuals();
 updateSettingsControls();
 updatePhysicsBudgetControls();
@@ -1221,6 +1232,12 @@ function wireMenuControls(): void {
   despawnObjectsButton.addEventListener("click", clearToys, eventListenerOptions);
   shadowQualitySlider.addEventListener("input", () => {
     qualityController.setShadowQualityLevel(shadowQualitySlider.value);
+  }, eventListenerOptions);
+  blockLightMinSlider.addEventListener("input", () => {
+    qualityController.setBlockLightMinLevel(blockLightMinSlider.value);
+  }, eventListenerOptions);
+  blockLightMaxSlider.addEventListener("input", () => {
+    qualityController.setBlockLightMaxLevel(blockLightMaxSlider.value);
   }, eventListenerOptions);
   debrisShadowsToggle.addEventListener("change", () => {
     qualityController.setDebrisShadowsEnabled(debrisShadowsToggle.checked);
@@ -1751,6 +1768,19 @@ function applyDayNightVisuals(): void {
   };
   updateWorldBlockMaterialDayNight(worldMaterial, materialDayNightUniforms);
   updateWorldBlockMaterialDayNight(partialBlockMaterial, materialDayNightUniforms);
+}
+
+function applyBlockLightRange(): void {
+  const materialBlockLightUniforms = {
+    minLevel: qualityController.blockLightMinLevel,
+    maxLevel: qualityController.blockLightMaxLevel
+  };
+
+  // This is deliberately a shader-uniform update instead of a chunk remesh.
+  // The baked 0..15 block-light arrays stay honest; this is only a live display
+  // clamp for tuning night readability and Lamp spill intensity.
+  updateWorldBlockMaterialBlockLightRange(worldMaterial, materialBlockLightUniforms);
+  updateWorldBlockMaterialBlockLightRange(partialBlockMaterial, materialBlockLightUniforms);
 }
 
 function copyRgbColor(target: THREE.Color, color: RgbColorTuple): void {
@@ -4573,7 +4603,9 @@ function emitQualityChanged(source: QualityChangeSource): void {
     source,
     renderDistance: qualityController.loadRadius,
     physicsObjectBudget,
-    blockFragmentCount: preset.blockFragmentCount
+    blockFragmentCount: preset.blockFragmentCount,
+    blockLightMinLevel: preset.blockLightMinLevel,
+    blockLightMaxLevel: preset.blockLightMaxLevel
   });
 }
 
@@ -4593,6 +4625,19 @@ function updateSettingsControls(): void {
   shadowQualitySlider.step = "1";
   shadowQualitySlider.value = String(getShadowQualityLevel(preset.shadows ? preset.shadowMapSize : 0));
   shadowQualityValue.textContent = formatShadowQuality(preset.shadows ? preset.shadowMapSize : 0);
+
+  blockLightMinSlider.min = String(BLOCK_LIGHT_LEVEL_MIN);
+  blockLightMinSlider.max = String(BLOCK_LIGHT_LEVEL_MAX);
+  blockLightMinSlider.step = String(BLOCK_LIGHT_LEVEL_STEP);
+  blockLightMinSlider.value = String(preset.blockLightMinLevel);
+  blockLightMinValue.textContent = formatBlockLightLevel(preset.blockLightMinLevel);
+
+  blockLightMaxSlider.min = String(BLOCK_LIGHT_LEVEL_MIN);
+  blockLightMaxSlider.max = String(BLOCK_LIGHT_LEVEL_MAX);
+  blockLightMaxSlider.step = String(BLOCK_LIGHT_LEVEL_STEP);
+  blockLightMaxSlider.value = String(preset.blockLightMaxLevel);
+  blockLightMaxValue.textContent = formatBlockLightLevel(preset.blockLightMaxLevel);
+
   debrisShadowsToggle.checked = preset.debrisShadows;
 
   debrisCountSlider.min = String(BLOCK_FRAGMENT_MIN_COUNT);

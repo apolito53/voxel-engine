@@ -18,6 +18,7 @@ import {
   readQualitySettingsPreference,
   writeQualitySettingsPreference,
   normalizeQualitySettings,
+  normalizeBlockLightLevelSetting,
   normalizeRenderDistance,
   createDefaultQualitySettings,
   getShadowMapSizeForQualityLevel,
@@ -132,6 +133,14 @@ export class QualityController {
     return this.settings.debrisShadows;
   }
 
+  get blockLightMinLevel(): number {
+    return this.settings.blockLightMinLevel;
+  }
+
+  get blockLightMaxLevel(): number {
+    return this.settings.blockLightMaxLevel;
+  }
+
   initialize(): void {
     this.syncQualitySelect();
     this.syncSuperUltraToggle();
@@ -201,6 +210,28 @@ export class QualityController {
     this.updateSettings({
       ...this.settings,
       debrisShadows: enabled
+    }, false);
+  }
+
+  setBlockLightMinLevel(level: unknown): void {
+    const minLevel = normalizeBlockLightLevelSetting(level, this.settings.blockLightMinLevel);
+    this.updateSettings({
+      ...this.settings,
+      blockLightMinLevel: minLevel,
+      // Dragging the lower handle upward should carry the upper handle with it
+      // instead of silently refusing the user's input at the old max.
+      blockLightMaxLevel: Math.max(this.settings.blockLightMaxLevel, minLevel)
+    }, false);
+  }
+
+  setBlockLightMaxLevel(level: unknown): void {
+    const maxLevel = normalizeBlockLightLevelSetting(level, this.settings.blockLightMaxLevel);
+    this.updateSettings({
+      ...this.settings,
+      // Symmetric guard for the upper handle: if it moves below the current
+      // floor, lower the floor too so the range never inverts.
+      blockLightMinLevel: Math.min(this.settings.blockLightMinLevel, maxLevel),
+      blockLightMaxLevel: maxLevel
     }, false);
   }
 
@@ -345,7 +376,9 @@ export class QualityController {
       fogFar,
       cameraFar,
       blockFragmentCount: this.settings.blockFragmentCount,
-      debrisShadows: this.settings.debrisShadows
+      debrisShadows: this.settings.debrisShadows,
+      blockLightMinLevel: this.settings.blockLightMinLevel,
+      blockLightMaxLevel: this.settings.blockLightMaxLevel
     };
   }
 

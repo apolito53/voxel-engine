@@ -62,7 +62,7 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Translucent block-color Builder placement ghost for the active build brush: `src/builderPreview.ts`
 - Minimap terrain slicing, grid, and player marker drawing: `src/minimap.ts`
 - Block IDs, colors, material-specific terrain HP, generated `Rubble` block, Wood/Leaves tree blocks, Moss/Bush overgrowth blocks, placeable Lamp block, and placeable palette: `src/blocks.ts`, `src/blockMaterialRules.ts`
-- Deterministic per-block tint buckets plus procedural texture-atlas tile and variant mapping used by worker and fallback meshing, including moss/bush/leaf/lamp tiles: `src/blockColors.ts`, `src/blockTextureTiles.ts`, `src/blockTextureAtlas.ts`
+- Deterministic per-block tint buckets plus procedural texture-atlas tile and variant mapping used by worker and fallback meshing, including moss/bush/leaf/lamp tiles and shader uniforms for rendered block-light range clamps: `src/blockColors.ts`, `src/blockTextureTiles.ts`, `src/blockTextureAtlas.ts`
 - Block fracture grid, oversampled visible-fragment sampling, slider-scaled terrain chip counts, normalized block-volume material, and per-shard mass/visual-axis caps: `src/blockFragments.ts`
 - Shared low-poly shard geometry catalog, deterministic material-aware debris shape selection, small non-uniform visual scale, conservative visual-volume estimates, per-piece volume-budget fitting, and cuboid physics envelope helpers: `src/debrisShapes.ts`
 - Stuck/trapped loose-debris cleanup heuristics for poofing tunnel clutter without reviving rubble conversion: `src/debrisCleanup.ts`
@@ -116,8 +116,9 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Render quality controller, fog-start-to-opaque-to-hidden-horizon policy, separate chunk render radius,
   Custom preset for slider edits, persistence, and renderer/light/camera application:
   `src/qualityController.ts`
-- Custom quality settings storage, fog-start slider bounds, and menu label
-  formatting, including the debris-shadow toggle: `src/qualitySettings.ts`
+- Custom quality settings storage, fog-start slider bounds, rendered block-light
+  min/max level clamps, and menu label formatting, including the debris-shadow
+  toggle: `src/qualitySettings.ts`
 - Render quality preset definitions, hard fog wall/hidden-horizon thickness, render horizon safety ring, physics-body
   defaults, active debris bubble radii, local-light radii, debris-shadow defaults, Custom baseline, and tuning knobs:
   `src/qualityPresets.ts`

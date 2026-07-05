@@ -1,4 +1,5 @@
 import { CHUNK_SIZE } from "./voxelConstants";
+import { BLOCK_LIGHT_MAX_LEVEL, BLOCK_LIGHT_MIN_LEVEL } from "./voxelBlockLight";
 
 export const QUALITY_STORAGE_KEY = "voxel-quality-preset";
 export const CUSTOM_QUALITY_BASE_STORAGE_KEY = "voxel-custom-quality-base";
@@ -9,6 +10,7 @@ export const CUSTOM_PRESET_ID = "custom";
 export const SUPER_ULTRA_PRESET_ID = "superUltra";
 export const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"] as const;
 export const FOG_RENDER_SAFETY_CHUNKS = 1;
+export const DEFAULT_BLOCK_LIGHT_MIN_LEVEL = 2;
 
 export type StandardQualityPresetId = (typeof QUALITY_PRESET_ORDER)[number];
 export type BuiltInQualityPresetId = StandardQualityPresetId | typeof SUPER_ULTRA_PRESET_ID;
@@ -42,6 +44,8 @@ export type QualityPreset = {
   readonly debrisShadows: boolean;
   readonly localLightRadiusMeters: number;
   readonly localLightShadowMapSize: number;
+  readonly blockLightMinLevel: number;
+  readonly blockLightMaxLevel: number;
   readonly minimapInterval: number;
   readonly minimapRowsPerFrame: number;
   readonly sunIntensity: number;
@@ -49,8 +53,13 @@ export type QualityPreset = {
 };
 
 type QualityPresetRuntimeFields = "fogNear" | "fogFar" | "cameraFar" | "renderRadius" | "loadRadius" | "unloadRadius";
-type QualityPresetDefinition = Omit<QualityPreset, QualityPresetRuntimeFields> & {
+type QualityPresetDefinition = Omit<
+  QualityPreset,
+  QualityPresetRuntimeFields | "blockLightMinLevel" | "blockLightMaxLevel"
+> & {
   readonly minCameraFar: number;
+  readonly blockLightMinLevel?: number;
+  readonly blockLightMaxLevel?: number;
 };
 
 // The player-facing render distance is the clear-view radius. Fog reaches full
@@ -65,6 +74,8 @@ function createQualityPreset(definition: QualityPresetDefinition): QualityPreset
   const fogNear = preset.fogStartRadius * CHUNK_SIZE;
   const fogFar = fogOpaqueRadius * CHUNK_SIZE;
   const cameraFar = Math.max(minCameraFar, fogFar + CHUNK_SIZE * 2);
+  const blockLightMinLevel = normalizePresetBlockLightLevel(definition.blockLightMinLevel, DEFAULT_BLOCK_LIGHT_MIN_LEVEL);
+  const blockLightMaxLevel = normalizePresetBlockLightLevel(definition.blockLightMaxLevel, BLOCK_LIGHT_MAX_LEVEL);
 
   return {
     ...preset,
@@ -73,8 +84,16 @@ function createQualityPreset(definition: QualityPresetDefinition): QualityPreset
     cameraFar,
     renderRadius,
     loadRadius,
-    unloadRadius: loadRadius + 1
+    unloadRadius: loadRadius + 1,
+    blockLightMinLevel: Math.min(blockLightMinLevel, blockLightMaxLevel),
+    blockLightMaxLevel: Math.max(blockLightMinLevel, blockLightMaxLevel)
   };
+}
+
+function normalizePresetBlockLightLevel(value: unknown, fallback: number): number {
+  const numericValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numericValue)) return fallback;
+  return Math.max(BLOCK_LIGHT_MIN_LEVEL, Math.min(BLOCK_LIGHT_MAX_LEVEL, Math.round(numericValue)));
 }
 
 // Quality presets are intentionally plain data so render distance, lighting,
