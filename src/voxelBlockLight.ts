@@ -255,18 +255,28 @@ function getChunkLightValueAt(
   if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
     return current ? current[getBlockLightIndex(x, y, z)] : null;
   }
-  if (x < 0 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
+
+  // Mesh jobs only carry the current chunk plus the four cardinal neighbor
+  // light buffers. Treat exactly one cell outside the chunk as the sampled
+  // halo; farther coordinates are genuinely unknown, not another copy of the
+  // edge cell. Without this guard, face-light lookups can flatten falloff by
+  // reading the same bright neighbor voxel for x=-1, x=-2, x=-3, and so on.
+  if (x === -1 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
     return neighbors.negativeX[getBlockLightIndex(CHUNK_SIZE - 1, y, z)];
   }
-  if (x >= CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
+
+  if (x === CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
     return neighbors.positiveX[getBlockLightIndex(0, y, z)];
   }
-  if (z < 0 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
+
+  if (z === -1 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
     return neighbors.negativeZ[getBlockLightIndex(x, y, CHUNK_SIZE - 1)];
   }
-  if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
+
+  if (z === CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
     return neighbors.positiveZ[getBlockLightIndex(x, y, 0)];
   }
+
   return null;
 }
 

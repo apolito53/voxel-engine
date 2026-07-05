@@ -73,6 +73,7 @@ import {
   createEmptyChunkBlockLight,
   getBlockLightEmission,
   getBlockLightIndex,
+  getChunkBlockLightAt,
   getDirtyBlockLightChunkCoordsForEdit,
   isBlockLightOpaque,
   normalizeBlockLightLevel
@@ -2602,6 +2603,31 @@ test("voxel block light reads neighbor halo sources across chunk borders", () =>
   assertEqual(result.sourceCount, 1, "neighbor halo lamp should be discovered once");
   assertEqual(result.blockLight[getBlockLightIndex(0, 9, 6)], 14, "light should cross from the west neighbor into x=0");
   assertEqual(result.blockLight[getBlockLightIndex(1, 9, 6)], 13, "cross-border light should keep Manhattan falloff");
+});
+
+test("chunk block light samples only the immediately adjacent cardinal halo", () => {
+  const westLight = createEmptyBlockLightChunkSnapshot();
+  westLight[getBlockLightIndex(CHUNK_SIZE - 1, 9, 6)] = 15;
+  const blockLights = {
+    current: null,
+    neighbors: {
+      negativeX: westLight,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    }
+  };
+
+  assertEqual(
+    getChunkBlockLightAt(blockLights, -1, 9, 6),
+    15,
+    "the first cell outside the west edge should read the west neighbor light buffer"
+  );
+  assertEqual(
+    getChunkBlockLightAt(blockLights, -2, 9, 6),
+    0,
+    "farther west samples should not clamp to the same bright neighbor edge cell"
+  );
 });
 
 test("block-light build worker job matches the solver and transfers its buffer", () => {
