@@ -1,8 +1,4 @@
 import type {
-  ChunkBlockLightBuffers,
-  ChunkNeighborBuffers
-} from "./chunkProtocol";
-import type {
   PartialBlockMeshBuildInput,
   PartialBlockMeshGeometryData,
   PartialBlockMeshRegionUpdate
@@ -22,10 +18,9 @@ export type PartialBlockMeshBuildJobResult = {
 
 export function createPartialBlockMeshBuildJobPayload(
   update: PartialBlockMeshRegionUpdate,
-  faceVisibilityMasks: readonly number[],
-  blockLights?: ChunkBlockLightBuffers
+  faceVisibilityMasks: readonly number[]
 ): PartialBlockMeshBuildJobPayload {
-  return { update, faceVisibilityMasks, blockLights };
+  return { update, faceVisibilityMasks };
 }
 
 export function buildPartialBlockMeshBuildJob(
@@ -50,25 +45,5 @@ export function getPartialBlockMeshBuildJobTransfers(
     result.geometry.uvs.buffer,
     result.geometry.textureTiles.buffer,
     result.geometry.indices.buffer
-  ];
-}
-
-export function getPartialBlockMeshBuildPayloadTransfers(
-  payload: PartialBlockMeshBuildJobPayload
-): Transferable[] {
-  if (!payload.blockLights) return [];
-
-  return [
-    payload.blockLights.current,
-    ...getNeighborBuffers(payload.blockLights.neighbors)
-  ].filter((buffer): buffer is ArrayBuffer => Boolean(buffer));
-}
-
-function getNeighborBuffers(neighbors: ChunkNeighborBuffers): readonly (ArrayBuffer | null)[] {
-  return [
-    neighbors.negativeX,
-    neighbors.positiveX,
-    neighbors.negativeZ,
-    neighbors.positiveZ
   ];
 }

@@ -3302,23 +3302,6 @@ export class VoxelWorld implements CollisionWorld {
     this.markChunkMeshDirtyForLightBuffer(cx, cz + 1);
   }
 
-  private markPartialBlockMeshesDirtyForLightBuffer(cx: number, cz: number): void {
-    this.markPartialBlockMeshesDirtyInChunk(cx, cz);
-    this.markPartialBlockMeshesDirtyInChunk(cx - 1, cz);
-    this.markPartialBlockMeshesDirtyInChunk(cx + 1, cz);
-    this.markPartialBlockMeshesDirtyInChunk(cx, cz - 1);
-    this.markPartialBlockMeshesDirtyInChunk(cx, cz + 1);
-  }
-
-  private markPartialBlockMeshesDirtyInChunk(cx: number, cz: number): void {
-    const cells = this.partialBlocksByChunk.get(this.key(cx, cz));
-    if (!cells) return;
-
-    for (const cell of cells.values()) {
-      this.markPartialBlockVisualDirty(cell.position, false);
-    }
-  }
-
   private markChunkMeshDirtyForLightBuffer(cx: number, cz: number): void {
     const key = this.key(cx, cz);
     const chunk = this.getChunk(cx, cz);
@@ -3818,7 +3801,6 @@ export class VoxelWorld implements CollisionWorld {
       // not be invalidated just because a neighboring mesh needs this buffer.
       this.markChunkMeshDirtyForLightBuffer(result.cx, result.cz);
       this.markCardinalNeighborMeshesDirty(result.cx, result.cz);
-      this.markPartialBlockMeshesDirtyForLightBuffer(result.cx, result.cz);
     }
 
     this.workerResults = remaining;
@@ -4265,18 +4247,6 @@ export class VoxelWorld implements CollisionWorld {
     };
   }
 
-  snapshotPartialBlockMeshBlockLightBuffers(update: PartialBlockMeshRegionUpdate): ChunkBlockLightBuffers {
-    const anchorCell = update.cells[0] ?? update.contextCells[0];
-    if (!anchorCell) {
-      return createNullChunkBlockLightBuffers();
-    }
-
-    return this.snapshotChunkBlockLightBuffers(
-      Math.floor(anchorCell.position.x / CHUNK_SIZE),
-      Math.floor(anchorCell.position.z / CHUNK_SIZE)
-    );
-  }
-
   snapshotPartialBlockMasks(cx: number, cz: number): {
     readonly current: ArrayBuffer | null;
     readonly neighbors: ChunkNeighborBuffers;
@@ -4501,18 +4471,6 @@ function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {
 
 function cloneCachedBlockLightBuffer(entry: BlockLightCacheEntry | undefined): ArrayBuffer | null {
   return entry ? transferChunkBuffer(entry.blockLight.slice()) : null;
-}
-
-function createNullChunkBlockLightBuffers(): ChunkBlockLightBuffers {
-  return {
-    current: null,
-    neighbors: {
-      negativeX: null,
-      positiveX: null,
-      negativeZ: null,
-      positiveZ: null
-    }
-  };
 }
 
 function transferChunkBuffer(blocks: Uint8Array): ArrayBuffer {

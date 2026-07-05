@@ -137,12 +137,11 @@ The engine now also has a worker-safe Minecraft-style block-light data layer:
 Lamp blocks emit level 15 into derived 0..15 chunk light arrays, light falls off
 by one per orthogonal block step, and solid or partial terrain blocks occlude it.
 That block-light field now feeds a dedicated per-vertex `blockLight` terrain
-attribute on normal chunk meshes and damaged partial-block meshes for warm
-rendered Lamp spill, while the current emissive Lamp material and fixed
-point-light proxies stay active. `Settings > Graphics` exposes minimum and
-maximum rendered block-light level sliders, defaulting to `1..15`, so night
-readability and Lamp spill can be tuned without changing the underlying 0..15
-chunk light data.
+attribute for warm rendered Lamp spill, while the current emissive Lamp material
+and fixed point-light proxies stay active. `Settings > Graphics` exposes
+minimum and maximum rendered block-light level sliders, defaulting to `1..15`,
+so night readability and Lamp spill can be tuned without changing the underlying
+0..15 chunk light data.
 `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.
 Directional shadow bias, baked underside face shading, chunk sky-exposure

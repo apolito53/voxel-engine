@@ -16,9 +16,8 @@
 
 ### Changed
 
-- Partial terrain meshes now consume cached block-light buffers and upload real
-  sampled `blockLight` attributes, including tangential same-plane Lamp
-  softening that matches normal chunk terrain.
+- Partial terrain meshes now upload a zero-filled compatible `blockLight`
+  attribute until partial-terrain block lighting is implemented.
 - Softened rendered Lamp block light on tangential same-plane terrain faces so
   surfaces beside a Lamp no longer read like the light is directly in front of
   them.
@@ -27,10 +26,9 @@
 
 ### Tests
 
-- Added coverage for block-light worker transfers, chunk and partial mesh
-  block-light attributes, shader separation, rendered Lamp removal,
-  cross-chunk continuity, partial neighbor-buffer sampling, and missing-buffer
-  darkness fallbacks.
+- Added coverage for block-light worker transfers, chunk mesh block-light
+  attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
+  and partial-terrain zero attributes.
 
 ## 0.17.0 - 2026-07-01
 

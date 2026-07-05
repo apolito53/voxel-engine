@@ -1,5 +1,4 @@
 import { BLOCK, BLOCKS } from "./blocks";
-import type { ChunkBlockLights, ChunkNeighborBlocks } from "./chunkProtocol";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 export type BlockLightNeighborSnapshots = Readonly<Record<string, Uint8Array | null | undefined>>;
@@ -32,7 +31,6 @@ const EXTENDED_MIN_LOCAL = -BLOCK_LIGHT_RADIUS;
 const EXTENDED_MAX_LOCAL = CHUNK_SIZE - 1 + BLOCK_LIGHT_RADIUS;
 const EXTENDED_SIZE = CHUNK_SIZE + BLOCK_LIGHT_RADIUS * 2;
 const EXTENDED_CELL_COUNT = EXTENDED_SIZE * WORLD_HEIGHT * EXTENDED_SIZE;
-const TANGENTIAL_BLOCK_LIGHT_SCALE = 0.35;
 const NEIGHBOR_STEPS = [
   [1, 0, 0],
   [-1, 0, 0],
@@ -124,48 +122,6 @@ export function getBlockLightIndex(localX: number, y: number, localZ: number): n
   return localX + CHUNK_SIZE * (localZ + CHUNK_SIZE * y);
 }
 
-export function getChunkBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number
-): number {
-  if (y < 0 || y >= WORLD_HEIGHT) return 0;
-  const light = getChunkLightValueAt(blockLights.current, blockLights.neighbors, x, y, z);
-  return normalizeBlockLightLevel(light ?? 0);
-}
-
-export function getChunkFaceBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number,
-  normalX: number,
-  normalY: number,
-  normalZ: number
-): number {
-  const centerLight = getChunkBlockLightAt(blockLights, x, y, z);
-  if (centerLight <= 0) return 0;
-
-  const forwardLight = getChunkBlockLightAt(
-    blockLights,
-    x + normalX,
-    y + normalY,
-    z + normalZ
-  );
-  if (forwardLight > centerLight) return centerLight;
-
-  const tangentLight = getMaxTangentialBlockLightAt(blockLights, x, y, z, normalX, normalY, normalZ);
-  if (tangentLight > forwardLight && tangentLight >= centerLight) {
-    // A scalar voxel light field makes a surface beside a Lamp look like the
-    // Lamp is directly in front of that face. Keep the propagation data intact,
-    // but soften light that clearly arrives along the face plane.
-    return normalizeBlockLightLevel(centerLight * TANGENTIAL_BLOCK_LIGHT_SCALE);
-  }
-
-  return centerLight;
-}
-
 export function normalizeBlockLightLevel(value: number): number {
   if (!Number.isFinite(value)) return BLOCK_LIGHT_MIN_LEVEL;
   return Math.max(BLOCK_LIGHT_MIN_LEVEL, Math.min(BLOCK_LIGHT_MAX_LEVEL, Math.round(value)));
@@ -218,66 +174,6 @@ function samplePartialMask(input: ChunkBlockLightBuildInput, localX: number, y: 
   if (!snapshot) return 0;
   const wrapped = wrapExtendedCell(localX, localZ);
   return snapshot[getBlockLightIndex(wrapped.localX, y, wrapped.localZ)] ?? 0;
-}
-
-function getMaxTangentialBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number,
-  normalX: number,
-  normalY: number,
-  normalZ: number
-): number {
-  let maxLight = 0;
-  for (const [dx, dy, dz] of [
-    [1, 0, 0],
-    [-1, 0, 0],
-    [0, 1, 0],
-    [0, -1, 0],
-    [0, 0, 1],
-    [0, 0, -1]
-  ] as const) {
-    if (dx === normalX && dy === normalY && dz === normalZ) continue;
-    if (dx === -normalX && dy === -normalY && dz === -normalZ) continue;
-    maxLight = Math.max(maxLight, getChunkBlockLightAt(blockLights, x + dx, y + dy, z + dz));
-  }
-  return maxLight;
-}
-
-function getChunkLightValueAt(
-  current: Uint8Array | null,
-  neighbors: ChunkNeighborBlocks,
-  x: number,
-  y: number,
-  z: number
-): number | null {
-  if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
-    return current ? current[getBlockLightIndex(x, y, z)] : null;
-  }
-
-  // Mesh jobs only carry the current chunk plus the four cardinal neighbor
-  // light buffers. Treat exactly one cell outside the chunk as the sampled
-  // halo; farther coordinates are genuinely unknown, not another copy of the
-  // edge cell. Without this guard, face-light lookups can flatten falloff by
-  // reading the same bright neighbor voxel for x=-1, x=-2, x=-3, and so on.
-  if (x === -1 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
-    return neighbors.negativeX[getBlockLightIndex(CHUNK_SIZE - 1, y, z)];
-  }
-
-  if (x === CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
-    return neighbors.positiveX[getBlockLightIndex(0, y, z)];
-  }
-
-  if (z === -1 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
-    return neighbors.negativeZ[getBlockLightIndex(x, y, CHUNK_SIZE - 1)];
-  }
-
-  if (z === CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
-    return neighbors.positiveZ[getBlockLightIndex(x, y, 0)];
-  }
-
-  return null;
 }
 
 function getSnapshotForExtendedCell(

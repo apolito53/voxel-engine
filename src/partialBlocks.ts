@@ -2,11 +2,8 @@ import { BLOCK_FRAGMENT_COUNT, BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments
 import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
 import { TERRAIN_DAMAGE_SCALE } from "./blockMaterialRules";
 import { getBlockTextureBaseTileId } from "./blockTextureTiles";
-import type { ChunkBlockLightBuffers, ChunkBlockLights } from "./chunkProtocol";
 import type { CollisionBounds } from "./collision";
-import { getChunkFaceBlockLightAt } from "./voxelBlockLight";
 import { getSunlitFaceShade } from "./voxelLighting";
-import { CHUNK_SIZE } from "./voxelConstants";
 
 // A single core hit used to spend one old material HP. Terrain HP is now scaled
 // by 270, so a core spends 270 HP and keeps the same damage ratio/bite feel.
@@ -115,12 +112,6 @@ type MutablePartialBlockGeometry = {
   readonly indices: number[];
 };
 
-type PartialBlockLightSampler = {
-  readonly blockLights: ChunkBlockLights;
-  readonly originCx: number;
-  readonly originCz: number;
-};
-
 type PartialBlockSurfaceGrid = {
   readonly minX: number;
   readonly maxX: number;
@@ -158,7 +149,6 @@ export type PartialBlockMeshRegionUpdate = {
 export type PartialBlockMeshBuildInput = {
   readonly update: PartialBlockMeshRegionUpdate;
   readonly faceVisibilityMasks: readonly number[];
-  readonly blockLights?: ChunkBlockLightBuffers;
 };
 
 export type PartialBlockMeshGeometryData = {
@@ -297,8 +287,7 @@ export function createPartialBlockFaceVisibilityMasks(
 
 export function buildPartialBlockMeshGeometryData({
   update,
-  faceVisibilityMasks,
-  blockLights
+  faceVisibilityMasks
 }: PartialBlockMeshBuildInput): PartialBlockMeshGeometryData {
   const geometryData: MutablePartialBlockGeometry = {
     positions: [],
@@ -316,13 +305,12 @@ export function buildPartialBlockMeshGeometryData({
       .map((cell) => [createPartialBlockKey(cell.position), cell])
   );
   const isFaceVisible = createPartialBlockFaceVisibilityFromMasks(update, faceVisibilityMasks);
-  const lightSampler = createPartialBlockLightSampler(update, blockLights);
 
   for (const cell of update.cells) {
     if (isPartialBlockSurfaceCell(cell)) {
-      addPartialBlockSurfaceGeometry(geometryData, cell, surfaceCells, lightSampler);
+      addPartialBlockSurfaceGeometry(geometryData, cell, surfaceCells);
     } else {
-      addPartialBlockCellGeometry(geometryData, cell, isFaceVisible, lightSampler);
+      addPartialBlockCellGeometry(geometryData, cell, isFaceVisible);
     }
   }
 
@@ -335,68 +323,6 @@ export function buildPartialBlockMeshGeometryData({
     textureTiles: new Float32Array(geometryData.textureTiles),
     indices: new Uint32Array(geometryData.indices)
   };
-}
-
-function createPartialBlockLightSampler(
-  update: PartialBlockMeshRegionUpdate,
-  blockLights: ChunkBlockLightBuffers | undefined
-): PartialBlockLightSampler | null {
-  if (!blockLights) return null;
-
-  const anchorCell = update.cells[0] ?? update.contextCells[0];
-  if (!anchorCell) return null;
-
-  return {
-    blockLights: {
-      current: blockLights.current ? new Uint8Array(blockLights.current) : null,
-      neighbors: {
-        negativeX: blockLights.neighbors.negativeX ? new Uint8Array(blockLights.neighbors.negativeX) : null,
-        positiveX: blockLights.neighbors.positiveX ? new Uint8Array(blockLights.neighbors.positiveX) : null,
-        negativeZ: blockLights.neighbors.negativeZ ? new Uint8Array(blockLights.neighbors.negativeZ) : null,
-        positiveZ: blockLights.neighbors.positiveZ ? new Uint8Array(blockLights.neighbors.positiveZ) : null
-      }
-    },
-    originCx: Math.floor(anchorCell.position.x / CHUNK_SIZE),
-    originCz: Math.floor(anchorCell.position.z / CHUNK_SIZE)
-  };
-}
-
-function samplePartialBlockFaceLight(
-  position: PartialBlockPosition,
-  normal: PartialBlockPosition | readonly [number, number, number],
-  sampler: PartialBlockLightSampler | null
-): number {
-  if (!sampler) return 0;
-
-  const cardinalNormal = getDominantCardinalNormal(normal);
-  const localX = Math.floor(position.x) - sampler.originCx * CHUNK_SIZE + cardinalNormal.x;
-  const localY = Math.floor(position.y) + cardinalNormal.y;
-  const localZ = Math.floor(position.z) - sampler.originCz * CHUNK_SIZE + cardinalNormal.z;
-
-  return getChunkFaceBlockLightAt(
-    sampler.blockLights,
-    localX,
-    localY,
-    localZ,
-    cardinalNormal.x,
-    cardinalNormal.y,
-    cardinalNormal.z
-  );
-}
-
-function getDominantCardinalNormal(
-  normal: PartialBlockPosition | readonly [number, number, number]
-): PartialBlockPosition {
-  const tupleNormal = normal as PartialBlockPosition & readonly [number, number, number];
-  const x = typeof tupleNormal.x === "number" ? tupleNormal.x : tupleNormal[0];
-  const y = typeof tupleNormal.y === "number" ? tupleNormal.y : tupleNormal[1];
-  const z = typeof tupleNormal.z === "number" ? tupleNormal.z : tupleNormal[2];
-  const ax = Math.abs(x);
-  const ay = Math.abs(y);
-  const az = Math.abs(z);
-  if (ax >= ay && ax >= az) return { x: x >= 0 ? 1 : -1, y: 0, z: 0 };
-  if (ay >= ax && ay >= az) return { x: 0, y: y >= 0 ? 1 : -1, z: 0 };
-  return { x: 0, y: 0, z: z >= 0 ? 1 : -1 };
 }
 
 export function createPartialBlockCollisionBoxes(cell: PartialBlockCell): readonly CollisionBounds[] {
@@ -698,17 +624,16 @@ function hasConnectedPassableAperture(
 export function addPartialBlockCellGeometry(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
-  isFaceVisible: PartialBlockFaceVisibility,
-  lightSampler: PartialBlockLightSampler | null = null
+  isFaceVisible: PartialBlockFaceVisibility
 ): void {
   const removedCells = createPartialBlockRemovedLatticeCellSet(cell);
   if (removedCells.size > 0) {
-    addPartialBlockLatticeGeometry(geometry, cell, isFaceVisible, removedCells, lightSampler);
+    addPartialBlockLatticeGeometry(geometry, cell, isFaceVisible, removedCells);
     return;
   }
 
   for (const face of PARTIAL_BLOCK_FACES) {
-    if (isFaceVisible(cell, face.normal)) addFlatFaceGeometry(geometry, cell, face, lightSampler);
+    if (isFaceVisible(cell, face.normal)) addFlatFaceGeometry(geometry, cell, face);
   }
 }
 
@@ -1149,8 +1074,7 @@ function addPartialBlockLatticeGeometry(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
   isFaceVisible: PartialBlockFaceVisibility,
-  removedCells: ReadonlySet<number>,
-  lightSampler: PartialBlockLightSampler | null
+  removedCells: ReadonlySet<number>
 ): void {
   const exactRemovedCells = createExactRemovedVisualCellSet(cell.cuts);
 
@@ -1190,12 +1114,12 @@ function addPartialBlockLatticeGeometry(
           // Terraformer edits are precision deletions, not impacts. Draw their
           // newly exposed walls as clean cuboid cuts so neighboring sub-cells
           // do not look damaged just because they border the removed cell.
-          addQuad(geometry, cell.block, cell.position, face.normal, corners, 1, lightSampler);
+          addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
         } else {
-          addWrinkledBiteFace(geometry, cell, latticeCell, face.normal, corners, lightSampler);
+          addWrinkledBiteFace(geometry, cell, latticeCell, face.normal, corners);
         }
       } else {
-        addQuad(geometry, cell.block, cell.position, face.normal, corners, 1, lightSampler);
+        addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
       }
     }
   }
@@ -1252,8 +1176,7 @@ function addWrinkledBiteFace(
   cell: PartialBlockCell,
   latticeCell: PartialBlockLatticeCell,
   normal: PartialBlockPosition,
-  corners: readonly PartialBlockPosition[],
-  lightSampler: PartialBlockLightSampler | null
+  corners: readonly PartialBlockPosition[]
 ): void {
   const center = getFaceCenter(corners);
   const noise = hashUnit(hashPartialBlockCut(cell.block, cell.position, normal, latticeCell.index + 97));
@@ -1264,31 +1187,30 @@ function addWrinkledBiteFace(
     z: center.z + normal.z * signedWrinkle
   };
 
-  addTriangleFacingNormal(geometry, cell, corners[0]!, corners[1]!, wrinkledCenter, normal, lightSampler);
-  addTriangleFacingNormal(geometry, cell, corners[1]!, corners[2]!, wrinkledCenter, normal, lightSampler);
-  addTriangleFacingNormal(geometry, cell, corners[2]!, corners[3]!, wrinkledCenter, normal, lightSampler);
-  addTriangleFacingNormal(geometry, cell, corners[3]!, corners[0]!, wrinkledCenter, normal, lightSampler);
+  addTriangleFacingNormal(geometry, cell, corners[0]!, corners[1]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[1]!, corners[2]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[2]!, corners[3]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[3]!, corners[0]!, wrinkledCenter, normal);
 }
 
 function addPartialBlockSurfaceGeometry(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
-  surfaceCells: PartialBlockSurfaceCellMap,
-  lightSampler: PartialBlockLightSampler | null
+  surfaceCells: PartialBlockSurfaceCellMap
 ): void {
   const grid = createPartialSurfaceGrid(cell, surfaceCells);
-  addPartialSurfaceTop(geometry, cell, grid, lightSampler);
+  addPartialSurfaceTop(geometry, cell, grid);
   if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x, y: cell.position.y, z: cell.position.z - 1 }))) {
-    addPartialSurfaceSide(geometry, cell, grid, "north", lightSampler);
+    addPartialSurfaceSide(geometry, cell, grid, "north");
   }
   if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x, y: cell.position.y, z: cell.position.z + 1 }))) {
-    addPartialSurfaceSide(geometry, cell, grid, "south", lightSampler);
+    addPartialSurfaceSide(geometry, cell, grid, "south");
   }
   if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x - 1, y: cell.position.y, z: cell.position.z }))) {
-    addPartialSurfaceSide(geometry, cell, grid, "west", lightSampler);
+    addPartialSurfaceSide(geometry, cell, grid, "west");
   }
   if (!surfaceCells.has(createPartialBlockKey({ x: cell.position.x + 1, y: cell.position.y, z: cell.position.z }))) {
-    addPartialSurfaceSide(geometry, cell, grid, "east", lightSampler);
+    addPartialSurfaceSide(geometry, cell, grid, "east");
   }
 }
 
@@ -1355,8 +1277,7 @@ function getNeighborPartialSurfaceY(
 function addPartialSurfaceTop(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
-  grid: PartialBlockSurfaceGrid,
-  lightSampler: PartialBlockLightSampler | null
+  grid: PartialBlockSurfaceGrid
 ): void {
   for (let zIndex = 0; zIndex < PARTIAL_BLOCK_SURFACE_GRID_STEPS; zIndex += 1) {
     for (let xIndex = 0; xIndex < PARTIAL_BLOCK_SURFACE_GRID_STEPS; xIndex += 1) {
@@ -1374,11 +1295,11 @@ function addPartialSurfaceTop(
         hashPartialBlockCut(cell.block, cell.position, { x: 0, y: 1, z: 0 }, xIndex + zIndex * 17)
       );
       if (noise > 0.5) {
-        addTriangle(geometry, cell, northWest, southWest, southEast, lightSampler);
-        addTriangle(geometry, cell, northWest, southEast, northEast, lightSampler);
+        addTriangle(geometry, cell, northWest, southWest, southEast);
+        addTriangle(geometry, cell, northWest, southEast, northEast);
       } else {
-        addTriangle(geometry, cell, northWest, southWest, northEast, lightSampler);
-        addTriangle(geometry, cell, northEast, southWest, southEast, lightSampler);
+        addTriangle(geometry, cell, northWest, southWest, northEast);
+        addTriangle(geometry, cell, northEast, southWest, southEast);
       }
     }
   }
@@ -1388,8 +1309,7 @@ function addPartialSurfaceSide(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
   grid: PartialBlockSurfaceGrid,
-  side: "north" | "south" | "west" | "east",
-  lightSampler: PartialBlockLightSampler | null
+  side: "north" | "south" | "west" | "east"
 ): void {
   for (let step = 0; step < PARTIAL_BLOCK_SURFACE_GRID_STEPS; step += 1) {
     if (side === "north") {
@@ -1400,7 +1320,7 @@ function addPartialSurfaceSide(
         { x: x0, y: getPartialGridHeight(grid, step, 0), z: grid.minZ },
         { x: x1, y: getPartialGridHeight(grid, step + 1, 0), z: grid.minZ },
         { x: x1, y: grid.baseY, z: grid.minZ }
-      ], 1, lightSampler);
+      ], 1);
       continue;
     }
     if (side === "south") {
@@ -1411,7 +1331,7 @@ function addPartialSurfaceSide(
         { x: x1, y: grid.baseY, z: grid.maxZ },
         { x: x1, y: getPartialGridHeight(grid, step + 1, PARTIAL_BLOCK_SURFACE_GRID_STEPS), z: grid.maxZ },
         { x: x0, y: getPartialGridHeight(grid, step, PARTIAL_BLOCK_SURFACE_GRID_STEPS), z: grid.maxZ }
-      ], 1, lightSampler);
+      ], 1);
       continue;
     }
     if (side === "west") {
@@ -1422,7 +1342,7 @@ function addPartialSurfaceSide(
         { x: grid.minX, y: grid.baseY, z: z1 },
         { x: grid.minX, y: getPartialGridHeight(grid, 0, step + 1), z: z1 },
         { x: grid.minX, y: getPartialGridHeight(grid, 0, step), z: z0 }
-      ], 1, lightSampler);
+      ], 1);
       continue;
     }
     const z0 = lerp(grid.minZ, grid.maxZ, step / PARTIAL_BLOCK_SURFACE_GRID_STEPS);
@@ -1432,15 +1352,14 @@ function addPartialSurfaceSide(
       { x: grid.maxX, y: getPartialGridHeight(grid, PARTIAL_BLOCK_SURFACE_GRID_STEPS, step), z: z0 },
       { x: grid.maxX, y: getPartialGridHeight(grid, PARTIAL_BLOCK_SURFACE_GRID_STEPS, step + 1), z: z1 },
       { x: grid.maxX, y: grid.baseY, z: z1 }
-    ], 1, lightSampler);
+    ], 1);
   }
 }
 
 function addFlatFaceGeometry(
   geometry: MutablePartialBlockGeometry,
   cell: PartialBlockCell,
-  face: PartialBlockFace,
-  lightSampler: PartialBlockLightSampler | null
+  face: PartialBlockFace
 ): void {
   const corners = [
     facePoint(cell.position, face, 0, 0, 0),
@@ -1448,7 +1367,7 @@ function addFlatFaceGeometry(
     facePoint(cell.position, face, 1, 1, 0),
     facePoint(cell.position, face, 0, 1, 0)
   ];
-  addQuad(geometry, cell.block, cell.position, face.normal, corners, 1, lightSampler);
+  addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
 }
 
 function addCarvedFaceGeometry(
@@ -1498,20 +1417,18 @@ function addTriangle(
   cell: PartialBlockCell,
   first: RubbleLikeVertex,
   second: RubbleLikeVertex,
-  third: RubbleLikeVertex,
-  lightSampler: PartialBlockLightSampler | null = null
+  third: RubbleLikeVertex
 ): void {
   const normal = getTriangleNormal(first, second, third);
   const shade = Math.max(0.24, getSunlitFaceShade(normal) * 0.95);
   const meshKey = createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z);
   const color = getTintedBlockColor(meshKey, shade);
   const textureTile = getBlockTextureBaseTileId(meshKey, normal);
-  const blockLight = samplePartialBlockFaceLight(cell.position, normal, lightSampler);
   const base = geometry.positions.length / 3;
   geometry.positions.push(...first, ...second, ...third);
   geometry.normals.push(...normal, ...normal, ...normal);
   geometry.colors.push(...color, ...color, ...color);
-  geometry.blockLights.push(blockLight, blockLight, blockLight);
+  geometry.blockLights.push(0, 0, 0);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, first[0], first[1], first[2]);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, second[0], second[1], second[2]);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, third[0], third[1], third[2]);
@@ -1524,8 +1441,7 @@ function addTriangleFacingNormal(
   first: PartialBlockPosition,
   second: PartialBlockPosition,
   third: PartialBlockPosition,
-  desiredNormal: PartialBlockPosition,
-  lightSampler: PartialBlockLightSampler | null
+  desiredNormal: PartialBlockPosition
 ): void {
   const triangleNormal = getTriangleNormal(
     vectorToRubbleVertex(first),
@@ -1533,9 +1449,9 @@ function addTriangleFacingNormal(
     vectorToRubbleVertex(third)
   );
   if (dotNormal(triangleNormal, desiredNormal) >= 0) {
-    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(second), vectorToRubbleVertex(third), lightSampler);
+    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(second), vectorToRubbleVertex(third));
   } else {
-    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(third), vectorToRubbleVertex(second), lightSampler);
+    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(third), vectorToRubbleVertex(second));
   }
 }
 
@@ -1737,8 +1653,7 @@ function addQuad(
   position: PartialBlockPosition,
   normal: PartialBlockPosition,
   corners: readonly PartialBlockPosition[],
-  shadeMultiplier: number,
-  lightSampler: PartialBlockLightSampler | null = null
+  shadeMultiplier: number
 ): void {
   const base = geometry.positions.length / 3;
   const normalTuple: readonly [number, number, number] = [normal.x, normal.y, normal.z];
@@ -1746,13 +1661,12 @@ function addQuad(
   const meshKey = createBlockMeshKey(block, position.x, position.y, position.z);
   const color = getTintedBlockColor(meshKey, shade);
   const textureTile = getBlockTextureBaseTileId(meshKey, normalTuple);
-  const blockLight = samplePartialBlockFaceLight(position, normalTuple, lightSampler);
 
   for (const corner of corners) {
     geometry.positions.push(corner.x, corner.y, corner.z);
     geometry.normals.push(normal.x, normal.y, normal.z);
     geometry.colors.push(...color);
-    geometry.blockLights.push(blockLight);
+    geometry.blockLights.push(0);
     appendPartialBlockTextureVertex(geometry, textureTile, normalTuple, corner.x, corner.y, corner.z);
   }
 
