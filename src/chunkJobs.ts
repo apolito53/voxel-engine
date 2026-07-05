@@ -23,7 +23,7 @@ import type {
 } from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
 import type { TerrainContext, TerrainProfile } from "./terrain";
-import { getBlockLightIndex, normalizeBlockLightLevel } from "./voxelBlockLight";
+import { getChunkFaceBlockLightAt, normalizeBlockLightLevel } from "./voxelBlockLight";
 import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
@@ -38,7 +38,6 @@ export type ChunkJobResult = ChunkGeneratedResult | ChunkMeshedResult;
 const terrainContexts = new Map<string, TerrainContext>();
 const BLOCK_LIGHT_MESH_KEY_SHIFT = 24;
 const BLOCK_LIGHT_MESH_KEY_MASK = 0x0f;
-const TANGENTIAL_BLOCK_LIGHT_SCALE = 0.35;
 
 export function buildChunkGenerateJob(payload: ChunkGenerateJobPayload): ChunkGeneratedResult {
   const blocks = generateChunkBlocks(
@@ -416,7 +415,7 @@ function exposedBlock(
   return createBlockLightMeshKey(createLitBlockMeshKey(
     block,
     skyExposure.getLightBucketForNeighbor(nx, ny, nz)
-  ), getFaceBlockLightAt(blockLights, nx, ny, nz, normalX, normalY, normalZ));
+  ), getChunkFaceBlockLightAt(blockLights, nx, ny, nz, normalX, normalY, normalZ));
 }
 
 function isRenderableSolidAt(
@@ -503,103 +502,6 @@ function getBlockAt(
 
   if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
     return neighbors.positiveZ[index(x, y, 0)];
-  }
-
-  return null;
-}
-
-function getBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number
-): number {
-  if (y < 0 || y >= WORLD_HEIGHT) return 0;
-  const light = getChunkLightValueAt(blockLights.current, blockLights.neighbors, x, y, z);
-  return normalizeBlockLightLevel(light ?? 0);
-}
-
-function getFaceBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number,
-  normalX: number,
-  normalY: number,
-  normalZ: number
-): number {
-  const centerLight = getBlockLightAt(blockLights, x, y, z);
-  if (centerLight <= 0) return 0;
-
-  const forwardLight = getBlockLightAt(
-    blockLights,
-    x + normalX,
-    y + normalY,
-    z + normalZ
-  );
-  if (forwardLight > centerLight) return centerLight;
-
-  const tangentLight = getMaxTangentialBlockLightAt(blockLights, x, y, z, normalX, normalY, normalZ);
-  if (tangentLight > forwardLight && tangentLight >= centerLight) {
-    // A scalar voxel light field makes a surface beside a Lamp look like the
-    // Lamp is directly in front of that face. Keep the propagation data intact,
-    // but soften light that clearly arrives along the face plane.
-    return centerLight * TANGENTIAL_BLOCK_LIGHT_SCALE;
-  }
-
-  return centerLight;
-}
-
-function getMaxTangentialBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number,
-  normalX: number,
-  normalY: number,
-  normalZ: number
-): number {
-  let maxLight = 0;
-  for (const [dx, dy, dz] of [
-    [1, 0, 0],
-    [-1, 0, 0],
-    [0, 1, 0],
-    [0, -1, 0],
-    [0, 0, 1],
-    [0, 0, -1]
-  ] as const) {
-    if (dx === normalX && dy === normalY && dz === normalZ) continue;
-    if (dx === -normalX && dy === -normalY && dz === -normalZ) continue;
-    maxLight = Math.max(maxLight, getBlockLightAt(blockLights, x + dx, y + dy, z + dz));
-  }
-  return maxLight;
-}
-
-function getChunkLightValueAt(
-  current: Uint8Array | null,
-  neighbors: ChunkNeighborBlocks,
-  x: number,
-  y: number,
-  z: number
-): number | null {
-  if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
-    return current ? current[getBlockLightIndex(x, y, z)] : null;
-  }
-
-  if (x < 0 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
-    return neighbors.negativeX[getBlockLightIndex(CHUNK_SIZE - 1, y, z)];
-  }
-
-  if (x >= CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
-    return neighbors.positiveX[getBlockLightIndex(0, y, z)];
-  }
-
-  if (z < 0 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
-    return neighbors.negativeZ[getBlockLightIndex(x, y, CHUNK_SIZE - 1)];
-  }
-
-  if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
-    return neighbors.positiveZ[getBlockLightIndex(x, y, 0)];
   }
 
   return null;
