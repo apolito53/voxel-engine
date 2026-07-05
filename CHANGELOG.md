@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- Rendered derived Lamp block light on normal chunk terrain through a dedicated
+  per-vertex `blockLight` attribute, preserving sealed-room vertex-color
+  darkness semantics.
+- Added a `block-light:build` WorkerPool job and runtime `VoxelWorld` cache so
+  chunk mesh jobs consume derived light buffers instead of recomputing the
+  solver per mesh.
+
+### Changed
+
+- Partial terrain meshes now upload a zero-filled compatible `blockLight`
+  attribute until partial-terrain block lighting is implemented.
+
+### Tests
+
+- Added coverage for block-light worker transfers, chunk mesh block-light
+  attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
+  and partial-terrain zero attributes.
+
 ## 0.17.0 - 2026-07-01
 
 ### Added

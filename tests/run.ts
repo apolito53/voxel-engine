@@ -59,6 +59,12 @@ import {
   getLitBlockShadeMultiplier
 } from "../src/chunkLightOcclusion";
 import {
+  BLOCK_LIGHT_BUILD_JOB,
+  BLOCK_LIGHT_BUILT_RESULT,
+  buildBlockLightBuildJob,
+  getBlockLightBuildJobTransfers
+} from "../src/blockLightJobs";
+import {
   BLOCK_LIGHT_MAX_LEVEL,
   BLOCK_LIGHT_RADIUS,
   buildChunkBlockLight,
@@ -1577,8 +1583,10 @@ test("chunk generation worker job matches direct floating-island generation", ()
 test("chunk mesh worker job honors partial render masks", () => {
   const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
   const partialMask = new Uint8Array(blocks.length);
+  const blockLight = createEmptyBlockLightChunkSnapshot();
   const centerIndex = 1 + CHUNK_SIZE * (1 + CHUNK_SIZE * 1);
   blocks[centerIndex] = BLOCK.stone;
+  blockLight[getBlockLightIndex(2, 1, 1)] = 14;
 
   const visibleResult = buildChunkMeshJob({
     requestId: 18,
@@ -1600,7 +1608,8 @@ test("chunk mesh worker job honors partial render masks", () => {
         negativeZ: null,
         positiveZ: null
       }
-    }
+    },
+    blockLights: createChunkMeshBlockLightBuffers(blockLight)
   });
 
   partialMask[centerIndex] = 1;
@@ -1624,12 +1633,22 @@ test("chunk mesh worker job honors partial render masks", () => {
         negativeZ: null,
         positiveZ: null
       }
-    }
+    },
+    blockLights: createChunkMeshBlockLightBuffers(blockLight)
   });
 
   assert(visibleResult.positions.length > 0, "unmasked solid blocks should emit chunk mesh geometry");
   assertEqual(hiddenResult.positions.length, 0, "partial-masked blocks should be hidden from normal chunk mesh");
   assertEqual(visibleResult.uvs.length / 2, visibleResult.positions.length / 3, "chunk mesh job should emit UVs");
+  assertEqual(
+    visibleResult.blockLights.length,
+    visibleResult.positions.length / 3,
+    "chunk mesh job should emit one block-light value per vertex"
+  );
+  assert(
+    visibleResult.blockLights.includes(14),
+    "chunk mesh job should sample dedicated block-light data from the face-adjacent light cell"
+  );
   assertEqual(
     visibleResult.textureTiles.length,
     visibleResult.positions.length / 3,
@@ -1660,7 +1679,8 @@ test("chunk mesh worker job is deterministic for the same payload", () => {
         negativeZ: null,
         positiveZ: null
       }
-    }
+    },
+    blockLights: createChunkMeshBlockLightBuffers()
   };
 
   const first = buildChunkMeshJob(payload);
@@ -1672,6 +1692,7 @@ test("chunk mesh worker job is deterministic for the same payload", () => {
 
   assertFloat32ArraysEqual(first.positions, second.positions, "same chunk mesh payload should produce same positions");
   assertFloat32ArraysEqual(first.colors, second.colors, "same chunk mesh payload should produce same colors");
+  assertFloat32ArraysEqual(first.blockLights, second.blockLights, "same chunk mesh payload should produce same block lights");
   assertFloat32ArraysEqual(first.textureTiles, second.textureTiles, "same chunk mesh payload should produce same texture tiles");
 });
 
@@ -2297,6 +2318,19 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "terrain shader should detect lamp tiles for material-level glow"
   );
   assert(
+    shader.vertexShader.includes("attribute float blockLight;") &&
+    shader.vertexShader.includes("varying float vBlockLight;"),
+    "terrain shader should receive Lamp block light through a dedicated vertex attribute"
+  );
+  assert(
+    shader.fragmentShader.includes("float voxelBlockLight = clamp(vBlockLight / 15.0, 0.0, 1.0);"),
+    "terrain shader should normalize dedicated block-light values separately from vertex color"
+  );
+  assert(
+    shader.fragmentShader.includes("reflectedLight.indirectDiffuse += voxelTextureDiffuseColor * voxelBlockLightColor"),
+    "terrain shader should add warm Lamp block-light spill through a separate additive path"
+  );
+  assert(
     shader.fragmentShader.includes("reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, vec3(0.0), voxelLampTileMask);"),
     "lamp faces should opt out of camera-dependent point-light diffuse hot spots"
   );
@@ -2312,6 +2346,48 @@ test("world block shader damps specular through baked diffuse shade", () => {
 
 function createEmptyBlockLightChunkSnapshot(): Uint8Array {
   return new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+}
+
+function createChunkMeshBlockLightBuffers(current: Uint8Array | null = null): {
+  readonly current: ArrayBuffer | null;
+  readonly neighbors: {
+    readonly negativeX: ArrayBuffer | null;
+    readonly positiveX: ArrayBuffer | null;
+    readonly negativeZ: ArrayBuffer | null;
+    readonly positiveZ: ArrayBuffer | null;
+  };
+} {
+  return {
+    current: current ? current.buffer.slice(0) : null,
+    neighbors: {
+      negativeX: null,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    }
+  };
+}
+
+async function drainWorldRenderWork(
+  world: VoxelWorld,
+  scene: THREE.Scene,
+  material: THREE.Material,
+  iterations = 12
+): Promise<void> {
+  for (let index = 0; index < iterations; index += 1) {
+    world.rebuildDirty(scene, material, 32);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function getMaxBlockLightAttribute(geometry: THREE.BufferGeometry): number {
+  const attribute = geometry.getAttribute("blockLight");
+  assert(attribute, "geometry should expose a blockLight attribute");
+  let maxBlockLight = 0;
+  for (let index = 0; index < attribute.count; index += 1) {
+    maxBlockLight = Math.max(maxBlockLight, attribute.getX(index));
+  }
+  return maxBlockLight;
 }
 
 test("voxel block light emits lamp sources and falls off through open air", () => {
@@ -2396,6 +2472,32 @@ test("voxel block light reads neighbor halo sources across chunk borders", () =>
   assertEqual(result.blockLight[getBlockLightIndex(1, 9, 6)], 13, "cross-border light should keep Manhattan falloff");
 });
 
+test("block-light build worker job matches the solver and transfers its buffer", () => {
+  const blocks = createEmptyBlockLightChunkSnapshot();
+  blocks[getBlockLightIndex(4, 8, 4)] = BLOCK.lamp;
+
+  const result = buildBlockLightBuildJob({
+    requestId: 44,
+    cx: 2,
+    cz: -1,
+    revision: 7,
+    blocks: blocks.buffer.slice(0),
+    neighbors: {},
+    partialBlockMask: null,
+    neighborPartialBlockMasks: {}
+  });
+  const direct = buildChunkBlockLight({ blocks });
+  const transfers = getBlockLightBuildJobTransfers(result);
+
+  assertEqual(BLOCK_LIGHT_BUILD_JOB, "block-light:build", "block-light build job should use its dedicated worker type");
+  assertEqual(result.type, BLOCK_LIGHT_BUILT_RESULT, "block-light build job should return a typed light result");
+  assertEqual(result.requestId, 44, "block-light build job should preserve request id");
+  assertEqual(result.revision, 7, "block-light build job should preserve chunk revision");
+  assertUint8ArraysEqual(result.blockLight, direct.blockLight, "block-light worker job should match the direct solver");
+  assertEqual(transfers.length, 1, "block-light job should transfer only the derived light buffer");
+  assertEqual(transfers[0], result.blockLight.buffer, "block-light job should transfer the derived light ArrayBuffer");
+});
+
 test("voxel block light rebuilds without stale removed lamp data", () => {
   const blocks = createEmptyBlockLightChunkSnapshot();
   blocks[getBlockLightIndex(8, 8, 8)] = BLOCK.lamp;
@@ -2435,6 +2537,61 @@ test("voxel block light dirty bounds cover the full 15-block source radius", () 
     9,
     "explicit default radius should match the exported block-light radius"
   );
+});
+
+test("Lamp removal clears rendered chunk block-light attributes", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "lamp-removal-render-light-test", workerPool });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+
+  world.setBlock(1, 80, 1, BLOCK.lamp);
+  world.setBlock(3, 80, 1, BLOCK.stone);
+  await drainWorldRenderWork(world, scene, material);
+
+  const litChunk = world.getChunk(0, 0);
+  assert(litChunk?.mesh, "rendered lamp-removal fixture should build a chunk mesh");
+  assert(
+    getMaxBlockLightAttribute(litChunk.mesh.geometry) >= 14,
+    "stone terrain beside a Lamp should receive rendered block-light data"
+  );
+
+  world.setBlock(1, 80, 1, BLOCK.air);
+  await drainWorldRenderWork(world, scene, material);
+
+  const darkChunk = world.getChunk(0, 0);
+  assert(darkChunk?.mesh, "chunk mesh should still exist after removing the Lamp source");
+  assertEqual(
+    getMaxBlockLightAttribute(darkChunk.mesh.geometry),
+    0,
+    "removing a Lamp should clear stale rendered block-light attributes"
+  );
+
+  world.dispose(scene);
+  workerPool.dispose();
+  material.dispose();
+});
+
+test("cross-chunk Lamp light reaches rendered terrain through cached neighbor halos", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "cross-chunk-render-light-test", workerPool });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+
+  world.setBlock(CHUNK_SIZE - 1, 80, 1, BLOCK.lamp);
+  world.setBlock(CHUNK_SIZE + 1, 80, 1, BLOCK.stone);
+  await drainWorldRenderWork(world, scene, material);
+
+  const eastChunk = world.getChunk(1, 0);
+  assert(eastChunk?.mesh, "east neighbor chunk should build a mesh for the cross-chunk light test");
+  assert(
+    getMaxBlockLightAttribute(eastChunk.mesh.geometry) >= 14,
+    "terrain in the east chunk should sample Lamp light propagated from the west chunk halo"
+  );
+
+  world.dispose(scene);
+  workerPool.dispose();
+  material.dispose();
 });
 
 test("lamp blocks register as local light sources", () => {
@@ -5707,6 +5864,11 @@ test("partial block mesh builder uses face visibility masks without world callba
 
   assertEqual(geometry.positions.length / 3, 4, "one visible macro face should emit one quad");
   assertEqual(geometry.indices.length / 3, 2, "one visible macro face should emit two triangles");
+  assertEqual(geometry.blockLights.length, 4, "partial mesh builder should emit one zero block-light value per vertex");
+  assert(
+    geometry.blockLights.every((value) => value === 0),
+    "partial mesh builder should keep block-light values zero until partial lighting is implemented"
+  );
   for (let index = 0; index < geometry.normals.length; index += 3) {
     assertEqual(geometry.normals[index], 1, "visibility mask should emit only the positive-X face normal");
     assertEqual(geometry.normals[index + 1], 0, "visibility mask should not leak Y normals");
@@ -5739,6 +5901,7 @@ test("partial block field renders faceted custom terrain cells", () => {
   const positionAttribute = regionMesh.geometry.getAttribute("position");
   const uvAttribute = regionMesh.geometry.getAttribute("uv");
   const textureTileAttribute = regionMesh.geometry.getAttribute("blockTextureTile");
+  const blockLightAttribute = regionMesh.geometry.getAttribute("blockLight");
   const bounds = new THREE.Box3().setFromBufferAttribute(positionAttribute);
 
   assertEqual(scene.children[0], field.mesh, "partial block field should own one shared scene root");
@@ -5752,6 +5915,14 @@ test("partial block field renders faceted custom terrain cells", () => {
     positionAttribute.count,
     "partial terrain should emit atlas tile ids for every vertex"
   );
+  assertEqual(
+    blockLightAttribute.count,
+    positionAttribute.count,
+    "partial terrain should emit shader-compatible block-light attributes for every vertex"
+  );
+  for (let index = 0; index < blockLightAttribute.count; index += 1) {
+    assertEqual(blockLightAttribute.getX(index), 0, "partial terrain block-light attributes should be zero-filled for now");
+  }
   assert(bounds.min.x >= 1 && bounds.max.x <= 2, "partial block geometry should stay inside its voxel x bounds");
   assert(bounds.min.y >= 2 && bounds.max.y <= 3, "partial block geometry should stay inside its voxel y bounds");
   assert(bounds.min.z >= 3 && bounds.max.z <= 4, "partial block geometry should stay inside its voxel z bounds");

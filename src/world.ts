@@ -1,4 +1,11 @@
 import type * as THREE from "three";
+import {
+  BLOCK_LIGHT_BUILD_JOB,
+  BLOCK_LIGHT_BUILT_RESULT,
+  buildBlockLightBuildJob,
+  type BlockLightBuildJobPayload,
+  type BlockLightBuildJobResult
+} from "./blockLightJobs";
 import { BLOCK_FRAGMENT_GRID_SIZE, getEjectedBlockRubbleMaterialUnits } from "./blockFragments";
 import {
   getBlockMaterialRule,
@@ -8,6 +15,7 @@ import {
 import { BLOCK, BLOCKS } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
+  ChunkBlockLightBuffers,
   ChunkNeighborBuffers,
   ChunkWorkerResult
 } from "./chunkProtocol";
@@ -63,6 +71,10 @@ import {
 } from "./partialBlocks";
 import { normalizeTerraformerSize } from "./terraformerSettings";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext, type TerrainProfile } from "./terrain";
+import {
+  createBlockLightNeighborKey,
+  getDirtyBlockLightChunkCoordsForEdit
+} from "./voxelBlockLight";
 import type { WorkerPool, WorkerPoolJobResult } from "./workerPool";
 
 const LOAD_RADIUS = 4;
@@ -941,6 +953,19 @@ type PendingMeshBuild = {
   readonly jobId: number;
 };
 
+type PendingBlockLightBuild = {
+  readonly key: string;
+  readonly revision: number;
+  readonly jobId: number;
+};
+
+type BlockLightCacheEntry = {
+  readonly revision: number;
+  readonly blockLight: Uint8Array;
+};
+
+type VoxelWorldWorkerResult = ChunkWorkerResult | BlockLightBuildJobResult;
+
 type PriorityItem = {
   readonly cx: number;
   readonly cz: number;
@@ -982,7 +1007,9 @@ export class VoxelWorld implements CollisionWorld {
   pendingSavedChunkKeys: Set<string>;
   pendingMeshBuilds: Map<number, PendingMeshBuild>;
   pendingMeshKeys: Set<string>;
-  workerResults: ChunkWorkerResult[];
+  pendingBlockLightBuilds: Map<number, PendingBlockLightBuild>;
+  pendingBlockLightKeys: Set<string>;
+  workerResults: VoxelWorldWorkerResult[];
   savedChunkResults: SavedChunkLoadResult[];
   storageOperations: Set<Promise<void>>;
   chunkStorageChains: Map<string, Promise<void>>;
@@ -1009,6 +1036,8 @@ export class VoxelWorld implements CollisionWorld {
   private lastUnloadCandidateChecks: number;
   private readonly dirtyChunkKeys: Set<string>;
   private readonly modifiedChunkKeys: Set<string>;
+  private readonly blockLightCache: Map<string, BlockLightCacheEntry>;
+  private readonly dirtyBlockLightChunkKeys: Set<string>;
   lastLoadedChunks: number;
   lastRequestedChunkLoads: number;
   lastMeshedChunks: number;
@@ -1041,6 +1070,8 @@ export class VoxelWorld implements CollisionWorld {
     this.pendingSavedChunkKeys = new Set();
     this.pendingMeshBuilds = new Map();
     this.pendingMeshKeys = new Set();
+    this.pendingBlockLightBuilds = new Map();
+    this.pendingBlockLightKeys = new Set();
     this.workerResults = [];
     this.savedChunkResults = [];
     this.storageOperations = new Set();
@@ -1068,6 +1099,8 @@ export class VoxelWorld implements CollisionWorld {
     this.lastUnloadCandidateChecks = 0;
     this.dirtyChunkKeys = new Set();
     this.modifiedChunkKeys = new Set();
+    this.blockLightCache = new Map();
+    this.dirtyBlockLightChunkKeys = new Set();
     this.lastLoadedChunks = 0;
     this.lastRequestedChunkLoads = 0;
     this.lastMeshedChunks = 0;
@@ -1149,12 +1182,17 @@ export class VoxelWorld implements CollisionWorld {
     for (const pending of this.pendingMeshBuilds.values()) {
       this.workerPool?.cancel(pending.jobId);
     }
+    for (const pending of this.pendingBlockLightBuilds.values()) {
+      this.workerPool?.cancel(pending.jobId);
+    }
     this.pendingChunkLoads.clear();
     this.pendingChunkKeys.clear();
     this.pendingSavedChunkLoads.clear();
     this.pendingSavedChunkKeys.clear();
     this.pendingMeshBuilds.clear();
     this.pendingMeshKeys.clear();
+    this.pendingBlockLightBuilds.clear();
+    this.pendingBlockLightKeys.clear();
     this.workerResults.length = 0;
     this.savedChunkResults.length = 0;
     this.blockDamage.clear();
@@ -1163,6 +1201,8 @@ export class VoxelWorld implements CollisionWorld {
     this.localLightBlockKeysByChunk.clear();
     this.dirtyChunkKeys.clear();
     this.modifiedChunkKeys.clear();
+    this.blockLightCache.clear();
+    this.dirtyBlockLightChunkKeys.clear();
   }
 
   dispose(scene: THREE.Scene): void {
@@ -1206,6 +1246,7 @@ export class VoxelWorld implements CollisionWorld {
       this.chunkLoadQueue.delete(key);
       if (savedSnapshot) this.hydrateSavedPartialBlocksForChunk(key, savedSnapshot.partialBlocks);
       this.markNeighborChunksDirty(cx, cz);
+      this.markBlockLightChunkAndNeighborsDirty(cx, cz);
     }
     return chunk;
   }
@@ -1238,6 +1279,7 @@ export class VoxelWorld implements CollisionWorld {
     this.pendingChunkKeys.delete(key);
     if (partialBlocks.length > 0) this.hydrateSavedPartialBlocksForChunk(key, partialBlocks);
     this.markNeighborChunksDirty(cx, cz);
+    this.markBlockLightChunkAndNeighborsDirty(cx, cz);
     return chunk;
   }
 
@@ -1492,7 +1534,7 @@ export class VoxelWorld implements CollisionWorld {
       seed: this.seed,
       terrainProfile: this.terrainProfile
     };
-    const handle = this.workerPool.enqueue<ChunkGenerateJobPayload, ChunkWorkerResult>({
+    const handle = this.workerPool.enqueue<ChunkGenerateJobPayload, VoxelWorldWorkerResult>({
       type: CHUNK_GENERATE_JOB,
       payload,
       priority: this.getChunkWorkerPriority(cx, cz, 40),
@@ -1570,7 +1612,7 @@ export class VoxelWorld implements CollisionWorld {
     if (this.workerResults.length === 0) return;
 
     const selectedResults = this.pickWorkerResultIndexes("generated", maxResults);
-    const remaining: ChunkWorkerResult[] = [];
+    const remaining: VoxelWorldWorkerResult[] = [];
     for (let index = 0; index < this.workerResults.length; index += 1) {
       const result = this.workerResults[index];
       if (result.type !== "generated") {
@@ -1602,7 +1644,7 @@ export class VoxelWorld implements CollisionWorld {
     return this.workerRequestId;
   }
 
-  private bufferChunkWorkerResult(result: WorkerPoolJobResult<ChunkWorkerResult>): void {
+  private bufferChunkWorkerResult(result: WorkerPoolJobResult<VoxelWorldWorkerResult>): void {
     if (result.status === "completed") {
       this.workerResults.push(result.result);
       return;
@@ -1623,12 +1665,21 @@ export class VoxelWorld implements CollisionWorld {
         result.status,
         result.status === "failed" ? result.error : undefined
       );
+      return;
+    }
+
+    if (result.type === BLOCK_LIGHT_BUILD_JOB) {
+      this.releasePendingBlockLightBuildByJobId(
+        result.id,
+        result.status,
+        result.status === "failed" ? result.error : undefined
+      );
     }
   }
 
   private releasePendingChunkLoadByJobId(
     jobId: number,
-    status: WorkerPoolJobResult<ChunkWorkerResult>["status"],
+    status: WorkerPoolJobResult<VoxelWorldWorkerResult>["status"],
     error?: unknown
   ): void {
     const requestId = findPendingChunkRequestIdByJob(this.pendingChunkLoads, jobId);
@@ -1650,7 +1701,7 @@ export class VoxelWorld implements CollisionWorld {
 
   private releasePendingMeshBuildByJobId(
     jobId: number,
-    status: WorkerPoolJobResult<ChunkWorkerResult>["status"],
+    status: WorkerPoolJobResult<VoxelWorldWorkerResult>["status"],
     error?: unknown
   ): void {
     const requestId = findPendingMeshRequestIdByJob(this.pendingMeshBuilds, jobId);
@@ -1667,6 +1718,28 @@ export class VoxelWorld implements CollisionWorld {
 
     if (status === "failed") {
       console.warn("Chunk mesh worker-pool job failed", pending.key, error);
+    }
+  }
+
+  private releasePendingBlockLightBuildByJobId(
+    jobId: number,
+    status: WorkerPoolJobResult<VoxelWorldWorkerResult>["status"],
+    error?: unknown
+  ): void {
+    const requestId = findPendingBlockLightRequestIdByJob(this.pendingBlockLightBuilds, jobId);
+    if (requestId === null) return;
+    const pending = this.pendingBlockLightBuilds.get(requestId);
+    if (!pending) return;
+
+    this.pendingBlockLightBuilds.delete(requestId);
+    this.pendingBlockLightKeys.delete(pending.key);
+
+    const [cxText, czText] = pending.key.split(",");
+    const chunk = this.getChunk(Number(cxText), Number(czText));
+    if (chunk) this.markBlockLightChunkDirty(chunk.cx, chunk.cz, { bumpRevision: false });
+
+    if (status === "failed") {
+      console.warn("Block-light worker-pool job failed", pending.key, error);
     }
   }
 
@@ -1729,6 +1802,7 @@ export class VoxelWorld implements CollisionWorld {
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
     if (lz === 0) this.markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+    this.markBlockLightChunksDirtyForEdit(blockX, blockZ);
   }
 
   private *iterLocalLightSources(): Iterable<LocalLightSource> {
@@ -3026,6 +3100,7 @@ export class VoxelWorld implements CollisionWorld {
     const { cx, cz, lx, lz } = this.toChunkCoords(position.x, position.z);
     const chunk = this.getChunk(cx, cz);
     this.partialBlockMaskCache.delete(this.key(cx, cz));
+    this.markBlockLightChunksDirtyForEdit(position.x, position.z);
     if (chunk) {
       chunk.revision += 1;
       this.markChunkDirty(chunk);
@@ -3220,6 +3295,82 @@ export class VoxelWorld implements CollisionWorld {
     this.markDirty(cx, cz + 1);
   }
 
+  private markCardinalNeighborMeshesDirty(cx: number, cz: number): void {
+    this.markChunkMeshDirtyForLightBuffer(cx - 1, cz);
+    this.markChunkMeshDirtyForLightBuffer(cx + 1, cz);
+    this.markChunkMeshDirtyForLightBuffer(cx, cz - 1);
+    this.markChunkMeshDirtyForLightBuffer(cx, cz + 1);
+  }
+
+  private markChunkMeshDirtyForLightBuffer(cx: number, cz: number): void {
+    const key = this.key(cx, cz);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) return;
+
+    this.cancelPendingMeshBuildForKey(key);
+    this.markChunkDirty(chunk);
+  }
+
+  private markBlockLightChunksDirtyForEdit(worldX: number, worldZ: number): void {
+    for (const coord of getDirtyBlockLightChunkCoordsForEdit(worldX, worldZ)) {
+      this.markBlockLightChunkDirty(coord.cx, coord.cz);
+    }
+  }
+
+  private markBlockLightChunkAndNeighborsDirty(cx: number, cz: number): void {
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        this.markBlockLightChunkDirty(cx + dx, cz + dz);
+      }
+    }
+  }
+
+  private markBlockLightChunkDirty(cx: number, cz: number, {
+    bumpRevision = true
+  }: {
+    readonly bumpRevision?: boolean;
+  } = {}): void {
+    const key = this.key(cx, cz);
+    this.blockLightCache.delete(key);
+    this.cancelPendingBlockLightBuildForKey(key);
+
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) {
+      this.dirtyBlockLightChunkKeys.delete(key);
+      return;
+    }
+
+    // A light-only change still invalidates any in-flight mesh result because
+    // the mesh result carries the per-vertex blockLight attribute.
+    if (bumpRevision) chunk.revision += 1;
+    this.markChunkDirty(chunk);
+    if (!this.workerPool) return;
+
+    this.dirtyBlockLightChunkKeys.add(key);
+  }
+
+  private cancelPendingBlockLightBuildForKey(key: string): void {
+    if (!this.pendingBlockLightKeys.has(key)) return;
+
+    for (const [requestId, pending] of this.pendingBlockLightBuilds) {
+      if (pending.key !== key) continue;
+      this.workerPool?.cancel(pending.jobId);
+      this.pendingBlockLightBuilds.delete(requestId);
+    }
+    this.pendingBlockLightKeys.delete(key);
+  }
+
+  private cancelPendingMeshBuildForKey(key: string): void {
+    if (!this.pendingMeshKeys.has(key)) return;
+
+    for (const [requestId, pending] of this.pendingMeshBuilds) {
+      if (pending.key !== key) continue;
+      this.workerPool?.cancel(pending.jobId);
+      this.pendingMeshBuilds.delete(requestId);
+    }
+    this.pendingMeshKeys.delete(key);
+  }
+
   rememberModifiedChunk(key: string, blocks: Uint8Array): void {
     // Copy before saving so later in-memory edits cannot mutate the stored snapshot by reference.
     // The actual IndexedDB write is debounced/coalesced per chunk; rapid destruction can touch
@@ -3350,9 +3501,13 @@ export class VoxelWorld implements CollisionWorld {
       this.chunkLoadQueue.delete(key);
       this.dirtyChunkKeys.delete(key);
       this.modifiedChunkKeys.delete(key);
-      this.pendingMeshKeys.delete(key);
+      this.cancelPendingMeshBuildForKey(key);
+      this.blockLightCache.delete(key);
+      this.dirtyBlockLightChunkKeys.delete(key);
+      this.cancelPendingBlockLightBuildForKey(key);
       this.clearDamageForChunk(chunk.cx, chunk.cz);
       this.markNeighborChunksDirty(chunk.cx, chunk.cz);
+      this.markBlockLightChunkAndNeighborsDirty(chunk.cx, chunk.cz);
     }
 
     this.chunkUnloadWindow = {
@@ -3583,6 +3738,7 @@ export class VoxelWorld implements CollisionWorld {
     maxRebuilds = MAX_CHUNK_REBUILDS_PER_FRAME
   ): number {
     if (this.workerPool) {
+      this.processBlockLightResults(maxRebuilds);
       this.processMeshResults(scene, material, maxRebuilds);
       this.lastRequestedMeshes = this.requestDirtyMeshBuilds(maxRebuilds);
       return this.lastMeshedChunks;
@@ -3603,6 +3759,53 @@ export class VoxelWorld implements CollisionWorld {
     return rebuilt;
   }
 
+  processBlockLightResults(maxResults = MAX_CHUNK_REBUILDS_PER_FRAME): void {
+    if (this.workerResults.length === 0) return;
+
+    const selectedResults = this.pickWorkerResultIndexes(BLOCK_LIGHT_BUILT_RESULT, maxResults);
+    const remaining: VoxelWorldWorkerResult[] = [];
+    for (let index = 0; index < this.workerResults.length; index += 1) {
+      const result = this.workerResults[index];
+      if (result.type !== BLOCK_LIGHT_BUILT_RESULT) {
+        remaining.push(result);
+        continue;
+      }
+
+      const pending = this.pendingBlockLightBuilds.get(result.requestId);
+      if (!pending) continue;
+
+      const chunk = this.getChunk(result.cx, result.cz);
+      if (!chunk || chunk.revision !== result.revision) {
+        this.pendingBlockLightBuilds.delete(result.requestId);
+        this.pendingBlockLightKeys.delete(pending.key);
+        if (chunk) this.markBlockLightChunkDirty(chunk.cx, chunk.cz, { bumpRevision: false });
+        continue;
+      }
+
+      if (!selectedResults.has(index)) {
+        remaining.push(result);
+        continue;
+      }
+
+      this.pendingBlockLightBuilds.delete(result.requestId);
+      this.pendingBlockLightKeys.delete(pending.key);
+      this.dirtyBlockLightChunkKeys.delete(pending.key);
+      this.blockLightCache.set(pending.key, {
+        revision: result.revision,
+        blockLight: result.blockLight
+      });
+
+      // Current chunk meshes use their own light buffer; cardinal neighbors can
+      // also sample this buffer for border faces, so both sides need a remesh.
+      // This is mesh-only dirtiness: the light cache itself is current and must
+      // not be invalidated just because a neighboring mesh needs this buffer.
+      this.markChunkMeshDirtyForLightBuffer(result.cx, result.cz);
+      this.markCardinalNeighborMeshesDirty(result.cx, result.cz);
+    }
+
+    this.workerResults = remaining;
+  }
+
   processMeshResults(
     scene: THREE.Scene,
     material: THREE.Material,
@@ -3612,7 +3815,7 @@ export class VoxelWorld implements CollisionWorld {
     if (this.workerResults.length === 0) return;
 
     const selectedResults = this.pickWorkerResultIndexes("meshed", maxResults);
-    const remaining: ChunkWorkerResult[] = [];
+    const remaining: VoxelWorldWorkerResult[] = [];
     for (let index = 0; index < this.workerResults.length; index += 1) {
       const result = this.workerResults[index];
       if (result.type !== "meshed") {
@@ -3645,6 +3848,7 @@ export class VoxelWorld implements CollisionWorld {
           positions: result.positions,
           normals: result.normals,
           colors: result.colors,
+          blockLights: result.blockLights,
           uvs: result.uvs,
           textureTiles: result.textureTiles,
           indices: result.indices
@@ -3661,7 +3865,7 @@ export class VoxelWorld implements CollisionWorld {
   }
 
   pickWorkerResultIndexes(
-    type: ChunkWorkerResult["type"],
+    type: VoxelWorldWorkerResult["type"],
     limit: number
   ): Set<number> {
     const candidates: Array<PriorityEntry<{ readonly cx: number; readonly cz: number; readonly index: number }>> = [];
@@ -3670,6 +3874,16 @@ export class VoxelWorld implements CollisionWorld {
       const result = this.workerResults[index];
       if (result.type !== type) continue;
       if (result.type === "generated" && !this.pendingChunkLoads.has(result.requestId)) continue;
+      if (result.type === BLOCK_LIGHT_BUILT_RESULT) {
+        const chunk = this.getChunk(result.cx, result.cz);
+        if (
+          !this.pendingBlockLightBuilds.has(result.requestId) ||
+          !chunk ||
+          chunk.revision !== result.revision
+        ) {
+          continue;
+        }
+      }
       if (result.type === "meshed") {
         const chunk = this.getChunk(result.cx, result.cz);
         if (!this.pendingMeshBuilds.has(result.requestId) || !chunk || chunk.revision !== result.revision) {
@@ -3717,8 +3931,16 @@ export class VoxelWorld implements CollisionWorld {
     const dirtyChunks = this.pickNearestDirtyChunks(buildSlots);
 
     let requested = 0;
+    let blockLightSlots = this.availableBlockLightBuildSlots(maxBuilds);
     for (const chunk of dirtyChunks) {
       const key = this.key(chunk.cx, chunk.cz);
+      if (!this.hasUsableBlockLightCache(key, chunk)) {
+        if (blockLightSlots > 0 && this.requestBlockLightBuild(chunk, key)) {
+          blockLightSlots -= 1;
+        }
+        continue;
+      }
+
       this.requestMeshBuild(chunk, key);
       requested += 1;
       if (requested >= buildSlots) break;
@@ -3732,6 +3954,20 @@ export class VoxelWorld implements CollisionWorld {
     return Math.max(0, Math.min(maxBuilds, meshPipelineLimit - this.pendingMeshBuilds.size));
   }
 
+  availableBlockLightBuildSlots(maxBuilds: number): number {
+    const lightPipelineLimit = Math.max(maxBuilds, maxBuilds * MAX_PENDING_MESH_MULTIPLIER);
+    return Math.max(0, Math.min(maxBuilds, lightPipelineLimit - this.pendingBlockLightBuilds.size));
+  }
+
+  private hasUsableBlockLightCache(key: string, chunk: Chunk): boolean {
+    const cached = this.blockLightCache.get(key);
+    return Boolean(
+      cached &&
+      cached.revision === chunk.revision &&
+      !this.dirtyBlockLightChunkKeys.has(key)
+    );
+  }
+
   pickNearestDirtyChunks(limit: number): Chunk[] {
     const nearest: PriorityEntry<Chunk>[] = [];
 
@@ -3743,7 +3979,7 @@ export class VoxelWorld implements CollisionWorld {
         this.dirtyChunkKeys.delete(key);
         continue;
       }
-      if (this.pendingMeshKeys.has(key)) continue;
+      if (this.pendingMeshKeys.has(key) || this.pendingBlockLightKeys.has(key)) continue;
       this.insertNearest(nearest, chunk, this.priorityCx, this.priorityCz, limit);
     }
 
@@ -3871,6 +4107,54 @@ export class VoxelWorld implements CollisionWorld {
     return basePriority + priority.lane * 10 + Math.min(priority.distance, 10000) / 10000;
   }
 
+  requestBlockLightBuild(chunk: Chunk, key: string): boolean {
+    if (!this.workerPool || this.pendingBlockLightKeys.has(key)) return false;
+
+    const requestId = this.nextWorkerRequestId();
+    const blocks = chunk.blocks.slice();
+    const neighbors = this.snapshotBlockLightNeighborBuffers(chunk.cx, chunk.cz);
+    const partialBlockMask = this.createPartialBlockMaskBuffer(chunk.cx, chunk.cz);
+    const neighborPartialBlockMasks = this.snapshotBlockLightNeighborPartialMaskBuffers(chunk.cx, chunk.cz);
+    const blocksBuffer = transferChunkBuffer(blocks);
+    const transfers: Transferable[] = [
+      blocksBuffer,
+      partialBlockMask,
+      ...Object.values(neighbors),
+      ...Object.values(neighborPartialBlockMasks)
+    ].filter((buffer): buffer is ArrayBuffer => Boolean(buffer));
+
+    this.pendingBlockLightKeys.add(key);
+    const payload: BlockLightBuildJobPayload = {
+      requestId,
+      cx: chunk.cx,
+      cz: chunk.cz,
+      revision: chunk.revision,
+      blocks: blocksBuffer,
+      neighbors,
+      partialBlockMask,
+      neighborPartialBlockMasks
+    };
+    const handle = this.workerPool.enqueue<BlockLightBuildJobPayload, VoxelWorldWorkerResult>({
+      type: BLOCK_LIGHT_BUILD_JOB,
+      payload,
+      revision: chunk.revision,
+      priority: this.getChunkWorkerPriority(chunk.cx, chunk.cz, 8),
+      transfer: transfers,
+      isRevisionStale: (revision) => {
+        const currentChunk = this.getChunk(chunk.cx, chunk.cz);
+        return !currentChunk || currentChunk.revision !== revision;
+      },
+      run: buildBlockLightBuildJob
+    });
+    this.pendingBlockLightBuilds.set(requestId, {
+      key,
+      revision: chunk.revision,
+      jobId: handle.id
+    });
+    void handle.promise.then((result) => this.bufferChunkWorkerResult(result));
+    return true;
+  }
+
   requestMeshBuild(chunk: Chunk, key: string): void {
     if (!this.workerPool) return;
 
@@ -3878,12 +4162,15 @@ export class VoxelWorld implements CollisionWorld {
     const blocks = chunk.blocks.slice();
     const neighbors = this.snapshotNeighborBlocks(chunk.cx, chunk.cz);
     const partialBlockMasks = this.snapshotPartialBlockMasks(chunk.cx, chunk.cz);
+    const blockLights = this.snapshotChunkBlockLightBuffers(chunk.cx, chunk.cz);
     const blocksBuffer = transferChunkBuffer(blocks);
     const transfers: Transferable[] = [
       blocksBuffer,
       partialBlockMasks.current,
       ...Object.values(neighbors),
-      ...Object.values(partialBlockMasks.neighbors)
+      ...Object.values(partialBlockMasks.neighbors),
+      blockLights.current,
+      ...Object.values(blockLights.neighbors)
     ].filter((buffer): buffer is ArrayBuffer => Boolean(buffer));
 
     this.pendingMeshKeys.add(key);
@@ -3894,9 +4181,10 @@ export class VoxelWorld implements CollisionWorld {
       revision: chunk.revision,
       blocks: blocksBuffer,
       neighbors,
-      partialBlockMasks
+      partialBlockMasks,
+      blockLights
     };
-    const handle = this.workerPool.enqueue<ChunkMeshJobPayload, ChunkWorkerResult>({
+    const handle = this.workerPool.enqueue<ChunkMeshJobPayload, VoxelWorldWorkerResult>({
       type: CHUNK_MESH_JOB,
       payload,
       revision: chunk.revision,
@@ -3922,6 +4210,40 @@ export class VoxelWorld implements CollisionWorld {
       positiveX: cloneChunkBuffer(this.getChunk(cx + 1, cz)),
       negativeZ: cloneChunkBuffer(this.getChunk(cx, cz - 1)),
       positiveZ: cloneChunkBuffer(this.getChunk(cx, cz + 1))
+    };
+  }
+
+  snapshotBlockLightNeighborBuffers(cx: number, cz: number): Record<string, ArrayBuffer | null> {
+    const neighbors: Record<string, ArrayBuffer | null> = {};
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dz === 0) continue;
+        neighbors[createBlockLightNeighborKey(dx, dz)] = cloneChunkBuffer(this.getChunk(cx + dx, cz + dz));
+      }
+    }
+    return neighbors;
+  }
+
+  snapshotBlockLightNeighborPartialMaskBuffers(cx: number, cz: number): Record<string, ArrayBuffer | null> {
+    const neighbors: Record<string, ArrayBuffer | null> = {};
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dz === 0) continue;
+        neighbors[createBlockLightNeighborKey(dx, dz)] = this.createPartialBlockMaskBufferForExistingChunk(cx + dx, cz + dz);
+      }
+    }
+    return neighbors;
+  }
+
+  snapshotChunkBlockLightBuffers(cx: number, cz: number): ChunkBlockLightBuffers {
+    return {
+      current: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx, cz))),
+      neighbors: {
+        negativeX: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx - 1, cz))),
+        positiveX: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx + 1, cz))),
+        negativeZ: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx, cz - 1))),
+        positiveZ: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx, cz + 1)))
+      }
     };
   }
 
@@ -4082,7 +4404,9 @@ export class VoxelWorld implements CollisionWorld {
       this.pendingSavedChunkLoads.size > 0 ||
       this.workerResults.length > 0 ||
       this.savedChunkResults.length > 0 ||
+      this.pendingBlockLightBuilds.size > 0 ||
       this.pendingMeshBuilds.size > 0 ||
+      this.dirtyBlockLightChunkKeys.size > 0 ||
       this.dirtyChunkKeys.size > 0 ||
       this.dirtyPartialBlockRegionKeys.size > 0 ||
       this.pendingSavedChunkWrites.size > 0 ||
@@ -4145,6 +4469,10 @@ function cloneChunkBuffer(chunk: Chunk | undefined): ArrayBuffer | null {
   return chunk ? transferChunkBuffer(chunk.blocks.slice()) : null;
 }
 
+function cloneCachedBlockLightBuffer(entry: BlockLightCacheEntry | undefined): ArrayBuffer | null {
+  return entry ? transferChunkBuffer(entry.blockLight.slice()) : null;
+}
+
 function transferChunkBuffer(blocks: Uint8Array): ArrayBuffer {
   // All chunk snapshots in this engine are plain Uint8Array instances, not shared buffers.
   return blocks.buffer as ArrayBuffer;
@@ -4162,6 +4490,16 @@ function findPendingChunkRequestIdByJob(
 
 function findPendingMeshRequestIdByJob(
   pendingBuilds: ReadonlyMap<number, PendingMeshBuild>,
+  jobId: number
+): number | null {
+  for (const [requestId, pending] of pendingBuilds) {
+    if (pending.jobId === jobId) return requestId;
+  }
+  return null;
+}
+
+function findPendingBlockLightRequestIdByJob(
+  pendingBuilds: ReadonlyMap<number, PendingBlockLightBuild>,
   jobId: number
 ): number | null {
   for (const [requestId, pending] of pendingBuilds) {

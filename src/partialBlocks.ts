@@ -106,6 +106,7 @@ type MutablePartialBlockGeometry = {
   readonly positions: number[];
   readonly normals: number[];
   readonly colors: number[];
+  readonly blockLights: number[];
   readonly uvs: number[];
   readonly textureTiles: number[];
   readonly indices: number[];
@@ -154,6 +155,7 @@ export type PartialBlockMeshGeometryData = {
   readonly positions: Float32Array;
   readonly normals: Float32Array;
   readonly colors: Float32Array;
+  readonly blockLights: Float32Array;
   readonly uvs: Float32Array;
   readonly textureTiles: Float32Array;
   readonly indices: Uint32Array;
@@ -291,6 +293,7 @@ export function buildPartialBlockMeshGeometryData({
     positions: [],
     normals: [],
     colors: [],
+    blockLights: [],
     uvs: [],
     textureTiles: [],
     indices: []
@@ -315,6 +318,7 @@ export function buildPartialBlockMeshGeometryData({
     positions: new Float32Array(geometryData.positions),
     normals: new Float32Array(geometryData.normals),
     colors: new Float32Array(geometryData.colors),
+    blockLights: new Float32Array(geometryData.blockLights),
     uvs: new Float32Array(geometryData.uvs),
     textureTiles: new Float32Array(geometryData.textureTiles),
     indices: new Uint32Array(geometryData.indices)
@@ -1389,6 +1393,7 @@ function addCarvedFaceGeometry(
         getSunlitFaceShade([face.normal.x, face.normal.y, face.normal.z]) * sample.shade
       );
       geometry.colors.push(...color);
+      geometry.blockLights.push(0);
       appendPartialBlockTextureVertex(geometry, textureTile, normalTuple, sample.x, sample.y, sample.z);
     }
   }
@@ -1423,6 +1428,7 @@ function addTriangle(
   geometry.positions.push(...first, ...second, ...third);
   geometry.normals.push(...normal, ...normal, ...normal);
   geometry.colors.push(...color, ...color, ...color);
+  geometry.blockLights.push(0, 0, 0);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, first[0], first[1], first[2]);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, second[0], second[1], second[2]);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, third[0], third[1], third[2]);
@@ -1660,6 +1666,7 @@ function addQuad(
     geometry.positions.push(corner.x, corner.y, corner.z);
     geometry.normals.push(normal.x, normal.y, normal.z);
     geometry.colors.push(...color);
+    geometry.blockLights.push(0);
     appendPartialBlockTextureVertex(geometry, textureTile, normalTuple, corner.x, corner.y, corner.z);
   }
 

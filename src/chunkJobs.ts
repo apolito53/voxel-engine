@@ -9,6 +9,8 @@ import {
   type ChunkSkyExposure
 } from "./chunkLightOcclusion";
 import type {
+  ChunkBlockLightBuffers,
+  ChunkBlockLights,
   ChunkGeneratedResult,
   ChunkGenerateRequest,
   ChunkMeshData,
@@ -21,6 +23,7 @@ import type {
 } from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
 import type { TerrainContext, TerrainProfile } from "./terrain";
+import { getBlockLightIndex, normalizeBlockLightLevel } from "./voxelBlockLight";
 import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
@@ -33,6 +36,8 @@ export type ChunkJobPayload = ChunkGenerateJobPayload | ChunkMeshJobPayload;
 export type ChunkJobResult = ChunkGeneratedResult | ChunkMeshedResult;
 
 const terrainContexts = new Map<string, TerrainContext>();
+const BLOCK_LIGHT_MESH_KEY_SHIFT = 24;
+const BLOCK_LIGHT_MESH_KEY_MASK = 0x0f;
 
 export function buildChunkGenerateJob(payload: ChunkGenerateJobPayload): ChunkGeneratedResult {
   const blocks = generateChunkBlocks(
@@ -56,7 +61,8 @@ export function buildChunkMeshJob(payload: ChunkMeshJobPayload): ChunkMeshedResu
     cz: payload.cz,
     blocks: new Uint8Array(payload.blocks),
     neighbors: readNeighbors(payload.neighbors),
-    partialBlockMasks: readPartialBlockMasks(payload.partialBlockMasks)
+    partialBlockMasks: readPartialBlockMasks(payload.partialBlockMasks),
+    blockLights: readBlockLights(payload.blockLights)
   });
 
   return {
@@ -68,6 +74,7 @@ export function buildChunkMeshJob(payload: ChunkMeshJobPayload): ChunkMeshedResu
     positions: meshData.positions,
     normals: meshData.normals,
     colors: meshData.colors,
+    blockLights: meshData.blockLights,
     uvs: meshData.uvs,
     textureTiles: meshData.textureTiles,
     indices: meshData.indices
@@ -83,6 +90,7 @@ export function getChunkJobResultTransfers(result: ChunkJobResult): Transferable
     result.positions.buffer,
     result.normals.buffer,
     result.colors.buffer,
+    result.blockLights.buffer,
     result.uvs.buffer,
     result.textureTiles.buffer,
     result.indices.buffer
@@ -117,22 +125,32 @@ function readPartialBlockMasks(partialBlockMasks: ChunkPartialBlockMaskBuffers):
   };
 }
 
+function readBlockLights(blockLights: ChunkBlockLightBuffers): ChunkBlockLights {
+  return {
+    current: blockLights.current ? new Uint8Array(blockLights.current) : null,
+    neighbors: readNeighbors(blockLights.neighbors)
+  };
+}
+
 function buildChunkMesh({
   cx,
   cz,
   blocks,
   neighbors,
-  partialBlockMasks
+  partialBlockMasks,
+  blockLights
 }: {
   cx: number;
   cz: number;
   blocks: Uint8Array;
   neighbors: ChunkNeighborBlocks;
   partialBlockMasks: ChunkPartialBlockMasks;
+  blockLights: ChunkBlockLights;
 }): ChunkMeshData {
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
+  const blockLightAttributes: number[] = [];
   const uvs: number[] = [];
   const textureTiles: number[] = [];
   const indices: number[] = [];
@@ -142,14 +160,15 @@ function buildChunkMesh({
     isRenderableSolidAt(blocks, neighbors, partialBlockMasks, x, y, z)
   ));
 
-  buildXFaces(blocks, neighbors, partialBlockMasks, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
-  buildYFaces(blocks, neighbors, partialBlockMasks, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
-  buildZFaces(blocks, neighbors, partialBlockMasks, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+  buildXFaces(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, ox, oz, positions, normals, colors, blockLightAttributes, uvs, textureTiles, indices);
+  buildYFaces(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, ox, oz, positions, normals, colors, blockLightAttributes, uvs, textureTiles, indices);
+  buildZFaces(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, ox, oz, positions, normals, colors, blockLightAttributes, uvs, textureTiles, indices);
 
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     colors: new Float32Array(colors),
+    blockLights: new Float32Array(blockLightAttributes),
     uvs: new Float32Array(uvs),
     textureTiles: new Float32Array(textureTiles),
     indices: new Uint32Array(indices)
@@ -160,12 +179,14 @@ function buildXFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  blockLights: ChunkBlockLights,
   skyExposure: ChunkSkyExposure,
   ox: number,
   oz: number,
   positions: number[],
   normals: number[],
   colors: number[],
+  blockLightAttributes: number[],
   uvs: number[],
   textureTiles: number[],
   indices: number[]
@@ -174,12 +195,13 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x + 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x + 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
           normals,
           colors,
+          blockLightAttributes,
           uvs,
           textureTiles,
           indices,
@@ -198,12 +220,13 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x - 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x - 1, y, z, ox + x, y, oz + z),
       (y, z, height, width, block) => {
         addQuad(
           positions,
           normals,
           colors,
+          blockLightAttributes,
           uvs,
           textureTiles,
           indices,
@@ -225,12 +248,14 @@ function buildYFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  blockLights: ChunkBlockLights,
   skyExposure: ChunkSkyExposure,
   ox: number,
   oz: number,
   positions: number[],
   normals: number[],
   colors: number[],
+  blockLightAttributes: number[],
   uvs: number[],
   textureTiles: number[],
   indices: number[]
@@ -239,12 +264,13 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y + 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y + 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
           normals,
           colors,
+          blockLightAttributes,
           uvs,
           textureTiles,
           indices,
@@ -263,12 +289,13 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y - 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y - 1, z, ox + x, y, oz + z),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
           normals,
           colors,
+          blockLightAttributes,
           uvs,
           textureTiles,
           indices,
@@ -290,12 +317,14 @@ function buildZFaces(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  blockLights: ChunkBlockLights,
   skyExposure: ChunkSkyExposure,
   ox: number,
   oz: number,
   positions: number[],
   normals: number[],
   colors: number[],
+  blockLightAttributes: number[],
   uvs: number[],
   textureTiles: number[],
   indices: number[]
@@ -304,12 +333,13 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y, z + 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y, z + 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
           normals,
           colors,
+          blockLightAttributes,
           uvs,
           textureTiles,
           indices,
@@ -328,12 +358,13 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, skyExposure, x, y, z, x, y, z - 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y, z - 1, ox + x, y, oz + z),
       (x, y, width, height, block) => {
         addQuad(
           positions,
           normals,
           colors,
+          blockLightAttributes,
           uvs,
           textureTiles,
           indices,
@@ -355,6 +386,7 @@ function exposedBlock(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
+  blockLights: ChunkBlockLights,
   skyExposure: ChunkSkyExposure,
   x: number,
   y: number,
@@ -374,13 +406,13 @@ function exposedBlock(
   ) {
     return BLOCK.air;
   }
-  // Keep the merge key tied to material and light bucket only. Coordinate
-  // variants belong in the shader/texture path; putting them here fragments
-  // otherwise flat greedy faces and can leave bright MSAA seams in interiors.
-  return createLitBlockMeshKey(
+  // Keep coordinate variants shader-side, but include the derived Lamp light
+  // level in the merge key so a bright cell beside a large wall still gets a
+  // real vertex attribute instead of being averaged away by one giant quad.
+  return createBlockLightMeshKey(createLitBlockMeshKey(
     block,
     skyExposure.getLightBucketForNeighbor(nx, ny, nz)
-  );
+  ), getBlockLightAt(blockLights, nx, ny, nz));
 }
 
 function isRenderableSolidAt(
@@ -472,6 +504,47 @@ function getBlockAt(
   return null;
 }
 
+function getBlockLightAt(
+  blockLights: ChunkBlockLights,
+  x: number,
+  y: number,
+  z: number
+): number {
+  if (y < 0 || y >= WORLD_HEIGHT) return 0;
+  const light = getChunkLightValueAt(blockLights.current, blockLights.neighbors, x, y, z);
+  return normalizeBlockLightLevel(light ?? 0);
+}
+
+function getChunkLightValueAt(
+  current: Uint8Array | null,
+  neighbors: ChunkNeighborBlocks,
+  x: number,
+  y: number,
+  z: number
+): number | null {
+  if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
+    return current ? current[getBlockLightIndex(x, y, z)] : null;
+  }
+
+  if (x < 0 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
+    return neighbors.negativeX[getBlockLightIndex(CHUNK_SIZE - 1, y, z)];
+  }
+
+  if (x >= CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
+    return neighbors.positiveX[getBlockLightIndex(0, y, z)];
+  }
+
+  if (z < 0 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
+    return neighbors.negativeZ[getBlockLightIndex(x, y, CHUNK_SIZE - 1)];
+  }
+
+  if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
+    return neighbors.positiveZ[getBlockLightIndex(x, y, 0)];
+  }
+
+  return null;
+}
+
 function emitGreedyFaces(
   width: number,
   height: number,
@@ -525,6 +598,7 @@ function addQuad(
   positions: number[],
   normals: number[],
   colors: number[],
+  blockLightAttributes: number[],
   uvs: number[],
   textureTiles: number[],
   indices: number[],
@@ -536,15 +610,25 @@ function addQuad(
   const baseMeshKey = getBaseBlockMeshKey(meshKey);
   const shade = getLitBlockFaceShade(meshKey, normal, getSunlitFaceShade(normal));
   const color = getMaterialBlockColor(baseMeshKey, shade);
+  const blockLight = getBlockLightFromMeshKey(meshKey);
 
   for (const corner of corners) {
     positions.push(corner[0], corner[1], corner[2]);
     normals.push(...normal);
     colors.push(...color);
+    blockLightAttributes.push(blockLight);
   }
 
   appendBlockTextureQuadAttributes(uvs, textureTiles, baseMeshKey, normal, corners);
   indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+}
+
+function createBlockLightMeshKey(meshKey: number, blockLight: number): number {
+  return meshKey | ((normalizeBlockLightLevel(blockLight) & BLOCK_LIGHT_MESH_KEY_MASK) << BLOCK_LIGHT_MESH_KEY_SHIFT);
+}
+
+function getBlockLightFromMeshKey(meshKey: number): number {
+  return (meshKey >>> BLOCK_LIGHT_MESH_KEY_SHIFT) & BLOCK_LIGHT_MESH_KEY_MASK;
 }
 
 function index(x: number, y: number, z: number): number {

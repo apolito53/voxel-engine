@@ -146,6 +146,7 @@ export class Chunk {
     const positions: MeshNumberBuffer = [];
     const normals: MeshNumberBuffer = [];
     const colors: MeshNumberBuffer = [];
+    const blockLights: MeshNumberBuffer = [];
     const uvs: MeshNumberBuffer = [];
     const textureTiles: MeshNumberBuffer = [];
     const indices: MeshNumberBuffer = [];
@@ -157,14 +158,15 @@ export class Chunk {
       return world.isRenderableSolid?.(worldX, y, worldZ) ?? world.isSolid(worldX, y, worldZ);
     });
 
-    this.buildXFaces(world, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
-    this.buildYFaces(world, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
-    this.buildZFaces(world, skyExposure, ox, oz, positions, normals, colors, uvs, textureTiles, indices);
+    this.buildXFaces(world, skyExposure, ox, oz, positions, normals, colors, blockLights, uvs, textureTiles, indices);
+    this.buildYFaces(world, skyExposure, ox, oz, positions, normals, colors, blockLights, uvs, textureTiles, indices);
+    this.buildZFaces(world, skyExposure, ox, oz, positions, normals, colors, blockLights, uvs, textureTiles, indices);
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute("blockLight", new THREE.Float32BufferAttribute(blockLights, 1));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setAttribute("blockTextureTile", new THREE.Float32BufferAttribute(textureTiles, 1));
     geometry.setIndex(indices);
@@ -198,6 +200,7 @@ export class Chunk {
     geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(meshData.colors, 3));
+    geometry.setAttribute("blockLight", new THREE.BufferAttribute(meshData.blockLights, 1));
     geometry.setAttribute("uv", new THREE.BufferAttribute(meshData.uvs, 2));
     geometry.setAttribute("blockTextureTile", new THREE.BufferAttribute(meshData.textureTiles, 1));
     geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
@@ -241,6 +244,7 @@ export class Chunk {
     positions: MeshNumberBuffer,
     normals: MeshNumberBuffer,
     colors: MeshNumberBuffer,
+    blockLights: MeshNumberBuffer,
     uvs: MeshNumberBuffer,
     textureTiles: MeshNumberBuffer,
     indices: MeshNumberBuffer
@@ -255,6 +259,7 @@ export class Chunk {
             positions,
             normals,
             colors,
+            blockLights,
             uvs,
             textureTiles,
             indices,
@@ -279,6 +284,7 @@ export class Chunk {
             positions,
             normals,
             colors,
+            blockLights,
             uvs,
             textureTiles,
             indices,
@@ -304,6 +310,7 @@ export class Chunk {
     positions: MeshNumberBuffer,
     normals: MeshNumberBuffer,
     colors: MeshNumberBuffer,
+    blockLights: MeshNumberBuffer,
     uvs: MeshNumberBuffer,
     textureTiles: MeshNumberBuffer,
     indices: MeshNumberBuffer
@@ -318,6 +325,7 @@ export class Chunk {
             positions,
             normals,
             colors,
+            blockLights,
             uvs,
             textureTiles,
             indices,
@@ -342,6 +350,7 @@ export class Chunk {
             positions,
             normals,
             colors,
+            blockLights,
             uvs,
             textureTiles,
             indices,
@@ -367,6 +376,7 @@ export class Chunk {
     positions: MeshNumberBuffer,
     normals: MeshNumberBuffer,
     colors: MeshNumberBuffer,
+    blockLights: MeshNumberBuffer,
     uvs: MeshNumberBuffer,
     textureTiles: MeshNumberBuffer,
     indices: MeshNumberBuffer
@@ -381,6 +391,7 @@ export class Chunk {
             positions,
             normals,
             colors,
+            blockLights,
             uvs,
             textureTiles,
             indices,
@@ -405,6 +416,7 @@ export class Chunk {
             positions,
             normals,
             colors,
+            blockLights,
             uvs,
             textureTiles,
             indices,
@@ -511,6 +523,7 @@ function addQuad(
   positions: MeshNumberBuffer,
   normals: MeshNumberBuffer,
   colors: MeshNumberBuffer,
+  blockLights: MeshNumberBuffer,
   uvs: MeshNumberBuffer,
   textureTiles: MeshNumberBuffer,
   indices: MeshNumberBuffer,
@@ -527,6 +540,7 @@ function addQuad(
     positions.push(corner[0], corner[1], corner[2]);
     normals.push(...normal);
     colors.push(...color);
+    blockLights.push(0);
   }
 
   appendBlockTextureQuadAttributes(uvs, textureTiles, baseMeshKey, normal, corners);

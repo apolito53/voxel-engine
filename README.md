@@ -136,9 +136,9 @@ pressure plus the current clock, phase, cycle state, light scales, and fog color
 The engine now also has a worker-safe Minecraft-style block-light data layer:
 Lamp blocks emit level 15 into derived 0..15 chunk light arrays, light falls off
 by one per orthogonal block step, and solid or partial terrain blocks occlude it.
-That block-light field is not rendered yet; it is the foundation for the next
-terrain-lightmap pass while the current emissive Lamp material and fixed point
-light proxies stay active.
+That block-light field now feeds a dedicated per-vertex `blockLight` terrain
+attribute for warm rendered Lamp spill, while the current emissive Lamp material
+and fixed point-light proxies stay active.
 `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,
 but it stays off on lower presets because debris storms are already spicy.
 Directional shadow bias, baked underside face shading, chunk sky-exposure

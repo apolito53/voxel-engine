@@ -24,6 +24,16 @@ export type ChunkPartialBlockMasks = {
   readonly neighbors: ChunkNeighborBlocks;
 };
 
+export type ChunkBlockLightBuffers = {
+  readonly current: ArrayBuffer | null;
+  readonly neighbors: ChunkNeighborBuffers;
+};
+
+export type ChunkBlockLights = {
+  readonly current: Uint8Array | null;
+  readonly neighbors: ChunkNeighborBlocks;
+};
+
 export type ChunkGenerateRequest = {
   readonly type: "generate";
   readonly requestId: number;
@@ -42,6 +52,7 @@ export type ChunkMeshRequest = {
   readonly blocks: ArrayBuffer;
   readonly neighbors: ChunkNeighborBuffers;
   readonly partialBlockMasks: ChunkPartialBlockMaskBuffers;
+  readonly blockLights: ChunkBlockLightBuffers;
 };
 
 export type ChunkWorkerRequest = ChunkGenerateRequest | ChunkMeshRequest;
@@ -58,6 +69,7 @@ export type ChunkMeshData = {
   readonly positions: Float32Array;
   readonly normals: Float32Array;
   readonly colors: Float32Array;
+  readonly blockLights: Float32Array;
   readonly uvs: Float32Array;
   readonly textureTiles: Float32Array;
   readonly indices: Uint32Array;

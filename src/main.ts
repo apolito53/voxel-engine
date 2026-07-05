@@ -3501,6 +3501,7 @@ function schedulePartialBlockMeshRegionBuild(
       positions: new Float32Array(),
       normals: new Float32Array(),
       colors: new Float32Array(),
+      blockLights: new Float32Array(),
       uvs: new Float32Array(),
       textureTiles: new Float32Array(),
       indices: new Uint32Array()

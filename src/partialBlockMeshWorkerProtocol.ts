@@ -41,6 +41,7 @@ export function getPartialBlockMeshBuildJobTransfers(
     result.geometry.positions.buffer,
     result.geometry.normals.buffer,
     result.geometry.colors.buffer,
+    result.geometry.blockLights.buffer,
     result.geometry.uvs.buffer,
     result.geometry.textureTiles.buffer,
     result.geometry.indices.buffer

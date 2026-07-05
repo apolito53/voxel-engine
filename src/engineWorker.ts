@@ -1,4 +1,11 @@
 import {
+  BLOCK_LIGHT_BUILD_JOB,
+  buildBlockLightBuildJob,
+  getBlockLightBuildJobTransfers,
+  type BlockLightBuildJobPayload,
+  type BlockLightBuildJobResult
+} from "./blockLightJobs";
+import {
   CHUNK_GENERATE_JOB,
   CHUNK_MESH_JOB,
   buildChunkGenerateJob,
@@ -50,9 +57,17 @@ workerScope.onmessage = (event: MessageEvent<WorkerPoolWorkerRequest>) => {
 function runEngineJob(
   request: WorkerPoolWorkerRequest
 ): {
-  readonly result: ChunkJobResult | PartialBlockMeshBuildJobResult;
+  readonly result: ChunkJobResult | PartialBlockMeshBuildJobResult | BlockLightBuildJobResult;
   readonly transfers: Transferable[];
 } {
+  if (request.type === BLOCK_LIGHT_BUILD_JOB) {
+    const result = buildBlockLightBuildJob(request.payload as BlockLightBuildJobPayload);
+    return {
+      result,
+      transfers: getBlockLightBuildJobTransfers(result)
+    };
+  }
+
   if (request.type === PARTIAL_BLOCK_MESH_BUILD_JOB) {
     const result = buildPartialBlockMeshBuildJob(request.payload as PartialBlockMeshBuildJobPayload);
     return {

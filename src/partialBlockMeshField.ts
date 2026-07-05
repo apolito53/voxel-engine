@@ -118,6 +118,7 @@ export class PartialBlockMeshField {
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(geometryData.positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(geometryData.normals, 3));
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(geometryData.colors, 3));
+    geometry.setAttribute("blockLight", new THREE.Float32BufferAttribute(geometryData.blockLights, 1));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(geometryData.uvs, 2));
     geometry.setAttribute("blockTextureTile", new THREE.Float32BufferAttribute(geometryData.textureTiles, 1));
     geometry.setIndex(new THREE.BufferAttribute(geometryData.indices, 1));

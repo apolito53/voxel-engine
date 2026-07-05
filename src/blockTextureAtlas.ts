@@ -21,6 +21,7 @@ const WORLD_DAY_NIGHT_EXPOSURE_UNIFORM = "voxelDayNightOutdoorExposure";
 const SEALED_VERTEX_LIGHT_THRESHOLD = 0.05;
 const SEALED_DIRECT_LIGHT_RESTORE_SCALE = 1 / ENCLOSED_INTERIOR_SHADE;
 const LAMP_EMISSIVE_STRENGTH = 2.35;
+const LAMP_BLOCK_LIGHT_STRENGTH = 1.45;
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
@@ -52,7 +53,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v8-day-night-lamp-emission-horizontal-fog";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v9-block-light-spill";
   return material;
 }
 
@@ -90,13 +91,15 @@ export function applyWorldBlockShaderPatches(
       [
         "#include <common>",
         "attribute float blockTextureTile;",
+        "attribute float blockLight;",
         "varying float vBlockTextureTile;",
+        "varying float vBlockLight;",
         "varying vec3 vVoxelWorldPosition;"
       ].join("\n")
     )
     .replace(
       "#include <uv_vertex>",
-      "#include <uv_vertex>\nvBlockTextureTile = blockTextureTile;"
+      "#include <uv_vertex>\nvBlockTextureTile = blockTextureTile;\nvBlockLight = blockLight;"
     )
     .replace(
       "#include <worldpos_vertex>",
@@ -116,6 +119,7 @@ export function applyWorldBlockShaderPatches(
         `uniform float ${WORLD_DAY_NIGHT_EXPOSURE_UNIFORM};`,
         `const float voxelLampBaseTile = ${BLOCK_TEXTURE_TILE.lamp.toFixed(1)};`,
         "varying float vBlockTextureTile;",
+        "varying float vBlockLight;",
         "varying vec3 vVoxelWorldPosition;"
       ].join("\n")
     )
@@ -194,6 +198,13 @@ export function applyWorldBlockShaderPatches(
         // unlit until it becomes sealed and takes the sealed-room restore path.
         "reflectedLight.indirectDiffuse = mix(reflectedLight.indirectDiffuse, reflectedLight.indirectDiffuse * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
         "reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, reflectedLight.indirectSpecular * voxelOutdoorCycleScale, voxelOutdoorCycleMask);",
+        // Derived Lamp block-light is deliberately separate from `vColor`.
+        // Sealed-room darkness still comes from the baked vertex color path
+        // above; this warm spill is an additive runtime lightmap channel.
+        "float voxelBlockLight = clamp(vBlockLight / 15.0, 0.0, 1.0);",
+        "float voxelBlockLightCurve = voxelBlockLight * voxelBlockLight;",
+        `vec3 voxelBlockLightColor = vec3(1.0, 0.62, 0.28) * ${LAMP_BLOCK_LIGHT_STRENGTH.toFixed(2)};`,
+        "reflectedLight.indirectDiffuse += voxelTextureDiffuseColor * voxelBlockLightColor * voxelBlockLightCurve * (1.0 - voxelLampTileMask);",
         // PointLight proxies are only for spill on nearby non-lamp surfaces.
         // Lamp terrain itself should look self-lit and identical no matter
         // which proxy source is nearest to the player/camera.
