@@ -10,7 +10,7 @@ export const CUSTOM_PRESET_ID = "custom";
 export const SUPER_ULTRA_PRESET_ID = "superUltra";
 export const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"] as const;
 export const FOG_RENDER_SAFETY_CHUNKS = 1;
-export const DEFAULT_BLOCK_LIGHT_MIN_LEVEL = 2;
+export const DEFAULT_BLOCK_LIGHT_MIN_LEVEL = 1;
 
 export type StandardQualityPresetId = (typeof QUALITY_PRESET_ORDER)[number];
 export type BuiltInQualityPresetId = StandardQualityPresetId | typeof SUPER_ULTRA_PRESET_ID;

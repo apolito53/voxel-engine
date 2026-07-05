@@ -1020,7 +1020,7 @@ test("nova context journal records world, runtime, and event state", () => {
     renderDistance: 6,
     physicsObjectBudget: 192,
     blockFragmentCount: 7,
-    blockLightMinLevel: 2,
+    blockLightMinLevel: 1,
     blockLightMaxLevel: 15
   });
   now += 10;
@@ -11393,20 +11393,20 @@ test("quality settings clamp custom menu overrides", () => {
       shadowMapSize: 2048,
       blockFragmentCount: 108,
       debrisShadows: false,
-      blockLightMinLevel: 2,
+      blockLightMinLevel: 1,
       blockLightMaxLevel: 15
     },
     "normal preset should expose its default tunable settings"
   );
   assertEqual(normalizeRenderDistance(-20), RENDER_DISTANCE_MIN, "render distance should keep a lower bound");
   assertEqual(normalizeRenderDistance(999), RENDER_DISTANCE_MAX, "render distance should keep an upper bound");
-  assertEqual(DEFAULT_BLOCK_LIGHT_MIN_LEVEL, 2, "quality presets should default to a low rendered block-light floor");
+  assertEqual(DEFAULT_BLOCK_LIGHT_MIN_LEVEL, 1, "quality presets should default to a low rendered block-light floor");
   assertEqual(normalizeBlockLightLevelSetting(-20), BLOCK_LIGHT_LEVEL_MIN, "block-light minimum should clamp low");
   assertEqual(normalizeBlockLightLevelSetting(999), BLOCK_LIGHT_LEVEL_MAX, "block-light maximum should clamp high");
   assertDeepEqual(
     normalizeBlockLightLevelRange(
       { minLevel: 13, maxLevel: 4 },
-      { minLevel: 2, maxLevel: 15 }
+      { minLevel: 1, maxLevel: 15 }
     ),
     { minLevel: 4, maxLevel: 13 },
     "persisted block-light ranges should sort instead of crossing"
@@ -11456,7 +11456,7 @@ test("quality settings clamp custom menu overrides", () => {
     "39 max shards/block",
     "debris count label should show the clamped mass-safe shard count"
   );
-  assertEqual(formatBlockLightLevel(2), "Level 2", "block-light labels should show integer solver levels");
+  assertEqual(formatBlockLightLevel(1), "Level 1", "block-light labels should show integer solver levels");
 });
 
 test("physics object budget clamps and steps predictably", () => {
