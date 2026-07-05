@@ -38,6 +38,7 @@ export type ChunkJobResult = ChunkGeneratedResult | ChunkMeshedResult;
 const terrainContexts = new Map<string, TerrainContext>();
 const BLOCK_LIGHT_MESH_KEY_SHIFT = 24;
 const BLOCK_LIGHT_MESH_KEY_MASK = 0x0f;
+const TANGENTIAL_BLOCK_LIGHT_SCALE = 0.35;
 
 export function buildChunkGenerateJob(payload: ChunkGenerateJobPayload): ChunkGeneratedResult {
   const blocks = generateChunkBlocks(
@@ -195,7 +196,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x + 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x + 1, y, z, ox + x, y, oz + z, 1, 0, 0),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -220,7 +221,7 @@ function buildXFaces(
     emitGreedyFaces(
       WORLD_HEIGHT,
       CHUNK_SIZE,
-      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x - 1, y, z, ox + x, y, oz + z),
+      (y, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x - 1, y, z, ox + x, y, oz + z, -1, 0, 0),
       (y, z, height, width, block) => {
         addQuad(
           positions,
@@ -264,7 +265,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y + 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y + 1, z, ox + x, y, oz + z, 0, 1, 0),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -289,7 +290,7 @@ function buildYFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       CHUNK_SIZE,
-      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y - 1, z, ox + x, y, oz + z),
+      (x, z) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y - 1, z, ox + x, y, oz + z, 0, -1, 0),
       (x, z, width, depth, block) => {
         addQuad(
           positions,
@@ -333,7 +334,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y, z + 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y, z + 1, ox + x, y, oz + z, 0, 0, 1),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -358,7 +359,7 @@ function buildZFaces(
     emitGreedyFaces(
       CHUNK_SIZE,
       WORLD_HEIGHT,
-      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y, z - 1, ox + x, y, oz + z),
+      (x, y) => exposedBlock(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, x, y, z, x, y, z - 1, ox + x, y, oz + z, 0, 0, -1),
       (x, y, width, height, block) => {
         addQuad(
           positions,
@@ -396,7 +397,10 @@ function exposedBlock(
   nz: number,
   worldX: number,
   worldY: number,
-  worldZ: number
+  worldZ: number,
+  normalX: number,
+  normalY: number,
+  normalZ: number
 ): number {
   const block = blocks[index(x, y, z)];
   if (
@@ -412,7 +416,7 @@ function exposedBlock(
   return createBlockLightMeshKey(createLitBlockMeshKey(
     block,
     skyExposure.getLightBucketForNeighbor(nx, ny, nz)
-  ), getBlockLightAt(blockLights, nx, ny, nz));
+  ), getFaceBlockLightAt(blockLights, nx, ny, nz, normalX, normalY, normalZ));
 }
 
 function isRenderableSolidAt(
@@ -513,6 +517,62 @@ function getBlockLightAt(
   if (y < 0 || y >= WORLD_HEIGHT) return 0;
   const light = getChunkLightValueAt(blockLights.current, blockLights.neighbors, x, y, z);
   return normalizeBlockLightLevel(light ?? 0);
+}
+
+function getFaceBlockLightAt(
+  blockLights: ChunkBlockLights,
+  x: number,
+  y: number,
+  z: number,
+  normalX: number,
+  normalY: number,
+  normalZ: number
+): number {
+  const centerLight = getBlockLightAt(blockLights, x, y, z);
+  if (centerLight <= 0) return 0;
+
+  const forwardLight = getBlockLightAt(
+    blockLights,
+    x + normalX,
+    y + normalY,
+    z + normalZ
+  );
+  if (forwardLight > centerLight) return centerLight;
+
+  const tangentLight = getMaxTangentialBlockLightAt(blockLights, x, y, z, normalX, normalY, normalZ);
+  if (tangentLight > forwardLight && tangentLight >= centerLight) {
+    // A scalar voxel light field makes a surface beside a Lamp look like the
+    // Lamp is directly in front of that face. Keep the propagation data intact,
+    // but soften light that clearly arrives along the face plane.
+    return centerLight * TANGENTIAL_BLOCK_LIGHT_SCALE;
+  }
+
+  return centerLight;
+}
+
+function getMaxTangentialBlockLightAt(
+  blockLights: ChunkBlockLights,
+  x: number,
+  y: number,
+  z: number,
+  normalX: number,
+  normalY: number,
+  normalZ: number
+): number {
+  let maxLight = 0;
+  for (const [dx, dy, dz] of [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1]
+  ] as const) {
+    if (dx === normalX && dy === normalY && dz === normalZ) continue;
+    if (dx === -normalX && dy === -normalY && dz === -normalZ) continue;
+    maxLight = Math.max(maxLight, getBlockLightAt(blockLights, x + dx, y + dy, z + dz));
+  }
+  return maxLight;
 }
 
 function getChunkLightValueAt(
