@@ -11,7 +11,7 @@
   chunk mesh jobs consume derived light buffers instead of recomputing the
   solver per mesh.
 - Added `Settings > Graphics` sliders for minimum and maximum rendered
-  block-light levels, defaulting the displayed range to `1..15` while keeping
+  block-light levels, defaulting the displayed range to `2..15` while keeping
   the solver's chunk light data at integer `0..15`.
 
 ### Changed
