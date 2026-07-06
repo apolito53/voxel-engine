@@ -18,12 +18,16 @@
 
 - Partial terrain meshes now upload a zero-filled compatible `blockLight`
   attribute until partial-terrain block lighting is implemented.
+- Smoothed normal chunk terrain Lamp block light by averaging face-adjacent
+  light levels per vertex, reducing checker-patterned rendered falloff without
+  changing the integer 0..15 block-light solver.
 
 ### Tests
 
 - Added coverage for block-light worker transfers, chunk mesh block-light
   attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
   and partial-terrain zero attributes.
+- Added coverage for smoothed per-vertex chunk mesh block-light values.
 
 ## 0.17.0 - 2026-07-01
 

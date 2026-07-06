@@ -35,6 +35,11 @@ export type ChunkMeshJobPayload = Omit<ChunkMeshRequest, "type">;
 export type ChunkJobPayload = ChunkGenerateJobPayload | ChunkMeshJobPayload;
 export type ChunkJobResult = ChunkGeneratedResult | ChunkMeshedResult;
 
+type FaceNormal = readonly [number, number, number];
+type QuadCorner = readonly [number, number, number];
+type QuadCorners = readonly [QuadCorner, QuadCorner, QuadCorner, QuadCorner];
+type QuadBlockLightLevels = readonly [number, number, number, number];
+
 const terrainContexts = new Map<string, TerrainContext>();
 const BLOCK_LIGHT_MESH_KEY_SHIFT = 24;
 const BLOCK_LIGHT_MESH_KEY_MASK = 0x0f;
@@ -212,7 +217,17 @@ function buildXFaces(
             [ox + x + 1, y + height, oz + z],
             [ox + x + 1, y + height, oz + z + width],
             [ox + x + 1, y, oz + z + width]
-          ]
+          ],
+          getSmoothedFaceBlockLightCorners(
+            blockLights,
+            [1, 0, 0],
+            [
+              [x + 1, y, z],
+              [x + 1, y + height, z],
+              [x + 1, y + height, z + width],
+              [x + 1, y, z + width]
+            ]
+          )
         );
       }
     );
@@ -237,7 +252,17 @@ function buildXFaces(
             [ox + x, y + height, oz + z + width],
             [ox + x, y + height, oz + z],
             [ox + x, y, oz + z]
-          ]
+          ],
+          getSmoothedFaceBlockLightCorners(
+            blockLights,
+            [-1, 0, 0],
+            [
+              [x - 1, y, z + width],
+              [x - 1, y + height, z + width],
+              [x - 1, y + height, z],
+              [x - 1, y, z]
+            ]
+          )
         );
       }
     );
@@ -281,7 +306,17 @@ function buildYFaces(
             [ox + x + width, y + 1, oz + z + depth],
             [ox + x + width, y + 1, oz + z],
             [ox + x, y + 1, oz + z]
-          ]
+          ],
+          getSmoothedFaceBlockLightCorners(
+            blockLights,
+            [0, 1, 0],
+            [
+              [x, y + 1, z + depth],
+              [x + width, y + 1, z + depth],
+              [x + width, y + 1, z],
+              [x, y + 1, z]
+            ]
+          )
         );
       }
     );
@@ -306,7 +341,17 @@ function buildYFaces(
             [ox + x + width, y, oz + z],
             [ox + x + width, y, oz + z + depth],
             [ox + x, y, oz + z + depth]
-          ]
+          ],
+          getSmoothedFaceBlockLightCorners(
+            blockLights,
+            [0, -1, 0],
+            [
+              [x, y - 1, z],
+              [x + width, y - 1, z],
+              [x + width, y - 1, z + depth],
+              [x, y - 1, z + depth]
+            ]
+          )
         );
       }
     );
@@ -350,7 +395,17 @@ function buildZFaces(
             [ox + x + width, y + height, oz + z + 1],
             [ox + x, y + height, oz + z + 1],
             [ox + x, y, oz + z + 1]
-          ]
+          ],
+          getSmoothedFaceBlockLightCorners(
+            blockLights,
+            [0, 0, 1],
+            [
+              [x + width, y, z + 1],
+              [x + width, y + height, z + 1],
+              [x, y + height, z + 1],
+              [x, y, z + 1]
+            ]
+          )
         );
       }
     );
@@ -375,7 +430,17 @@ function buildZFaces(
             [ox + x, y + height, oz + z],
             [ox + x + width, y + height, oz + z],
             [ox + x + width, y, oz + z]
-          ]
+          ],
+          getSmoothedFaceBlockLightCorners(
+            blockLights,
+            [0, 0, -1],
+            [
+              [x, y, z - 1],
+              [x, y + height, z - 1],
+              [x + width, y + height, z - 1],
+              [x + width, y, z - 1]
+            ]
+          )
         );
       }
     );
@@ -515,6 +580,81 @@ function getBlockLightAt(
   return normalizeBlockLightLevel(light ?? 0);
 }
 
+function getSmoothedFaceBlockLightCorners(
+  blockLights: ChunkBlockLights,
+  normal: FaceNormal,
+  corners: QuadCorners
+): QuadBlockLightLevels {
+  return [
+    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[0]),
+    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[1]),
+    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[2]),
+    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[3])
+  ];
+}
+
+function getSmoothedFaceCornerBlockLight(
+  blockLights: ChunkBlockLights,
+  normal: FaceNormal,
+  [x, y, z]: QuadCorner
+): number {
+  // Block light is still a macro-voxel 0..15 field. For rendering, each face
+  // vertex samples the four face-adjacent cells that touch that corner in the
+  // face plane. The duplicated vertices on neighboring quads then receive the
+  // same value, letting the shader interpolate away the visible checker steps
+  // without changing the solver or leaking light through occluding terrain.
+  if (normal[0] !== 0) {
+    return averageBlockLight4(
+      blockLights,
+      x, y - 1, z - 1,
+      x, y, z - 1,
+      x, y - 1, z,
+      x, y, z
+    );
+  }
+
+  if (normal[1] !== 0) {
+    return averageBlockLight4(
+      blockLights,
+      x - 1, y, z - 1,
+      x, y, z - 1,
+      x - 1, y, z,
+      x, y, z
+    );
+  }
+
+  return averageBlockLight4(
+    blockLights,
+    x - 1, y - 1, z,
+    x, y - 1, z,
+    x - 1, y, z,
+    x, y, z
+  );
+}
+
+function averageBlockLight4(
+  blockLights: ChunkBlockLights,
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  cx: number,
+  cy: number,
+  cz: number,
+  dx: number,
+  dy: number,
+  dz: number
+): number {
+  return (
+    getBlockLightAt(blockLights, ax, ay, az) +
+    getBlockLightAt(blockLights, bx, by, bz) +
+    getBlockLightAt(blockLights, cx, cy, cz) +
+    getBlockLightAt(blockLights, dx, dy, dz)
+  ) / 4;
+}
+
 function getChunkLightValueAt(
   current: Uint8Array | null,
   neighbors: ChunkNeighborBlocks,
@@ -603,20 +743,22 @@ function addQuad(
   textureTiles: number[],
   indices: number[],
   meshKey: number,
-  normal: readonly [number, number, number],
-  corners: readonly (readonly [number, number, number])[]
+  normal: FaceNormal,
+  corners: QuadCorners,
+  blockLightLevels?: QuadBlockLightLevels
 ): void {
   const base = positions.length / 3;
   const baseMeshKey = getBaseBlockMeshKey(meshKey);
   const shade = getLitBlockFaceShade(meshKey, normal, getSunlitFaceShade(normal));
   const color = getMaterialBlockColor(baseMeshKey, shade);
-  const blockLight = getBlockLightFromMeshKey(meshKey);
+  const fallbackBlockLight = getBlockLightFromMeshKey(meshKey);
 
-  for (const corner of corners) {
+  for (let index = 0; index < corners.length; index += 1) {
+    const corner = corners[index];
     positions.push(corner[0], corner[1], corner[2]);
     normals.push(...normal);
     colors.push(...color);
-    blockLightAttributes.push(blockLight);
+    blockLightAttributes.push(blockLightLevels?.[index] ?? fallbackBlockLight);
   }
 
   appendBlockTextureQuadAttributes(uvs, textureTiles, baseMeshKey, normal, corners);

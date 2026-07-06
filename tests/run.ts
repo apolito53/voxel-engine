@@ -91,7 +91,7 @@ import {
   normalizeBuilderBrushSize
 } from "../src/builderTools";
 import { Chunk } from "../src/chunk";
-import type { ChunkGeneratedResult } from "../src/chunkProtocol";
+import type { ChunkGeneratedResult, ChunkMeshedResult } from "../src/chunkProtocol";
 import {
   CHUNK_GENERATE_JOB,
   CHUNK_MESH_JOB,
@@ -1656,13 +1656,55 @@ test("chunk mesh worker job honors partial render masks", () => {
     "chunk mesh job should emit one block-light value per vertex"
   );
   assert(
-    visibleResult.blockLights.includes(14),
-    "chunk mesh job should sample dedicated block-light data from the face-adjacent light cell"
+    visibleResult.blockLights.some((value) => value > 0),
+    "chunk mesh job should sample dedicated block-light data into vertex attributes"
   );
   assertEqual(
     visibleResult.textureTiles.length,
     visibleResult.positions.length / 3,
     "chunk mesh job should emit per-vertex texture tile ids"
+  );
+});
+
+test("chunk mesh block light smooths face corner values", () => {
+  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blocks[1 + CHUNK_SIZE * (1 + CHUNK_SIZE * 1)] = BLOCK.stone;
+  blockLight[getBlockLightIndex(2, 1, 1)] = 14;
+
+  const result = buildChunkMeshJob({
+    requestId: 181,
+    cx: 0,
+    cz: 0,
+    revision: 1,
+    blocks: blocks.buffer.slice(0),
+    neighbors: {
+      negativeX: null,
+      positiveX: null,
+      negativeZ: null,
+      positiveZ: null
+    },
+    partialBlockMasks: {
+      current: null,
+      neighbors: {
+        negativeX: null,
+        positiveX: null,
+        negativeZ: null,
+        positiveZ: null
+      }
+    },
+    blockLights: createChunkMeshBlockLightBuffers(blockLight)
+  });
+
+  const positiveXFaceLights = getBlockLightValuesForMeshNormal(result, [1, 0, 0]);
+  assertEqual(positiveXFaceLights.length, 4, "single-block positive-X face should emit four vertices");
+  assert(
+    positiveXFaceLights.every((value) => value === 3.5),
+    "isolated face-adjacent light should be averaged into each touching corner instead of stamped flat"
+  );
+  assert(
+    !positiveXFaceLights.includes(14),
+    "smoothed terrain vertices should avoid the old checker-pattern full-cell light stamp"
   );
 });
 
@@ -2401,6 +2443,25 @@ function getMaxBlockLightAttribute(geometry: THREE.BufferGeometry): number {
   return maxBlockLight;
 }
 
+function getBlockLightValuesForMeshNormal(
+  result: ChunkMeshedResult,
+  normal: readonly [number, number, number]
+): number[] {
+  const values: number[] = [];
+  for (let vertexIndex = 0; vertexIndex < result.blockLights.length; vertexIndex += 1) {
+    const normalIndex = vertexIndex * 3;
+    if (
+      result.normals[normalIndex] !== normal[0] ||
+      result.normals[normalIndex + 1] !== normal[1] ||
+      result.normals[normalIndex + 2] !== normal[2]
+    ) {
+      continue;
+    }
+    values.push(result.blockLights[vertexIndex] ?? 0);
+  }
+  return values;
+}
+
 test("voxel block light emits lamp sources and falls off through open air", () => {
   const blocks = createEmptyBlockLightChunkSnapshot();
   const lampIndex = getBlockLightIndex(4, 10, 4);
@@ -2563,8 +2624,8 @@ test("Lamp removal clears rendered chunk block-light attributes", async () => {
   const litChunk = world.getChunk(0, 0);
   assert(litChunk?.mesh, "rendered lamp-removal fixture should build a chunk mesh");
   assert(
-    getMaxBlockLightAttribute(litChunk.mesh.geometry) >= 14,
-    "stone terrain beside a Lamp should receive rendered block-light data"
+    getMaxBlockLightAttribute(litChunk.mesh.geometry) >= 12,
+    "stone terrain beside a Lamp should receive bright smoothed rendered block-light data"
   );
 
   world.setBlock(1, 80, 1, BLOCK.air);
@@ -2596,8 +2657,8 @@ test("cross-chunk Lamp light reaches rendered terrain through cached neighbor ha
   const eastChunk = world.getChunk(1, 0);
   assert(eastChunk?.mesh, "east neighbor chunk should build a mesh for the cross-chunk light test");
   assert(
-    getMaxBlockLightAttribute(eastChunk.mesh.geometry) >= 14,
-    "terrain in the east chunk should sample Lamp light propagated from the west chunk halo"
+    getMaxBlockLightAttribute(eastChunk.mesh.geometry) >= 12,
+    "terrain in the east chunk should sample smoothed Lamp light propagated from the west chunk halo"
   );
 
   world.dispose(scene);
