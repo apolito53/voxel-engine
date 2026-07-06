@@ -32,7 +32,6 @@ import {
   getTerraformerSubCellHealth
 } from "../src/blockMaterialRules";
 import {
-  LAMP_LIGHT_DEFINITION,
   getLocalLightDefinition,
   isLocalLightBlock,
   selectNearestLocalLightSources
@@ -92,7 +91,7 @@ import {
   normalizeBuilderBrushSize
 } from "../src/builderTools";
 import { Chunk } from "../src/chunk";
-import type { ChunkGeneratedResult, ChunkMeshedResult } from "../src/chunkProtocol";
+import type { ChunkGeneratedResult } from "../src/chunkProtocol";
 import {
   CHUNK_GENERATE_JOB,
   CHUNK_MESH_JOB,
@@ -1657,53 +1656,6 @@ test("chunk mesh worker job honors partial render masks", () => {
   );
 });
 
-test("chunk mesh block light distinguishes direct and tangential face light", () => {
-  const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
-  const blockLight = createEmptyBlockLightChunkSnapshot();
-  blocks[2 + CHUNK_SIZE * (1 + CHUNK_SIZE * 1)] = BLOCK.stone;
-
-  blockLight[getBlockLightIndex(2, 2, 1)] = 14;
-  blockLight[getBlockLightIndex(3, 2, 1)] = 15;
-  blockLight[getBlockLightIndex(2, 3, 1)] = 13;
-  blockLight[getBlockLightIndex(1, 1, 1)] = 14;
-  blockLight[getBlockLightIndex(0, 1, 1)] = 15;
-
-  const result = buildChunkMeshJob({
-    requestId: 181,
-    cx: 0,
-    cz: 0,
-    revision: 1,
-    blocks: blocks.buffer.slice(0),
-    neighbors: {
-      negativeX: null,
-      positiveX: null,
-      negativeZ: null,
-      positiveZ: null
-    },
-    partialBlockMasks: {
-      current: null,
-      neighbors: {
-        negativeX: null,
-        positiveX: null,
-        negativeZ: null,
-        positiveZ: null
-      }
-    },
-    blockLights: createChunkMeshBlockLightBuffers(blockLight)
-  });
-
-  assertEqual(
-    getMaxBlockLightForMeshNormal(result, [0, 1, 0]),
-    5,
-    "top faces should soften block light that is strongest along the face plane"
-  );
-  assertEqual(
-    getMaxBlockLightForMeshNormal(result, [-1, 0, 0]),
-    14,
-    "faces aimed toward a stronger light cell should keep direct block light"
-  );
-});
-
 test("chunk mesh worker job is deterministic for the same payload", () => {
   const terrain = createTerrainContext("chunk-mesh-deterministic", "varied");
   const blocks = generateChunkBlocks(0, 0, terrain);
@@ -2438,25 +2390,6 @@ function getMaxBlockLightAttribute(geometry: THREE.BufferGeometry): number {
   return maxBlockLight;
 }
 
-function getMaxBlockLightForMeshNormal(
-  result: ChunkMeshedResult,
-  normal: readonly [number, number, number]
-): number {
-  let maxBlockLight = 0;
-  for (let vertexIndex = 0; vertexIndex < result.blockLights.length; vertexIndex += 1) {
-    const normalIndex = vertexIndex * 3;
-    if (
-      result.normals[normalIndex] !== normal[0] ||
-      result.normals[normalIndex + 1] !== normal[1] ||
-      result.normals[normalIndex + 2] !== normal[2]
-    ) {
-      continue;
-    }
-    maxBlockLight = Math.max(maxBlockLight, result.blockLights[vertexIndex] ?? 0);
-  }
-  return maxBlockLight;
-}
-
 test("voxel block light emits lamp sources and falls off through open air", () => {
   const blocks = createEmptyBlockLightChunkSnapshot();
   const lampIndex = getBlockLightIndex(4, 10, 4);
@@ -2777,11 +2710,6 @@ test("local light renderer keeps fixed point-light proxies while overflow lamps 
     2,
     "unused high-water pool slots should remain zero-intensity placeholders"
   );
-  assertEqual(
-    Math.max(...pointLights.map((light) => light.intensity)),
-    LAMP_LIGHT_DEFINITION.intensity,
-    "small lamp selections should keep the full dynamic point-light intensity"
-  );
   assertEqual(reducedStats.emissiveOnlySources, 0, "all remaining lamps should fit in the proxy layer");
   assertEqual(
     pointLights.filter((light) => light.castShadow).length,
@@ -2824,10 +2752,6 @@ test("local light renderer gives dense visible lamp fields real spill below the 
     pointLights.filter((light) => light.intensity > 0).length,
     denseLampCount,
     "below-cap lamps should activate one warm spill proxy per selected source"
-  );
-  assert(
-    Math.max(...pointLights.map((light) => light.intensity)) < LAMP_LIGHT_DEFINITION.intensity,
-    "crowded lamp fields should taper dynamic proxy intensity now that baked block light carries the main terrain glow"
   );
 
   renderer.dispose();

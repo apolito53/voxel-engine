@@ -15,11 +15,6 @@
 
 - Partial terrain meshes now upload a zero-filled compatible `blockLight`
   attribute until partial-terrain block lighting is implemented.
-- Softened rendered Lamp block light on tangential same-plane terrain faces so
-  surfaces beside a Lamp no longer read like the light is directly in front of
-  them.
-- Tapered dynamic Lamp point-light intensity in dense Lamp fields now that
-  baked block light carries the main voxel terrain glow.
 
 ### Tests
 

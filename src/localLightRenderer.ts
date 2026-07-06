@@ -7,8 +7,6 @@ import type { QualityPreset } from "./qualityPresets";
 
 export const LOCAL_LIGHT_POINT_PROXY_CAPACITY = 128;
 const LOCAL_LIGHT_IDLE_Y = -10000;
-const LOCAL_LIGHT_FULL_PROXY_INTENSITY_COUNT = 32;
-const LOCAL_LIGHT_DENSE_PROXY_MIN_INTENSITY_SCALE = 0.35;
 
 export type LocalLightRendererStats = {
   readonly sourceCount: number;
@@ -43,7 +41,6 @@ export class LocalLightRenderer {
 
     let activePointLights = 0;
     let shadowCastingPointLights = 0;
-    const denseIntensityScale = getDensePointLightIntensityScale(sources.length);
     for (let index = 0; index < this.lights.length; index += 1) {
       const light = this.lights[index];
       const source = sources[index];
@@ -60,7 +57,7 @@ export class LocalLightRenderer {
 
       light.visible = true;
       light.color.setHex(definition.color);
-      light.intensity = definition.intensity * source.intensityScale * denseIntensityScale;
+      light.intensity = definition.intensity * source.intensityScale;
       light.distance = definition.distance * source.distanceScale;
       light.decay = definition.decay;
       light.position.set(source.centerX, source.centerY, source.centerZ);
@@ -141,17 +138,4 @@ export class LocalLightRenderer {
     light.castShadow = false;
     light.position.set(0, LOCAL_LIGHT_IDLE_Y, 0);
   }
-}
-
-function getDensePointLightIntensityScale(sourceCount: number): number {
-  if (sourceCount <= LOCAL_LIGHT_FULL_PROXY_INTENSITY_COUNT) return 1;
-
-  // Baked block light now carries the stable voxel illumination, so crowded
-  // Lamp fields should not stack dozens of full-strength dynamic PointLights
-  // onto partial terrain and same-plane surfaces. Keep nearby proxy spill, but
-  // taper it gently as the active source field gets dense.
-  return Math.max(
-    LOCAL_LIGHT_DENSE_PROXY_MIN_INTENSITY_SCALE,
-    Math.sqrt(LOCAL_LIGHT_FULL_PROXY_INTENSITY_COUNT / sourceCount)
-  );
 }
