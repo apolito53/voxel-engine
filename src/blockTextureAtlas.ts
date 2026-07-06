@@ -7,7 +7,6 @@ import {
   BLOCK_TEXTURE_TILE_SIZE_PX
 } from "./blockTextureTiles";
 import { ENCLOSED_INTERIOR_SHADE } from "./chunkLightOcclusion";
-import { BLOCK_LIGHT_MAX_LEVEL, BLOCK_LIGHT_MIN_LEVEL } from "./voxelBlockLight";
 
 type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile"]>[0];
 type TilePainter = (ctx: CanvasRenderingContext2D, variant: number) => void;
@@ -16,7 +15,6 @@ const ATLAS_INSET_UV = 0.5 / BLOCK_TEXTURE_TILE_SIZE_PX;
 const WORLD_FOG_CAMERA_UNIFORM = "voxelHorizontalFogCameraPosition";
 const WORLD_DAY_NIGHT_TINT_UNIFORM = "voxelDayNightOutdoorTint";
 const WORLD_DAY_NIGHT_EXPOSURE_UNIFORM = "voxelDayNightOutdoorExposure";
-const WORLD_BLOCK_LIGHT_RANGE_UNIFORM = "voxelBlockLightLevelRange";
 // The sealed-room baked shade is intentionally tiny. This cutoff catches every
 // enclosed material face, but stays below normal outdoor foliage/wall shade so
 // the indirect-light clamp does not misclassify ordinary dark terrain.
@@ -34,11 +32,6 @@ export type WorldBlockDayNightUniforms = {
   readonly outdoorExposure: number;
 };
 
-export type WorldBlockLightRangeUniforms = {
-  readonly minLevel: number;
-  readonly maxLevel: number;
-};
-
 export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}): THREE.MeshStandardMaterial {
   const atlasTexture = createBlockTextureAtlas();
   const material = new THREE.MeshStandardMaterial({
@@ -51,18 +44,16 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
   const fogCameraPosition = new THREE.Vector3();
   const dayNightTint = new THREE.Color(1, 1, 1);
   const dayNightExposure = { value: 1 };
-  const blockLightLevelRange = new THREE.Vector2(BLOCK_LIGHT_MIN_LEVEL, BLOCK_LIGHT_MAX_LEVEL);
   material.userData[WORLD_FOG_CAMERA_UNIFORM] = fogCameraPosition;
   material.userData[WORLD_DAY_NIGHT_TINT_UNIFORM] = dayNightTint;
   material.userData[WORLD_DAY_NIGHT_EXPOSURE_UNIFORM] = dayNightExposure;
-  material.userData[WORLD_BLOCK_LIGHT_RANGE_UNIFORM] = blockLightLevelRange;
 
   material.onBeforeCompile = (shader) => {
-    applyWorldBlockShaderPatches(shader, fogCameraPosition, dayNightTint, dayNightExposure, blockLightLevelRange);
+    applyWorldBlockShaderPatches(shader, fogCameraPosition, dayNightTint, dayNightExposure);
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v10-block-light-range";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v9-block-light-spill";
   return material;
 }
 
@@ -70,8 +61,7 @@ export function applyWorldBlockShaderPatches(
   shader: ShaderWithUniforms,
   fogCameraPosition = new THREE.Vector3(),
   dayNightTint = new THREE.Color(1, 1, 1),
-  dayNightExposure = { value: 1 },
-  blockLightLevelRange = new THREE.Vector2(BLOCK_LIGHT_MIN_LEVEL, BLOCK_LIGHT_MAX_LEVEL)
+  dayNightExposure = { value: 1 }
 ): void {
   shader.uniforms.blockTextureAtlasGrid = {
     value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
@@ -89,9 +79,6 @@ export function applyWorldBlockShaderPatches(
     value: dayNightTint
   };
   shader.uniforms[WORLD_DAY_NIGHT_EXPOSURE_UNIFORM] = dayNightExposure;
-  shader.uniforms[WORLD_BLOCK_LIGHT_RANGE_UNIFORM] = {
-    value: blockLightLevelRange
-  };
 
   // The base tile id is per vertex so worker-built chunk geometry can choose grass
   // tops, dirt undersides, wood end grain, and side textures without splitting
@@ -130,7 +117,6 @@ export function applyWorldBlockShaderPatches(
         `uniform vec3 ${WORLD_FOG_CAMERA_UNIFORM};`,
         `uniform vec3 ${WORLD_DAY_NIGHT_TINT_UNIFORM};`,
         `uniform float ${WORLD_DAY_NIGHT_EXPOSURE_UNIFORM};`,
-        `uniform vec2 ${WORLD_BLOCK_LIGHT_RANGE_UNIFORM};`,
         `const float voxelLampBaseTile = ${BLOCK_TEXTURE_TILE.lamp.toFixed(1)};`,
         "varying float vBlockTextureTile;",
         "varying float vBlockLight;",
@@ -215,14 +201,7 @@ export function applyWorldBlockShaderPatches(
         // Derived Lamp block-light is deliberately separate from `vColor`.
         // Sealed-room darkness still comes from the baked vertex color path
         // above; this warm spill is an additive runtime lightmap channel.
-        // The solver still emits integer 0..15 block-light values. This range
-        // uniform is a player-facing display clamp for tuning night readability
-        // and overbright Lamp spill without mutating chunk light data.
-        "float voxelRawBlockLight = clamp(vBlockLight, 0.0, 15.0);",
-        `float voxelBlockLightMinLevel = min(${WORLD_BLOCK_LIGHT_RANGE_UNIFORM}.x, ${WORLD_BLOCK_LIGHT_RANGE_UNIFORM}.y);`,
-        `float voxelBlockLightMaxLevel = max(${WORLD_BLOCK_LIGHT_RANGE_UNIFORM}.x, ${WORLD_BLOCK_LIGHT_RANGE_UNIFORM}.y);`,
-        "float voxelClampedBlockLight = clamp(voxelRawBlockLight, voxelBlockLightMinLevel, voxelBlockLightMaxLevel);",
-        "float voxelBlockLight = clamp(voxelClampedBlockLight / 15.0, 0.0, 1.0);",
+        "float voxelBlockLight = clamp(vBlockLight / 15.0, 0.0, 1.0);",
         "float voxelBlockLightCurve = voxelBlockLight * voxelBlockLight;",
         `vec3 voxelBlockLightColor = vec3(1.0, 0.62, 0.28) * ${LAMP_BLOCK_LIGHT_STRENGTH.toFixed(2)};`,
         "reflectedLight.indirectDiffuse += voxelTextureDiffuseColor * voxelBlockLightColor * voxelBlockLightCurve * (1.0 - voxelLampTileMask);",
@@ -282,27 +261,6 @@ export function updateWorldBlockMaterialDayNight(
   }
 }
 
-export function updateWorldBlockMaterialBlockLightRange(
-  material: THREE.Material,
-  uniforms: WorldBlockLightRangeUniforms
-): void {
-  const minLevel = normalizeMaterialBlockLightLevel(uniforms.minLevel, BLOCK_LIGHT_MIN_LEVEL);
-  const maxLevel = normalizeMaterialBlockLightLevel(uniforms.maxLevel, BLOCK_LIGHT_MAX_LEVEL);
-  const lowLevel = Math.min(minLevel, maxLevel);
-  const highLevel = Math.max(minLevel, maxLevel);
-
-  const userDataRange = material.userData[WORLD_BLOCK_LIGHT_RANGE_UNIFORM];
-  if (userDataRange instanceof THREE.Vector2) {
-    userDataRange.set(lowLevel, highLevel);
-  }
-
-  const shader = getWorldBlockShader(material);
-  const shaderRange = shader?.uniforms[WORLD_BLOCK_LIGHT_RANGE_UNIFORM]?.value;
-  if (shaderRange instanceof THREE.Vector2) {
-    shaderRange.set(lowLevel, highLevel);
-  }
-}
-
 export function disposeWorldBlockMaterial(material: THREE.MeshStandardMaterial): void {
   material.map?.dispose();
   material.dispose();
@@ -336,12 +294,6 @@ function isUniformNumber(value: unknown): value is { value: number } {
     "value" in value &&
     typeof (value as { readonly value?: unknown }).value === "number"
   );
-}
-
-function normalizeMaterialBlockLightLevel(value: unknown, fallback: number): number {
-  const numericValue = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numericValue)) return fallback;
-  return Math.max(BLOCK_LIGHT_MIN_LEVEL, Math.min(BLOCK_LIGHT_MAX_LEVEL, Math.round(numericValue)));
 }
 
 export function createBlockTextureAtlas(): THREE.CanvasTexture {

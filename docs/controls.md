@@ -137,8 +137,6 @@ Pause menu `Settings` is split into three tabs.
 - Quality preset
 - Fog start distance
 - Shadow quality
-- Minimum/Maximum Light Level, a rendered block-light clamp over the underlying
-  0..15 Lamp light field
 - Debris Shadows toggle for loose-fragment shadow casting
 
 `Gameplay` owns:

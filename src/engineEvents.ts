@@ -72,8 +72,6 @@ export type EngineEvents = {
     readonly renderDistance: number;
     readonly physicsObjectBudget: number;
     readonly blockFragmentCount: number;
-    readonly blockLightMinLevel: number;
-    readonly blockLightMaxLevel: number;
   };
   "settings:physics-budget-changed": {
     readonly physicsObjectBudget: number;

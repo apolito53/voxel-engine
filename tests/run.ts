@@ -263,7 +263,6 @@ import { RollingFrameRateMeter } from "../src/frameRateMeter";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
-  DEFAULT_BLOCK_LIGHT_MIN_LEVEL,
   FOG_RENDER_SAFETY_CHUNKS,
   QUALITY_PRESET_ORDER,
   QUALITY_PRESETS,
@@ -271,19 +270,14 @@ import {
 } from "../src/qualityPresets";
 import {
   BLOCK_FRAGMENT_MAX_COUNT,
-  BLOCK_LIGHT_LEVEL_MAX,
-  BLOCK_LIGHT_LEVEL_MIN,
   RENDER_DISTANCE_MAX,
   RENDER_DISTANCE_MIN,
   SHADOW_QUALITY_MAX_LEVEL,
   createDefaultQualitySettings,
-  formatBlockLightLevel,
   formatBlockFragmentCount,
   formatRenderDistance,
   formatShadowQuality,
   getShadowMapSizeForQualityLevel,
-  normalizeBlockLightLevelRange,
-  normalizeBlockLightLevelSetting,
   normalizeQualitySettings,
   normalizeRenderDistance,
   normalizeShadowQualityLevel
@@ -1019,9 +1013,7 @@ test("nova context journal records world, runtime, and event state", () => {
     source: "preset",
     renderDistance: 6,
     physicsObjectBudget: 192,
-    blockFragmentCount: 7,
-    blockLightMinLevel: 2,
-    blockLightMaxLevel: 15
+    blockFragmentCount: 7
   });
   now += 10;
   events.emit("palette:selected", {
@@ -1087,9 +1079,7 @@ test("nova chat replies use context and chat logs stay bounded", () => {
     source: "settings",
     renderDistance: 9,
     physicsObjectBudget: 512,
-    blockFragmentCount: 13,
-    blockLightMinLevel: 4,
-    blockLightMaxLevel: 12
+    blockFragmentCount: 13
   });
   events.emit("physics:core-thrown", { source: "player" });
   journal.updateRuntimeTelemetry({
@@ -2381,9 +2371,8 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "terrain shader should receive Lamp block light through a dedicated vertex attribute"
   );
   assert(
-    shader.fragmentShader.includes("uniform vec2 voxelBlockLightLevelRange;") &&
-      shader.fragmentShader.includes("float voxelClampedBlockLight = clamp(voxelRawBlockLight, voxelBlockLightMinLevel, voxelBlockLightMaxLevel);"),
-    "terrain shader should clamp dedicated block-light values through the settings-controlled range"
+    shader.fragmentShader.includes("float voxelBlockLight = clamp(vBlockLight / 15.0, 0.0, 1.0);"),
+    "terrain shader should normalize dedicated block-light values separately from vertex color"
   );
   assert(
     shader.fragmentShader.includes("reflectedLight.indirectDiffuse += voxelTextureDiffuseColor * voxelBlockLightColor"),
@@ -11388,29 +11377,11 @@ test("quality settings clamp custom menu overrides", () => {
 
   assertDeepEqual(
     normalDefaults,
-    {
-      loadRadius: 6,
-      shadowMapSize: 2048,
-      blockFragmentCount: 108,
-      debrisShadows: false,
-      blockLightMinLevel: 2,
-      blockLightMaxLevel: 15
-    },
+    { loadRadius: 6, shadowMapSize: 2048, blockFragmentCount: 108, debrisShadows: false },
     "normal preset should expose its default tunable settings"
   );
   assertEqual(normalizeRenderDistance(-20), RENDER_DISTANCE_MIN, "render distance should keep a lower bound");
   assertEqual(normalizeRenderDistance(999), RENDER_DISTANCE_MAX, "render distance should keep an upper bound");
-  assertEqual(DEFAULT_BLOCK_LIGHT_MIN_LEVEL, 2, "quality presets should default to a low rendered block-light floor");
-  assertEqual(normalizeBlockLightLevelSetting(-20), BLOCK_LIGHT_LEVEL_MIN, "block-light minimum should clamp low");
-  assertEqual(normalizeBlockLightLevelSetting(999), BLOCK_LIGHT_LEVEL_MAX, "block-light maximum should clamp high");
-  assertDeepEqual(
-    normalizeBlockLightLevelRange(
-      { minLevel: 13, maxLevel: 4 },
-      { minLevel: 2, maxLevel: 15 }
-    ),
-    { minLevel: 4, maxLevel: 13 },
-    "persisted block-light ranges should sort instead of crossing"
-  );
   assertEqual(getShadowMapSizeForQualityLevel(0), 0, "shadow quality level zero should disable shadows");
   assertEqual(
     getShadowMapSizeForQualityLevel(SHADOW_QUALITY_MAX_LEVEL),
@@ -11424,14 +11395,7 @@ test("quality settings clamp custom menu overrides", () => {
   );
 
   const normalized = normalizeQualitySettings(
-    {
-      loadRadius: 999,
-      shadowMapSize: 3333,
-      blockFragmentCount: 999,
-      debrisShadows: "true",
-      blockLightMinLevel: 20,
-      blockLightMaxLevel: 3
-    },
+    { loadRadius: 999, shadowMapSize: 3333, blockFragmentCount: 999, debrisShadows: "true" },
     normalDefaults
   );
 
@@ -11443,8 +11407,6 @@ test("quality settings clamp custom menu overrides", () => {
     "custom debris count should clamp to the visible VFX shard limit"
   );
   assertEqual(normalized.debrisShadows, true, "debris shadow toggle should normalize persisted boolean strings");
-  assertEqual(normalized.blockLightMinLevel, 3, "custom block-light range should keep the lower sorted level");
-  assertEqual(normalized.blockLightMaxLevel, 15, "custom block-light range should clamp and sort the upper level");
   assertEqual(
     formatRenderDistance(6),
     "6 clear chunks",
@@ -11456,7 +11418,6 @@ test("quality settings clamp custom menu overrides", () => {
     "39 max shards/block",
     "debris count label should show the clamped mass-safe shard count"
   );
-  assertEqual(formatBlockLightLevel(2), "Level 2", "block-light labels should show integer solver levels");
 });
 
 test("physics object budget clamps and steps predictably", () => {
