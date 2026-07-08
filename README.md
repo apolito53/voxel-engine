@@ -139,8 +139,12 @@ by one per orthogonal block step, and solid or partial terrain blocks occlude it
 That block-light field now feeds a dedicated per-vertex `blockLight` terrain
 attribute for warm rendered Lamp spill, with chunk terrain vertices averaging
 nearby face-adjacent light cells so the rendered falloff is smoother than the
-raw integer grid. The current emissive Lamp material and fixed point-light
-proxies stay active. `Settings > Graphics` exposes minimum and maximum rendered
+raw integer grid. Damaged partial-block terrain consumes cloned cached
+block-light buffers through its mesh worker as a conservative render-only path:
+exterior macro and partial-height faces smooth light per vertex, while interior
+carved bite faces stay dark to avoid sub-voxel light leaks. The current
+emissive Lamp material and fixed point-light proxies stay active.
+`Settings > Graphics` exposes minimum and maximum rendered
 block-light level sliders, defaulting to `1..15`, so night readability and Lamp
 spill can be tuned without changing the underlying 0..15 chunk light data.
 `Settings > Graphics > Debris Shadows` lets loose shards cast shadows,

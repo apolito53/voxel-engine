@@ -71,10 +71,12 @@ import {
   createBlockLightNeighborKey,
   createEmptyChunkBlockLight,
   getBlockLightEmission,
+  getBlockLightAt,
   getBlockLightIndex,
   getDirtyBlockLightChunkCoordsForEdit,
   isBlockLightOpaque,
-  normalizeBlockLightLevel
+  normalizeBlockLightLevel,
+  readChunkBlockLightBuffers
 } from "../src/voxelBlockLight";
 import {
   BLOCK_TEXTURE_TILE,
@@ -258,6 +260,11 @@ import {
   PARTIAL_BLOCK_MESH_MIN_UPDATE_INTERVAL_MS,
   shouldDeferPartialBlockMeshUpdate
 } from "../src/partialBlockMeshBudget";
+import {
+  buildPartialBlockMeshBuildJob,
+  createPartialBlockMeshBuildJobPayload,
+  getPartialBlockMeshBuildJobPayloadTransfers
+} from "../src/partialBlockMeshWorkerProtocol";
 import { RollingFrameRateMeter } from "../src/frameRateMeter";
 import { shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
@@ -2401,7 +2408,15 @@ function createEmptyBlockLightChunkSnapshot(): Uint8Array {
   return new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
 }
 
-function createChunkMeshBlockLightBuffers(current: Uint8Array | null = null): {
+function createChunkMeshBlockLightBuffers(
+  current: Uint8Array | null = null,
+  neighbors: {
+    readonly negativeX?: Uint8Array | null;
+    readonly positiveX?: Uint8Array | null;
+    readonly negativeZ?: Uint8Array | null;
+    readonly positiveZ?: Uint8Array | null;
+  } = {}
+): {
   readonly current: ArrayBuffer | null;
   readonly neighbors: {
     readonly negativeX: ArrayBuffer | null;
@@ -2413,10 +2428,10 @@ function createChunkMeshBlockLightBuffers(current: Uint8Array | null = null): {
   return {
     current: current ? current.buffer.slice(0) : null,
     neighbors: {
-      negativeX: null,
-      positiveX: null,
-      negativeZ: null,
-      positiveZ: null
+      negativeX: neighbors.negativeX ? neighbors.negativeX.buffer.slice(0) : null,
+      positiveX: neighbors.positiveX ? neighbors.positiveX.buffer.slice(0) : null,
+      negativeZ: neighbors.negativeZ ? neighbors.negativeZ.buffer.slice(0) : null,
+      positiveZ: neighbors.positiveZ ? neighbors.positiveZ.buffer.slice(0) : null
     }
   };
 }
@@ -2441,6 +2456,39 @@ function getMaxBlockLightAttribute(geometry: THREE.BufferGeometry): number {
     maxBlockLight = Math.max(maxBlockLight, attribute.getX(index));
   }
   return maxBlockLight;
+}
+
+function updatePartialBlockMeshFieldFromWorld(
+  world: VoxelWorld,
+  field: PartialBlockMeshField,
+  maxRegions = 64
+): void {
+  const updates = world.consumePartialBlockMeshRegionUpdates({ maxRegions });
+  field.beginUpdate(world.getDirtyPartialBlockMeshRegionCount() + updates.length);
+
+  for (const update of updates) {
+    const faceVisibilityMasks = createPartialBlockFaceVisibilityMasks(
+      update,
+      (cell, normal) => world.shouldRenderPartialBlockFace(cell, normal)
+    );
+    const lightInput = world.snapshotPartialBlockMeshRegionBlockLightInput(update);
+
+    // This mirrors the browser-side upload path without needing a DOM render
+    // loop. The important contract is that partial meshes consume the same
+    // cached block-light snapshots as normal chunk terrain.
+    field.updateRegionGeometry(
+      update.key,
+      update.cells.length,
+      buildPartialBlockMeshGeometryData({
+        update,
+        faceVisibilityMasks,
+        blockLights: lightInput?.blockLights,
+        blockLightChunkOrigin: lightInput?.blockLightChunkOrigin
+      })
+    );
+  }
+
+  field.setDirtyRegionCount(world.getDirtyPartialBlockMeshRegionCount());
 }
 
 function getBlockLightValuesForMeshNormal(
@@ -2544,6 +2592,24 @@ test("voxel block light reads neighbor halo sources across chunk borders", () =>
   assertEqual(result.blockLight[getBlockLightIndex(1, 9, 6)], 13, "cross-border light should keep Manhattan falloff");
 });
 
+test("mesh-time block light samples only one exact cardinal halo cell", () => {
+  const currentLight = createEmptyBlockLightChunkSnapshot();
+  const westLight = createEmptyBlockLightChunkSnapshot();
+  westLight[getBlockLightIndex(CHUNK_SIZE - 1, 9, 6)] = 12;
+  const blockLights = readChunkBlockLightBuffers(
+    createChunkMeshBlockLightBuffers(currentLight, { negativeX: westLight })
+  );
+
+  assertEqual(getBlockLightAt(blockLights, -1, 9, 6), 12, "exact west halo reads should use the cloned neighbor buffer");
+  assertEqual(getBlockLightAt(blockLights, -2, 9, 6), 0, "far west halo reads should fall back to darkness");
+  assertEqual(getBlockLightAt(blockLights, -1, 9, -1), 0, "diagonal west/north halo reads should not smear edge light");
+  assertEqual(
+    getBlockLightAt(blockLights, -1, 9, CHUNK_SIZE),
+    0,
+    "diagonal west/south halo reads should not smear edge light"
+  );
+});
+
 test("block-light build worker job matches the solver and transfers its buffer", () => {
   const blocks = createEmptyBlockLightChunkSnapshot();
   blocks[getBlockLightIndex(4, 8, 4)] = BLOCK.lamp;
@@ -2644,6 +2710,99 @@ test("Lamp removal clears rendered chunk block-light attributes", async () => {
   material.dispose();
 });
 
+test("stale block-light worker results do not overwrite newer chunk revisions", () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "stale-block-light-result-test", workerPool });
+  world.setBlock(1, 80, 1, BLOCK.stone);
+  const chunk = world.getChunk(0, 0);
+  assert(chunk, "stale block-light test should create an owning chunk");
+  const requestId = 512;
+  const oldRevision = chunk.revision;
+  const staleLight = createEmptyBlockLightChunkSnapshot();
+  staleLight[getBlockLightIndex(1, 80, 1)] = 15;
+
+  world.pendingBlockLightBuilds.set(requestId, {
+    key: "0,0",
+    revision: oldRevision,
+    jobId: 999
+  });
+  world.pendingBlockLightKeys.add("0,0");
+  chunk.revision += 1;
+  world.workerResults.push({
+    type: BLOCK_LIGHT_BUILT_RESULT,
+    requestId,
+    cx: 0,
+    cz: 0,
+    revision: oldRevision,
+    blockLight: staleLight,
+    sourceCount: 1,
+    litCellCount: 1,
+    maxQueueDepth: 1
+  });
+
+  world.processBlockLightResults(1);
+
+  assertEqual(world.pendingBlockLightBuilds.has(requestId), false, "stale block-light requests should be retired");
+  assertEqual(world.pendingBlockLightKeys.has("0,0"), false, "stale block-light keys should leave the pending set");
+  assertEqual(
+    world.snapshotChunkBlockLightBuffers(0, 0).current,
+    null,
+    "stale block-light buffers should not be cached for later chunk or partial mesh builds"
+  );
+
+  workerPool.dispose();
+});
+
+test("Lamp removal clears uploaded partial block-light attributes", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "partial-lamp-removal-render-light-test", workerPool });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const field = new PartialBlockMeshField(scene, material);
+  const partialPosition = { x: 3, y: 80, z: 1 };
+  const regionKey = createPartialBlockMeshRegionKey(partialPosition);
+
+  world.setBlock(1, 80, 1, BLOCK.lamp);
+  world.setBlock(partialPosition.x, partialPosition.y, partialPosition.z, BLOCK.stone);
+  const carveResult = world.carveBlock({
+    x: partialPosition.x,
+    y: partialPosition.y,
+    z: partialPosition.z,
+    point: new THREE.Vector3(partialPosition.x + 0.02, partialPosition.y + 0.5, partialPosition.z + 0.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE,
+    speed: 18
+  });
+  assert(carveResult, "partial Lamp test setup should carve a damaged terrain cell");
+
+  await drainWorldRenderWork(world, scene, material);
+  updatePartialBlockMeshFieldFromWorld(world, field);
+
+  const litRegion = field.getRegionMesh(regionKey);
+  assert(litRegion, "partial Lamp test should upload the damaged terrain region");
+  assert(
+    getMaxBlockLightAttribute(litRegion.geometry) > 0,
+    "uploaded partial terrain beside a Lamp should receive cached block-light values"
+  );
+
+  world.setBlock(1, 80, 1, BLOCK.air);
+  await drainWorldRenderWork(world, scene, material);
+  updatePartialBlockMeshFieldFromWorld(world, field);
+
+  const darkRegion = field.getRegionMesh(regionKey);
+  assert(darkRegion, "partial terrain region should still exist after removing the Lamp");
+  assertEqual(
+    getMaxBlockLightAttribute(darkRegion.geometry),
+    0,
+    "removing a Lamp should clear stale uploaded partial block-light values"
+  );
+
+  field.dispose();
+  world.dispose(scene);
+  workerPool.dispose();
+  material.dispose();
+});
+
 test("cross-chunk Lamp light reaches rendered terrain through cached neighbor halos", async () => {
   const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
   const world = new VoxelWorld({ seed: "cross-chunk-render-light-test", workerPool });
@@ -2661,6 +2820,44 @@ test("cross-chunk Lamp light reaches rendered terrain through cached neighbor ha
     "terrain in the east chunk should sample smoothed Lamp light propagated from the west chunk halo"
   );
 
+  world.dispose(scene);
+  workerPool.dispose();
+  material.dispose();
+});
+
+test("cross-chunk Lamp light reaches uploaded partial block meshes", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "cross-chunk-partial-render-light-test", workerPool });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const field = new PartialBlockMeshField(scene, material);
+  const partialPosition = { x: CHUNK_SIZE + 1, y: 80, z: 1 };
+  const regionKey = createPartialBlockMeshRegionKey(partialPosition);
+
+  world.setBlock(CHUNK_SIZE - 1, 80, 1, BLOCK.lamp);
+  world.setBlock(partialPosition.x, partialPosition.y, partialPosition.z, BLOCK.stone);
+  const carveResult = world.carveBlock({
+    x: partialPosition.x,
+    y: partialPosition.y,
+    z: partialPosition.z,
+    point: new THREE.Vector3(partialPosition.x + 0.02, partialPosition.y + 0.5, partialPosition.z + 0.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE,
+    speed: 18
+  });
+  assert(carveResult, "cross-chunk partial Lamp test setup should carve a damaged terrain cell");
+
+  await drainWorldRenderWork(world, scene, material);
+  updatePartialBlockMeshFieldFromWorld(world, field);
+
+  const litRegion = field.getRegionMesh(regionKey);
+  assert(litRegion, "cross-chunk partial Lamp test should upload the damaged terrain region");
+  assert(
+    getMaxBlockLightAttribute(litRegion.geometry) > 0,
+    "uploaded partial terrain should sample cached Lamp light from the cardinal neighbor chunk"
+  );
+
+  field.dispose();
   world.dispose(scene);
   workerPool.dispose();
   material.dispose();
@@ -5932,20 +6129,256 @@ test("partial block mesh builder uses face visibility masks without world callba
     update,
     (_cell, normal) => normal.x === 1
   );
-  const geometry = buildPartialBlockMeshGeometryData({ update, faceVisibilityMasks: masks });
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight[getBlockLightIndex(2, 2, 3)] = 14;
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
 
   assertEqual(geometry.positions.length / 3, 4, "one visible macro face should emit one quad");
   assertEqual(geometry.indices.length / 3, 2, "one visible macro face should emit two triangles");
-  assertEqual(geometry.blockLights.length, 4, "partial mesh builder should emit one zero block-light value per vertex");
+  assertEqual(geometry.blockLights.length, 4, "partial mesh builder should emit one block-light value per vertex");
   assert(
-    geometry.blockLights.every((value) => value === 0),
-    "partial mesh builder should keep block-light values zero until partial lighting is implemented"
+    geometry.blockLights.every((value) => value === 3.5),
+    "partial mesh macro faces should average isolated light across touching face-corner cells instead of stamping raw 14"
   );
   for (let index = 0; index < geometry.normals.length; index += 3) {
     assertEqual(geometry.normals[index], 1, "visibility mask should emit only the positive-X face normal");
     assertEqual(geometry.normals[index + 1], 0, "visibility mask should not leak Y normals");
     assertEqual(geometry.normals[index + 2], 0, "visibility mask should not leak Z normals");
   }
+});
+
+test("partial block mesh builder keeps missing block-light buffers dark", () => {
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 0,
+    maxHealth: 2,
+    cuts: []
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 10,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, normal) => normal.x === 1);
+  const geometry = buildPartialBlockMeshGeometryData({ update, faceVisibilityMasks: masks });
+
+  assertEqual(geometry.blockLights.length, 4, "partial mesh should still emit shader-compatible block-light slots");
+  assert(
+    geometry.blockLights.every((value) => value === 0),
+    "missing partial mesh block-light buffers should fall back to darkness"
+  );
+});
+
+test("partial block mesh worker payload transfers and samples block-light buffers", () => {
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 0,
+    maxHealth: 2,
+    cuts: []
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 11,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight[getBlockLightIndex(2, 2, 3)] = 14;
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, normal) => normal.x === 1);
+  const payload = createPartialBlockMeshBuildJobPayload(update, masks, {
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const transfers = getPartialBlockMeshBuildJobPayloadTransfers(payload);
+  const result = buildPartialBlockMeshBuildJob(payload);
+
+  assertEqual(transfers.length, 1, "partial mesh worker payload should transfer the cloned current block-light buffer");
+  assertEqual(transfers[0], payload.blockLights?.current, "partial mesh worker should transfer the payload light buffer");
+  assert(
+    result.geometry.blockLights.every((value) => value === 3.5),
+    "partial mesh worker builds should sample transferred block-light buffers"
+  );
+});
+
+test("Lamp removal clears rendered partial block-light attributes on rebuild", () => {
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 0,
+    maxHealth: 2,
+    cuts: []
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 12,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, normal) => normal.x === 1);
+  const litBlocks = createEmptyBlockLightChunkSnapshot();
+  litBlocks[getBlockLightIndex(2, 2, 3)] = BLOCK.lamp;
+  const lit = buildChunkBlockLight({ blocks: litBlocks }).blockLight;
+  litBlocks[getBlockLightIndex(2, 2, 3)] = BLOCK.air;
+  const dark = buildChunkBlockLight({ blocks: litBlocks }).blockLight;
+
+  const litGeometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(lit),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const darkGeometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(dark),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+
+  assert(litGeometry.blockLights.some((value) => value > 0), "lamp cache should light the partial face before removal");
+  assert(
+    darkGeometry.blockLights.every((value) => value === 0),
+    "rebuilt partial mesh attributes should clear after the lamp cache goes dark"
+  );
+});
+
+test("cross-chunk Lamp block light reaches partial terrain through neighbor buffers", () => {
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: CHUNK_SIZE, y: 2, z: 3 },
+    damage: 0,
+    maxHealth: 2,
+    cuts: []
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 13,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const westLight = createEmptyBlockLightChunkSnapshot();
+  westLight[getBlockLightIndex(CHUNK_SIZE - 1, 2, 3)] = 14;
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, normal) => normal.x === -1);
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(createEmptyBlockLightChunkSnapshot(), {
+      negativeX: westLight
+    }),
+    blockLightChunkOrigin: { cx: 1, cz: 0 }
+  });
+
+  assert(
+    geometry.blockLights.every((value) => value === 3.5),
+    "partial terrain on a chunk edge should read the cloned cardinal neighbor block-light buffer"
+  );
+});
+
+test("accepted block-light cache results dirty current and cardinal partial mesh regions", () => {
+  const world = new VoxelWorld({ seed: "partial-light-dirty-test" });
+  world.setBlock(1, 2, 3, BLOCK.stone);
+  world.setBlock(CHUNK_SIZE, 2, 3, BLOCK.stone);
+  world.carveBlock({
+    x: 1,
+    y: 2,
+    z: 3,
+    point: { x: 1, y: 2.5, z: 3.5 },
+    normal: { x: -1, y: 0, z: 0 },
+    amount: PARTIAL_BLOCK_CORE_DAMAGE,
+    speed: 18
+  });
+  world.carveBlock({
+    x: CHUNK_SIZE,
+    y: 2,
+    z: 3,
+    point: { x: CHUNK_SIZE, y: 2.5, z: 3.5 },
+    normal: { x: -1, y: 0, z: 0 },
+    amount: PARTIAL_BLOCK_CORE_DAMAGE,
+    speed: 18
+  });
+  assert(world.consumePartialBlockMeshRegionUpdates().length > 0, "setup should create initial partial mesh dirtiness");
+  assertEqual(world.getDirtyPartialBlockMeshRegionCount(), 0, "setup should drain initial partial mesh dirtiness");
+
+  const chunk = world.getChunk(0, 0);
+  assert(chunk, "test world should have an owning chunk");
+  const requestId = 711;
+  world.pendingBlockLightBuilds.set(requestId, {
+    key: "0,0",
+    revision: chunk.revision,
+    jobId: 123
+  });
+  world.pendingBlockLightKeys.add("0,0");
+  world.workerResults.push({
+    type: BLOCK_LIGHT_BUILT_RESULT,
+    requestId,
+    cx: 0,
+    cz: 0,
+    revision: chunk.revision,
+    blockLight: createEmptyBlockLightChunkSnapshot(),
+    sourceCount: 0,
+    litCellCount: 0,
+    maxQueueDepth: 0
+  });
+
+  world.processBlockLightResults(1);
+
+  const dirtyUpdates = world.consumePartialBlockMeshRegionUpdates();
+  const dirtyRegionKeys = new Set(dirtyUpdates.map((update) => update.key));
+  assert(
+    dirtyRegionKeys.has(createPartialBlockMeshRegionKey({ x: 1, y: 2, z: 3 })),
+    "accepted light cache should dirty partial mesh regions in the current chunk"
+  );
+  assert(
+    dirtyRegionKeys.has(createPartialBlockMeshRegionKey({ x: CHUNK_SIZE, y: 2, z: 3 })),
+    "accepted light cache should dirty partial mesh regions in cardinal neighbor chunks"
+  );
+});
+
+test("partial exact-cut interior faces stay dark instead of raw-stamped", () => {
+  const exactRemovedCell = encodeTestLatticeIndex(1, 1, 1);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 27,
+    removedVisualCellIndexes: [exactRemovedCell],
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0.5, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: [exactRemovedCell],
+      radius: 0.12,
+      depth: 0.12,
+      seed: 2468
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 14,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, () => false);
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight[getBlockLightIndex(1, 2, 3)] = 14;
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+
+  assert(geometry.blockLights.length > 0, "exact-cut interior geometry should be present for the test fixture");
+  assert(
+    geometry.blockLights.every((value) => value === 0),
+    "exact/carved interior faces should stay dark instead of alternating raw 0/14 block-light artifacts"
+  );
 });
 
 test("partial block field renders faceted custom terrain cells", () => {
@@ -5993,7 +6426,7 @@ test("partial block field renders faceted custom terrain cells", () => {
     "partial terrain should emit shader-compatible block-light attributes for every vertex"
   );
   for (let index = 0; index < blockLightAttribute.count; index += 1) {
-    assertEqual(blockLightAttribute.getX(index), 0, "partial terrain block-light attributes should be zero-filled for now");
+    assertEqual(blockLightAttribute.getX(index), 0, "partial terrain without light buffers should render dark");
   }
   assert(bounds.min.x >= 1 && bounds.max.x <= 2, "partial block geometry should stay inside its voxel x bounds");
   assert(bounds.min.y >= 2 && bounds.max.y <= 3, "partial block geometry should stay inside its voxel y bounds");

@@ -210,6 +210,7 @@ import {
   PARTIAL_BLOCK_MESH_BUILD_JOB,
   buildPartialBlockMeshBuildJob,
   createPartialBlockMeshBuildJobPayload,
+  getPartialBlockMeshBuildJobPayloadTransfers,
   type PartialBlockMeshBuildJobPayload,
   type PartialBlockMeshBuildJobResult
 } from "./partialBlockMeshWorkerProtocol";
@@ -3544,12 +3545,17 @@ function schedulePartialBlockMeshRegionBuild(
     update,
     (cell, normal) => activeWorld.shouldRenderPartialBlockFace(cell, normal)
   );
-  const payload = createPartialBlockMeshBuildJobPayload(update, faceVisibilityMasks);
+  const payload = createPartialBlockMeshBuildJobPayload(
+    update,
+    faceVisibilityMasks,
+    activeWorld.snapshotPartialBlockMeshRegionBlockLightInput(update)
+  );
   const handle = workerPool.enqueue<PartialBlockMeshBuildJobPayload, PartialBlockMeshBuildJobResult>({
     type: PARTIAL_BLOCK_MESH_BUILD_JOB,
     payload,
     revision,
     priority: update.urgent ? 0 : 20,
+    transfer: getPartialBlockMeshBuildJobPayloadTransfers(payload),
     isRevisionStale: (jobRevision) =>
       activeWorld !== world || activeWorld.isPartialBlockMeshRegionRevisionStale(update.key, jobRevision),
     run: buildPartialBlockMeshBuildJob

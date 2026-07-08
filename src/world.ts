@@ -57,6 +57,7 @@ import {
   createPartialBlockRemovedVisualCellIndexes,
   createPartialBlockSurfaceSamples,
   createPartialBlockTrajectoryTunnelCellIndexes,
+  getPartialBlockMeshRegionBounds,
   getPartialBlockPlayerFootprintSupport,
   getPartialBlockMeshDirtyRegionKeys,
   getPartialBlockSupportHeight,
@@ -65,6 +66,7 @@ import {
   parsePartialBlockMeshRegionKey,
   type PartialBlockCell,
   type PartialBlockCut,
+  type PartialBlockMeshBuildInput,
   type PartialBlockMeshRegionUpdate,
   type PartialBlockPosition,
   type PartialBlockSurfaceSample
@@ -3087,8 +3089,15 @@ export class VoxelWorld implements CollisionWorld {
     // The region halo is deliberately wider than the owned cell. Boundary faces
     // and stitched partial-height surfaces both need adjacent regions to refresh
     // when a neighboring damaged cell appears, changes, or disappears.
+    this.markPartialBlockMeshRegionKeysDirty(getPartialBlockMeshDirtyRegionKeys(position), urgent);
+  }
+
+  private markPartialBlockMeshRegionKeysDirty(regionKeys: Iterable<string>, urgent: boolean): void {
+    const keys = [...new Set(regionKeys)];
+    if (keys.length === 0) return;
+
     const nextRevision = this.partialBlockGeometryRevision + 1;
-    for (const key of getPartialBlockMeshDirtyRegionKeys(position)) {
+    for (const key of keys) {
       this.dirtyPartialBlockRegionKeys.add(key);
       this.partialBlockRegionRevisions.set(key, nextRevision);
       if (urgent) this.urgentPartialBlockRegionKeys.add(key);
@@ -3300,6 +3309,20 @@ export class VoxelWorld implements CollisionWorld {
     this.markChunkMeshDirtyForLightBuffer(cx + 1, cz);
     this.markChunkMeshDirtyForLightBuffer(cx, cz - 1);
     this.markChunkMeshDirtyForLightBuffer(cx, cz + 1);
+  }
+
+  private markPartialBlockMeshesDirtyForLightBuffer(cx: number, cz: number): void {
+    const regionKeys = new Set<string>();
+    for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const bucket = this.partialBlocksByChunk.get(this.key(cx + dx, cz + dz));
+      if (!bucket) continue;
+      for (const cell of bucket.values()) {
+        for (const regionKey of getPartialBlockMeshDirtyRegionKeys(cell.position)) {
+          regionKeys.add(regionKey);
+        }
+      }
+    }
+    this.markPartialBlockMeshRegionKeysDirty(regionKeys, false);
   }
 
   private markChunkMeshDirtyForLightBuffer(cx: number, cz: number): void {
@@ -3801,6 +3824,7 @@ export class VoxelWorld implements CollisionWorld {
       // not be invalidated just because a neighboring mesh needs this buffer.
       this.markChunkMeshDirtyForLightBuffer(result.cx, result.cz);
       this.markCardinalNeighborMeshesDirty(result.cx, result.cz);
+      this.markPartialBlockMeshesDirtyForLightBuffer(result.cx, result.cz);
     }
 
     this.workerResults = remaining;
@@ -4244,6 +4268,25 @@ export class VoxelWorld implements CollisionWorld {
         negativeZ: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx, cz - 1))),
         positiveZ: cloneCachedBlockLightBuffer(this.blockLightCache.get(this.key(cx, cz + 1)))
       }
+    };
+  }
+
+  snapshotPartialBlockMeshRegionBlockLightInput(
+    update: PartialBlockMeshRegionUpdate
+  ): Pick<PartialBlockMeshBuildInput, "blockLights" | "blockLightChunkOrigin"> | undefined {
+    const coords = parsePartialBlockMeshRegionKey(update.key);
+    if (!coords) return undefined;
+    const bounds = getPartialBlockMeshRegionBounds(coords);
+    const cx = Math.floor(bounds.minX / CHUNK_SIZE);
+    const cz = Math.floor(bounds.minZ / CHUNK_SIZE);
+
+    // Partial mesh regions are 4m columns and chunk columns are 16m columns,
+    // so a region's owned cells fit inside one chunk. Context halo cells can
+    // cross the edge, but all rendered vertices sample through this owner chunk
+    // plus the cloned cardinal cache buffers below.
+    return {
+      blockLights: this.snapshotChunkBlockLightBuffers(cx, cz),
+      blockLightChunkOrigin: { cx, cz }
     };
   }
 

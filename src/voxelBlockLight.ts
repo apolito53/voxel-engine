@@ -1,4 +1,10 @@
 import { BLOCK, BLOCKS } from "./blocks";
+import type {
+  ChunkBlockLightBuffers,
+  ChunkBlockLights,
+  ChunkNeighborBlocks,
+  ChunkNeighborBuffers
+} from "./chunkProtocol";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
 export type BlockLightNeighborSnapshots = Readonly<Record<string, Uint8Array | null | undefined>>;
@@ -21,6 +27,14 @@ export type BlockLightDirtyChunkCoord = {
   readonly cx: number;
   readonly cz: number;
 };
+
+export type BlockLightFaceNormal = readonly [number, number, number];
+export type BlockLightSamplePoint = readonly [number, number, number] | {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+};
+export type QuadBlockLightLevels = readonly [number, number, number, number];
 
 export const BLOCK_LIGHT_MIN_LEVEL = 0;
 export const BLOCK_LIGHT_MAX_LEVEL = 15;
@@ -120,6 +134,133 @@ export function createEmptyChunkBlockLight(): Uint8Array {
 
 export function getBlockLightIndex(localX: number, y: number, localZ: number): number {
   return localX + CHUNK_SIZE * (localZ + CHUNK_SIZE * y);
+}
+
+export function readChunkBlockLightBuffers(blockLights?: ChunkBlockLightBuffers | null): ChunkBlockLights {
+  return {
+    current: blockLights?.current ? new Uint8Array(blockLights.current) : null,
+    neighbors: readChunkBlockLightNeighborBuffers(blockLights?.neighbors)
+  };
+}
+
+export function getBlockLightAt(
+  blockLights: ChunkBlockLights,
+  x: number,
+  y: number,
+  z: number
+): number {
+  if (y < 0 || y >= WORLD_HEIGHT) return 0;
+  return normalizeBlockLightLevel(getChunkBlockLightValueAt(blockLights.current, blockLights.neighbors, x, y, z) ?? 0);
+}
+
+export function getSmoothedFaceBlockLightCorners(
+  blockLights: ChunkBlockLights,
+  normal: BlockLightFaceNormal,
+  corners: readonly [
+    BlockLightSamplePoint,
+    BlockLightSamplePoint,
+    BlockLightSamplePoint,
+    BlockLightSamplePoint
+  ]
+): QuadBlockLightLevels {
+  return [
+    getSmoothedFaceVertexBlockLight(blockLights, normal, corners[0], corners[0]),
+    getSmoothedFaceVertexBlockLight(blockLights, normal, corners[1], corners[1]),
+    getSmoothedFaceVertexBlockLight(blockLights, normal, corners[2], corners[2]),
+    getSmoothedFaceVertexBlockLight(blockLights, normal, corners[3], corners[3])
+  ];
+}
+
+export function getSmoothedFaceVertexBlockLight(
+  blockLights: ChunkBlockLights,
+  normal: BlockLightFaceNormal,
+  vertex: BlockLightSamplePoint,
+  faceSideCell: BlockLightSamplePoint
+): number {
+  // Block light is still a macro-voxel 0..15 field. Mesh vertices sample only
+  // the face-adjacent cells touching that vertex in the face plane, then let
+  // the shader interpolate. Fractional partial-terrain vertices stay inside
+  // their containing macro row/column instead of reaching through solids.
+  if (normal[0] !== 0) {
+    const yCells = getTouchingBlockLightCellCoords(getBlockLightSampleY(vertex));
+    const zCells = getTouchingBlockLightCellCoords(getBlockLightSampleZ(vertex));
+    return averageBlockLight4(
+      blockLights,
+      Math.floor(getBlockLightSampleX(faceSideCell)),
+      yCells[0],
+      zCells[0],
+      Math.floor(getBlockLightSampleX(faceSideCell)),
+      yCells[1],
+      zCells[0],
+      Math.floor(getBlockLightSampleX(faceSideCell)),
+      yCells[0],
+      zCells[1],
+      Math.floor(getBlockLightSampleX(faceSideCell)),
+      yCells[1],
+      zCells[1]
+    );
+  }
+
+  if (normal[1] !== 0) {
+    const xCells = getTouchingBlockLightCellCoords(getBlockLightSampleX(vertex));
+    const zCells = getTouchingBlockLightCellCoords(getBlockLightSampleZ(vertex));
+    return averageBlockLight4(
+      blockLights,
+      xCells[0],
+      Math.floor(getBlockLightSampleY(faceSideCell)),
+      zCells[0],
+      xCells[1],
+      Math.floor(getBlockLightSampleY(faceSideCell)),
+      zCells[0],
+      xCells[0],
+      Math.floor(getBlockLightSampleY(faceSideCell)),
+      zCells[1],
+      xCells[1],
+      Math.floor(getBlockLightSampleY(faceSideCell)),
+      zCells[1]
+    );
+  }
+
+  const xCells = getTouchingBlockLightCellCoords(getBlockLightSampleX(vertex));
+  const yCells = getTouchingBlockLightCellCoords(getBlockLightSampleY(vertex));
+  return averageBlockLight4(
+    blockLights,
+    xCells[0],
+    yCells[0],
+    Math.floor(getBlockLightSampleZ(faceSideCell)),
+    xCells[1],
+    yCells[0],
+    Math.floor(getBlockLightSampleZ(faceSideCell)),
+    xCells[0],
+    yCells[1],
+    Math.floor(getBlockLightSampleZ(faceSideCell)),
+    xCells[1],
+    yCells[1],
+    Math.floor(getBlockLightSampleZ(faceSideCell))
+  );
+}
+
+export function averageBlockLight4(
+  blockLights: ChunkBlockLights,
+  ax: number,
+  ay: number,
+  az: number,
+  bx: number,
+  by: number,
+  bz: number,
+  cx: number,
+  cy: number,
+  cz: number,
+  dx: number,
+  dy: number,
+  dz: number
+): number {
+  return (
+    getBlockLightAt(blockLights, ax, ay, az) +
+    getBlockLightAt(blockLights, bx, by, bz) +
+    getBlockLightAt(blockLights, cx, cy, cz) +
+    getBlockLightAt(blockLights, dx, dy, dz)
+  ) / 4;
 }
 
 export function normalizeBlockLightLevel(value: number): number {
@@ -238,4 +379,67 @@ function unpackExtendedBlockLightIndex(index: number): { localX: number; y: numb
 
 function worldToChunkCoord(worldCoord: number): number {
   return Math.floor(worldCoord / CHUNK_SIZE);
+}
+
+function readChunkBlockLightNeighborBuffers(neighbors?: ChunkNeighborBuffers): ChunkNeighborBlocks {
+  return {
+    negativeX: neighbors?.negativeX ? new Uint8Array(neighbors.negativeX) : null,
+    positiveX: neighbors?.positiveX ? new Uint8Array(neighbors.positiveX) : null,
+    negativeZ: neighbors?.negativeZ ? new Uint8Array(neighbors.negativeZ) : null,
+    positiveZ: neighbors?.positiveZ ? new Uint8Array(neighbors.positiveZ) : null
+  };
+}
+
+function getChunkBlockLightValueAt(
+  current: Uint8Array | null,
+  neighbors: ChunkNeighborBlocks,
+  x: number,
+  y: number,
+  z: number
+): number | null {
+  if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
+    return current ? current[getBlockLightIndex(x, y, z)] : null;
+  }
+
+  // Mesh-time block-light smoothing may look exactly one cell across a cardinal
+  // chunk edge. Farther or diagonal out-of-range reads are darkness so border
+  // falloff cannot smear a bright edge cell into a fake halo.
+  if (x === -1 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
+    return neighbors.negativeX[getBlockLightIndex(CHUNK_SIZE - 1, y, z)];
+  }
+
+  if (x === CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
+    return neighbors.positiveX[getBlockLightIndex(0, y, z)];
+  }
+
+  if (z === -1 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
+    return neighbors.negativeZ[getBlockLightIndex(x, y, CHUNK_SIZE - 1)];
+  }
+
+  if (z === CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
+    return neighbors.positiveZ[getBlockLightIndex(x, y, 0)];
+  }
+
+  return null;
+}
+
+function getTouchingBlockLightCellCoords(value: number): readonly [number, number] {
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) <= 0.000001) {
+    return [rounded - 1, rounded];
+  }
+  const cell = Math.floor(value);
+  return [cell, cell];
+}
+
+function getBlockLightSampleX(point: BlockLightSamplePoint): number {
+  return "x" in point ? point.x : point[0];
+}
+
+function getBlockLightSampleY(point: BlockLightSamplePoint): number {
+  return "y" in point ? point.y : point[1];
+}
+
+function getBlockLightSampleZ(point: BlockLightSamplePoint): number {
+  return "z" in point ? point.z : point[2];
 }

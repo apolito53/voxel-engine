@@ -16,8 +16,9 @@
 
 ### Changed
 
-- Partial terrain meshes now upload a zero-filled compatible `blockLight`
-  attribute until partial-terrain block lighting is implemented.
+- Partial terrain meshes now consume cloned cached block-light buffers as a
+  conservative render-only path: exterior macro and partial-height faces smooth
+  per-vertex Lamp light, while carved/interior bite faces stay dark.
 - Smoothed normal chunk terrain Lamp block light by averaging face-adjacent
   light levels per vertex, reducing checker-patterned rendered falloff without
   changing the integer 0..15 block-light solver.
@@ -26,7 +27,9 @@
 
 - Added coverage for block-light worker transfers, chunk mesh block-light
   attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
-  and partial-terrain zero attributes.
+  partial-terrain smoothing, partial worker light-buffer transfers, missing
+  partial light buffers, rendered partial Lamp removal, cross-chunk partial
+  light, and dark carved interiors.
 - Added coverage for smoothed per-vertex chunk mesh block-light values.
 
 ## 0.17.0 - 2026-07-01

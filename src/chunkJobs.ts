@@ -23,7 +23,13 @@ import type {
 } from "./chunkProtocol";
 import { createTerrainContext, generateChunkBlocks } from "./terrain";
 import type { TerrainContext, TerrainProfile } from "./terrain";
-import { getBlockLightIndex, normalizeBlockLightLevel } from "./voxelBlockLight";
+import {
+  getBlockLightAt,
+  getSmoothedFaceBlockLightCorners,
+  normalizeBlockLightLevel,
+  readChunkBlockLightBuffers,
+  type QuadBlockLightLevels
+} from "./voxelBlockLight";
 import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 
@@ -38,7 +44,6 @@ export type ChunkJobResult = ChunkGeneratedResult | ChunkMeshedResult;
 type FaceNormal = readonly [number, number, number];
 type QuadCorner = readonly [number, number, number];
 type QuadCorners = readonly [QuadCorner, QuadCorner, QuadCorner, QuadCorner];
-type QuadBlockLightLevels = readonly [number, number, number, number];
 
 const terrainContexts = new Map<string, TerrainContext>();
 const BLOCK_LIGHT_MESH_KEY_SHIFT = 24;
@@ -131,10 +136,7 @@ function readPartialBlockMasks(partialBlockMasks: ChunkPartialBlockMaskBuffers):
 }
 
 function readBlockLights(blockLights: ChunkBlockLightBuffers): ChunkBlockLights {
-  return {
-    current: blockLights.current ? new Uint8Array(blockLights.current) : null,
-    neighbors: readNeighbors(blockLights.neighbors)
-  };
+  return readChunkBlockLightBuffers(blockLights);
 }
 
 function buildChunkMesh({
@@ -564,122 +566,6 @@ function getBlockAt(
 
   if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
     return neighbors.positiveZ[index(x, y, 0)];
-  }
-
-  return null;
-}
-
-function getBlockLightAt(
-  blockLights: ChunkBlockLights,
-  x: number,
-  y: number,
-  z: number
-): number {
-  if (y < 0 || y >= WORLD_HEIGHT) return 0;
-  const light = getChunkLightValueAt(blockLights.current, blockLights.neighbors, x, y, z);
-  return normalizeBlockLightLevel(light ?? 0);
-}
-
-function getSmoothedFaceBlockLightCorners(
-  blockLights: ChunkBlockLights,
-  normal: FaceNormal,
-  corners: QuadCorners
-): QuadBlockLightLevels {
-  return [
-    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[0]),
-    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[1]),
-    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[2]),
-    getSmoothedFaceCornerBlockLight(blockLights, normal, corners[3])
-  ];
-}
-
-function getSmoothedFaceCornerBlockLight(
-  blockLights: ChunkBlockLights,
-  normal: FaceNormal,
-  [x, y, z]: QuadCorner
-): number {
-  // Block light is still a macro-voxel 0..15 field. For rendering, each face
-  // vertex samples the four face-adjacent cells that touch that corner in the
-  // face plane. The duplicated vertices on neighboring quads then receive the
-  // same value, letting the shader interpolate away the visible checker steps
-  // without changing the solver or leaking light through occluding terrain.
-  if (normal[0] !== 0) {
-    return averageBlockLight4(
-      blockLights,
-      x, y - 1, z - 1,
-      x, y, z - 1,
-      x, y - 1, z,
-      x, y, z
-    );
-  }
-
-  if (normal[1] !== 0) {
-    return averageBlockLight4(
-      blockLights,
-      x - 1, y, z - 1,
-      x, y, z - 1,
-      x - 1, y, z,
-      x, y, z
-    );
-  }
-
-  return averageBlockLight4(
-    blockLights,
-    x - 1, y - 1, z,
-    x, y - 1, z,
-    x - 1, y, z,
-    x, y, z
-  );
-}
-
-function averageBlockLight4(
-  blockLights: ChunkBlockLights,
-  ax: number,
-  ay: number,
-  az: number,
-  bx: number,
-  by: number,
-  bz: number,
-  cx: number,
-  cy: number,
-  cz: number,
-  dx: number,
-  dy: number,
-  dz: number
-): number {
-  return (
-    getBlockLightAt(blockLights, ax, ay, az) +
-    getBlockLightAt(blockLights, bx, by, bz) +
-    getBlockLightAt(blockLights, cx, cy, cz) +
-    getBlockLightAt(blockLights, dx, dy, dz)
-  ) / 4;
-}
-
-function getChunkLightValueAt(
-  current: Uint8Array | null,
-  neighbors: ChunkNeighborBlocks,
-  x: number,
-  y: number,
-  z: number
-): number | null {
-  if (x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) {
-    return current ? current[getBlockLightIndex(x, y, z)] : null;
-  }
-
-  if (x < 0 && z >= 0 && z < CHUNK_SIZE && neighbors.negativeX) {
-    return neighbors.negativeX[getBlockLightIndex(CHUNK_SIZE - 1, y, z)];
-  }
-
-  if (x >= CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE && neighbors.positiveX) {
-    return neighbors.positiveX[getBlockLightIndex(0, y, z)];
-  }
-
-  if (z < 0 && x >= 0 && x < CHUNK_SIZE && neighbors.negativeZ) {
-    return neighbors.negativeZ[getBlockLightIndex(x, y, CHUNK_SIZE - 1)];
-  }
-
-  if (z >= CHUNK_SIZE && x >= 0 && x < CHUNK_SIZE && neighbors.positiveZ) {
-    return neighbors.positiveZ[getBlockLightIndex(x, y, 0)];
   }
 
   return null;
