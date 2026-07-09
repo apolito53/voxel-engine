@@ -1,5 +1,5 @@
 import { BLOCK_FRAGMENT_COUNT, BLOCK_FRAGMENT_GRID_SIZE } from "./blockFragments";
-import { createBlockMeshKey, getTintedBlockColor } from "./blockColors";
+import { createBlockMeshKey, getMaterialBlockColor } from "./blockColors";
 import { TERRAIN_DAMAGE_SCALE } from "./blockMaterialRules";
 import { getBlockTextureBaseTileId } from "./blockTextureTiles";
 import type { ChunkBlockLightBuffers, ChunkBlockLights } from "./chunkProtocol";
@@ -1435,7 +1435,7 @@ function addCarvedFaceGeometry(
       const sample = sampleCarvedFacePoint(cell, face, cuts, tu, tv);
       geometry.positions.push(sample.x, sample.y, sample.z);
       geometry.normals.push(face.normal.x, face.normal.y, face.normal.z);
-      const color = getTintedBlockColor(
+      const color = getMaterialBlockColor(
         meshKey,
         getSunlitFaceShade([face.normal.x, face.normal.y, face.normal.z]) * sample.shade
       );
@@ -1471,7 +1471,7 @@ function addTriangle(
   const normal = getTriangleNormal(first, second, third);
   const shade = Math.max(0.24, getSunlitFaceShade(normal) * 0.95);
   const meshKey = createBlockMeshKey(cell.block, cell.position.x, cell.position.y, cell.position.z);
-  const color = getTintedBlockColor(meshKey, shade);
+  const color = getMaterialBlockColor(meshKey, shade);
   const textureTile = getBlockTextureBaseTileId(meshKey, normal);
   const base = geometry.positions.length / 3;
   geometry.positions.push(...first, ...second, ...third);
@@ -1755,7 +1755,10 @@ function addQuad(
   const normalTuple: readonly [number, number, number] = [normal.x, normal.y, normal.z];
   const shade = getSunlitFaceShade(normalTuple) * shadeMultiplier;
   const meshKey = createBlockMeshKey(block, position.x, position.y, position.z);
-  const color = getTintedBlockColor(meshKey, shade);
+  // Normal chunk meshes keep deterministic variation in texture/atlas lookup,
+  // not in vertex color, so greedy faces stay material-consistent. Partial
+  // terrain follows the same rule or damaged pieces read as a different block.
+  const color = getMaterialBlockColor(meshKey, shade);
   const textureTile = getBlockTextureBaseTileId(meshKey, normalTuple);
 
   for (const corner of corners) {

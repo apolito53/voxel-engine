@@ -6152,6 +6152,46 @@ test("partial block mesh builder uses face visibility masks without world callba
   }
 });
 
+test("partial block exterior vertex colors match chunk material colors", () => {
+  const normal = [1, 0, 0] as const;
+  const shade = getSunlitFaceShade(normal);
+  const expectedColor = getMaterialBlockColor(BLOCK.grass, shade);
+  let position: { readonly x: number; readonly y: number; readonly z: number } | null = null;
+
+  for (let x = 0; x < 64; x += 1) {
+    const meshKey = createBlockMeshKey(BLOCK.grass, x, 2, 3);
+    const oldTintedColor = getTintedBlockColor(meshKey, shade);
+    if (oldTintedColor.some((channel, index) => Math.abs(channel - expectedColor[index]) > 0.01)) {
+      position = { x, y: 2, z: 3 };
+      break;
+    }
+  }
+
+  assert(position, "fixture should find a coordinate whose old vertex tint would visibly diverge");
+  const cell: PartialBlockCell = {
+    block: BLOCK.grass,
+    position,
+    damage: 0,
+    maxHealth: 2,
+    cuts: []
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 15,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, faceNormal) => faceNormal.x === 1);
+  const geometry = buildPartialBlockMeshGeometryData({ update, faceVisibilityMasks: masks });
+
+  assertEqual(geometry.colors.length, 12, "one visible partial quad should emit four RGB vertex colors");
+  for (let index = 0; index < geometry.colors.length; index += 3) {
+    assertClose(geometry.colors[index] ?? 0, expectedColor[0], 0.000001, "partial red channel should match chunks");
+    assertClose(geometry.colors[index + 1] ?? 0, expectedColor[1], 0.000001, "partial green channel should match chunks");
+    assertClose(geometry.colors[index + 2] ?? 0, expectedColor[2], 0.000001, "partial blue channel should match chunks");
+  }
+});
+
 test("partial block mesh builder keeps missing block-light buffers dark", () => {
   const cell: PartialBlockCell = {
     block: BLOCK.stone,
