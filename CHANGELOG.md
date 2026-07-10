@@ -18,7 +18,10 @@
 
 - Partial terrain meshes now consume cloned cached block-light buffers as a
   conservative render-only path: exterior macro and partial-height faces smooth
-  per-vertex Lamp light, while carved/interior bite faces stay dark.
+  per-vertex Lamp light, while visible 3x3x3 bite apertures transfer that cached
+  light through face-connected removed subcells to exact and wrinkled cavity
+  walls. Cavity light loses one-third of a level at entry and per connected
+  subcell, and cannot enter sealed pockets or cross intact subcells.
 - Partial terrain vertex colors now use the same material-level color path as
   normal chunk terrain, keeping damaged pieces from looking like a different
   material while texture variation still comes from the atlas tile attributes.
@@ -35,7 +38,8 @@
   attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
   partial-terrain smoothing, partial worker light-buffer transfers, missing
   partial light buffers, rendered partial Lamp removal, cross-chunk partial
-  light, dark carved interiors, partial/chunk material color parity, and
+  light, exact and wrinkled cavity illumination, sealed-pocket darkness,
+  one-third-step cavity attenuation, partial/chunk material color parity, and
   subdivided partial/chunk block-light gradient parity.
 - Added coverage for smoothed per-vertex chunk mesh block-light values.
 

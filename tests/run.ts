@@ -2436,6 +2436,35 @@ function createChunkMeshBlockLightBuffers(
   };
 }
 
+type TestPartialBlockVertexSample = {
+  readonly position: readonly [number, number, number];
+  readonly normal: readonly [number, number, number];
+  readonly blockLight: number;
+};
+
+function getPartialBlockVertexSamples(
+  geometry: ReturnType<typeof buildPartialBlockMeshGeometryData>
+): readonly TestPartialBlockVertexSample[] {
+  const samples: TestPartialBlockVertexSample[] = [];
+  for (let vertexIndex = 0; vertexIndex < geometry.positions.length / 3; vertexIndex += 1) {
+    const offset = vertexIndex * 3;
+    samples.push({
+      position: [
+        geometry.positions[offset] ?? 0,
+        geometry.positions[offset + 1] ?? 0,
+        geometry.positions[offset + 2] ?? 0
+      ],
+      normal: [
+        geometry.normals[offset] ?? 0,
+        geometry.normals[offset + 1] ?? 0,
+        geometry.normals[offset + 2] ?? 0
+      ],
+      blockLight: geometry.blockLights[vertexIndex] ?? 0
+    });
+  }
+  return samples;
+}
+
 async function drainWorldRenderWork(
   world: VoxelWorld,
   scene: THREE.Scene,
@@ -6389,6 +6418,399 @@ test("cross-chunk Lamp block light reaches partial terrain through neighbor buff
   );
 });
 
+test("visible partial apertures illuminate exact-cut cavity walls", () => {
+  const removedCells = [
+    encodeTestLatticeIndex(0, 1, 1),
+    encodeTestLatticeIndex(1, 1, 1)
+  ];
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 2,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 0.2,
+      depth: 2 / 3,
+      seed: 4101
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 17,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight.fill(12);
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    ),
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const endWallX = cell.position.x + 2 / 3;
+  const endWallSamples = getPartialBlockVertexSamples(geometry).filter(({ position, normal }) => (
+    Math.abs(position[0] - endWallX) <= 0.000001 &&
+    Math.abs(normal[0] + 1) <= 0.000001 &&
+    Math.abs(normal[1]) <= 0.000001 &&
+    Math.abs(normal[2]) <= 0.000001
+  ));
+
+  assert(endWallSamples.length > 0, "exact-cut fixture should expose a clean wall at the back of the cavity");
+  for (const sample of endWallSamples) {
+    assert(sample.blockLight > 0, "a visible lit aperture should illuminate its exact-cut cavity wall");
+    assert(sample.blockLight <= 12, "cavity light should never exceed its aperture seed");
+  }
+});
+
+test("wrinkled cavity light attenuates by one third per connected subcell", () => {
+  const removedCells = [0, 1, 2].map((x) => encodeTestLatticeIndex(x, 1, 1));
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 3,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.3,
+      depth: 1,
+      seed: 4102
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 18,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight.fill(12);
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    ),
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const samples = getPartialBlockVertexSamples(geometry);
+  const depthLevels: number[] = [];
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    const centerX = cell.position.x + (depth + 0.5) / 3;
+    const centerSamples = samples.filter(({ position, normal }) => {
+      const tangentNormal = Math.abs(normal[1]) + Math.abs(normal[2]);
+      return Math.abs(position[0] - centerX) <= 0.000001 && tangentNormal > 0.5;
+    });
+    assert(centerSamples.length > 0, `wrinkled depth ${depth} should emit center vertices`);
+    const level = centerSamples[0]?.blockLight ?? 0;
+    for (const sample of centerSamples) {
+      assertClose(sample.blockLight, level, 0.000001, "one cavity subcell should share one center light level");
+    }
+    depthLevels.push(level);
+  }
+
+  assert(depthLevels[0]! > 0, "the wrinkled cavity lip should receive light through its visible aperture");
+  assertClose(depthLevels[0]!, 12 - 1 / 3, 0.000001, "the aperture subcell should lose one third level at entry");
+  assertClose(depthLevels[1]!, 12 - 2 / 3, 0.000001, "the second subcell should lose another one third level");
+  assertClose(depthLevels[2]!, 11, 0.000001, "the third subcell should lose one full level from the exterior lip");
+  assert(depthLevels.every((level) => level <= 12), "cavity propagation should never exceed the aperture seed");
+});
+
+test("neighboring partial apertures smooth unequal cavity light across their shared edge", () => {
+  const removedCells = [
+    encodeTestLatticeIndex(0, 0, 1),
+    encodeTestLatticeIndex(0, 1, 1)
+  ];
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 2,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 1 / 3, z: 0.5 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 1 / 3,
+      depth: 1 / 3,
+      seed: 4106
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 22,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  // Build a vertical macro-face gradient so the two neighboring aperture
+  // centers start at different levels instead of accidentally testing a flat
+  // field that would hide a discontinuity.
+  for (let z = 2; z <= 4; z += 1) {
+    blockLight[getBlockLightIndex(0, 1, z)] = 4;
+    blockLight[getBlockLightIndex(0, 2, z)] = 8;
+    blockLight[getBlockLightIndex(0, 3, z)] = 12;
+  }
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    ),
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const samples = getPartialBlockVertexSamples(geometry);
+  const wallX = cell.position.x + 1 / 3;
+  const wallZ = cell.position.z + 1 / 3;
+  const sampleWallVertex = (y: number): readonly TestPartialBlockVertexSample[] => samples.filter(({ position, normal }) => (
+    Math.abs(position[0] - wallX) <= 0.000001 &&
+    Math.abs(position[1] - y) <= 0.000001 &&
+    Math.abs(position[2] - wallZ) <= 0.000001 &&
+    Math.abs(normal[0]) <= 0.000001 &&
+    Math.abs(normal[1]) <= 0.000001 &&
+    Math.abs(normal[2] - 1) <= 0.000001
+  ));
+  const lowerSamples = sampleWallVertex(cell.position.y);
+  const sharedSamples = sampleWallVertex(cell.position.y + 1 / 3);
+  const upperSamples = sampleWallVertex(cell.position.y + 2 / 3);
+
+  assert(lowerSamples.length > 0, "the lower aperture should expose its outer cavity-wall vertex");
+  assert(sharedSamples.length >= 2, "neighboring cavity walls should duplicate their shared-edge vertex");
+  assert(upperSamples.length > 0, "the upper aperture should expose its outer cavity-wall vertex");
+  const lowerLevel = lowerSamples[0]?.blockLight ?? 0;
+  const sharedLevel = sharedSamples[0]?.blockLight ?? 0;
+  const upperLevel = upperSamples[0]?.blockLight ?? 0;
+  assert(upperLevel > lowerLevel, "the asymmetric aperture fixture should preserve its vertical light gradient");
+  assert(
+    sharedLevel > lowerLevel && sharedLevel < upperLevel,
+    "the shared cavity edge should interpolate between its unequal neighboring aperture levels"
+  );
+  for (const sample of sharedSamples) {
+    assertClose(
+      sample.blockLight,
+      sharedLevel,
+      0.000001,
+      "both cavity quads should emit the same smoothed light at their shared edge"
+    );
+  }
+});
+
+test("diagonally touching partial cavities do not transfer light through an intact corner", () => {
+  const apertureCell = encodeTestLatticeIndex(0, 0, 0);
+  const sealedCell = encodeTestLatticeIndex(1, 1, 1);
+  const removedCells = [apertureCell, sealedCell];
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 2,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 1 / 6, z: 1 / 6 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 0.2,
+      depth: 2 / 3,
+      seed: 4107
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 23,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight.fill(12);
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    ),
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const samples = getPartialBlockVertexSamples(geometry);
+  const openWallX = cell.position.x + 1 / 3;
+  const sealedWallX = cell.position.x + 2 / 3;
+  const openWallSamples = samples.filter(({ position, normal }) => (
+    Math.abs(position[0] - openWallX) <= 0.000001 && Math.abs(normal[0] + 1) <= 0.000001
+  ));
+  const sealedWallSamples = samples.filter(({ position, normal }) => (
+    Math.abs(position[0] - sealedWallX) <= 0.000001 &&
+    position[1] >= cell.position.y + 1 / 3 - 0.000001 &&
+    position[1] <= cell.position.y + 2 / 3 + 0.000001 &&
+    position[2] >= cell.position.z + 1 / 3 - 0.000001 &&
+    position[2] <= cell.position.z + 2 / 3 + 0.000001 &&
+    Math.abs(normal[0] + 1) <= 0.000001
+  ));
+
+  assert(openWallSamples.length > 0, "the visible aperture should expose a lit inner wall");
+  assert(openWallSamples.some((sample) => sample.blockLight > 0), "the face-connected aperture should receive light");
+  assert(sealedWallSamples.length > 0, "the isolated center cell should expose a cavity wall");
+  assert(
+    sealedWallSamples.every((sample) => sample.blockLight === 0),
+    "a diagonal-only cavity must remain dark because no face-connected path reaches it"
+  );
+});
+
+test("partial cavity lighting stays dark when block-light buffers are missing", () => {
+  const removedCells = [
+    encodeTestLatticeIndex(0, 1, 1),
+    encodeTestLatticeIndex(1, 1, 1)
+  ];
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 2,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 0.2,
+      depth: 2 / 3,
+      seed: 4103
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 19,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    )
+  });
+
+  assert(geometry.blockLights.length > 0, "missing-buffer cavity fixture should emit partial geometry");
+  assert(
+    geometry.blockLights.every((level) => level === 0),
+    "missing cached light buffers should leave exterior and cavity attributes dark"
+  );
+});
+
+test("Lamp removal clears propagated partial cavity light", () => {
+  const removedCells = [
+    encodeTestLatticeIndex(2, 1, 1),
+    encodeTestLatticeIndex(1, 1, 1)
+  ];
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 2,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: 1, y: 0, z: 0 },
+      localPoint: { x: 1, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 0.2,
+      depth: 2 / 3,
+      seed: 4104
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 20,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, normal) => normal.x === 1);
+  const blocks = createEmptyBlockLightChunkSnapshot();
+  blocks[getBlockLightIndex(2, 2, 3)] = BLOCK.lamp;
+  const lit = buildChunkBlockLight({ blocks }).blockLight;
+  blocks[getBlockLightIndex(2, 2, 3)] = BLOCK.air;
+  const dark = buildChunkBlockLight({ blocks }).blockLight;
+  const litGeometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(lit),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const darkGeometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(dark),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+
+  assert(litGeometry.blockLights.some((level) => level > 0), "the Lamp should illuminate the open cavity");
+  assert(
+    darkGeometry.blockLights.every((level) => level === 0),
+    "rebuilding after Lamp removal should clear propagated cavity light"
+  );
+});
+
+test("chunk-edge partial apertures seed cavity light from cardinal neighbor buffers", () => {
+  const removedCells = [
+    encodeTestLatticeIndex(0, 1, 1),
+    encodeTestLatticeIndex(1, 1, 1)
+  ];
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: CHUNK_SIZE, y: 2, z: 3 },
+    damage: 2,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 0.2,
+      depth: 2 / 3,
+      seed: 4105
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 21,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const westLight = createEmptyBlockLightChunkSnapshot();
+  westLight.fill(12);
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    ),
+    blockLights: createChunkMeshBlockLightBuffers(createEmptyBlockLightChunkSnapshot(), {
+      negativeX: westLight
+    }),
+    blockLightChunkOrigin: { cx: 1, cz: 0 }
+  });
+  const endWallX = cell.position.x + 2 / 3;
+  const cavityEndWall = getPartialBlockVertexSamples(geometry).filter(({ position, normal }) => (
+    Math.abs(position[0] - endWallX) <= 0.000001 && Math.abs(normal[0] + 1) <= 0.000001
+  ));
+
+  assert(cavityEndWall.length > 0, "chunk-edge cavity fixture should expose its inner end wall");
+  assert(
+    cavityEndWall.every((sample) => sample.blockLight > 0 && sample.blockLight <= 12),
+    "a visible chunk-edge aperture should seed bounded cavity light from the west buffer"
+  );
+});
+
 test("accepted block-light cache results dirty current and cardinal partial mesh regions", () => {
   const world = new VoxelWorld({ seed: "partial-light-dirty-test" });
   world.setBlock(1, 2, 3, BLOCK.stone);
@@ -6449,7 +6871,7 @@ test("accepted block-light cache results dirty current and cardinal partial mesh
   );
 });
 
-test("partial exact-cut interior faces stay dark instead of raw-stamped", () => {
+test("closed partial cavities stay dark without a visible aperture", () => {
   const exactRemovedCell = encodeTestLatticeIndex(1, 1, 1);
   const cell: PartialBlockCell = {
     block: BLOCK.stone,
@@ -6485,7 +6907,7 @@ test("partial exact-cut interior faces stay dark instead of raw-stamped", () => 
   assert(geometry.blockLights.length > 0, "exact-cut interior geometry should be present for the test fixture");
   assert(
     geometry.blockLights.every((value) => value === 0),
-    "exact/carved interior faces should stay dark instead of alternating raw 0/14 block-light artifacts"
+    "a removed pocket with no visible macro-face connection should remain dark"
   );
 });
 

@@ -5,6 +5,7 @@ import { getBlockTextureBaseTileId } from "./blockTextureTiles";
 import type { ChunkBlockLightBuffers, ChunkBlockLights } from "./chunkProtocol";
 import type { CollisionBounds } from "./collision";
 import {
+  BLOCK_LIGHT_MAX_LEVEL,
   getSmoothedFaceBlockLightCorners,
   readChunkBlockLightBuffers,
   type BlockLightFaceNormal,
@@ -25,6 +26,8 @@ export const PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT = BLOCK_FRAGMENT_COUNT;
 
 const PARTIAL_BLOCK_FACE_SEGMENTS = 5;
 const PARTIAL_BLOCK_LATTICE_CELL_SIZE = 1 / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
+const PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION = 1 / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
+const PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON = 0.000001;
 const PARTIAL_BLOCK_BITE_DEPTH_SCORE_SCALE = 0.65;
 const PARTIAL_BLOCK_BITE_WRINKLE_DEPTH = 0.045;
 const PARTIAL_BLOCK_MIN_RADIUS = 0.26;
@@ -146,6 +149,11 @@ type PartialBlockMacroFaceLight = {
   readonly edgeV: PartialBlockPosition;
   readonly levels: QuadBlockLightLevels;
 };
+type PartialBlockCavityLightField = {
+  readonly levels: Float32Array;
+  readonly reachable: Uint8Array;
+};
+type PartialBlockVertexLightSampler = (vertex: PartialBlockPosition) => number;
 
 export type PartialBlockMeshRegionCoords = {
   readonly rx: number;
@@ -1124,6 +1132,15 @@ function addPartialBlockLatticeGeometry(
   lighting?: PartialBlockMeshLightingContext
 ): void {
   const exactRemovedCells = createExactRemovedVisualCellSet(cell.cuts);
+  // The macro solver intentionally treats a damaged voxel as opaque. Build one
+  // tiny render-only field for this block so its real 3x3x3 openings can carry
+  // cached Lamp light into exposed cut walls without changing world lighting.
+  const cavityLight = createPartialBlockCavityLightField(
+    cell,
+    removedCells,
+    isFaceVisible,
+    lighting
+  );
 
   for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
     if (removedCells.has(latticeCell.index)) continue;
@@ -1157,13 +1174,37 @@ function addPartialBlockLatticeGeometry(
         )
         : getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal);
       if (exposesBite) {
+        const cavityLightSampler = neighborIndex === null
+          ? undefined
+          : createPartialBlockCavityVertexLightSampler(
+            cavityLight,
+            neighborIndex,
+            face.normal,
+            cell.position
+          );
         if (neighborIndex !== null && exactRemovedCells.has(neighborIndex)) {
           // Terraformer edits are precision deletions, not impacts. Draw their
           // newly exposed walls as clean cuboid cuts so neighboring sub-cells
           // do not look damaged just because they border the removed cell.
-          addQuad(geometry, cell.block, cell.position, face.normal, corners, 1);
+          addQuad(
+            geometry,
+            cell.block,
+            cell.position,
+            face.normal,
+            corners,
+            1,
+            undefined,
+            cavityLightSampler
+          );
         } else {
-          addWrinkledBiteFace(geometry, cell, latticeCell, face.normal, corners);
+          addWrinkledBiteFace(
+            geometry,
+            cell,
+            latticeCell,
+            face.normal,
+            corners,
+            cavityLightSampler
+          );
         }
       } else {
         addQuad(
@@ -1178,6 +1219,167 @@ function addPartialBlockLatticeGeometry(
       }
     }
   }
+}
+
+function createPartialBlockCavityLightField(
+  cell: PartialBlockCell,
+  removedCells: ReadonlySet<number>,
+  isFaceVisible: PartialBlockFaceVisibility,
+  lighting?: PartialBlockMeshLightingContext
+): PartialBlockCavityLightField | undefined {
+  if (!lighting || removedCells.size === 0) return undefined;
+
+  const levels = new Float32Array(PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT);
+  const reachable = new Uint8Array(PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT);
+  const queue: number[] = [];
+  let brightestSeed = 0;
+
+  for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
+    if (!removedCells.has(latticeCell.index)) continue;
+
+    for (const face of PARTIAL_BLOCK_LATTICE_FACES) {
+      const neighborIndex = getPartialBlockLatticeCellIndex(
+        latticeCell.x + face.offset.x,
+        latticeCell.y + face.offset.y,
+        latticeCell.z + face.offset.z
+      );
+      if (neighborIndex !== null || !isFaceVisible(cell, face.normal)) continue;
+
+      // Sample the same cached macro-face gradient as normal chunk terrain, but
+      // at this aperture's center. A boundary subcell behind solid neighboring
+      // terrain is not a seed, even if another side of the damaged block is open.
+      const apertureCenter = getFaceCenter(
+        getPartialBlockLatticeFaceCorners(cell.position, latticeCell, face.normal)
+      );
+      const apertureLevel = clamp(
+        getPartialBlockVertexLight(lighting, cell.position, face.normal, apertureCenter),
+        0,
+        BLOCK_LIGHT_MAX_LEVEL
+      );
+      // The first cavity sample sits one subcell inside the macro boundary, so
+      // it should already read slightly dimmer than the exterior lip. Applying
+      // the same one-third-level transfer loss at entry keeps the recess legible
+      // without flattening it into an equally bright continuation of the wall.
+      const seedLevel = Math.max(0, apertureLevel - PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION);
+      brightestSeed = Math.max(brightestSeed, seedLevel);
+      levels[latticeCell.index] = Math.max(levels[latticeCell.index] ?? 0, seedLevel);
+      if (reachable[latticeCell.index] === 0) {
+        reachable[latticeCell.index] = 1;
+        queue.push(latticeCell.index);
+      }
+    }
+  }
+
+  // Each subcell spans one third of a meter, so a face-connected step loses one
+  // third of the macro solver's one-level-per-meter falloff. Re-queue improved
+  // cells because multiple apertures can illuminate the same cavity differently.
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const currentIndex = queue[cursor];
+    if (currentIndex === undefined) continue;
+    const currentLevel = levels[currentIndex] ?? 0;
+
+    for (const neighborIndex of getPartialBlockAdjacentLatticeCellIndexes(currentIndex)) {
+      if (!removedCells.has(neighborIndex)) continue;
+      const candidateLevel = Math.min(
+        brightestSeed,
+        Math.max(0, currentLevel - PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION)
+      );
+
+      if (reachable[neighborIndex] === 0) {
+        reachable[neighborIndex] = 1;
+        levels[neighborIndex] = candidateLevel;
+        queue.push(neighborIndex);
+        continue;
+      }
+      if (candidateLevel > (levels[neighborIndex] ?? 0) + PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON) {
+        levels[neighborIndex] = candidateLevel;
+        queue.push(neighborIndex);
+      }
+    }
+  }
+
+  return { levels, reachable };
+}
+
+function createPartialBlockCavityVertexLightSampler(
+  field: PartialBlockCavityLightField | undefined,
+  cavityCellIndex: number,
+  normal: PartialBlockPosition,
+  cellPosition: PartialBlockPosition
+): PartialBlockVertexLightSampler | undefined {
+  if (!field || field.reachable[cavityCellIndex] === 0) return undefined;
+  return (vertex) => samplePartialBlockCavityVertexLight(
+    field,
+    cavityCellIndex,
+    normal,
+    cellPosition,
+    vertex
+  );
+}
+
+function samplePartialBlockCavityVertexLight(
+  field: PartialBlockCavityLightField,
+  cavityCellIndex: number,
+  normal: PartialBlockPosition,
+  cellPosition: PartialBlockPosition,
+  vertex: PartialBlockPosition
+): number {
+  const cavityCell = PARTIAL_BLOCK_LATTICE_CELLS[cavityCellIndex];
+  if (!cavityCell || field.reachable[cavityCellIndex] === 0) return 0;
+
+  const tangentAxes = getPartialBlockCavityTangentAxes(normal);
+  const firstStep = getPartialBlockCavityVertexStep(vertex, cellPosition, cavityCell, tangentAxes[0]);
+  const secondStep = getPartialBlockCavityVertexStep(vertex, cellPosition, cavityCell, tangentAxes[1]);
+  const candidateIndexes = [cavityCellIndex];
+
+  const addReachableCandidate = (firstOffset: number, secondOffset: number): boolean => {
+    const coordinates = { x: cavityCell.x, y: cavityCell.y, z: cavityCell.z };
+    coordinates[tangentAxes[0]] += firstOffset;
+    coordinates[tangentAxes[1]] += secondOffset;
+    const candidateIndex = getPartialBlockLatticeCellIndex(coordinates.x, coordinates.y, coordinates.z);
+    if (
+      candidateIndex === null ||
+      field.reachable[candidateIndex] === 0 ||
+      candidateIndexes.includes(candidateIndex)
+    ) {
+      return false;
+    }
+    candidateIndexes.push(candidateIndex);
+    return true;
+  };
+
+  const hasFirstNeighbor = firstStep !== 0 && addReachableCandidate(firstStep, 0);
+  const hasSecondNeighbor = secondStep !== 0 && addReachableCandidate(0, secondStep);
+  // A diagonal cavity cell only contributes when one of the two local orthogonal
+  // cells connects it around this vertex. That keeps smoothing from shining
+  // through an intact corner where empty cells merely touch diagonally.
+  if (firstStep !== 0 && secondStep !== 0 && (hasFirstNeighbor || hasSecondNeighbor)) {
+    addReachableCandidate(firstStep, secondStep);
+  }
+
+  let total = 0;
+  for (const candidateIndex of candidateIndexes) total += field.levels[candidateIndex] ?? 0;
+  return total / candidateIndexes.length;
+}
+
+function getPartialBlockCavityTangentAxes(
+  normal: PartialBlockPosition
+): readonly [PartialBlockAxis, PartialBlockAxis] {
+  if (normal.x !== 0) return ["y", "z"];
+  if (normal.y !== 0) return ["x", "z"];
+  return ["x", "y"];
+}
+
+function getPartialBlockCavityVertexStep(
+  vertex: PartialBlockPosition,
+  cellPosition: PartialBlockPosition,
+  cavityCell: PartialBlockLatticeCell,
+  axis: PartialBlockAxis
+): number {
+  const latticeCoordinate = (vertex[axis] - cellPosition[axis]) * PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
+  if (Math.abs(latticeCoordinate - cavityCell[axis]) <= PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON) return -1;
+  if (Math.abs(latticeCoordinate - (cavityCell[axis] + 1)) <= PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON) return 1;
+  return 0;
 }
 
 function insetPartialBlockFaceCorners(
@@ -1231,7 +1433,8 @@ function addWrinkledBiteFace(
   cell: PartialBlockCell,
   latticeCell: PartialBlockLatticeCell,
   normal: PartialBlockPosition,
-  corners: readonly PartialBlockPosition[]
+  corners: readonly PartialBlockPosition[],
+  cavityLightSampler?: PartialBlockVertexLightSampler
 ): void {
   const center = getFaceCenter(corners);
   const noise = hashUnit(hashPartialBlockCut(cell.block, cell.position, normal, latticeCell.index + 97));
@@ -1242,10 +1445,10 @@ function addWrinkledBiteFace(
     z: center.z + normal.z * signedWrinkle
   };
 
-  addTriangleFacingNormal(geometry, cell, corners[0]!, corners[1]!, wrinkledCenter, normal);
-  addTriangleFacingNormal(geometry, cell, corners[1]!, corners[2]!, wrinkledCenter, normal);
-  addTriangleFacingNormal(geometry, cell, corners[2]!, corners[3]!, wrinkledCenter, normal);
-  addTriangleFacingNormal(geometry, cell, corners[3]!, corners[0]!, wrinkledCenter, normal);
+  addTriangleFacingNormal(geometry, cell, corners[0]!, corners[1]!, wrinkledCenter, normal, cavityLightSampler);
+  addTriangleFacingNormal(geometry, cell, corners[1]!, corners[2]!, wrinkledCenter, normal, cavityLightSampler);
+  addTriangleFacingNormal(geometry, cell, corners[2]!, corners[3]!, wrinkledCenter, normal, cavityLightSampler);
+  addTriangleFacingNormal(geometry, cell, corners[3]!, corners[0]!, wrinkledCenter, normal, cavityLightSampler);
 }
 
 function addPartialBlockSurfaceGeometry(
@@ -1478,7 +1681,8 @@ function addTriangle(
   second: RubbleLikeVertex,
   third: RubbleLikeVertex,
   lightingNormal?: PartialBlockPosition,
-  lighting?: PartialBlockMeshLightingContext
+  lighting?: PartialBlockMeshLightingContext,
+  vertexLightSampler?: PartialBlockVertexLightSampler
 ): void {
   const normal = getTriangleNormal(first, second, third);
   const shade = Math.max(0.24, getSunlitFaceShade(normal) * 0.95);
@@ -1491,9 +1695,15 @@ function addTriangle(
   geometry.colors.push(...color, ...color, ...color);
   const logicalLightingNormal = lightingNormal ?? null;
   geometry.blockLights.push(
-    getPartialBlockVertexLight(lighting, cell.position, logicalLightingNormal, vertexFromRubble(first)),
-    getPartialBlockVertexLight(lighting, cell.position, logicalLightingNormal, vertexFromRubble(second)),
-    getPartialBlockVertexLight(lighting, cell.position, logicalLightingNormal, vertexFromRubble(third))
+    vertexLightSampler
+      ? vertexLightSampler(vertexFromRubble(first))
+      : getPartialBlockVertexLight(lighting, cell.position, logicalLightingNormal, vertexFromRubble(first)),
+    vertexLightSampler
+      ? vertexLightSampler(vertexFromRubble(second))
+      : getPartialBlockVertexLight(lighting, cell.position, logicalLightingNormal, vertexFromRubble(second)),
+    vertexLightSampler
+      ? vertexLightSampler(vertexFromRubble(third))
+      : getPartialBlockVertexLight(lighting, cell.position, logicalLightingNormal, vertexFromRubble(third))
   );
   appendPartialBlockTextureVertex(geometry, textureTile, normal, first[0], first[1], first[2]);
   appendPartialBlockTextureVertex(geometry, textureTile, normal, second[0], second[1], second[2]);
@@ -1507,7 +1717,8 @@ function addTriangleFacingNormal(
   first: PartialBlockPosition,
   second: PartialBlockPosition,
   third: PartialBlockPosition,
-  desiredNormal: PartialBlockPosition
+  desiredNormal: PartialBlockPosition,
+  vertexLightSampler?: PartialBlockVertexLightSampler
 ): void {
   const triangleNormal = getTriangleNormal(
     vectorToRubbleVertex(first),
@@ -1515,9 +1726,27 @@ function addTriangleFacingNormal(
     vectorToRubbleVertex(third)
   );
   if (dotNormal(triangleNormal, desiredNormal) >= 0) {
-    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(second), vectorToRubbleVertex(third));
+    addTriangle(
+      geometry,
+      cell,
+      vectorToRubbleVertex(first),
+      vectorToRubbleVertex(second),
+      vectorToRubbleVertex(third),
+      undefined,
+      undefined,
+      vertexLightSampler
+    );
   } else {
-    addTriangle(geometry, cell, vectorToRubbleVertex(first), vectorToRubbleVertex(third), vectorToRubbleVertex(second));
+    addTriangle(
+      geometry,
+      cell,
+      vectorToRubbleVertex(first),
+      vectorToRubbleVertex(third),
+      vectorToRubbleVertex(second),
+      undefined,
+      undefined,
+      vertexLightSampler
+    );
   }
 }
 
@@ -1834,7 +2063,8 @@ function addQuad(
   normal: PartialBlockPosition,
   corners: readonly PartialBlockPosition[],
   shadeMultiplier: number,
-  lighting?: PartialBlockMeshLightingContext
+  lighting?: PartialBlockMeshLightingContext,
+  vertexLightSampler?: PartialBlockVertexLightSampler
 ): void {
   const base = geometry.positions.length / 3;
   const normalTuple: readonly [number, number, number] = [normal.x, normal.y, normal.z];
@@ -1850,7 +2080,11 @@ function addQuad(
     geometry.positions.push(corner.x, corner.y, corner.z);
     geometry.normals.push(normal.x, normal.y, normal.z);
     geometry.colors.push(...color);
-    geometry.blockLights.push(getPartialBlockVertexLight(lighting, position, normal, corner));
+    geometry.blockLights.push(
+      vertexLightSampler
+        ? vertexLightSampler(corner)
+        : getPartialBlockVertexLight(lighting, position, normal, corner)
+    );
     appendPartialBlockTextureVertex(geometry, textureTile, normalTuple, corner.x, corner.y, corner.z);
   }
 

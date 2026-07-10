@@ -142,8 +142,11 @@ nearby face-adjacent light cells so the rendered falloff is smoother than the
 raw integer grid. Damaged partial-block terrain consumes cloned cached
 block-light buffers through its mesh worker as a conservative render-only path:
 exterior macro and partial-height faces interpolate the same macro-face corner
-gradient used by full chunk blocks, while interior carved bite faces stay dark
-to avoid sub-voxel light leaks. The current
+gradient used by full chunk blocks. Carved bite interiors build a tiny 3x3x3
+render-only cavity field per damaged block: visible apertures seed the cached
+macro light with a one-third-level entry loss, connected removed subcells lose
+another one-third per step, and sealed pockets keep zero cavity data before the
+player's global minimum-light display floor. The current
 emissive Lamp material and fixed point-light proxies stay active.
 `Settings > Graphics` exposes minimum and maximum rendered
 block-light level sliders, defaulting to `1..15`, so night readability and Lamp
