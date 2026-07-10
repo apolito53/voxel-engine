@@ -22,6 +22,9 @@
 - Partial terrain vertex colors now use the same material-level color path as
   normal chunk terrain, keeping damaged pieces from looking like a different
   material while texture variation still comes from the atlas tile attributes.
+- Fractional vertices on partial terrain exterior faces now interpolate the
+  same four macro-face block-light samples and triangle split as normal chunk
+  terrain, removing the remaining light/color seam on subdivided damaged blocks.
 - Smoothed normal chunk terrain Lamp block light by averaging face-adjacent
   light levels per vertex, reducing checker-patterned rendered falloff without
   changing the integer 0..15 block-light solver.
@@ -32,7 +35,8 @@
   attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
   partial-terrain smoothing, partial worker light-buffer transfers, missing
   partial light buffers, rendered partial Lamp removal, cross-chunk partial
-  light, dark carved interiors, and partial/chunk material color parity.
+  light, dark carved interiors, partial/chunk material color parity, and
+  subdivided partial/chunk block-light gradient parity.
 - Added coverage for smoothed per-vertex chunk mesh block-light values.
 
 ## 0.17.0 - 2026-07-01

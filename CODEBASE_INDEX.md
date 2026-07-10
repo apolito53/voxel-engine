@@ -109,7 +109,8 @@ Purpose: a compact map for surgical codebase reads. Keep this file current when 
 - Worker-safe sun constants, chunk sky-exposure buckets, and light-aware baked voxel face shading:
   `src/voxelLighting.ts`, `src/chunkLightOcclusion.ts`
 - Worker-safe derived 0..15 Lamp block-light data model, exact one-cell
-  cardinal mesh-time halo sampling, shared smoothed face-corner/vertex helpers,
+  cardinal mesh-time halo sampling, shared smoothed face-corner helpers,
+  triangulation-matched partial-face gradient interpolation,
   partial-as-opaque first-pass solver behavior, dirty-light chunk bounds
   helpers, and the dedicated WorkerPool job wrapper for cached rendered terrain
   lightmaps:

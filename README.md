@@ -141,8 +141,9 @@ attribute for warm rendered Lamp spill, with chunk terrain vertices averaging
 nearby face-adjacent light cells so the rendered falloff is smoother than the
 raw integer grid. Damaged partial-block terrain consumes cloned cached
 block-light buffers through its mesh worker as a conservative render-only path:
-exterior macro and partial-height faces smooth light per vertex, while interior
-carved bite faces stay dark to avoid sub-voxel light leaks. The current
+exterior macro and partial-height faces interpolate the same macro-face corner
+gradient used by full chunk blocks, while interior carved bite faces stay dark
+to avoid sub-voxel light leaks. The current
 emissive Lamp material and fixed point-light proxies stay active.
 `Settings > Graphics` exposes minimum and maximum rendered
 block-light level sliders, defaulting to `1..15`, so night readability and Lamp

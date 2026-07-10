@@ -5,9 +5,10 @@ import { getBlockTextureBaseTileId } from "./blockTextureTiles";
 import type { ChunkBlockLightBuffers, ChunkBlockLights } from "./chunkProtocol";
 import type { CollisionBounds } from "./collision";
 import {
-  getSmoothedFaceVertexBlockLight,
+  getSmoothedFaceBlockLightCorners,
   readChunkBlockLightBuffers,
-  type BlockLightFaceNormal
+  type BlockLightFaceNormal,
+  type QuadBlockLightLevels
 } from "./voxelBlockLight";
 import { getSunlitFaceShade } from "./voxelLighting";
 import { CHUNK_SIZE } from "./voxelConstants";
@@ -137,6 +138,13 @@ type PartialBlockMeshLightingContext = {
   readonly blockLights: ChunkBlockLights;
   readonly originX: number;
   readonly originZ: number;
+  readonly macroFaceLights: Map<string, PartialBlockMacroFaceLight>;
+};
+type PartialBlockMacroFaceLight = {
+  readonly corner: PartialBlockPosition;
+  readonly edgeU: PartialBlockPosition;
+  readonly edgeV: PartialBlockPosition;
+  readonly levels: QuadBlockLightLevels;
 };
 
 export type PartialBlockMeshRegionCoords = {
@@ -354,7 +362,11 @@ function createPartialBlockMeshLightingContext(
   return {
     blockLights: readChunkBlockLightBuffers(blockLights),
     originX: origin.cx * CHUNK_SIZE,
-    originZ: origin.cz * CHUNK_SIZE
+    originZ: origin.cz * CHUNK_SIZE,
+    // Damaged faces contain many sub-voxel vertices, but every exterior face
+    // shares one macro block-light quad. Cache those four corner samples so a
+    // detailed partial mesh does not repeat sixteen light reads per vertex.
+    macroFaceLights: new Map()
   };
 }
 
@@ -1524,33 +1536,106 @@ function getPartialBlockVertexLight(
   vertex: PartialBlockPosition
 ): number {
   if (!lighting || !normal) return 0;
-  const normalTuple: BlockLightFaceNormal = [normal.x, normal.y, normal.z];
   const localVertex = {
     x: vertex.x - lighting.originX,
     y: vertex.y,
     z: vertex.z - lighting.originZ
   };
-  const faceSideCell = createPartialBlockFaceSideSampleCell(lighting, cellPosition, normal, localVertex);
-  return getSmoothedFaceVertexBlockLight(lighting.blockLights, normalTuple, localVertex, faceSideCell);
+  const macroFaceLight = getPartialBlockMacroFaceLight(lighting, cellPosition, normal);
+  return samplePartialBlockMacroFaceLight(macroFaceLight, localVertex);
 }
 
-function createPartialBlockFaceSideSampleCell(
+function getPartialBlockMacroFaceLight(
   lighting: PartialBlockMeshLightingContext,
   cellPosition: PartialBlockPosition,
-  normal: PartialBlockPosition,
-  localVertex: PartialBlockPosition
-): PartialBlockPosition {
+  normal: PartialBlockPosition
+): PartialBlockMacroFaceLight {
   const localCellX = cellPosition.x - lighting.originX;
   const localCellZ = cellPosition.z - lighting.originZ;
+  const cacheKey = `${localCellX},${cellPosition.y},${localCellZ}|${normal.x},${normal.y},${normal.z}`;
+  const cached = lighting.macroFaceLights.get(cacheKey);
+  if (cached) return cached;
+  const normalTuple: BlockLightFaceNormal = [normal.x, normal.y, normal.z];
+  const corners = createPartialBlockMacroFaceSampleCorners(
+    { x: localCellX, y: cellPosition.y, z: localCellZ },
+    normal
+  );
+  const result: PartialBlockMacroFaceLight = {
+    corner: corners[0],
+    edgeU: subtractPartialBlockPosition(corners[1], corners[0]),
+    edgeV: subtractPartialBlockPosition(corners[3], corners[0]),
+    levels: getSmoothedFaceBlockLightCorners(lighting.blockLights, normalTuple, corners)
+  };
+  lighting.macroFaceLights.set(cacheKey, result);
+  return result;
+}
 
-  // Partial mesh regions are 4m wide and chunk columns are 16m wide, so the
-  // owning region's real cells sit inside one chunk. Vertices sample the one
-  // macro cell on the logical exterior side of that cell; interior bite faces
-  // do not call this path.
+function createPartialBlockMacroFaceSampleCorners(
+  cell: PartialBlockPosition,
+  normal: PartialBlockPosition
+): readonly [PartialBlockPosition, PartialBlockPosition, PartialBlockPosition, PartialBlockPosition] {
+  const x0 = cell.x;
+  const x1 = cell.x + 1;
+  const y0 = cell.y;
+  const y1 = cell.y + 1;
+  const z0 = cell.z;
+  const z1 = cell.z + 1;
+
+  // These are deliberately ordered exactly like the normal chunk quads. The
+  // interpolation below can therefore reproduce the chunk face's 0-1-2 / 0-2-3
+  // triangle split instead of making sub-voxel faces invent a second gradient.
+  if (normal.x > 0) return [
+    { x: x1, y: y0, z: z0 }, { x: x1, y: y1, z: z0 },
+    { x: x1, y: y1, z: z1 }, { x: x1, y: y0, z: z1 }
+  ];
+  if (normal.x < 0) return [
+    { x: x0 - 1, y: y0, z: z1 }, { x: x0 - 1, y: y1, z: z1 },
+    { x: x0 - 1, y: y1, z: z0 }, { x: x0 - 1, y: y0, z: z0 }
+  ];
+  if (normal.y > 0) return [
+    { x: x0, y: y1, z: z1 }, { x: x1, y: y1, z: z1 },
+    { x: x1, y: y1, z: z0 }, { x: x0, y: y1, z: z0 }
+  ];
+  if (normal.y < 0) return [
+    { x: x0, y: y0 - 1, z: z0 }, { x: x1, y: y0 - 1, z: z0 },
+    { x: x1, y: y0 - 1, z: z1 }, { x: x0, y: y0 - 1, z: z1 }
+  ];
+  if (normal.z > 0) return [
+    { x: x1, y: y0, z: z1 }, { x: x1, y: y1, z: z1 },
+    { x: x0, y: y1, z: z1 }, { x: x0, y: y0, z: z1 }
+  ];
+  return [
+    { x: x0, y: y0, z: z0 - 1 }, { x: x0, y: y1, z: z0 - 1 },
+    { x: x1, y: y1, z: z0 - 1 }, { x: x1, y: y0, z: z0 - 1 }
+  ];
+}
+
+function samplePartialBlockMacroFaceLight(
+  face: PartialBlockMacroFaceLight,
+  vertex: PartialBlockPosition
+): number {
+  const offset = subtractPartialBlockPosition(vertex, face.corner);
+  const u = clamp01(dotPosition(offset, face.edgeU));
+  const v = clamp01(dotPosition(offset, face.edgeV));
+  const [level0, level1, level2, level3] = face.levels;
+
+  // Match the two triangles emitted by both chunk and partial quads. Sampling
+  // this plane at every fractional partial vertex keeps subdivision invisible:
+  // carving changes geometry, not the light gradient already on that block.
+  if (u >= v) {
+    return level0 + u * (level1 - level0) + v * (level2 - level1);
+  }
+  return level0 + u * (level2 - level3) + v * (level3 - level0);
+}
+
+function subtractPartialBlockPosition(
+  left: PartialBlockPosition,
+  right: PartialBlockPosition
+): PartialBlockPosition {
   return {
-    x: normal.x > 0 ? localCellX + 1 : normal.x < 0 ? localCellX - 1 : localVertex.x,
-    y: normal.y > 0 ? cellPosition.y + 1 : normal.y < 0 ? cellPosition.y - 1 : localVertex.y,
-    z: normal.z > 0 ? localCellZ + 1 : normal.z < 0 ? localCellZ - 1 : localVertex.z
+    x: left.x - right.x,
+    y: left.y - right.y,
+    z: left.z - right.z
   };
 }
 

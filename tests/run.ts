@@ -6192,6 +6192,74 @@ test("partial block exterior vertex colors match chunk material colors", () => {
   }
 });
 
+test("partial block subdivisions preserve the chunk macro-face light gradient", () => {
+  const removedCenter = encodeTestLatticeIndex(1, 1, 1);
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 27,
+    removedVisualCellIndexes: [removedCenter],
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0.5, y: 0.5, z: 0.5 },
+      exactRemovedVisualCellIndexes: [removedCenter],
+      radius: 0.12,
+      depth: 0.12,
+      seed: 8642
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 16,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const masks = createPartialBlockFaceVisibilityMasks(update, (_cell, normal) => normal.x === 1);
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight[getBlockLightIndex(2, 1, 2)] = 0;
+  blockLight[getBlockLightIndex(2, 2, 2)] = 4;
+  blockLight[getBlockLightIndex(2, 1, 3)] = 8;
+  blockLight[getBlockLightIndex(2, 2, 3)] = 12;
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: masks,
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const targetValues: number[] = [];
+
+  for (let vertexIndex = 0; vertexIndex < geometry.positions.length / 3; vertexIndex += 1) {
+    const positionOffset = vertexIndex * 3;
+    const x = geometry.positions[positionOffset] ?? 0;
+    const y = geometry.positions[positionOffset + 1] ?? 0;
+    const z = geometry.positions[positionOffset + 2] ?? 0;
+    const nx = geometry.normals[positionOffset] ?? 0;
+    const ny = geometry.normals[positionOffset + 1] ?? 0;
+    const nz = geometry.normals[positionOffset + 2] ?? 0;
+    if (
+      Math.abs(x - 2) <= 0.000001 &&
+      Math.abs(y - (2 + 1 / 3)) <= 0.000001 &&
+      Math.abs(z - (3 + 1 / 3)) <= 0.000001 &&
+      Math.abs(nx - 1) <= 0.000001 &&
+      Math.abs(ny) <= 0.000001 &&
+      Math.abs(nz) <= 0.000001
+    ) {
+      targetValues.push(geometry.blockLights[vertexIndex] ?? 0);
+    }
+  }
+
+  assert(targetValues.length > 0, "damaged exterior fixture should contain the chosen fractional face vertex");
+  for (const value of targetValues) {
+    assertClose(
+      value,
+      5,
+      0.000001,
+      "fractional partial vertices should follow the chunk quad gradient instead of snapping to raw light 12"
+    );
+  }
+});
+
 test("partial block mesh builder keeps missing block-light buffers dark", () => {
   const cell: PartialBlockCell = {
     block: BLOCK.stone,
