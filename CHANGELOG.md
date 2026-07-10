@@ -16,6 +16,10 @@
 
 ### Changed
 
+- Instanced flying debris now samples the accepted integer voxel block-light
+  cache at each shard position and uploads one light level per instance, so
+  fragments inherit the same warm Lamp falloff as terrain without adding
+  PointLights, draw calls, or physics work.
 - Partial terrain meshes now consume cloned cached block-light buffers as a
   conservative render-only path: exterior macro and partial-height faces smooth
   per-vertex Lamp light, while visible 3x3x3 bite apertures transfer that cached
@@ -34,6 +38,8 @@
 
 ### Tests
 
+- Added coverage for debris shader block-light separation, per-instance light
+  uploads, moving shard resampling, and stale-light removal after a Lamp edit.
 - Added coverage for block-light worker transfers, chunk mesh block-light
   attributes, shader separation, rendered Lamp removal, cross-chunk continuity,
   partial-terrain smoothing, partial worker light-buffer transfers, missing

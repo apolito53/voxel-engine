@@ -1,9 +1,14 @@
 import * as THREE from "three";
 import { getDebrisShapeGeometry, type DebrisShapeId } from "./debrisShapes";
 import { PhysicsToy, getFragmentMaterial } from "./physics";
+import { BLOCK_LIGHT_MAX_LEVEL, BLOCK_LIGHT_MIN_LEVEL, normalizeBlockLightLevel } from "./voxelBlockLight";
+
+type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile"]>[0];
+type FragmentBlockLightSampler = (position: Pick<THREE.Vector3, "x" | "y" | "z">) => number;
 
 type FragmentRenderBatch = {
   readonly mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  readonly blockLights: THREE.InstancedBufferAttribute;
   readonly block: number;
   readonly shapeId: DebrisShapeId;
   capacity: number;
@@ -21,13 +26,19 @@ const EMPTY_FRAGMENT_RENDER_STATS: PhysicsFragmentRenderStats = {
   capacity: 0
 };
 
+const FRAGMENT_BLOCK_LIGHT_ATTRIBUTE = "fragmentBlockLight";
+const FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM = "voxelFragmentBlockLightLevelRange";
+const FRAGMENT_BLOCK_LIGHT_STRENGTH = 1.45;
+
 export class PhysicsFragmentInstancer {
   private readonly scene: THREE.Scene;
   private readonly batchesByKey = new Map<string, FragmentRenderBatch>();
+  private readonly materialsByBlock = new Map<number, THREE.MeshStandardMaterial>();
   private readonly countsByKey = new Map<string, number>();
   private readonly writeIndexesByKey = new Map<string, number>();
   private readonly instanceMatrix = new THREE.Matrix4();
   private readonly instanceScale = new THREE.Vector3(1, 1, 1);
+  private readonly blockLightLevelRange = new THREE.Vector2(BLOCK_LIGHT_MIN_LEVEL, BLOCK_LIGHT_MAX_LEVEL);
   private stats: PhysicsFragmentRenderStats = EMPTY_FRAGMENT_RENDER_STATS;
   private debrisShadowsEnabled = false;
 
@@ -46,7 +57,16 @@ export class PhysicsFragmentInstancer {
     }
   }
 
-  update(toys: readonly PhysicsToy[]): void {
+  setBlockLightRange(minLevel: number, maxLevel: number): void {
+    const lowLevel = normalizeBlockLightLevel(Math.min(minLevel, maxLevel));
+    const highLevel = normalizeBlockLightLevel(Math.max(minLevel, maxLevel));
+    this.blockLightLevelRange.set(lowLevel, highLevel);
+    for (const material of this.materialsByBlock.values()) {
+      updatePhysicsFragmentMaterialBlockLightRange(material, lowLevel, highLevel);
+    }
+  }
+
+  update(toys: readonly PhysicsToy[], sampleBlockLight: FragmentBlockLightSampler = () => 0): void {
     this.countsByKey.clear();
     this.writeIndexesByKey.clear();
 
@@ -82,6 +102,7 @@ export class PhysicsFragmentInstancer {
       this.instanceScale.copy(toy.debrisShape.visualScale);
       this.instanceMatrix.compose(toy.mesh.position, toy.mesh.quaternion, this.instanceScale);
       batch.mesh.setMatrixAt(writeIndex, this.instanceMatrix);
+      batch.blockLights.setX(writeIndex, normalizeBlockLightLevel(sampleBlockLight(toy.mesh.position)));
     }
 
     let totalInstances = 0;
@@ -93,6 +114,7 @@ export class PhysicsFragmentInstancer {
       batch.mesh.count = count;
       batch.mesh.visible = count > 0;
       batch.mesh.instanceMatrix.needsUpdate = count > 0;
+      batch.blockLights.needsUpdate = count > 0;
       totalInstances += count;
     }
 
@@ -122,9 +144,12 @@ export class PhysicsFragmentInstancer {
   dispose(): void {
     for (const batch of this.batchesByKey.values()) {
       this.scene.remove(batch.mesh);
+      batch.mesh.geometry.dispose();
       batch.mesh.dispose();
     }
+    for (const material of this.materialsByBlock.values()) material.dispose();
     this.batchesByKey.clear();
+    this.materialsByBlock.clear();
     this.countsByKey.clear();
     this.writeIndexesByKey.clear();
     this.stats = EMPTY_FRAGMENT_RENDER_STATS;
@@ -141,13 +166,21 @@ export class PhysicsFragmentInstancer {
 
     if (existingBatch) {
       this.scene.remove(existingBatch.mesh);
+      existingBatch.mesh.geometry.dispose();
       existingBatch.mesh.dispose();
     }
 
     const capacity = roundCapacityUp(neededCapacity);
+    // Each batch owns its clone because the per-instance light attribute has a
+    // capacity-specific buffer. The low-poly source shape remains shared and
+    // untouched by the dynamic render data.
+    const geometry = getDebrisShapeGeometry(shapeId).clone();
+    const blockLights = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
+    blockLights.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute(FRAGMENT_BLOCK_LIGHT_ATTRIBUTE, blockLights);
     const mesh = new THREE.InstancedMesh(
-      getDebrisShapeGeometry(shapeId),
-      getFragmentMaterial(block),
+      geometry,
+      this.getOrCreateFragmentRenderMaterial(block),
       capacity
     );
 
@@ -162,8 +195,83 @@ export class PhysicsFragmentInstancer {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     this.scene.add(mesh);
-    this.batchesByKey.set(key, { mesh, block, shapeId, capacity });
+    this.batchesByKey.set(key, { mesh, blockLights, block, shapeId, capacity });
   }
+
+  private getOrCreateFragmentRenderMaterial(block: number): THREE.MeshStandardMaterial {
+    const existing = this.materialsByBlock.get(block);
+    if (existing) return existing;
+
+    // PhysicsToy and parked-rubble meshes still share the plain material from
+    // physics.ts. Instanced flight debris gets its own clone so adding an
+    // instanced-only attribute cannot change either of those render contracts.
+    const material = getFragmentMaterial(block).clone();
+    const blockLightLevelRange = this.blockLightLevelRange.clone();
+    material.userData[FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM] = blockLightLevelRange;
+    material.onBeforeCompile = (shader) => {
+      applyPhysicsFragmentBlockLightShaderPatch(shader, blockLightLevelRange);
+      material.userData.shader = shader;
+    };
+    material.customProgramCacheKey = () => "voxel-physics-fragment-block-light-v1";
+    this.materialsByBlock.set(block, material);
+    return material;
+  }
+}
+
+export function applyPhysicsFragmentBlockLightShaderPatch(
+  shader: ShaderWithUniforms,
+  blockLightLevelRange = new THREE.Vector2(BLOCK_LIGHT_MIN_LEVEL, BLOCK_LIGHT_MAX_LEVEL)
+): void {
+  shader.uniforms[FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM] = { value: blockLightLevelRange };
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      "#include <common>",
+      [
+        "#include <common>",
+        `attribute float ${FRAGMENT_BLOCK_LIGHT_ATTRIBUTE};`,
+        "varying float vFragmentBlockLight;"
+      ].join("\n")
+    )
+    .replace(
+      "#include <begin_vertex>",
+      `#include <begin_vertex>\nvFragmentBlockLight = ${FRAGMENT_BLOCK_LIGHT_ATTRIBUTE};`
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      "#include <common>",
+      [
+        "#include <common>",
+        `uniform vec2 ${FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM};`,
+        "varying float vFragmentBlockLight;"
+      ].join("\n")
+    )
+    .replace(
+      "#include <lights_fragment_end>",
+      [
+        "#include <lights_fragment_end>",
+        `float voxelFragmentMinLight = min(${FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM}.x, ${FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM}.y);`,
+        `float voxelFragmentMaxLight = max(${FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM}.x, ${FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM}.y);`,
+        "float voxelFragmentRawLight = clamp(vFragmentBlockLight, 0.0, 15.0);",
+        "float voxelFragmentClampedLight = clamp(voxelFragmentRawLight, voxelFragmentMinLight, voxelFragmentMaxLight);",
+        "float voxelFragmentLight = clamp(voxelFragmentClampedLight / 15.0, 0.0, 1.0);",
+        "float voxelFragmentLightCurve = voxelFragmentLight * voxelFragmentLight;",
+        `vec3 voxelFragmentLightColor = vec3(1.0, 0.62, 0.28) * ${FRAGMENT_BLOCK_LIGHT_STRENGTH.toFixed(2)};`,
+        "reflectedLight.indirectDiffuse += diffuseColor.rgb * voxelFragmentLightColor * voxelFragmentLightCurve;"
+      ].join("\n")
+    );
+}
+
+function updatePhysicsFragmentMaterialBlockLightRange(
+  material: THREE.MeshStandardMaterial,
+  minLevel: number,
+  maxLevel: number
+): void {
+  const range = material.userData[FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM];
+  if (range instanceof THREE.Vector2) range.set(minLevel, maxLevel);
+
+  const shader = material.userData.shader as ShaderWithUniforms | undefined;
+  const shaderRange = shader?.uniforms[FRAGMENT_BLOCK_LIGHT_RANGE_UNIFORM]?.value;
+  if (shaderRange instanceof THREE.Vector2) shaderRange.set(minLevel, maxLevel);
 }
 
 function isRenderableFragment(

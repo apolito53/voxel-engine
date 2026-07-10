@@ -1782,6 +1782,10 @@ function applyBlockLightRange(): void {
   // clamp for tuning night readability and Lamp spill intensity.
   updateWorldBlockMaterialBlockLightRange(worldMaterial, materialBlockLightUniforms);
   updateWorldBlockMaterialBlockLightRange(partialBlockMaterial, materialBlockLightUniforms);
+  physicsFragmentInstancer.setBlockLightRange(
+    materialBlockLightUniforms.minLevel,
+    materialBlockLightUniforms.maxLevel
+  );
 }
 
 function copyRgbColor(target: THREE.Color, color: RgbColorTuple): void {
@@ -2504,7 +2508,10 @@ function animate(): void {
 
     const renderProxyStartedAt = performance.now();
     pruneExpiredToys();
-    physicsFragmentInstancer.update(toys);
+    physicsFragmentInstancer.update(
+      toys,
+      (position) => activeWorld.getBlockLightLevel(position.x, position.y, position.z)
+    );
     physicsCoreTrail.update(delta);
     hitscanBoltTracer.update(delta);
     debrisPoofRenderer.update(delta);

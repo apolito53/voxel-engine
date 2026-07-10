@@ -148,6 +148,9 @@ macro light with a one-third-level entry loss, connected removed subcells lose
 another one-third per step, and sealed pockets keep zero cavity data before the
 player's global minimum-light display floor. The current
 emissive Lamp material and fixed point-light proxies stay active.
+Flying instanced debris reads the accepted integer light cache at each shard's
+world cell and carries one light value in its instance batch, keeping break
+bursts visible in Lamp pools without creating per-fragment lights or draw calls.
 `Settings > Graphics` exposes minimum and maximum rendered
 block-light level sliders, defaulting to `1..15`, so night readability and Lamp
 spill can be tuned without changing the underlying 0..15 chunk light data.

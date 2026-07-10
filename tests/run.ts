@@ -147,7 +147,10 @@ import {
   createPlayerCoreShotDirection,
   createPlayerPhysicsCoreLaunchVelocity
 } from "../src/physicsCoreLaunch";
-import { PhysicsFragmentInstancer } from "../src/physicsInstancing";
+import {
+  PhysicsFragmentInstancer,
+  applyPhysicsFragmentBlockLightShaderPatch
+} from "../src/physicsInstancing";
 import {
   RUBBLE_BLOCK_PROMOTION_PIECES,
   RUBBLE_FULL_BLOCK_HEALTH,
@@ -2621,6 +2624,29 @@ test("voxel block light reads neighbor halo sources across chunk borders", () =>
   assertEqual(result.blockLight[getBlockLightIndex(1, 9, 6)], 13, "cross-border light should keep Manhattan falloff");
 });
 
+test("instanced debris shader adds cached voxel block light independently of PointLights", () => {
+  const shader = {
+    uniforms: {},
+    vertexShader: "#include <common>\nvoid main() {\n#include <begin_vertex>\n}",
+    fragmentShader: "#include <common>\nvoid main() {\n#include <lights_fragment_end>\n}"
+  } as Parameters<typeof applyPhysicsFragmentBlockLightShaderPatch>[0];
+
+  applyPhysicsFragmentBlockLightShaderPatch(shader);
+
+  assert(
+    shader.vertexShader.includes("attribute float fragmentBlockLight;"),
+    "debris batches should expose one cached block-light level per instance"
+  );
+  assert(
+    shader.fragmentShader.includes("voxelFragmentLightCurve = voxelFragmentLight * voxelFragmentLight"),
+    "debris should use the same squared 0..15 Lamp falloff curve as terrain"
+  );
+  assert(
+    shader.fragmentShader.includes("reflectedLight.indirectDiffuse += diffuseColor.rgb * voxelFragmentLightColor"),
+    "debris Lamp spill should be additive so ordinary scene and PointLights remain intact"
+  );
+});
+
 test("mesh-time block light samples only one exact cardinal halo cell", () => {
   const currentLight = createEmptyBlockLightChunkSnapshot();
   const westLight = createEmptyBlockLightChunkSnapshot();
@@ -2722,6 +2748,11 @@ test("Lamp removal clears rendered chunk block-light attributes", async () => {
     getMaxBlockLightAttribute(litChunk.mesh.geometry) >= 12,
     "stone terrain beside a Lamp should receive bright smoothed rendered block-light data"
   );
+  assertEqual(
+    world.getBlockLightLevel(2.5, 80.5, 1.5),
+    14,
+    "moving render proxies should read the accepted integer light level at their world cell"
+  );
 
   world.setBlock(1, 80, 1, BLOCK.air);
   await drainWorldRenderWork(world, scene, material);
@@ -2732,6 +2763,11 @@ test("Lamp removal clears rendered chunk block-light attributes", async () => {
     getMaxBlockLightAttribute(darkChunk.mesh.geometry),
     0,
     "removing a Lamp should clear stale rendered block-light attributes"
+  );
+  assertEqual(
+    world.getBlockLightLevel(2.5, 80.5, 1.5),
+    0,
+    "moving render proxies should not read stale cached Lamp light after source removal"
   );
 
   world.dispose(scene);
@@ -8789,7 +8825,11 @@ test("block fragments render through instanced batches instead of scene children
   assert(grassFragment.isInstancedFragment, "block debris should opt into instanced rendering");
   assertEqual(grassFragment.fragmentBlock, BLOCK.grass, "fragment should remember its source block");
   assertEqual(grassFragment.debrisShape?.shapeId, "chunky-chip", "fragment should remember its shard shape");
-  instancer.update([grassFragment, secondGrassFragment, stoneFragment]);
+  instancer.setBlockLightRange(1, 15);
+  instancer.update(
+    [grassFragment, secondGrassFragment, stoneFragment],
+    (position) => 6 + position.x * 2
+  );
 
   const instancedMeshes = scene.children.filter((child) => child instanceof THREE.InstancedMesh);
   assertEqual(
@@ -8802,8 +8842,19 @@ test("block fragments render through instanced batches instead of scene children
     { batches: 3, instances: 3, capacity: 3 },
     "instanced renderer should report visible fragment pressure"
   );
+  for (const mesh of instancedMeshes) {
+    const blockLights = mesh.geometry.getAttribute("fragmentBlockLight");
+    assert(
+      blockLights instanceof THREE.InstancedBufferAttribute,
+      "each debris batch should own a capacity-matched per-instance block-light buffer"
+    );
+    assert(
+      (blockLights.getX(0) ?? 0) >= 6,
+      "visible debris should upload the cached voxel light sampled at its world position"
+    );
+  }
   grassFragment.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
-  instancer.update([grassFragment]);
+  instancer.update([grassFragment], () => 11);
   const grassBatch = scene.children.find((child) => child instanceof THREE.InstancedMesh);
   assert(grassBatch instanceof THREE.InstancedMesh, "fragment batch should still be available for matrix inspection");
   const instanceMatrix = new THREE.Matrix4();
@@ -8820,6 +8871,11 @@ test("block fragments render through instanced batches instead of scene children
     instanceScale,
     chunkyShape.visualScale,
     "instanced debris should render each fragment's non-uniform shard scale"
+  );
+  assertEqual(
+    grassBatch.geometry.getAttribute("fragmentBlockLight").getX(0),
+    11,
+    "debris light attributes should follow moving fragment samples on later frames"
   );
 
   instancer.clear();

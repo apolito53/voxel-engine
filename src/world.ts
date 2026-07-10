@@ -75,6 +75,7 @@ import { normalizeTerraformerSize } from "./terraformerSettings";
 import { createTerrainContext, generateChunkBlocks, type TerrainContext, type TerrainProfile } from "./terrain";
 import {
   createBlockLightNeighborKey,
+  getBlockLightIndex,
   getDirtyBlockLightChunkCoordsForEdit
 } from "./voxelBlockLight";
 import type { WorkerPool, WorkerPoolJobResult } from "./workerPool";
@@ -1768,6 +1769,21 @@ export class VoxelWorld implements CollisionWorld {
     if (y < 0 || y >= WORLD_HEIGHT) return BLOCK.air;
     const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
     return this.getChunk(cx, cz)?.getLocal(lx, Math.floor(y), lz) ?? BLOCK.air;
+  }
+
+  getBlockLightLevel(x: number, y: number, z: number): number {
+    const blockY = Math.floor(y);
+    if (blockY < 0 || blockY >= WORLD_HEIGHT) return 0;
+
+    const { cx, cz, lx, lz } = this.toChunkCoords(x, z);
+    const key = this.key(cx, cz);
+    const chunk = this.getChunk(cx, cz);
+    const cached = this.blockLightCache.get(key);
+    // Edits invalidate the cache before they dirty meshes. Refuse a mismatched
+    // revision as an extra guard so fast debris never flashes stale Lamp light
+    // while the derived worker job catches up.
+    if (!chunk || !cached || cached.revision !== chunk.revision) return 0;
+    return cached.blockLight[getBlockLightIndex(lx, blockY, lz)] ?? 0;
   }
 
   getLocalLightSources(
