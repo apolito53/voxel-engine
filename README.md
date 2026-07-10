@@ -148,6 +148,9 @@ macro light with a one-third-level entry loss, connected removed subcells lose
 another one-third per step, and sealed pockets keep zero cavity data before the
 player's global minimum-light display floor. The current
 emissive Lamp material and fixed point-light proxies stay active.
+When a damaged voxel is finally destroyed, its regional partial mesh remains as
+a brief visual bridge until the current normal chunk mesh (and any touched
+cardinal neighbor) has uploaded the newly exposed terrain faces.
 Flying instanced debris reads the accepted integer light cache at each shard's
 world cell and carries one light value in its instance batch, keeping break
 bursts visible in Lamp pools without creating per-fragment lights or draw calls.

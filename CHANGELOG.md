@@ -16,6 +16,10 @@
 
 ### Changed
 
+- Destroyed partial-block regions now retain their previous custom geometry
+  until the owning normal chunk and any touched cardinal neighbor have uploaded
+  current exposed-face meshes, removing the one-frame black hole flash during
+  asynchronous worker handoff.
 - Instanced flying debris now samples the accepted integer voxel block-light
   cache at each shard position and uploads one light level per instance, so
   fragments inherit the same warm Lamp falloff as terrain without adding
@@ -38,6 +42,8 @@
 
 ### Tests
 
+- Added coverage for deferred partial-region retirement, cancellation when new
+  partial work arrives, and owner/cardinal chunk-edge render readiness.
 - Added coverage for debris shader block-light separation, per-instance light
   uploads, moving shard resampling, and stale-light removal after a Lamp edit.
 - Added coverage for block-light worker transfers, chunk mesh block-light

@@ -3491,10 +3491,24 @@ function createHitscanRubbleAimPreviewPrediction(
 }
 
 function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
+  // A destroyed partial cell becomes ordinary air, but the normal chunk worker
+  // still needs to expose the newly visible neighbor faces. Keep the old bite
+  // mesh as a short visual bridge until that owning chunk revision is uploaded.
+  partialBlockMeshField.flushDeferredRegionRemovals(
+    (key) => activeWorld.isPartialBlockMeshRegionTerrainRenderCurrent(key)
+  );
   const revision = activeWorld.getPartialBlockGeometryRevision();
   const dirtyRegionCount = activeWorld.getDirtyPartialBlockMeshRegionCount();
-  partialBlockMeshField.beginUpdate(dirtyRegionCount + pendingPartialBlockMeshJobs.size);
-  if (revision === renderedPartialBlockRevision && dirtyRegionCount === 0 && pendingPartialBlockMeshJobs.size === 0) return;
+  const deferredRemovalCount = partialBlockMeshField.getDeferredRegionRemovalCount();
+  partialBlockMeshField.beginUpdate(
+    dirtyRegionCount + pendingPartialBlockMeshJobs.size + deferredRemovalCount
+  );
+  if (
+    revision === renderedPartialBlockRevision &&
+    dirtyRegionCount === 0 &&
+    pendingPartialBlockMeshJobs.size === 0 &&
+    deferredRemovalCount === 0
+  ) return;
   if (dirtyRegionCount === 0) {
     refreshRenderedPartialBlockRevision(activeWorld);
     return;
@@ -3520,7 +3534,9 @@ function updatePartialBlockMesh(activeWorld: VoxelWorld): void {
   }
 
   partialBlockMeshField.setDirtyRegionCount(
-    activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
+    activeWorld.getDirtyPartialBlockMeshRegionCount() +
+      pendingPartialBlockMeshJobs.size +
+      partialBlockMeshField.getDeferredRegionRemovalCount()
   );
   refreshRenderedPartialBlockRevision(activeWorld);
   lastPartialBlockMeshUpdateMs = performance.now();
@@ -3535,17 +3551,17 @@ function schedulePartialBlockMeshRegionBuild(
 
   if (update.cells.length === 0) {
     pendingPartialBlockMeshJobs.delete(update.key);
-    partialBlockMeshField.updateRegionGeometry(update.key, 0, {
-      positions: new Float32Array(),
-      normals: new Float32Array(),
-      colors: new Float32Array(),
-      blockLights: new Float32Array(),
-      uvs: new Float32Array(),
-      textureTiles: new Float32Array(),
-      indices: new Uint32Array()
-    });
+    if (activeWorld.isPartialBlockMeshRegionTerrainRenderCurrent(update.key)) {
+      removePartialBlockMeshRegion(update.key);
+    } else {
+      partialBlockMeshField.deferRegionRemoval(update.key);
+    }
     return;
   }
+
+  // A new damaged cell may enter a region while an earlier empty-region handoff
+  // is still waiting. Keep the old visual alive until this replacement arrives.
+  partialBlockMeshField.cancelDeferredRegionRemoval(update.key);
 
   const revision = update.revision ?? activeWorld.getPartialBlockGeometryRevision();
   const faceVisibilityMasks = createPartialBlockFaceVisibilityMasks(
@@ -3594,7 +3610,9 @@ function schedulePartialBlockMeshRegionBuild(
     );
     workerPool.recordMainThreadUpload(performance.now() - uploadStartedAt, PARTIAL_BLOCK_MESH_BUILD_JOB);
     partialBlockMeshField.setDirtyRegionCount(
-      activeWorld.getDirtyPartialBlockMeshRegionCount() + pendingPartialBlockMeshJobs.size
+      activeWorld.getDirtyPartialBlockMeshRegionCount() +
+        pendingPartialBlockMeshJobs.size +
+        partialBlockMeshField.getDeferredRegionRemovalCount()
     );
     refreshRenderedPartialBlockRevision(activeWorld);
   });
@@ -3604,10 +3622,23 @@ function refreshRenderedPartialBlockRevision(activeWorld: VoxelWorld): void {
   if (
     activeWorld === world &&
     activeWorld.getDirtyPartialBlockMeshRegionCount() === 0 &&
-    pendingPartialBlockMeshJobs.size === 0
+    pendingPartialBlockMeshJobs.size === 0 &&
+    partialBlockMeshField.getDeferredRegionRemovalCount() === 0
   ) {
     renderedPartialBlockRevision = activeWorld.getPartialBlockGeometryRevision();
   }
+}
+
+function removePartialBlockMeshRegion(key: string): void {
+  partialBlockMeshField.updateRegionGeometry(key, 0, {
+    positions: new Float32Array(),
+    normals: new Float32Array(),
+    colors: new Float32Array(),
+    blockLights: new Float32Array(),
+    uvs: new Float32Array(),
+    textureTiles: new Float32Array(),
+    indices: new Uint32Array()
+  });
 }
 
 function clearPendingPartialBlockMeshJobs(): void {

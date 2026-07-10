@@ -4220,6 +4220,59 @@ test("partial terrain separates visual dirtiness from chunk-mask dirtiness", () 
   );
 });
 
+test("partial mesh retirement waits for owner and chunk-edge terrain replacements", () => {
+  const world = new VoxelWorld({ seed: "partial-render-handoff-test" });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const position = { x: 0, y: 3, z: 4 };
+  const regionKey = createPartialBlockMeshRegionKey(position);
+
+  world.setBlock(position.x, position.y, position.z, BLOCK.stone);
+  world.setBlock(-1, position.y, position.z, BLOCK.stone);
+  world.rebuildDirty(scene, material, 32);
+  assert(
+    world.isPartialBlockMeshRegionTerrainRenderCurrent(regionKey),
+    "the handoff fixture should start with clean owner and west-neighbor terrain meshes"
+  );
+
+  world.carveBlock({
+    ...position,
+    point: new THREE.Vector3(0.05, 3.5, 4.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    speed: 20,
+    amount: PARTIAL_BLOCK_CORE_DAMAGE
+  });
+  assert(
+    !world.isPartialBlockMeshRegionTerrainRenderCurrent(regionKey),
+    "entering partial state should hold the custom visual while normal chunk masks rebuild"
+  );
+
+  world.rebuildDirty(scene, material, 1);
+  assert(
+    !world.isPartialBlockMeshRegionTerrainRenderCurrent(regionKey),
+    "a chunk-edge handoff should wait when either the owner or cardinal neighbor is still dirty"
+  );
+  world.rebuildDirty(scene, material, 32);
+  assert(
+    world.isPartialBlockMeshRegionTerrainRenderCurrent(regionKey),
+    "the handoff should become ready after every affected terrain mesh is current"
+  );
+
+  world.setBlock(position.x, position.y, position.z, BLOCK.air);
+  assert(
+    !world.isPartialBlockMeshRegionTerrainRenderCurrent(regionKey),
+    "destroying the partial voxel should make its terrain replacement pending again"
+  );
+  world.rebuildDirty(scene, material, 32);
+  assert(
+    world.isPartialBlockMeshRegionTerrainRenderCurrent(regionKey),
+    "destroyed partial visuals may retire after the exposed-face terrain mesh is uploaded"
+  );
+
+  world.dispose(scene);
+  material.dispose();
+});
+
 test("partial terrain mesh region updates include halo context", () => {
   const world = new VoxelWorld({ seed: "partial-region-halo-test" });
   world.setBlock(3, 3, 3, BLOCK.stone);
@@ -7170,6 +7223,47 @@ test("partial block field disposes empty regions", () => {
 
   assertEqual(field.getRegionMesh(regionKey), null, "empty partial mesh regions should be removed");
   assertEqual(field.getStats().regions, 0, "empty partial mesh regions should not count as live draw regions");
+
+  field.dispose();
+});
+
+test("partial block field defers empty-region retirement until terrain is ready", () => {
+  const scene = new THREE.Scene();
+  const field = new PartialBlockMeshField(scene);
+  const cell: PartialBlockCell = {
+    block: BLOCK.stone,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 2,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 0.5, z: 0.5 },
+      radius: 0.42,
+      depth: 0.5,
+      seed: 334
+    }]
+  };
+  const regionKey = createPartialBlockMeshRegionKey(cell.position);
+
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
+  assert(field.deferRegionRemoval(regionKey), "a rendered region should accept deferred retirement");
+  assertEqual(field.getDeferredRegionRemovalCount(), 1, "the handoff should report one waiting region");
+  assertEqual(
+    field.flushDeferredRegionRemovals(() => false),
+    0,
+    "a pending terrain replacement should keep the old partial geometry visible"
+  );
+  assert(field.getRegionMesh(regionKey), "the old partial mesh should bridge the asynchronous terrain rebuild");
+
+  field.cancelDeferredRegionRemoval(regionKey);
+  assertEqual(field.getDeferredRegionRemovalCount(), 0, "new partial work should cancel a stale retirement");
+  assert(field.deferRegionRemoval(regionKey), "the fixture should allow a later destruction handoff");
+  assertEqual(
+    field.flushDeferredRegionRemovals(() => true),
+    1,
+    "a current terrain replacement should release the bridged partial region"
+  );
+  assertEqual(field.getRegionMesh(regionKey), null, "retired partial geometry should leave after the handoff");
 
   field.dispose();
 });

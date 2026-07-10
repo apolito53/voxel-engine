@@ -4306,6 +4306,32 @@ export class VoxelWorld implements CollisionWorld {
     };
   }
 
+  isPartialBlockMeshRegionTerrainRenderCurrent(regionKey: string): boolean {
+    const coords = parsePartialBlockMeshRegionKey(regionKey);
+    if (!coords) return true;
+    const bounds = getPartialBlockMeshRegionBounds(coords);
+    const cx = Math.floor(bounds.minX / CHUNK_SIZE);
+    const cz = Math.floor(bounds.minZ / CHUNK_SIZE);
+    const ownerMinX = cx * CHUNK_SIZE;
+    const ownerMaxX = ownerMinX + CHUNK_SIZE - 1;
+    const ownerMinZ = cz * CHUNK_SIZE;
+    const ownerMaxZ = ownerMinZ + CHUNK_SIZE - 1;
+    const affectedChunks = [{ cx, cz }];
+    if (bounds.minX === ownerMinX) affectedChunks.push({ cx: cx - 1, cz });
+    if (bounds.maxX === ownerMaxX) affectedChunks.push({ cx: cx + 1, cz });
+    if (bounds.minZ === ownerMinZ) affectedChunks.push({ cx, cz: cz - 1 });
+    if (bounds.maxZ === ownerMaxZ) affectedChunks.push({ cx, cz: cz + 1 });
+
+    // An unloaded chunk has no normal terrain mesh that can expose a hole.
+    // Loaded owner/cardinal chunks are ready only after the current revision is
+    // clean and no worker result still owns the replacement upload.
+    return affectedChunks.every((coords) => {
+      const key = this.key(coords.cx, coords.cz);
+      const chunk = this.getChunk(coords.cx, coords.cz);
+      return !chunk || (!chunk.dirty && !this.pendingMeshKeys.has(key));
+    });
+  }
+
   snapshotPartialBlockMasks(cx: number, cz: number): {
     readonly current: ArrayBuffer | null;
     readonly neighbors: ChunkNeighborBuffers;

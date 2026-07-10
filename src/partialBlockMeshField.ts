@@ -44,6 +44,7 @@ export class PartialBlockMeshField {
   private readonly material: THREE.MeshStandardMaterial;
   private readonly ownsMaterial: boolean;
   private readonly regions: Map<string, PartialBlockMeshRegionEntry>;
+  private readonly deferredRegionRemovals = new Set<string>();
   private stats: PartialBlockMeshStats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
   private dirtyRegionCount = 0;
   private rebuiltRegionCount = 0;
@@ -77,6 +78,30 @@ export class PartialBlockMeshField {
 
   getRegionKeys(): readonly string[] {
     return [...this.regions.keys()];
+  }
+
+  getDeferredRegionRemovalCount(): number {
+    return this.deferredRegionRemovals.size;
+  }
+
+  deferRegionRemoval(key: string): boolean {
+    if (!this.regions.has(key)) return false;
+    this.deferredRegionRemovals.add(key);
+    return true;
+  }
+
+  cancelDeferredRegionRemoval(key: string): void {
+    this.deferredRegionRemovals.delete(key);
+  }
+
+  flushDeferredRegionRemovals(canRemove: (key: string) => boolean): number {
+    let removed = 0;
+    for (const key of [...this.deferredRegionRemovals]) {
+      if (!canRemove(key)) continue;
+      this.removeRegion(key);
+      removed += 1;
+    }
+    return removed;
   }
 
   beginUpdate(dirtyRegionCount: number): void {
@@ -114,6 +139,8 @@ export class PartialBlockMeshField {
       return;
     }
 
+    this.cancelDeferredRegionRemoval(key);
+
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(geometryData.positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(geometryData.normals, 3));
@@ -146,6 +173,7 @@ export class PartialBlockMeshField {
       this.removeRegion(key);
     }
     this.mesh.visible = false;
+    this.deferredRegionRemovals.clear();
     this.dirtyRegionCount = 0;
     this.rebuiltRegionCount = 0;
     this.stats = EMPTY_PARTIAL_BLOCK_MESH_STATS;
@@ -177,6 +205,7 @@ export class PartialBlockMeshField {
   }
 
   private removeRegion(key: string): void {
+    this.deferredRegionRemovals.delete(key);
     const entry = this.regions.get(key);
     if (!entry) return;
 
