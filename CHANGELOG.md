@@ -29,7 +29,9 @@
   per-vertex Lamp light, while visible 3x3x3 bite apertures transfer that cached
   light through face-connected removed subcells to exact and wrinkled cavity
   walls. Cavity light loses one-third of a level at entry and per connected
-  subcell, and cannot enter sealed pockets or cross intact subcells.
+  subcell, retains six aperture-direction channels to derive a dominant incoming
+  light gradient so facing/tangential/opposing cavity walls receive distinct
+  spill, and cannot enter sealed pockets or cross intact subcells.
 - Partial terrain vertex colors now use the same material-level color path as
   normal chunk terrain, keeping damaged pieces from looking like a different
   material while texture variation still comes from the atlas tile attributes.
@@ -51,8 +53,9 @@
   partial-terrain smoothing, partial worker light-buffer transfers, missing
   partial light buffers, rendered partial Lamp removal, cross-chunk partial
   light, exact and wrinkled cavity illumination, sealed-pocket darkness,
-  one-third-step cavity attenuation, partial/chunk material color parity, and
-  subdivided partial/chunk block-light gradient parity.
+  one-third-step cavity attenuation, directional aperture-facing cavity light,
+  partial/chunk material color parity, and subdivided partial/chunk block-light
+  gradient parity.
 - Added coverage for smoothed per-vertex chunk mesh block-light values.
 
 ## 0.17.0 - 2026-07-01

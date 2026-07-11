@@ -6559,6 +6559,72 @@ test("visible partial apertures illuminate exact-cut cavity walls", () => {
   }
 });
 
+test("partial cavity faces retain the direction of their visible aperture", () => {
+  // The path enters through the west face, travels east, then turns upward.
+  // At the final removed subcell it exposes both a west-facing wall looking
+  // back toward the aperture and an east-facing wall looking away from it.
+  const removedCells = [
+    encodeTestLatticeIndex(0, 0, 1),
+    encodeTestLatticeIndex(1, 0, 1),
+    encodeTestLatticeIndex(1, 1, 1)
+  ];
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 1, y: 2, z: 3 },
+    damage: removedCells.length,
+    maxHealth: 27,
+    removedVisualCellIndexes: removedCells,
+    cuts: [{
+      normal: { x: -1, y: 0, z: 0 },
+      localPoint: { x: 0, y: 1 / 6, z: 0.5 },
+      exactRemovedVisualCellIndexes: removedCells,
+      radius: 0.4,
+      depth: 2 / 3,
+      seed: 4110
+    }]
+  };
+  const update = {
+    key: createPartialBlockMeshRegionKey(cell.position),
+    revision: 24,
+    cells: [cell],
+    contextCells: [cell]
+  };
+  const blockLight = createEmptyBlockLightChunkSnapshot();
+  blockLight.fill(12);
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (_cell, normal) => normal.x === -1
+    ),
+    blockLights: createChunkMeshBlockLightBuffers(blockLight),
+    blockLightChunkOrigin: { cx: 0, cz: 0 }
+  });
+  const samples = getPartialBlockVertexSamples(geometry);
+  const directWall = samples.filter(({ position, normal }) => (
+    Math.abs(position[0] - (cell.position.x + 2 / 3)) <= 0.000001 &&
+    Math.abs(normal[0] + 1) <= 0.000001 &&
+    position[1] >= cell.position.y + 1 / 3 - 0.000001 &&
+    position[1] <= cell.position.y + 2 / 3 + 0.000001
+  ));
+  const opposingWall = samples.filter(({ position, normal }) => (
+    Math.abs(position[0] - (cell.position.x + 1 / 3)) <= 0.000001 &&
+    Math.abs(normal[0] - 1) <= 0.000001 &&
+    position[1] >= cell.position.y + 1 / 3 - 0.000001 &&
+    position[1] <= cell.position.y + 2 / 3 + 0.000001
+  ));
+
+  assert(directWall.length > 0, "the turned cavity should expose a wall facing its west aperture");
+  assert(opposingWall.length > 0, "the turned cavity should expose a wall facing away from its west aperture");
+  const directLevel = Math.max(...directWall.map((sample) => sample.blockLight));
+  const opposingLevel = Math.max(...opposingWall.map((sample) => sample.blockLight));
+  assert(directLevel > 0, "the wall looking back through the aperture should remain illuminated");
+  assert(
+    opposingLevel < directLevel * 0.25,
+    "a cavity wall facing away from the aperture should retain only faint reflected spill"
+  );
+});
+
 test("wrinkled cavity light attenuates by one third per connected subcell", () => {
   const removedCells = [0, 1, 2].map((x) => encodeTestLatticeIndex(x, 1, 1));
   const cell: PartialBlockCell = {
@@ -6610,9 +6676,24 @@ test("wrinkled cavity light attenuates by one third per connected subcell", () =
   }
 
   assert(depthLevels[0]! > 0, "the wrinkled cavity lip should receive light through its visible aperture");
-  assertClose(depthLevels[0]!, 12 - 1 / 3, 0.000001, "the aperture subcell should lose one third level at entry");
-  assertClose(depthLevels[1]!, 12 - 2 / 3, 0.000001, "the second subcell should lose another one third level");
-  assertClose(depthLevels[2]!, 11, 0.000001, "the third subcell should lose one full level from the exterior lip");
+  assertClose(
+    depthLevels[0]!,
+    (12 - 1 / 3) * 0.5,
+    0.000001,
+    "the tangential aperture subcell should combine entry loss with directional spill"
+  );
+  assertClose(
+    depthLevels[1]!,
+    (12 - 2 / 3) * 0.5,
+    0.000001,
+    "the second tangential subcell should keep the one-third propagation step"
+  );
+  assertClose(
+    depthLevels[2]!,
+    11 * 0.5,
+    0.000001,
+    "the third tangential subcell should keep the macro falloff beneath its orientation scale"
+  );
   assert(depthLevels.every((level) => level <= 12), "cavity propagation should never exceed the aperture seed");
 });
 

@@ -145,8 +145,12 @@ exterior macro and partial-height faces interpolate the same macro-face corner
 gradient used by full chunk blocks. Carved bite interiors build a tiny 3x3x3
 render-only cavity field per damaged block: visible apertures seed the cached
 macro light with a one-third-level entry loss, connected removed subcells lose
-another one-third per step, and sealed pockets keep zero cavity data before the
-player's global minimum-light display floor. The current
+another one-third per step, and six directional channels derive the dominant
+incoming-light gradient. Cavity walls facing that direction receive full spill,
+tangential walls receive softer diffuse light, opposing walls retain only a
+faint reflected component, and balanced opposing inputs remain ambient fill.
+Sealed pockets keep zero cavity data before the player's global minimum-light
+display floor. The current
 emissive Lamp material and fixed point-light proxies stay active.
 When a damaged voxel is finally destroyed, its regional partial mesh remains as
 a brief visual bridge until the current normal chunk mesh (and any touched

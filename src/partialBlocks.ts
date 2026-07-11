@@ -27,6 +27,12 @@ export const PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT = BLOCK_FRAGMENT_COUNT;
 const PARTIAL_BLOCK_FACE_SEGMENTS = 5;
 const PARTIAL_BLOCK_LATTICE_CELL_SIZE = 1 / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
 const PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION = 1 / PARTIAL_BLOCK_DAMAGE_LATTICE_SIZE;
+// Cavity light remains strongest on a wall whose normal points back toward the
+// dominant incoming-light direction. Side walls receive diffuse spill, while
+// geometry facing farther into the block keeps only a reflected-light floor.
+const PARTIAL_BLOCK_CAVITY_TANGENTIAL_LIGHT_SCALE = 0.5;
+const PARTIAL_BLOCK_CAVITY_OPPOSING_LIGHT_SCALE = 0.15;
+const PARTIAL_BLOCK_CAVITY_DIRECTIONAL_LEVEL_RANGE = 3;
 const PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON = 0.000001;
 const PARTIAL_BLOCK_BITE_DEPTH_SCORE_SCALE = 0.65;
 const PARTIAL_BLOCK_BITE_WRINKLE_DEPTH = 0.045;
@@ -150,7 +156,8 @@ type PartialBlockMacroFaceLight = {
   readonly levels: QuadBlockLightLevels;
 };
 type PartialBlockCavityLightField = {
-  readonly levels: Float32Array;
+  /** One independent propagated level for each of the six aperture normals. */
+  readonly directionalLevels: Float32Array;
   readonly reachable: Uint8Array;
 };
 type PartialBlockVertexLightSampler = (vertex: PartialBlockPosition) => number;
@@ -1229,10 +1236,13 @@ function createPartialBlockCavityLightField(
 ): PartialBlockCavityLightField | undefined {
   if (!lighting || removedCells.size === 0) return undefined;
 
-  const levels = new Float32Array(PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT);
+  const directionCount = PARTIAL_BLOCK_LATTICE_FACES.length;
+  const directionalLevels = new Float32Array(
+    PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT * directionCount
+  );
   const reachable = new Uint8Array(PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT);
-  const queue: number[] = [];
-  let brightestSeed = 0;
+  const topologyQueue: number[] = [];
+  const lightQueue: number[] = [];
 
   for (const latticeCell of PARTIAL_BLOCK_LATTICE_CELLS) {
     if (!removedCells.has(latticeCell.index)) continue;
@@ -1261,44 +1271,66 @@ function createPartialBlockCavityLightField(
       // the same one-third-level transfer loss at entry keeps the recess legible
       // without flattening it into an equally bright continuation of the wall.
       const seedLevel = Math.max(0, apertureLevel - PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION);
-      brightestSeed = Math.max(brightestSeed, seedLevel);
-      levels[latticeCell.index] = Math.max(levels[latticeCell.index] ?? 0, seedLevel);
+      const directionIndex = getPartialBlockCavityDirectionIndex(face.normal);
+      const directionalIndex = getPartialBlockCavityDirectionalIndex(
+        latticeCell.index,
+        directionIndex
+      );
+      if (seedLevel > (directionalLevels[directionalIndex] ?? 0)) {
+        directionalLevels[directionalIndex] = seedLevel;
+        lightQueue.push(directionalIndex);
+      }
       if (reachable[latticeCell.index] === 0) {
         reachable[latticeCell.index] = 1;
-        queue.push(latticeCell.index);
+        topologyQueue.push(latticeCell.index);
       }
     }
   }
 
-  // Each subcell spans one third of a meter, so a face-connected step loses one
-  // third of the macro solver's one-level-per-meter falloff. Re-queue improved
-  // cells because multiple apertures can illuminate the same cavity differently.
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const currentIndex = queue[cursor];
+  // Reachability is geometric rather than photometric: a very dim aperture must
+  // still establish which removed cells are connected to open air.
+  for (let cursor = 0; cursor < topologyQueue.length; cursor += 1) {
+    const currentIndex = topologyQueue[cursor];
     if (currentIndex === undefined) continue;
-    const currentLevel = levels[currentIndex] ?? 0;
-
     for (const neighborIndex of getPartialBlockAdjacentLatticeCellIndexes(currentIndex)) {
-      if (!removedCells.has(neighborIndex)) continue;
-      const candidateLevel = Math.min(
-        brightestSeed,
-        Math.max(0, currentLevel - PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION)
-      );
+      if (!removedCells.has(neighborIndex) || reachable[neighborIndex] !== 0) continue;
+      reachable[neighborIndex] = 1;
+      topologyQueue.push(neighborIndex);
+    }
+  }
 
-      if (reachable[neighborIndex] === 0) {
-        reachable[neighborIndex] = 1;
-        levels[neighborIndex] = candidateLevel;
-        queue.push(neighborIndex);
+  // Each aperture direction propagates independently. Keeping those six tiny
+  // channels prevents the brightest opening from erasing where its light came
+  // from before a carved face applies its orientation response.
+  for (let cursor = 0; cursor < lightQueue.length; cursor += 1) {
+    const currentDirectionalIndex = lightQueue[cursor];
+    if (currentDirectionalIndex === undefined) continue;
+    const currentCellIndex = currentDirectionalIndex % PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT;
+    const directionIndex = Math.floor(
+      currentDirectionalIndex / PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT
+    );
+    const currentLevel = directionalLevels[currentDirectionalIndex] ?? 0;
+    const candidateLevel = Math.max(0, currentLevel - PARTIAL_BLOCK_CAVITY_LIGHT_ATTENUATION);
+    if (candidateLevel <= PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON) continue;
+
+    for (const neighborIndex of getPartialBlockAdjacentLatticeCellIndexes(currentCellIndex)) {
+      if (!removedCells.has(neighborIndex)) continue;
+      const neighborDirectionalIndex = getPartialBlockCavityDirectionalIndex(
+        neighborIndex,
+        directionIndex
+      );
+      if (
+        candidateLevel <=
+        (directionalLevels[neighborDirectionalIndex] ?? 0) + PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON
+      ) {
         continue;
       }
-      if (candidateLevel > (levels[neighborIndex] ?? 0) + PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON) {
-        levels[neighborIndex] = candidateLevel;
-        queue.push(neighborIndex);
-      }
+      directionalLevels[neighborDirectionalIndex] = candidateLevel;
+      lightQueue.push(neighborDirectionalIndex);
     }
   }
 
-  return { levels, reachable };
+  return { directionalLevels, reachable };
 }
 
 function createPartialBlockCavityVertexLightSampler(
@@ -1358,8 +1390,81 @@ function samplePartialBlockCavityVertexLight(
   }
 
   let total = 0;
-  for (const candidateIndex of candidateIndexes) total += field.levels[candidateIndex] ?? 0;
+  for (const candidateIndex of candidateIndexes) {
+    total += getPartialBlockDirectionalCavityLight(field, candidateIndex, normal);
+  }
   return total / candidateIndexes.length;
+}
+
+function getPartialBlockDirectionalCavityLight(
+  field: PartialBlockCavityLightField,
+  cavityCellIndex: number,
+  surfaceNormal: PartialBlockPosition
+): number {
+  let brightestLevel = 0;
+  let directionX = 0;
+  let directionY = 0;
+  let directionZ = 0;
+  for (let directionIndex = 0; directionIndex < PARTIAL_BLOCK_LATTICE_FACES.length; directionIndex += 1) {
+    const apertureNormal = PARTIAL_BLOCK_LATTICE_FACES[directionIndex]?.normal;
+    if (!apertureNormal) continue;
+    const directionalIndex = getPartialBlockCavityDirectionalIndex(
+      cavityCellIndex,
+      directionIndex
+    );
+    const level = field.directionalLevels[directionalIndex] ?? 0;
+    if (level <= 0) continue;
+    brightestLevel = Math.max(brightestLevel, level);
+    directionX += apertureNormal.x * level;
+    directionY += apertureNormal.y * level;
+    directionZ += apertureNormal.z * level;
+  }
+
+  if (brightestLevel <= 0) return 0;
+  const directionLength = Math.hypot(directionX, directionY, directionZ);
+  // Equal light entering from opposing sides cancels into diffuse fill instead
+  // of choosing an arbitrary winner. Unequal levels form a local gradient that
+  // points back toward the dominant exterior light path.
+  if (directionLength <= PARTIAL_BLOCK_CAVITY_LIGHT_EPSILON) return brightestLevel;
+  const alignment = clamp(
+    (surfaceNormal.x * directionX + surfaceNormal.y * directionY + surfaceNormal.z * directionZ) /
+      directionLength,
+    -1,
+    1
+  );
+  const directionalOrientationScale = alignment > 0
+    ? lerp(PARTIAL_BLOCK_CAVITY_TANGENTIAL_LIGHT_SCALE, 1, alignment)
+    : lerp(
+      PARTIAL_BLOCK_CAVITY_TANGENTIAL_LIGHT_SCALE,
+      PARTIAL_BLOCK_CAVITY_OPPOSING_LIGHT_SCALE,
+      -alignment
+    );
+  // A one-level imbalance should only hint at direction; a three-level gradient
+  // is strong enough to use the full facing/tangential/opposing response. This
+  // avoids a harsh flip when nearly equal sources differ by one integer step.
+  const directionStrength = clamp(
+    directionLength / PARTIAL_BLOCK_CAVITY_DIRECTIONAL_LEVEL_RANGE,
+    0,
+    1
+  );
+  const orientationScale = lerp(1, directionalOrientationScale, directionStrength);
+  return brightestLevel * orientationScale;
+}
+
+function getPartialBlockCavityDirectionIndex(normal: PartialBlockPosition): number {
+  const directionIndex = PARTIAL_BLOCK_LATTICE_FACES.findIndex((face) => (
+    face.normal.x === normal.x &&
+    face.normal.y === normal.y &&
+    face.normal.z === normal.z
+  ));
+  return Math.max(0, directionIndex);
+}
+
+function getPartialBlockCavityDirectionalIndex(
+  cavityCellIndex: number,
+  directionIndex: number
+): number {
+  return cavityCellIndex + directionIndex * PARTIAL_BLOCK_DAMAGE_LATTICE_CELL_COUNT;
 }
 
 function getPartialBlockCavityTangentAxes(
