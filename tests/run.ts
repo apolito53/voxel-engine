@@ -2818,6 +2818,108 @@ test("stale block-light worker results do not overwrite newer chunk revisions", 
   workerPool.dispose();
 });
 
+test("opaque partial transitions carry accepted block light into the first damaged mesh", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "partial-light-cache-continuity-test", workerPool });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const partialPosition = { x: 3, y: 80, z: 1 };
+  const regionKey = createPartialBlockMeshRegionKey(partialPosition);
+
+  world.setBlock(1, 80, 1, BLOCK.lamp);
+  world.setBlock(partialPosition.x, partialPosition.y, partialPosition.z, BLOCK.stone);
+  await drainWorldRenderWork(world, scene, material);
+  assert(
+    world.snapshotChunkBlockLightBuffers(0, 0).current,
+    "the continuity fixture should begin with an accepted owner light cache"
+  );
+
+  const carveResult = world.carveBlock({
+    ...partialPosition,
+    point: new THREE.Vector3(partialPosition.x + 0.02, partialPosition.y + 0.5, partialPosition.z + 0.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE,
+    speed: 18
+  });
+  assert(carveResult, "the continuity fixture should create a partial terrain cell");
+  assert(
+    world.snapshotChunkBlockLightBuffers(0, 0).current,
+    "solid-to-partial opacity parity should carry the accepted light cache across the mesh revision"
+  );
+
+  const update = world.consumePartialBlockMeshRegionUpdates({ maxRegions: 64 })
+    .find((candidate) => candidate.key === regionKey);
+  assert(update, "the newly damaged region should remain immediately available for meshing");
+  const lightInput = world.snapshotPartialBlockMeshRegionBlockLightInput(update);
+  assert(lightInput?.blockLights.current, "the first partial mesh payload should contain current block light");
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(
+      update,
+      (cell, normal) => world.shouldRenderPartialBlockFace(cell, normal)
+    ),
+    blockLights: lightInput.blockLights,
+    blockLightChunkOrigin: lightInput.blockLightChunkOrigin
+  });
+  assert(
+    geometry.blockLights.some((level) => level > 0),
+    "the first uploaded partial geometry should never flash a zero-filled light attribute"
+  );
+
+  world.dispose(scene);
+  workerPool.dispose();
+  material.dispose();
+});
+
+test("partial mesh updates wait while required block light is rebuilding", async () => {
+  const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
+  const world = new VoxelWorld({ seed: "partial-light-readiness-gate-test", workerPool });
+  const scene = new THREE.Scene();
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+  const partialPosition = { x: 3, y: 80, z: 1 };
+  const regionKey = createPartialBlockMeshRegionKey(partialPosition);
+
+  world.setBlock(1, 80, 1, BLOCK.lamp);
+  world.setBlock(partialPosition.x, partialPosition.y, partialPosition.z, BLOCK.stone);
+  const carveResult = world.carveBlock({
+    ...partialPosition,
+    point: new THREE.Vector3(partialPosition.x + 0.02, partialPosition.y + 0.5, partialPosition.z + 0.5),
+    normal: new THREE.Vector3(-1, 0, 0),
+    amount: PARTIAL_BLOCK_CORE_DAMAGE,
+    speed: 18
+  });
+  assert(carveResult, "the readiness fixture should create a partial terrain cell");
+  assert(
+    !world.isPartialBlockMeshRegionBlockLightReady(regionKey),
+    "a region should report unready before its first derived light cache is accepted"
+  );
+  assertEqual(
+    world.consumePartialBlockMeshRegionUpdates({ maxRegions: 64 })
+      .filter((candidate) => candidate.key === regionKey).length,
+    0,
+    "an unlit worker payload must not consume the damaged region"
+  );
+  assert(
+    world.getDirtyPartialBlockMeshRegionCount() > 0,
+    "the deferred region should remain dirty while its previous render stays visible"
+  );
+
+  await drainWorldRenderWork(world, scene, material);
+  assert(
+    world.isPartialBlockMeshRegionBlockLightReady(regionKey),
+    "the region should become meshable after accepted block light catches up"
+  );
+  assert(
+    world.consumePartialBlockMeshRegionUpdates({ maxRegions: 64 })
+      .some((candidate) => candidate.key === regionKey),
+    "the deferred damaged region should be released once current light is available"
+  );
+
+  world.dispose(scene);
+  workerPool.dispose();
+  material.dispose();
+});
+
 test("Lamp removal clears uploaded partial block-light attributes", async () => {
   const workerPool = new WorkerPool({ maxWorkers: 1, hardwareConcurrency: 2 });
   const world = new VoxelWorld({ seed: "partial-lamp-removal-render-light-test", workerPool });

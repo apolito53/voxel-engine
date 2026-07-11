@@ -16,6 +16,11 @@
 
 ### Changed
 
+- First-time partial damage no longer invalidates derived block light when an
+  opaque full voxel becomes an equally opaque partial mask. Accepted light
+  buffers carry across the mesh-only revision, while partial regions with a
+  genuinely rebuilding cache retain their previous mesh instead of uploading a
+  zero-lit replacement.
 - Destroyed partial-block regions now retain their previous custom geometry
   until the owning normal chunk and any touched cardinal neighbor have uploaded
   current exposed-face meshes, removing the one-frame black hole flash during
@@ -44,6 +49,9 @@
 
 ### Tests
 
+- Added coverage for immediate accepted-light continuity on solid-to-partial
+  transitions and deferred partial-region consumption while required light
+  caches are unavailable.
 - Added coverage for deferred partial-region retirement, cancellation when new
   partial work arrives, and owner/cardinal chunk-edge render readiness.
 - Added coverage for debris shader block-light separation, per-instance light

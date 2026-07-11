@@ -152,6 +152,10 @@ faint reflected component, and balanced opposing inputs remain ambient fill.
 Sealed pockets keep zero cavity data before the player's global minimum-light
 display floor. The current
 emissive Lamp material and fixed point-light proxies stay active.
+First-time damage carries accepted block-light buffers across the opaque
+full-voxel-to-partial-mask mesh revision. If a relevant light cache genuinely
+needs rebuilding, the prior partial mesh remains visible until current light is
+available instead of flashing a zero-lit intermediate mesh.
 When a damaged voxel is finally destroyed, its regional partial mesh remains as
 a brief visual bridge until the current normal chunk mesh (and any touched
 cardinal neighbor) has uploaded the newly exposed terrain faces.

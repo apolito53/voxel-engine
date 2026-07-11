@@ -76,7 +76,8 @@ import { createTerrainContext, generateChunkBlocks, type TerrainContext, type Te
 import {
   createBlockLightNeighborKey,
   getBlockLightIndex,
-  getDirtyBlockLightChunkCoordsForEdit
+  getDirtyBlockLightChunkCoordsForEdit,
+  isBlockLightOpaque
 } from "./voxelBlockLight";
 import type { WorkerPool, WorkerPoolJobResult } from "./workerPool";
 
@@ -2193,7 +2194,13 @@ export class VoxelWorld implements CollisionWorld {
   }: PartialBlockMeshUpdateBatchOptions = {}): readonly PartialBlockMeshRegionUpdate[] {
     if (this.dirtyPartialBlockRegionKeys.size === 0 || maxRegions <= 0) return [];
 
-    const dirtyKeys = [...this.dirtyPartialBlockRegionKeys];
+    // A partial mesh with missing light buffers renders as zero-lit geometry.
+    // Leave that region dirty, and therefore leave its previous mesh visible,
+    // until every loaded cache it can sample is revision-current.
+    const dirtyKeys = [...this.dirtyPartialBlockRegionKeys].filter((key) => (
+      !this.partialBlocksByRegion.has(key) || this.isPartialBlockMeshRegionBlockLightReady(key)
+    ));
+    if (dirtyKeys.length === 0) return [];
     const urgentKeys = dirtyKeys.filter((key) => this.urgentPartialBlockRegionKeys.has(key));
     const normalKeys = dirtyKeys.filter((key) => !this.urgentPartialBlockRegionKeys.has(key));
     const sortedNormalKeys = origin
@@ -3043,7 +3050,7 @@ export class VoxelWorld implements CollisionWorld {
     this.partialBlocks.delete(key);
     this.removePartialBlockFromIndexes(key, existing);
     this.markPartialBlockVisualDirty(position, true);
-    this.markPartialBlockMaskDirty(position);
+    this.markPartialBlockMaskDirty(position, { previousMaskValue: 1, nextMaskValue: 0 });
     if (persist) this.rememberPartialBlockChunkModified(position);
   }
 
@@ -3066,7 +3073,7 @@ export class VoxelWorld implements CollisionWorld {
 
     this.addPartialBlockToIndexes(key, cell);
     this.markPartialBlockVisualDirty(cell.position, true);
-    this.markPartialBlockMaskDirty(cell.position);
+    this.markPartialBlockMaskDirty(cell.position, { previousMaskValue: 0, nextMaskValue: 1 });
     if (persist) this.rememberPartialBlockChunkModified(cell.position);
   }
 
@@ -3121,19 +3128,41 @@ export class VoxelWorld implements CollisionWorld {
     this.partialBlockGeometryRevision = nextRevision;
   }
 
-  private markPartialBlockMaskDirty(position: VoxelBlockPosition): void {
+  private markPartialBlockMaskDirty(position: VoxelBlockPosition, {
+    previousMaskValue,
+    nextMaskValue
+  }: {
+    readonly previousMaskValue: number;
+    readonly nextMaskValue: number;
+  }): void {
     const { cx, cz, lx, lz } = this.toChunkCoords(position.x, position.z);
     const chunk = this.getChunk(cx, cz);
     this.partialBlockMaskCache.delete(this.key(cx, cz));
-    this.markBlockLightChunksDirtyForEdit(position.x, position.z);
-    if (chunk) {
-      chunk.revision += 1;
-      this.markChunkDirty(chunk);
+    const block = this.getBlock(position.x, position.y, position.z);
+    const blockLightOpacityChanged =
+      isBlockLightOpaque(block, previousMaskValue) !== isBlockLightOpaque(block, nextMaskValue);
+
+    if (blockLightOpacityChanged) {
+      this.markBlockLightChunksDirtyForEdit(position.x, position.z);
+      if (chunk) {
+        chunk.revision += 1;
+        this.markChunkDirty(chunk);
+      }
+      if (lx === 0) this.markDirty(cx - 1, cz);
+      if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
+      if (lz === 0) this.markDirty(cx, cz - 1);
+      if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+      return;
     }
-    if (lx === 0) this.markDirty(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
-    if (lz === 0) this.markDirty(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+
+    // Normal damage replaces an opaque full voxel with an opaque partial mask.
+    // Only geometry changed, so keep accepted light data alive while invalidating
+    // the owner and any chunk-edge mesh that reads the new render mask.
+    this.markChunkMeshDirtyWithoutChangingBlockLight(cx, cz);
+    if (lx === 0) this.markChunkMeshDirtyWithoutChangingBlockLight(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.markChunkMeshDirtyWithoutChangingBlockLight(cx + 1, cz);
+    if (lz === 0) this.markChunkMeshDirtyWithoutChangingBlockLight(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.markChunkMeshDirtyWithoutChangingBlockLight(cx, cz + 1);
   }
 
   private getPartialBlockChunkKey(position: PartialBlockPosition): string {
@@ -3348,6 +3377,38 @@ export class VoxelWorld implements CollisionWorld {
 
     this.cancelPendingMeshBuildForKey(key);
     this.markChunkDirty(chunk);
+  }
+
+  private markChunkMeshDirtyWithoutChangingBlockLight(cx: number, cz: number): void {
+    const key = this.key(cx, cz);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk) return;
+
+    const cached = this.blockLightCache.get(key);
+    const canCarryCacheForward = Boolean(
+      cached &&
+      cached.revision === chunk.revision &&
+      !this.dirtyBlockLightChunkKeys.has(key)
+    );
+
+    this.cancelPendingMeshBuildForKey(key);
+    chunk.revision += 1;
+    this.markChunkDirty(chunk);
+
+    if (canCarryCacheForward && cached) {
+      // Chunk revisions guard both mesh and light jobs. When only the partial
+      // render mask changed, advance the still-valid derived light entry with
+      // the mesh revision instead of deleting it and flashing a dark rebuild.
+      this.blockLightCache.set(key, {
+        revision: chunk.revision,
+        blockLight: cached.blockLight
+      });
+      return;
+    }
+
+    // A cache that was already absent or rebuilding cannot be carried. Retire
+    // any now-stale job and keep the chunk queued for a fresh light result.
+    if (this.workerPool) this.markBlockLightChunkDirty(cx, cz, { bumpRevision: false });
   }
 
   private markBlockLightChunksDirtyForEdit(worldX: number, worldZ: number): void {
@@ -4290,6 +4351,7 @@ export class VoxelWorld implements CollisionWorld {
   snapshotPartialBlockMeshRegionBlockLightInput(
     update: PartialBlockMeshRegionUpdate
   ): Pick<PartialBlockMeshBuildInput, "blockLights" | "blockLightChunkOrigin"> | undefined {
+    if (!this.isPartialBlockMeshRegionBlockLightReady(update.key)) return undefined;
     const coords = parsePartialBlockMeshRegionKey(update.key);
     if (!coords) return undefined;
     const bounds = getPartialBlockMeshRegionBounds(coords);
@@ -4304,6 +4366,33 @@ export class VoxelWorld implements CollisionWorld {
       blockLights: this.snapshotChunkBlockLightBuffers(cx, cz),
       blockLightChunkOrigin: { cx, cz }
     };
+  }
+
+  isPartialBlockMeshRegionBlockLightReady(regionKey: string): boolean {
+    // Unit tests and the synchronous fallback build geometry directly without a
+    // derived-light worker cache. Their existing zero-light fallback remains a
+    // valid contract; runtime worker meshes wait for accepted cache revisions.
+    if (!this.workerPool) return true;
+
+    const coords = parsePartialBlockMeshRegionKey(regionKey);
+    if (!coords) return true;
+    const bounds = getPartialBlockMeshRegionBounds(coords);
+    const cx = Math.floor(bounds.minX / CHUNK_SIZE);
+    const cz = Math.floor(bounds.minZ / CHUNK_SIZE);
+    const ownerMinX = cx * CHUNK_SIZE;
+    const ownerMaxX = ownerMinX + CHUNK_SIZE - 1;
+    const ownerMinZ = cz * CHUNK_SIZE;
+    const ownerMaxZ = ownerMinZ + CHUNK_SIZE - 1;
+    const sampledChunks = [{ cx, cz }];
+    if (bounds.minX === ownerMinX) sampledChunks.push({ cx: cx - 1, cz });
+    if (bounds.maxX === ownerMaxX) sampledChunks.push({ cx: cx + 1, cz });
+    if (bounds.minZ === ownerMinZ) sampledChunks.push({ cx, cz: cz - 1 });
+    if (bounds.maxZ === ownerMaxZ) sampledChunks.push({ cx, cz: cz + 1 });
+
+    return sampledChunks.every((sampled) => {
+      const chunk = this.getChunk(sampled.cx, sampled.cz);
+      return !chunk || this.hasUsableBlockLightCache(this.key(sampled.cx, sampled.cz), chunk);
+    });
   }
 
   isPartialBlockMeshRegionTerrainRenderCurrent(regionKey: string): boolean {
