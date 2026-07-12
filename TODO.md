@@ -10,7 +10,6 @@ promoted work, not every fun idea that crosses the room.
 - Best next gameplay-feel lanes:
   1. Equipment and items
   2. Sound polish/content pass
-  3. Individual light-source follow-up polish
 - Treat rigid debris, worker scheduling, and partial terrain collision as
   maintenance/watchlist areas for now. They should not steal the whole roadmap
   unless a bug makes them unavoidable.
@@ -33,8 +32,7 @@ promoted work, not every fun idea that crosses the room.
   chunky shards, and wood as long splinters. CPU/Rapier should keep only the
   gameplay-relevant pieces.
 - Do not reopen this lane until we intentionally choose renderer architecture
-  work again; sound, equipment/items, and light-source polish remain the current
-  mainline priorities.
+  work again; equipment/items and sound remain the current mainline priorities.
 
 ## High Priority: Sound
 
@@ -67,33 +65,28 @@ promoted work, not every fun idea that crosses the room.
   stress scene with many debris/material events, and a cleanup check across
   pause, world exit, and dev reload.
 
-## High Priority: Individual Light Sources
+## Completed Foundation: Individual Light Sources
 
 - First slice shipped in `v0.14.0` and was corrected through `v0.15.3`:
   placeable `Lamp` blocks register as radius-selected Three.js point lights
   from exposed fixture surfaces, rebuild from loaded/edited chunks, use a
   quality-tuned light radius, and coexist with the cheaper baked
   sun/face-shading baseline.
-- Data foundation shipped in `v0.17.0`: `src/voxelBlockLight.ts` builds
-  worker-safe 0..15 Lamp block-light arrays from cloned chunk snapshots and
-  one-chunk neighbor halos, with solid and partial terrain currently treated as
-  opaque. This is not rendered yet.
-- Goal: support individual local light sources so the world can have torches,
-  lamps, glowing tools/projectiles, lit structures, and eventually gameplay that
-  depends on local darkness or illumination instead of only sun/sky lighting.
-- Next serious slice should feed block-light arrays into chunk and partial
-  terrain color attributes or shader uniforms so all Lamp blocks illuminate
-  nearby terrain without needing one Three.js point light per block.
+- The `v0.17.0` data foundation now renders through cached worker-built 0..15
+  Lamp block-light arrays on normal chunks, carved partial terrain, and flying
+  instanced debris. Partial cavities preserve aperture direction and light
+  attenuation, while chunk and partial faces share smoothed corner gradients.
+- The expensive smooth PointLight layer is now secondary and quality-scaled:
+  Potato uses none, while Low through Super Ultra use stable budgets from 4 to
+  32. Overflow Lamps remain emissive and block-light-backed instead of going
+  dark, and quality changes retain allocated high-water proxy objects for reuse.
 - Keep baked sun/face shading and individual runtime lights conceptually
   separate. Existing `voxelLighting.ts` face shading can remain the cheap
   ambient/sun baseline while block-light data becomes an additive local layer.
-- Future path: rendered chunk-aware block light, sub-cell light leakage through
-  damaged partial terrain, colored/emissive blocks, day/night interaction,
-  dynamic projectile glows, and tool/Nova light pulses.
-- Validation shape: include a Superflat Lab scene with multiple lights, a
-  dense-fixture stress pass, a save/load check for placed light sources, and a
-  visual smoke check that moving around chunk boundaries does not pop or leak
-  lights weirdly.
+- Reopen this lane for a named visual or performance repro, or when gameplay
+  needs colored/emissive blocks, dynamic projectile glows, tool/Nova light
+  pulses, or illumination-aware mechanics. Sub-cell propagation through intact
+  partial material remains deliberately out of scope until it earns the cost.
 
 ## High Priority: Equipment And Items
 

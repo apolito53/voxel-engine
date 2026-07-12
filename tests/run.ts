@@ -36,10 +36,7 @@ import {
   isLocalLightBlock,
   selectNearestLocalLightSources
 } from "../src/localLights";
-import {
-  LOCAL_LIGHT_POINT_PROXY_CAPACITY,
-  LocalLightRenderer
-} from "../src/localLightRenderer";
+import { LocalLightRenderer } from "../src/localLightRenderer";
 import {
   BLOCK_COLOR_VARIANT_COUNT,
   createBlockMeshKey,
@@ -2360,8 +2357,13 @@ test("world block shader damps specular through baked diffuse shade", () => {
     "terrain indirect specular should be damped by baked vertex and texture darkness"
   );
   assert(
-    shader.vertexShader.includes("vVoxelWorldPosition = worldPosition.xyz;"),
-    "terrain shader should pass world-space positions to the fragment fog path"
+    shader.vertexShader.includes("vec4 voxelWorldPosition = vec4(transformed, 1.0);") &&
+      shader.vertexShader.includes("vVoxelWorldPosition = (modelMatrix * voxelWorldPosition).xyz;"),
+    "terrain shader should build its own unconditional world position for the fragment fog path"
+  );
+  assert(
+    !shader.vertexShader.includes("vVoxelWorldPosition = worldPosition.xyz;"),
+    "zero-PointLight terrain variants must not depend on Three's conditional worldPosition declaration"
   );
   assert(
     shader.fragmentShader.includes("voxelHorizontalFogDistance"),
@@ -3100,10 +3102,11 @@ test("local light selection keeps every nearby lamp source inside the radius", (
   assert(selections.every((selection) => selection.sourceCount === 1), "separated lamps should stay independent");
 });
 
-test("local light renderer keeps fixed point-light proxies while overflow lamps stay emissive-only", () => {
+test("local light renderer keeps a preset-stable proxy pool while overflow lamps use block light", () => {
   const scene = new THREE.Scene();
   const renderer = new LocalLightRenderer(scene);
-  const overflowSourceCount = LOCAL_LIGHT_POINT_PROXY_CAPACITY + 8;
+  const normalCapacity = QUALITY_PRESETS.normal.localLightPointProxyCapacity;
+  const overflowSourceCount = normalCapacity + 8;
   const sources = selectNearestLocalLightSources(
     Array.from({ length: overflowSourceCount }, (_, index) => ({
       x: (index % 17) * 2,
@@ -3118,19 +3121,25 @@ test("local light renderer keeps fixed point-light proxies while overflow lamps 
   renderer.update(sources, QUALITY_PRESETS.normal);
   const pointLights = scene.children.filter((child): child is THREE.PointLight => child instanceof THREE.PointLight);
   const initialStats = renderer.getStats();
-  assertEqual(pointLights.length, LOCAL_LIGHT_POINT_PROXY_CAPACITY, "renderer should keep a fixed point-light proxy pool");
-  assertEqual(pointLights.filter((light) => light.visible).length, pointLights.length, "pooled lights stay visible to avoid shader-count churn");
+  assertEqual(pointLights.length, normalCapacity, "renderer should allocate the current preset's point-light pool");
+  assertEqual(
+    pointLights.filter((light) => light.visible).length,
+    normalCapacity,
+    "every slot in the preset budget should stay visible to avoid source-count shader churn"
+  );
   assertEqual(
     pointLights.filter((light) => light.intensity > 0).length,
-    LOCAL_LIGHT_POINT_PROXY_CAPACITY,
+    normalCapacity,
     "only proxy-backed nearest lamps should create real PointLight spill"
   );
   assertEqual(initialStats.sourceCount, sources.length, "renderer stats should report every selected lamp source");
-  assertEqual(initialStats.activePointLights, LOCAL_LIGHT_POINT_PROXY_CAPACITY, "stats should report the active proxy count");
+  assertEqual(initialStats.activePointLights, normalCapacity, "stats should report the active proxy count");
+  assertEqual(initialStats.pointLightCapacity, normalCapacity, "stats should report the current preset budget");
+  assertEqual(initialStats.allocatedPointLights, normalCapacity, "stats should expose the allocated high-water pool");
   assertEqual(
-    initialStats.emissiveOnlySources,
-    overflowSourceCount - LOCAL_LIGHT_POINT_PROXY_CAPACITY,
-    "overflow lamps should be reported as emissive-only instead of disappearing"
+    initialStats.blockLightOnlySources,
+    overflowSourceCount - normalCapacity,
+    "overflow lamps should be reported as block-light-only instead of disappearing"
   );
   assertEqual(
     pointLights.filter((light) => light.castShadow).length,
@@ -3140,13 +3149,18 @@ test("local light renderer keeps fixed point-light proxies while overflow lamps 
 
   renderer.update(sources.slice(0, 2), QUALITY_PRESETS.normal);
   const reducedStats = renderer.getStats();
-  assertEqual(pointLights.length, LOCAL_LIGHT_POINT_PROXY_CAPACITY, "the fixed pool should not shrink and force another point-light shader variant");
+  assertEqual(pointLights.length, normalCapacity, "the preset pool should not shrink when the source count falls");
+  assertEqual(
+    pointLights.filter((light) => light.visible).length,
+    normalCapacity,
+    "unused preset slots should remain in the shader at zero intensity"
+  );
   assertEqual(
     pointLights.filter((light) => light.intensity > 0).length,
     2,
     "unused high-water pool slots should remain zero-intensity placeholders"
   );
-  assertEqual(reducedStats.emissiveOnlySources, 0, "all remaining lamps should fit in the proxy layer");
+  assertEqual(reducedStats.blockLightOnlySources, 0, "all remaining lamps should fit in the proxy layer");
   assertEqual(
     pointLights.filter((light) => light.castShadow).length,
     0,
@@ -3161,7 +3175,7 @@ test("local light renderer keeps fixed point-light proxies while overflow lamps 
   );
 });
 
-test("local light renderer gives dense visible lamp fields real spill below the lifted cap", () => {
+test("local light renderer scales visible proxies by quality without discarding its high-water pool", () => {
   const scene = new THREE.Scene();
   const renderer = new LocalLightRenderer(scene);
   const denseLampCount = 72;
@@ -3179,15 +3193,39 @@ test("local light renderer gives dense visible lamp fields real spill below the 
   renderer.update(sources, QUALITY_PRESETS.superUltra);
 
   const pointLights = scene.children.filter((child): child is THREE.PointLight => child instanceof THREE.PointLight);
-  const stats = renderer.getStats();
+  const superUltraCapacity = QUALITY_PRESETS.superUltra.localLightPointProxyCapacity;
+  const superUltraStats = renderer.getStats();
   assertEqual(sources.length, denseLampCount, "the dense lamp fixture should fit inside the local-light radius");
-  assertEqual(stats.sourceCount, denseLampCount, "renderer stats should count every dense-fixture source");
-  assertEqual(stats.activePointLights, denseLampCount, "every below-cap lamp source should get real point-light spill");
-  assertEqual(stats.emissiveOnlySources, 0, "below-cap dense lamps should not be reduced to emissive-only glow");
+  assertEqual(superUltraStats.sourceCount, denseLampCount, "renderer stats should count every dense-fixture source");
+  assertEqual(superUltraStats.activePointLights, superUltraCapacity, "Super Ultra should activate only its proxy budget");
+  assertEqual(
+    superUltraStats.blockLightOnlySources,
+    denseLampCount - superUltraCapacity,
+    "dense overflow Lamps should keep voxel illumination without dynamic proxies"
+  );
   assertEqual(
     pointLights.filter((light) => light.intensity > 0).length,
-    denseLampCount,
-    "below-cap lamps should activate one warm spill proxy per selected source"
+    superUltraCapacity,
+    "only the nearest Super Ultra sources should receive smooth PointLight spill"
+  );
+
+  const originalPool = [...pointLights];
+  renderer.update(sources, QUALITY_PRESETS.normal);
+  const normalCapacity = QUALITY_PRESETS.normal.localLightPointProxyCapacity;
+  const normalStats = renderer.getStats();
+  assertEqual(pointLights.filter((light) => light.visible).length, normalCapacity, "Normal should hide slots above its budget");
+  assertEqual(normalStats.allocatedPointLights, superUltraCapacity, "lower quality should retain the allocated high-water pool");
+
+  renderer.update(sources, QUALITY_PRESETS.potato);
+  const potatoStats = renderer.getStats();
+  assertEqual(pointLights.filter((light) => light.visible).length, 0, "Potato should remove PointLights from material shaders");
+  assertEqual(potatoStats.activePointLights, 0, "Potato should rely entirely on voxel block light");
+  assertEqual(potatoStats.blockLightOnlySources, denseLampCount, "Potato Lamps should remain block-light sources");
+
+  renderer.update(sources, QUALITY_PRESETS.superUltra);
+  assert(
+    originalPool.every((light, index) => scene.children.includes(light) && pointLights[index] === light),
+    "returning to Super Ultra should reuse the original PointLight objects"
   );
 
   renderer.dispose();
@@ -3933,11 +3971,13 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
       textures: 4
     }
   });
+  const testPointLightCapacity = QUALITY_PRESETS.normal.localLightPointProxyCapacity;
   const pressuredLocalLights = {
-    sourceCount: LOCAL_LIGHT_POINT_PROXY_CAPACITY + 6,
-    activePointLights: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
-    pointLightCapacity: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
-    emissiveOnlySources: 6,
+    sourceCount: testPointLightCapacity + 6,
+    activePointLights: testPointLightCapacity,
+    pointLightCapacity: testPointLightCapacity,
+    allocatedPointLights: testPointLightCapacity,
+    blockLightOnlySources: 6,
     shadowCastingPointLights: 0
   };
   const record = createPerformanceHitchRecord(7, 700, {
@@ -4009,13 +4049,13 @@ test("performance hitch diagnosis calls out RAF gaps and browser frame clues", (
   );
   assert(
     renderRecord.details.some((detail) =>
-      detail.includes(`${LOCAL_LIGHT_POINT_PROXY_CAPACITY + 6} lamp sources`) &&
-      detail.includes("emissive-only")
+      detail.includes(`${testPointLightCapacity + 6} lamp sources`) &&
+      detail.includes("block-light-only")
     ),
-    "render hitches should explain when lamp sources exceed the fixed point-light proxy layer"
+    "render hitches should explain when lamp sources exceed the quality-scaled point-light layer"
   );
   assertEqual(
-    renderRecord.stats.localLights.emissiveOnlySources,
+    renderRecord.stats.localLights.blockLightOnlySources,
     6,
     "hitch snapshots should clone local light pressure stats"
   );
@@ -13336,6 +13376,21 @@ test("quality presets keep scheduler and render-distance invariants", () => {
     128,
     "Super Ultra should carry the largest local light radius"
   );
+  assertEqual(QUALITY_PRESETS.potato.localLightPointProxyCapacity, 0, "Potato should rely entirely on voxel block light");
+  assertEqual(QUALITY_PRESETS.low.localLightPointProxyCapacity, 4, "Low should keep four smooth nearby Lamp proxies");
+  assertEqual(QUALITY_PRESETS.normal.localLightPointProxyCapacity, 8, "Normal should keep eight smooth nearby Lamp proxies");
+  assertEqual(QUALITY_PRESETS.high.localLightPointProxyCapacity, 16, "High should double Normal's Lamp proxy budget");
+  assertEqual(QUALITY_PRESETS.ultra.localLightPointProxyCapacity, 24, "Ultra should retain a broader near-field proxy layer");
+  assertEqual(
+    QUALITY_PRESETS[SUPER_ULTRA_PRESET_ID].localLightPointProxyCapacity,
+    32,
+    "Super Ultra should cap per-fragment Lamp pressure at 32 proxies"
+  );
+  assertEqual(
+    QUALITY_PRESETS[CUSTOM_PRESET_ID].localLightPointProxyCapacity,
+    QUALITY_PRESETS.normal.localLightPointProxyCapacity,
+    "the default Custom definition should match Normal's proxy budget"
+  );
   assert(
     getShadowTexelSize(QUALITY_PRESETS.high) < getShadowTexelSize(QUALITY_PRESETS.normal),
     "High should spend more shadow texels near the player than Normal"
@@ -13772,8 +13827,9 @@ function createTestHitchStats(
     localLights: {
       sourceCount: 0,
       activePointLights: 0,
-      pointLightCapacity: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
-      emissiveOnlySources: 0,
+      pointLightCapacity: QUALITY_PRESETS.normal.localLightPointProxyCapacity,
+      allocatedPointLights: QUALITY_PRESETS.normal.localLightPointProxyCapacity,
+      blockLightOnlySources: 0,
       shadowCastingPointLights: 0
     },
     dayNight: createDayNightDebugSnapshot(

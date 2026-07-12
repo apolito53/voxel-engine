@@ -5,23 +5,24 @@ import {
 } from "./localLights";
 import type { QualityPreset } from "./qualityPresets";
 
-export const LOCAL_LIGHT_POINT_PROXY_CAPACITY = 128;
 const LOCAL_LIGHT_IDLE_Y = -10000;
 
 export type LocalLightRendererStats = {
   readonly sourceCount: number;
   readonly activePointLights: number;
   readonly pointLightCapacity: number;
-  readonly emissiveOnlySources: number;
+  readonly allocatedPointLights: number;
+  readonly blockLightOnlySources: number;
   readonly shadowCastingPointLights: number;
 };
 
-function createEmptyLocalLightRendererStats(): LocalLightRendererStats {
+function createEmptyLocalLightRendererStats(allocatedPointLights = 0): LocalLightRendererStats {
   return {
     sourceCount: 0,
     activePointLights: 0,
-    pointLightCapacity: LOCAL_LIGHT_POINT_PROXY_CAPACITY,
-    emissiveOnlySources: 0,
+    pointLightCapacity: 0,
+    allocatedPointLights,
+    blockLightOnlySources: 0,
     shadowCastingPointLights: 0
   };
 }
@@ -33,25 +34,33 @@ export class LocalLightRenderer {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
-    this.ensureLightPool();
   }
 
   update(sources: readonly LocalLightSelection[], preset: QualityPreset): void {
-    this.ensureLightPool();
+    const pointLightCapacity = normalizePointLightCapacity(preset.localLightPointProxyCapacity);
+    this.ensureLightPool(pointLightCapacity);
 
     let activePointLights = 0;
     let shadowCastingPointLights = 0;
     for (let index = 0; index < this.lights.length; index += 1) {
       const light = this.lights[index];
+      if (index >= pointLightCapacity) {
+        this.deactivateLight(light, false);
+        continue;
+      }
+
       const source = sources[index];
       if (!source) {
-        this.deactivateLight(light);
+        // Keep every slot inside the current preset's budget visible at zero
+        // intensity. Three.js compiles the visible light count into material
+        // programs, so source churn must not create a new shader variant.
+        this.deactivateLight(light, true);
         continue;
       }
 
       const definition = getLocalLightDefinition(source.block);
       if (!definition) {
-        this.deactivateLight(light);
+        this.deactivateLight(light, true);
         continue;
       }
 
@@ -62,17 +71,10 @@ export class LocalLightRenderer {
       light.decay = definition.decay;
       light.position.set(source.centerX, source.centerY, source.centerZ);
 
-      // Local lights are emitted from solid voxel fixtures. Even after moving
-      // the light toward exposed surfaces, a normal shadow-casting PointLight
-      // can still render the lamp voxels into its own cube-map and turn the
-      // fixture into its own occluder. Leave lamp shadow maps off until we have
-      // a voxel-aware exclusion path for the emitter volume.
+      // Lamp shadow maps stay parked until the emitter voxel can be excluded
+      // from its own cube-map. Block light supplies occluded terrain spill;
+      // these proxies are now only the smoother near-field highlight layer.
       light.castShadow = false;
-      light.shadow.mapSize.set(preset.localLightShadowMapSize, preset.localLightShadowMapSize);
-      light.shadow.camera.near = 0.05;
-      light.shadow.camera.far = light.distance;
-      light.shadow.bias = -0.00008;
-      light.shadow.normalBias = 0.012;
       activePointLights += 1;
       if (light.castShadow) shadowCastingPointLights += 1;
     }
@@ -80,11 +82,11 @@ export class LocalLightRenderer {
     this.lastStats = {
       sourceCount: sources.length,
       activePointLights,
-      pointLightCapacity: this.lights.length,
-      // Every lamp tile now emits in the terrain shader. Sources beyond the
-      // larger fixed proxy pool still visibly glow; they just skip expensive
-      // dynamic light spill for this frame.
-      emissiveOnlySources: Math.max(0, sources.length - activePointLights),
+      pointLightCapacity,
+      allocatedPointLights: this.lights.length,
+      // Overflow Lamps still glow and illuminate terrain through cached voxel
+      // block light. They skip only the expensive per-fragment PointLight pass.
+      blockLightOnlySources: Math.max(0, sources.length - activePointLights),
       shadowCastingPointLights
     };
   }
@@ -94,7 +96,7 @@ export class LocalLightRenderer {
       light.visible = false;
       light.castShadow = false;
     }
-    this.lastStats = createEmptyLocalLightRendererStats();
+    this.lastStats = createEmptyLocalLightRendererStats(this.lights.length);
   }
 
   getStats(): LocalLightRendererStats {
@@ -110,20 +112,13 @@ export class LocalLightRenderer {
     this.lastStats = createEmptyLocalLightRendererStats();
   }
 
-  private ensureLightPool(): void {
-    while (this.lights.length < LOCAL_LIGHT_POINT_PROXY_CAPACITY) {
+  private ensureLightPool(capacity: number): void {
+    while (this.lights.length < capacity) {
       const light = new THREE.PointLight(0xffb45f, 0, 12, 1.75);
-      // Keep pooled lights visible with zero intensity once a world is active.
-      // Three.js bakes visible light counts into shader variants, so toggling
-      // lights on/off for every placed Lamp block can cause the half-second
-      // browser-side hitch that barely shows up in our JS timing buckets.
-      //
-      // The pool is intentionally generous now, but still finite: lamp faces
-      // glow in the terrain shader, while these real PointLights are the warm
-      // spill that brightens nearby stone, dirt, and wood. This keeps normal
-      // dense fixtures consistent without pretending WebGL point lights are
-      // free forever.
-      light.visible = true;
+      // Allocation follows a high-water mark. Lower quality presets hide extra
+      // objects instead of destroying them, so returning to a larger preset
+      // reuses the same PointLights and cached shader program.
+      light.visible = false;
       light.castShadow = false;
       light.position.set(0, LOCAL_LIGHT_IDLE_Y, 0);
       light.name = `Local voxel light ${this.lights.length + 1}`;
@@ -132,10 +127,14 @@ export class LocalLightRenderer {
     }
   }
 
-  private deactivateLight(light: THREE.PointLight): void {
-    light.visible = true;
+  private deactivateLight(light: THREE.PointLight, keepInShader: boolean): void {
+    light.visible = keepInShader;
     light.intensity = 0;
     light.castShadow = false;
     light.position.set(0, LOCAL_LIGHT_IDLE_Y, 0);
   }
+}
+
+function normalizePointLightCapacity(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }

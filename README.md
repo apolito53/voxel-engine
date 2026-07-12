@@ -127,12 +127,16 @@ local Lamp spill remains intact so open and sealed Lamp-lit rooms read
 consistently. Placeable Lamp blocks are shader-emissive on every visible Lamp
 face, so dense fixtures and Lamp walls read as the same glowing material
 regardless of camera/player position or time of day. The local-light renderer
-keeps a fixed 128-source nearest-point proxy layer for warm spill onto
-surrounding blocks; only extremely dense overflow Lamp sources remain
-emissive-only instead of going dark, and Lamp shadow maps are parked until the
-emitter volume can be excluded from its own shadows. The F3 `Lights` and `Sky`
-panels report source/proxy
-pressure plus the current clock, phase, cycle state, light scales, and fog color.
+keeps a preset-stable nearest-point proxy layer for smooth per-fragment
+highlights: Potato uses no PointLights, then Low through Super Ultra use
+`4 / 8 / 16 / 24 / 32`. Unused slots inside the current budget stay visible at
+zero intensity so ordinary Lamp edits do not churn Three.js shader variants;
+allocated high-water slots above the current quality budget stay hidden and
+reusable. Lamps beyond the proxy budget still glow and illuminate terrain
+through voxel block light instead of becoming visually dead. Lamp shadow maps
+remain parked until the emitter volume can be excluded from its own shadows.
+The F3 `Lights` and `Sky` panels report source/proxy/block-light-only pressure
+plus the current clock, phase, cycle state, light scales, and fog color.
 The engine now also has a worker-safe Minecraft-style block-light data layer:
 Lamp blocks emit level 15 into derived 0..15 chunk light arrays, light falls off
 by one per orthogonal block step, and solid or partial terrain blocks occlude it.
@@ -150,8 +154,8 @@ incoming-light gradient. Cavity walls facing that direction receive full spill,
 tangential walls receive softer diffuse light, opposing walls retain only a
 faint reflected component, and balanced opposing inputs remain ambient fill.
 Sealed pockets keep zero cavity data before the player's global minimum-light
-display floor. The current
-emissive Lamp material and fixed point-light proxies stay active.
+display floor. The emissive Lamp material and quality-scaled near-field
+PointLight proxies stay active alongside that derived terrain light.
 First-time damage carries accepted block-light buffers across the opaque
 full-voxel-to-partial-mask mesh revision. If a relevant light cache genuinely
 needs rebuilding, the prior partial mesh remains visible until current light is

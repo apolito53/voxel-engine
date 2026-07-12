@@ -593,7 +593,7 @@ function addRenderDetails(
     details.push(
       `${stats.localLights.sourceCount} lamp sources, ` +
       `${stats.localLights.activePointLights}/${stats.localLights.pointLightCapacity} point proxies, ` +
-      `${stats.localLights.emissiveOnlySources} emissive-only`
+      `${stats.localLights.blockLightOnlySources} block-light-only`
     );
   }
   if (stats.fragmentRender.instances > 0) {
@@ -636,9 +636,9 @@ function addCrossCuttingPressureDetails(
   if (stats.fragmentRender.instances >= 100) {
     details.push(`${stats.fragmentRender.instances} live fragment render instances`);
   }
-  if (stats.localLights.emissiveOnlySources > 0) {
+  if (stats.localLights.blockLightOnlySources > 0) {
     details.push(
-      `light pressure ${stats.localLights.emissiveOnlySources} emissive-only lamp sources beyond ` +
+      `light pressure ${stats.localLights.blockLightOnlySources} block-light-only lamp sources beyond ` +
       `${stats.localLights.pointLightCapacity} point proxies`
     );
   }

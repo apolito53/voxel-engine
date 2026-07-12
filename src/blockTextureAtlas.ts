@@ -62,7 +62,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v10-block-light-range";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v11-unconditional-world-position";
   return material;
 }
 
@@ -116,7 +116,20 @@ export function applyWorldBlockShaderPatches(
     )
     .replace(
       "#include <worldpos_vertex>",
-      "#include <worldpos_vertex>\nvVoxelWorldPosition = worldPosition.xyz;"
+      [
+        // Three declares its stock `worldPosition` only when another enabled
+        // feature needs it. Potato deliberately has no PointLights or shadows,
+        // so terrain fog must build an unconditional position of its own.
+        "vec4 voxelWorldPosition = vec4(transformed, 1.0);",
+        "#ifdef USE_BATCHING",
+        "  voxelWorldPosition = batchingMatrix * voxelWorldPosition;",
+        "#endif",
+        "#ifdef USE_INSTANCING",
+        "  voxelWorldPosition = instanceMatrix * voxelWorldPosition;",
+        "#endif",
+        "vVoxelWorldPosition = (modelMatrix * voxelWorldPosition).xyz;",
+        "#include <worldpos_vertex>"
+      ].join("\n")
     );
 
   shader.fragmentShader = shader.fragmentShader

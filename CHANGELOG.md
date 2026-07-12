@@ -14,8 +14,23 @@
   block-light levels, defaulting the displayed range to `1..15` while keeping
   the solver's chunk light data at integer `0..15`.
 
+### Fixed
+
+- Made the terrain shader calculate its fog world position independently of
+  Three.js's conditional `worldPosition` variable, so Potato's zero-PointLight,
+  no-shadow material variant compiles instead of rendering black.
+
 ### Changed
 
+- Replaced the globally visible 128-PointLight Lamp proxy pool with stable
+  per-quality budgets of `0 / 4 / 8 / 16 / 24 / 32` from Potato through Super
+  Ultra. Voxel block light remains authoritative for every Lamp, while the
+  nearest proxies provide only smooth per-fragment highlights. Allocated proxy
+  objects follow a reusable high-water mark, and unused slots inside a preset
+  stay visible at zero intensity to avoid per-edit shader-count churn.
+- Renamed Lamp overflow diagnostics from `emissive-only` to
+  `block-light-only`, reflecting that sources beyond the PointLight budget still
+  illuminate normal terrain, carved partial terrain, and debris.
 - First-time partial damage no longer invalidates derived block light when an
   opaque full voxel becomes an equally opaque partial mask. Accepted light
   buffers carry across the mesh-only revision, while partial regions with a
@@ -49,6 +64,9 @@
 
 ### Tests
 
+- Added coverage for quality-scaled Lamp proxy budgets, stable zero-intensity
+  slots, block-light-only overflow reporting, Potato's zero-PointLight path,
+  quality changes, and high-water PointLight object reuse.
 - Added coverage for immediate accepted-light continuity on solid-to-partial
   transitions and deferred partial-region consumption while required light
   caches are unavailable.

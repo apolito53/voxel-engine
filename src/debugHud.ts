@@ -313,7 +313,10 @@ export class DebugHud {
             label: "point",
             value: `${snapshot.localLightStats.activePointLights}/${snapshot.localLightStats.pointLightCapacity} proxies`
           },
-          { label: "emit", value: `${snapshot.localLightStats.emissiveOnlySources} emissive-only` },
+          {
+            label: "voxel",
+            value: `${snapshot.localLightStats.blockLightOnlySources} block-light-only, ${snapshot.localLightStats.allocatedPointLights} pooled`
+          },
           {
             label: "shadow",
             value: `${snapshot.localLightStats.shadowCastingPointLights} casting, lamp shadows off`
