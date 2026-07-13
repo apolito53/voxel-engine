@@ -4,12 +4,21 @@ import {
   LEGACY_WORLD_HEIGHT,
   WORLD_HEIGHT
 } from "./voxelConstants";
+import { BLOCKS, PLACEABLE_BLOCKS } from "./blocks";
 import {
   createSavedDayNightState,
   normalizeSavedDayNightState,
   type DayNightState,
   type SavedDayNightState
 } from "./dayNightCycle";
+import {
+  cloneInventoryState,
+  createDefaultInventoryState,
+  createVoxelSandboxInventoryOptions,
+  normalizeInventoryState,
+  type InventoryState
+} from "./inventory";
+import { createVoxelSandboxItemRegistry } from "./items";
 import { isSuperflatSeed, type TerrainProfile } from "./terrain";
 
 const DATABASE_NAME = "voxel-engine";
@@ -26,6 +35,11 @@ const VARIED_TERRAIN_PROFILE_INTRODUCED_AT = Date.UTC(2026, 4, 25, 4, 31, 0);
 const CHUNK_BYTE_LENGTH = CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE;
 const LEGACY_CHUNK_BYTE_LENGTH = CHUNK_SIZE * LEGACY_WORLD_HEIGHT * CHUNK_SIZE;
 const PARTIAL_BLOCK_VISUAL_CELL_COUNT = 27;
+const SAVED_ITEM_REGISTRY = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+const SAVED_INVENTORY_OPTIONS = createVoxelSandboxInventoryOptions(
+  SAVED_ITEM_REGISTRY,
+  PLACEABLE_BLOCKS
+);
 
 export type SavedWorld = {
   readonly id: string;
@@ -36,6 +50,7 @@ export type SavedWorld = {
   updatedAt: number;
   playerState?: SavedPlayerState;
   dayNightState?: SavedDayNightState;
+  inventoryState?: InventoryState;
 };
 
 export type SavedPlayerPosition = {
@@ -103,6 +118,7 @@ export interface SaveDatabase {
   updateWorldTimestamp(worldId: string): Promise<void>;
   updateWorldPlayerState(worldId: string, playerState: SavedPlayerState): Promise<SavedWorld | null>;
   updateWorldDayNightState(worldId: string, dayNightState: SavedDayNightState): Promise<SavedWorld | null>;
+  updateWorldInventoryState(worldId: string, inventoryState: InventoryState): Promise<SavedWorld | null>;
   deleteWorld(worldId: string): Promise<void>;
   listChunkKeys(worldId: string): Promise<string[]>;
   loadChunkSnapshot(worldId: string, chunkKey: string, options?: ChunkLoadOptions): Promise<SavedChunkSnapshot | null>;
@@ -273,6 +289,17 @@ class IndexedDbSaveDatabase implements SaveDatabase {
     }));
   }
 
+  async updateWorldInventoryState(
+    worldId: string,
+    inventoryState: InventoryState
+  ): Promise<SavedWorld | null> {
+    return this.updateWorldRecord(worldId, (world) => ({
+      ...world,
+      inventoryState: cloneNormalizedInventoryState(inventoryState),
+      updatedAt: Date.now()
+    }));
+  }
+
   async deleteWorld(worldId: string): Promise<void> {
     const transaction = this.database.transaction([WORLDS_STORE, CHUNKS_STORE], "readwrite");
     const done = transactionDone(transaction);
@@ -422,11 +449,13 @@ class MemorySaveDatabase implements SaveDatabase {
   }
 
   async listWorlds(): Promise<SavedWorld[]> {
-    return Array.from(this.worlds.values()).map(cloneSavedWorld);
+    return Array.from(this.worlds.values())
+      .map(normalizeWorld)
+      .filter((world): world is SavedWorld => Boolean(world));
   }
 
   async getWorld(worldId: string): Promise<SavedWorld | null> {
-    return cloneWorld(this.worlds.get(worldId));
+    return normalizeWorld(this.worlds.get(worldId));
   }
 
   async putWorld(world: SavedWorld): Promise<void> {
@@ -466,6 +495,22 @@ class MemorySaveDatabase implements SaveDatabase {
     const updatedWorld = cloneSavedWorld({
       ...world,
       dayNightState: cloneSavedDayNightState(dayNightState),
+      updatedAt: Date.now()
+    });
+    this.worlds.set(worldId, updatedWorld);
+    return cloneSavedWorld(updatedWorld);
+  }
+
+  async updateWorldInventoryState(
+    worldId: string,
+    inventoryState: InventoryState
+  ): Promise<SavedWorld | null> {
+    const world = this.worlds.get(worldId);
+    if (!world) return null;
+
+    const updatedWorld = cloneSavedWorld({
+      ...world,
+      inventoryState: cloneNormalizedInventoryState(inventoryState),
       updatedAt: Date.now()
     });
     this.worlds.set(worldId, updatedWorld);
@@ -658,7 +703,8 @@ export class WorldRegistry {
       terrainProfile: worldTerrainProfile,
       createdAt: now,
       updatedAt: now,
-      dayNightState: createSavedDayNightState(undefined, now)
+      dayNightState: createSavedDayNightState(undefined, now),
+      inventoryState: createDefaultInventoryState(SAVED_INVENTORY_OPTIONS)
     };
 
     await this.database.putWorld(world);
@@ -698,7 +744,8 @@ export class WorldRegistry {
       terrainProfile: "classic",
       createdAt: now,
       updatedAt: now,
-      dayNightState: createSavedDayNightState(undefined, now)
+      dayNightState: createSavedDayNightState(undefined, now),
+      inventoryState: createDefaultInventoryState(SAVED_INVENTORY_OPTIONS)
     });
   }
 
@@ -717,6 +764,16 @@ export class WorldRegistry {
     state: DayNightState
   ): Promise<SavedWorld | null> {
     return this.database.updateWorldDayNightState(worldId, createSavedDayNightState(state));
+  }
+
+  async updateInventoryState(
+    worldId: string,
+    state: InventoryState
+  ): Promise<SavedWorld | null> {
+    return this.database.updateWorldInventoryState(
+      worldId,
+      cloneNormalizedInventoryState(state)
+    );
   }
 }
 
@@ -788,18 +845,30 @@ function normalizeWorld(world: unknown): SavedWorld | null {
   const dayNightState = normalizeSavedDayNightState(world.dayNightState);
   if (dayNightState) normalizedWorld.dayNightState = dayNightState;
 
-  return normalizedWorld;
-}
+  // Inventory metadata lives in the existing world record, so old databases do
+  // not need a schema upgrade. Missing, stale, and malformed ids/quantities are
+  // normalized against the current registry every time a world is read.
+  normalizedWorld.inventoryState = normalizeSavedWorldInventoryState(world.inventoryState);
 
-function cloneWorld(world: SavedWorld | undefined | null): SavedWorld | null {
-  return world ? cloneSavedWorld(world) : null;
+  return normalizedWorld;
 }
 
 function cloneSavedWorld(world: SavedWorld): SavedWorld {
   const clonedWorld: SavedWorld = { ...world };
   if (world.playerState) clonedWorld.playerState = cloneSavedPlayerState(world.playerState);
   if (world.dayNightState) clonedWorld.dayNightState = cloneSavedDayNightState(world.dayNightState);
+  if (world.inventoryState) {
+    clonedWorld.inventoryState = cloneNormalizedInventoryState(world.inventoryState);
+  }
   return clonedWorld;
+}
+
+function normalizeSavedWorldInventoryState(value: unknown): InventoryState {
+  return normalizeInventoryState(value, SAVED_INVENTORY_OPTIONS);
+}
+
+function cloneNormalizedInventoryState(value: unknown): InventoryState {
+  return cloneInventoryState(normalizeSavedWorldInventoryState(value));
 }
 
 function cloneSavedDayNightState(state: SavedDayNightState): SavedDayNightState {

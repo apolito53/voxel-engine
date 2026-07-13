@@ -8,7 +8,7 @@ promoted work, not every fun idea that crosses the room.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:
-  1. Equipment and items
+  1. Equipment slots and a deliberate pickup/drop loop
   2. Sound polish/content pass
 - Treat rigid debris, worker scheduling, and partial terrain collision as
   maintenance/watchlist areas for now. They should not steal the whole roadmap
@@ -32,7 +32,8 @@ promoted work, not every fun idea that crosses the room.
   chunky shards, and wood as long splinters. CPU/Rapier should keep only the
   gameplay-relevant pieces.
 - Do not reopen this lane until we intentionally choose renderer architecture
-  work again; equipment/items and sound remain the current mainline priorities.
+  work again; equipment slots/pickup gameplay and sound remain the current
+  mainline priorities.
 
 ## High Priority: Sound
 
@@ -88,24 +89,27 @@ promoted work, not every fun idea that crosses the room.
   pulses, or illumination-aware mechanics. Sub-cell propagation through intact
   partial material remains deliberately out of scope until it earns the cost.
 
-## High Priority: Equipment And Items
+## Completed Foundation: Creative Inventory
 
-- First foundation is in place: `src/items.ts` defines reusable item
-  definitions, stack metadata, categories, tags, and primary/secondary action
-  descriptors; `src/hotbar.ts` selects item stacks instead of hard-coded
-  behavior unions.
-- Next slice should turn that foundation into actual gameplay structure:
-  equipment slots, inventory containers, item quantities, pickups/drops, and
-  durable tool/weapon definitions.
-- Keep blocks, throwable cores, tools, and future weapons in one clean model.
-  If the hotbar becomes too crowded, split presentation into equipment slots
-  plus inventory without splitting the item data model too early.
-- Add explicit tool behavior so terrain editing, combat, building, and utility
-  actions are owned by selected items instead of creeping back into universal
-  left-click/right-click logic.
-- Validation shape: unit-test item container operations, hotbar/equipment
-  selection, stack limits, pickup/drop transfer, and click-action routing; smoke
-  test that Terraformer, blocks, Physics Core, and Hitscan Core still behave.
+- `v0.18.0` adds `src/inventory.ts`: fixed nullable-slot containers with
+  normalization, max-stack limits, merge/remainder insertion,
+  remove/split/transfer/swap operations, stable-id selection, and plain
+  deep-cloneable save state.
+- Inventory metadata now persists per world without an IndexedDB schema bump:
+  active lane, independent selected item/block ids, and an 18-slot finite
+  Backpack normalize against the current registry on read.
+- The pause menu now exposes Items and Blocks creative catalogs plus the saved
+  Backpack grid. `I` opens it, catalog picks resume play, and the bottom hotbar
+  remains lane-specific.
+- Current sandbox rules remain deliberately creative: Terraformer, cores, and
+  blocks are unlimited-use; Unarmed is virtual; there is no ammo, durability,
+  placement consumption, pickup, or drop behavior yet.
+- Next equipment slice should decide what earns a finite stack, add explicit
+  equipment slots, and design pickup/drop transfer as gameplay instead of
+  quietly turning the editor sandbox into a survival inventory.
+- Keep terrain editing, combat, building, and utility actions owned by item
+  descriptors. Regression coverage should continue proving action routing when
+  equipment and finite stacks arrive.
 
 ## Watchlist: Partial Terrain Traversal
 

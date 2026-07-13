@@ -266,15 +266,15 @@ body.playing canvas {
 
 .settings-panel,
 .builder-panel,
-.loadout-panel {
+.inventory-panel {
   display: grid;
   gap: 10px;
 }
 
 .settings-panel[hidden],
 .builder-panel[hidden],
-.loadout-panel[hidden],
-.loadout-tab-panel[hidden] {
+.inventory-panel[hidden],
+.inventory-tab-panel[hidden] {
   display: none;
 }
 
@@ -286,6 +286,10 @@ body.playing canvas {
   border-radius: 6px;
   background: rgba(5, 8, 12, 0.32);
   padding: 4px;
+}
+
+.inventory-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .settings-tab {
@@ -526,7 +530,7 @@ body.playing canvas {
   display: none;
 }
 
-.builder-loadout-hint {
+.builder-inventory-hint {
   border: 1px solid rgba(143, 216, 255, 0.16);
   border-radius: 6px;
   background: rgba(143, 216, 255, 0.07);
@@ -580,18 +584,19 @@ body.playing canvas {
   white-space: nowrap;
 }
 
-.loadout-tab-panel {
+.inventory-tab-panel {
   display: grid;
   gap: 10px;
 }
 
-.loadout-card-list {
+.inventory-item-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.loadout-card,
-.loadout-block-card {
+.inventory-catalog-card {
+  position: relative;
   display: grid;
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -603,20 +608,27 @@ body.playing canvas {
   text-align: left;
 }
 
-.loadout-card {
+.inventory-item-card {
   gap: 4px;
   min-height: 62px;
   padding: 10px 12px;
 }
 
-.loadout-card.is-active,
-.loadout-block-card.is-active {
+.inventory-catalog-card.is-active {
   border-color: rgba(241, 196, 83, 0.96);
   background: rgba(241, 196, 83, 0.16);
   box-shadow: inset 0 0 0 2px rgba(241, 196, 83, 0.28);
 }
 
-.loadout-card-title {
+.inventory-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inventory-card-title {
   overflow: hidden;
   font-size: 14px;
   font-weight: 950;
@@ -624,27 +636,43 @@ body.playing canvas {
   white-space: nowrap;
 }
 
-.loadout-card-action {
+.inventory-card-action {
   color: rgba(237, 244, 248, 0.66);
   font-size: 12px;
   font-weight: 780;
   line-height: 1.25;
 }
 
-.loadout-block-grid {
+.inventory-unlimited-badge {
+  color: #ffd66b;
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.inventory-block-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.loadout-block-card {
+.inventory-block-card {
   align-content: start;
   gap: 7px;
   min-height: 82px;
   padding: 8px;
 }
 
-.loadout-block-swatch {
+.inventory-block-card .inventory-unlimited-badge {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(9, 15, 21, 0.68);
+}
+
+.inventory-block-swatch {
   width: 100%;
   aspect-ratio: 1.85;
   border-radius: 5px;
@@ -653,13 +681,105 @@ body.playing canvas {
     inset 0 -16px 20px rgba(0, 0, 0, 0.22);
 }
 
-.loadout-block-name {
+.inventory-block-name {
   overflow: hidden;
   font-size: 12px;
   font-weight: 900;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inventory-backpack {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.inventory-backpack-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inventory-backpack-title {
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.inventory-backpack-status {
+  color: rgba(237, 244, 248, 0.58);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.inventory-backpack-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.inventory-backpack-slot {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+  aspect-ratio: 1;
+  border: 1px solid rgba(237, 244, 248, 0.17);
+  border-radius: 4px;
+  background: rgba(237, 244, 248, 0.07);
+  overflow: hidden;
+  padding: 5px;
+}
+
+.inventory-backpack-slot.is-empty {
+  border-color: rgba(237, 244, 248, 0.1);
+  background: rgba(5, 8, 12, 0.22);
+}
+
+.inventory-backpack-slot-number {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  color: rgba(237, 244, 248, 0.28);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.inventory-backpack-swatch {
+  width: 22px;
+  height: 13px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+.inventory-backpack-label {
+  max-width: 100%;
+  overflow: hidden;
+  color: rgba(237, 244, 248, 0.78);
+  font-size: 8px;
+  font-weight: 850;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.inventory-stack-quantity {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 14px;
+  border-radius: 4px;
+  background: rgba(9, 15, 21, 0.82);
+  color: #edf4f8;
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 14px;
+  text-align: center;
 }
 
 .budget-control {
@@ -1036,8 +1156,7 @@ body.playing canvas {
 .range-input:focus-visible,
 .settings-tab:focus-visible,
 .stepper-button:focus-visible,
-.loadout-card:focus-visible,
-.loadout-block-card:focus-visible,
+.inventory-catalog-card:focus-visible,
 .toggle-input:focus-visible,
 .nova-chat-input:focus-visible,
 .nova-chat-send:focus-visible,
@@ -1173,6 +1292,20 @@ body.controls-hidden #hud {
   color: rgba(237, 244, 248, 0.56);
   font-size: 9px;
   font-weight: 950;
+}
+
+.hotbar-slot-quantity {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  min-width: 16px;
+  border-radius: 4px;
+  background: rgba(9, 15, 21, 0.82);
+  color: #edf4f8;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 16px;
+  text-align: center;
 }
 
 .hotbar-slot-swatch {
@@ -1521,7 +1654,7 @@ body.controls-hidden #hud {
     bottom: 102px;
   }
 
-  .loadout-block-grid {
+  .inventory-block-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

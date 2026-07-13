@@ -13,12 +13,12 @@ World units are metric: `1 block = 1 meter`. The active world volume is 96m
 tall, with legacy 48m edited chunk saves expanded on read so older maps remain
 aligned with the current terrain profile.
 
-Edited chunk snapshots, partial-block terrain damage, last player location, and
-per-world time of day persist in IndexedDB browser storage. Clear this site's
-browser data to reset saved worlds. The home screen creates, loads, and deletes local saved
-worlds, with a `World Type` selector for `Varied Terrain`, `Floating Islands`,
-and `Classic Legacy`; `Superflat Lab` creates a flat test world using the
-reserved `superflat` seed.
+Edited chunk snapshots, partial-block terrain damage, last player location,
+per-world time of day, and inventory selection/backpack state persist in
+IndexedDB browser storage. Clear this site's browser data to reset saved worlds.
+The home screen creates, loads, and deletes local saved worlds, with a `World
+Type` selector for `Varied Terrain`, `Floating Islands`, and `Classic Legacy`;
+`Superflat Lab` creates a flat test world using the reserved `superflat` seed.
 
 New saved-world seeds default to the newer varied terrain profile with broader
 plains, mountain-scale ridges, cliff-like slope breaks, sandy washes, terraced
@@ -75,6 +75,7 @@ ignored by git.
 ## Core Controls
 
 - `WASD` move, `Mouse` look, `Esc` pause/release mouse
+- `I` opens or closes Inventory
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - Low damaged-terrain ledges step up automatically with a short vertical ease,
   so Terraformer stairs do not pop the camera upward. Two-to-four-sub-block
@@ -205,11 +206,16 @@ fall when their support is destroyed without restoring broad per-frame scans.
 Local hitch logs also receive runtime diagnostic breadcrumbs for WebGL context
 loss/restoration and uncaught browser errors, which helps separate a canvas-side
 render failure from a full engine freeze.
-The bottom hotbar shows the active Items or Blocks lane plus the current
-semi/full-auto click mode. The pause-menu
-`Loadout` panel selects tools and blocks, while `Settings > Gameplay` can show
-or hide the quick-control hints and tune audio. Debug and control overlays
-start hidden by default.
+The current Inventory is a creative catalog: Unarmed, Terraformer, both cores,
+and every placeable block remain unlimited-use, with no ammo, durability, or
+placement consumption. Its finite 18-slot Backpack is saved per world and
+reserved for later pickup/drop gameplay. Unarmed is virtual and cannot occupy a
+Backpack slot.
+
+The bottom hotbar shows only the active Items or Blocks lane plus the current
+semi/full-auto click mode. The pause-menu `Inventory` panel selects items and
+blocks, while `Settings > Gameplay` can show or hide the quick-control hints and
+tune audio. Debug and control overlays start hidden by default.
 
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).

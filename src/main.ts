@@ -157,10 +157,14 @@ import {
 } from "./frameTimings";
 import { readGpuInfo } from "./gpu";
 import {
-  createHotbarItems,
   canFireHitscanCoreWithHotbarItem,
   canThrowCoreWithHotbarItem,
+  createBlockHotbarItems,
+  createCreativeHotbarItem,
+  createToolHotbarItems,
   getHotbarIndexFromDigitCode,
+  getHotbarItemById,
+  getHotbarItemIndexById,
   getHotbarItemLabel,
   getHotbarItemCategory,
   getHotbarPrimaryAction,
@@ -168,8 +172,6 @@ import {
   getHotbarSecondaryAction,
   normalizeHotbarIndex,
   stepHotbarIndex,
-  createBlockHotbarItems,
-  createToolHotbarItems,
   type HotbarItem
 } from "./hotbar";
 import {
@@ -186,11 +188,23 @@ import {
 import { HitscanBoltTracer } from "./hitscanBoltTracer";
 import {
   EMPTY_HANDS_ITEM_ID,
-  createItemStack,
+  createBlockItemId,
   createVoxelSandboxItemRegistry,
   type ItemAction,
+  type ItemId,
   type ItemUseButton
 } from "./items";
+import {
+  cloneInventoryState,
+  createDefaultInventoryState,
+  createVoxelSandboxInventoryOptions,
+  getSelectedInventoryItemId,
+  normalizeInventoryState,
+  selectInventoryCatalogItem as selectInventoryCatalogItemState,
+  setInventoryActiveLane,
+  type InventoryLane,
+  type InventoryState
+} from "./inventory";
 import { SUN_OFFSET } from "./lighting";
 import { LocalLightRenderer } from "./localLightRenderer";
 import { MinimapRenderer } from "./minimap";
@@ -495,19 +509,21 @@ const changelogCloseButton = requireElement<HTMLButtonElement>("#changelog-close
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
-const loadoutButton = requireElement<HTMLButtonElement>("#loadout-button");
+const inventoryButton = requireElement<HTMLButtonElement>("#inventory-button");
 const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
 const builderButton = requireElement<HTMLButtonElement>("#builder-button");
 const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
-const pauseLoadoutPanel = requireElement<HTMLElement>("#pause-loadout-panel");
+const pauseInventoryPanel = requireElement<HTMLElement>("#pause-inventory-panel");
 const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
 const pauseBuilderPanel = requireElement<HTMLElement>("#pause-builder-panel");
-const loadoutToolsTab = requireElement<HTMLButtonElement>("#loadout-tab-tools");
-const loadoutBlocksTab = requireElement<HTMLButtonElement>("#loadout-tab-blocks");
-const loadoutToolsPanel = requireElement<HTMLElement>("#loadout-tools-panel");
-const loadoutBlocksPanel = requireElement<HTMLElement>("#loadout-blocks-panel");
-const loadoutToolList = requireElement<HTMLElement>("#loadout-tool-list");
-const loadoutBlockList = requireElement<HTMLElement>("#loadout-block-list");
+const inventoryItemsTab = requireElement<HTMLButtonElement>("#inventory-tab-items");
+const inventoryBlocksTab = requireElement<HTMLButtonElement>("#inventory-tab-blocks");
+const inventoryItemsPanel = requireElement<HTMLElement>("#inventory-items-panel");
+const inventoryBlocksPanel = requireElement<HTMLElement>("#inventory-blocks-panel");
+const inventoryItemList = requireElement<HTMLElement>("#inventory-item-list");
+const inventoryBlockList = requireElement<HTMLElement>("#inventory-block-list");
+const inventoryBackpackStatus = requireElement<HTMLElement>("#inventory-backpack-status");
+const inventoryBackpackGrid = requireElement<HTMLElement>("#inventory-backpack-grid");
 const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
 const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
 const settingsExperimentalTab = requireElement<HTMLButtonElement>("#settings-tab-experimental");
@@ -645,9 +661,6 @@ let player: PlayerController | null = null;
 let inWorld = false;
 let worldTransitioning = false;
 let homeWorldListRefreshGeneration = 0;
-let activeBuilderLane: BuilderLane = "items";
-let selectedToolHotbarIndex = 0;
-let selectedBlockHotbarIndex = 0;
 let builderBrushSize = BUILDER_BRUSH_MIN_SIZE;
 let qualityController: QualityController;
 
@@ -670,6 +683,10 @@ let nextPlayerLocationAutosaveAt = 0;
 let playerLocationSaveChain: Promise<void> = Promise.resolve();
 let nextDayNightAutosaveAt = 0;
 let dayNightSaveChain: Promise<void> = Promise.resolve();
+let pendingInventorySave: PendingInventorySave | null = null;
+let inventorySaveDrainPromise: Promise<void> | null = null;
+let lastSavedInventoryWorldId: string | null = null;
+let lastSavedInventoryFingerprint = "";
 let runtimeDisposed = false;
 let animationFrameId: number | null = null;
 let idleHeartbeatTimerId: ReturnType<typeof setTimeout> | null = null;
@@ -705,9 +722,11 @@ const gameAudio = new GameAudio({
   settings: audioSettings
 });
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+const inventoryStateOptions = createVoxelSandboxInventoryOptions(itemRegistry, PLACEABLE_BLOCKS);
+let inventoryState = createDefaultInventoryState(inventoryStateOptions);
 const toolHotbarItems = createToolHotbarItems();
 const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
-const fallbackHotbarItem = createItemStack(EMPTY_HANDS_ITEM_ID);
+const fallbackHotbarItem = createCreativeHotbarItem(EMPTY_HANDS_ITEM_ID);
 const novaContext = new NovaContextJournal(engineEvents);
 const performanceHitchLog = new PerformanceHitchLog();
 const frameDiagnostics = new BrowserFrameDiagnostics();
@@ -777,6 +796,12 @@ type PendingPartialBlockMeshJob = {
   readonly id: number;
   readonly revision: number;
 };
+type PendingInventorySave = {
+  readonly registry: WorldRegistry;
+  readonly worldId: string;
+  readonly state: InventoryState;
+  readonly fingerprint: string;
+};
 
 const TERRAFORMER_COMBAT_SOURCE: CombatLogSource = { kind: "terraformer", label: "Terraformer" };
 const PHYSICS_CORE_COMBAT_SOURCE: CombatLogSource = { kind: "physics-core", label: "Physics Core" };
@@ -788,8 +813,7 @@ declare global {
     __VOXEL_COMBAT_LOG__?: CombatLog;
   }
 }
-type LoadoutCategory = "tools" | "blocks";
-type PauseSubmenu = "loadout" | "settings" | "builder";
+type PauseSubmenu = "inventory" | "settings" | "builder";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
@@ -1023,7 +1047,7 @@ syncHealthBarsToggle();
 syncControlHintsToggle();
 syncCoreAimPreviewToggle();
 syncAudioControls();
-renderLoadoutMenus();
+renderInventoryMenus();
 renderBuilderPalette();
 syncBuilderControls();
 renderHotbar();
@@ -1183,13 +1207,13 @@ function wireMenuControls(): void {
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel, .loadout-panel, .builder-panel")) return;
+    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel, .inventory-panel, .builder-panel")) return;
     event.preventDefault();
     resumeFromPause();
   }, eventListenerOptions);
   resumeButton.addEventListener("click", resumeFromPause, eventListenerOptions);
-  loadoutButton.addEventListener("click", () => {
-    setLoadoutPanelOpen(pauseLoadoutPanel.hidden);
+  inventoryButton.addEventListener("click", () => {
+    setInventoryPanelOpen(pauseInventoryPanel.hidden);
   }, eventListenerOptions);
   settingsButton.addEventListener("click", () => {
     setSettingsPanelOpen(pauseSettingsPanel.hidden);
@@ -1206,11 +1230,11 @@ function wireMenuControls(): void {
   settingsExperimentalTab.addEventListener("click", () => {
     setSettingsCategory("experimental");
   }, eventListenerOptions);
-  loadoutToolsTab.addEventListener("click", () => {
-    setLoadoutCategory("tools");
+  inventoryItemsTab.addEventListener("click", () => {
+    setInventoryCategory("items");
   }, eventListenerOptions);
-  loadoutBlocksTab.addEventListener("click", () => {
-    setLoadoutCategory("blocks");
+  inventoryBlocksTab.addEventListener("click", () => {
+    setInventoryCategory("blocks");
   }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
@@ -1304,7 +1328,7 @@ function wireMenuControls(): void {
     setAudioVolume("uiVolume", uiVolumeSlider.value);
   }, eventListenerOptions);
   builderModeToggleButton.addEventListener("click", () => {
-    setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items", { resumeGameplay: true });
+    setBuilderLane(inventoryState.activeLane === "items" ? "blocks" : "items", { resumeGameplay: true });
   }, eventListenerOptions);
   builderBrushSizeSlider.addEventListener("input", () => {
     setBuilderBrushSize(builderBrushSizeSlider.value);
@@ -1473,8 +1497,24 @@ function closeNovaChatInputMode(): void {
   requirePlayer().resume();
 }
 
-function setLoadoutPanelOpen(open: boolean): void {
-  setPauseSubmenu(open ? "loadout" : null);
+function setInventoryPanelOpen(open: boolean): void {
+  if (open) setInventoryCategory(inventoryState.activeLane);
+  setPauseSubmenu(open ? "inventory" : null);
+}
+
+function toggleInventoryFromKeyboard(): void {
+  if (!pauseInventoryPanel.hidden) {
+    resumeFromPause();
+    return;
+  }
+
+  const activePlayer = requirePlayer();
+  if (activePlayer.active) {
+    activePlayer.pause(true);
+  } else {
+    pauseMenu.classList.remove("is-hidden");
+  }
+  setInventoryPanelOpen(true);
 }
 
 function setSettingsPanelOpen(open: boolean): void {
@@ -1490,22 +1530,22 @@ function closePauseSubmenus(): void {
 }
 
 function setPauseSubmenu(submenu: PauseSubmenu | null): void {
-  const loadoutOpen = submenu === "loadout";
+  const inventoryOpen = submenu === "inventory";
   const settingsOpen = submenu === "settings";
   const builderOpen = submenu === "builder";
-  pauseLoadoutPanel.hidden = !loadoutOpen;
+  pauseInventoryPanel.hidden = !inventoryOpen;
   pauseSettingsPanel.hidden = !settingsOpen;
   pauseBuilderPanel.hidden = !builderOpen;
-  loadoutButton.setAttribute("aria-expanded", String(loadoutOpen));
+  inventoryButton.setAttribute("aria-expanded", String(inventoryOpen));
   settingsButton.setAttribute("aria-expanded", String(settingsOpen));
   builderButton.setAttribute("aria-expanded", String(builderOpen));
-  loadoutButton.classList.toggle("is-active", loadoutOpen);
+  inventoryButton.classList.toggle("is-active", inventoryOpen);
   settingsButton.classList.toggle("is-active", settingsOpen);
   builderButton.classList.toggle("is-active", builderOpen);
-  loadoutButton.classList.toggle("is-hidden", settingsOpen || builderOpen);
-  settingsButton.classList.toggle("is-hidden", loadoutOpen || builderOpen);
-  builderButton.classList.toggle("is-hidden", loadoutOpen || settingsOpen);
-  loadoutButton.textContent = loadoutOpen ? "Back" : "Loadout";
+  inventoryButton.classList.toggle("is-hidden", settingsOpen || builderOpen);
+  settingsButton.classList.toggle("is-hidden", inventoryOpen || builderOpen);
+  builderButton.classList.toggle("is-hidden", inventoryOpen || settingsOpen);
+  inventoryButton.textContent = inventoryOpen ? "Back" : "Inventory";
   settingsButton.textContent = settingsOpen ? "Back" : "Settings";
   builderButton.textContent = builderOpen ? "Back" : "Builder";
 
@@ -1517,15 +1557,15 @@ function setPauseSubmenu(submenu: PauseSubmenu | null): void {
   }
 }
 
-function setLoadoutCategory(category: LoadoutCategory): void {
-  const showTools = category === "tools";
+function setInventoryCategory(category: InventoryLane): void {
+  const showItems = category === "items";
   const showBlocks = category === "blocks";
-  loadoutToolsPanel.hidden = !showTools;
-  loadoutBlocksPanel.hidden = !showBlocks;
-  loadoutToolsTab.classList.toggle("is-active", showTools);
-  loadoutBlocksTab.classList.toggle("is-active", showBlocks);
-  loadoutToolsTab.setAttribute("aria-selected", String(showTools));
-  loadoutBlocksTab.setAttribute("aria-selected", String(showBlocks));
+  inventoryItemsPanel.hidden = !showItems;
+  inventoryBlocksPanel.hidden = !showBlocks;
+  inventoryItemsTab.classList.toggle("is-active", showItems);
+  inventoryBlocksTab.classList.toggle("is-active", showBlocks);
+  inventoryItemsTab.setAttribute("aria-selected", String(showItems));
+  inventoryBlocksTab.setAttribute("aria-selected", String(showBlocks));
 }
 
 function setSettingsCategory(category: SettingsCategory): void {
@@ -1622,7 +1662,7 @@ function canToggleClickFireModeFromKeyboard(): boolean {
 }
 
 function isTerraformerSelected(): boolean {
-  return activeBuilderLane === "items" &&
+  return inventoryState.activeLane === "items" &&
     getHotbarPrimaryAction(getSelectedHotbarItem(), itemRegistry).kind === "terrain:mine-block";
 }
 
@@ -1935,6 +1975,13 @@ document.addEventListener("keydown", (event) => {
 
   if (!inWorld) return;
 
+  if (event.code === "KeyI" && !event.repeat) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toggleInventoryFromKeyboard();
+    return;
+  }
+
   if (event.code === TEST_AVATAR_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -1963,7 +2010,7 @@ document.addEventListener("keydown", (event) => {
 
   if (event.code === BUILDER_MODE_TOGGLE_KEY && !event.repeat) {
     event.preventDefault();
-    setBuilderLane(activeBuilderLane === "items" ? "blocks" : "items");
+    setBuilderLane(inventoryState.activeLane === "items" ? "blocks" : "items");
     return;
   }
 
@@ -2018,6 +2065,7 @@ document.addEventListener("visibilitychange", () => {
     clearPointerHoldState();
     void queueActivePlayerLocationSave(true);
     void queueActiveDayNightStateSave(true);
+    void flushActiveInventoryStateSave();
     enterIdleHeartbeat();
     return;
   }
@@ -2038,6 +2086,7 @@ window.addEventListener("pagehide", () => {
   clearPointerHoldState();
   void queueActivePlayerLocationSave(true);
   void queueActiveDayNightStateSave(true);
+  void flushActiveInventoryStateSave();
   enterIdleHeartbeat();
 }, eventListenerOptions);
 window.addEventListener("blur", () => {
@@ -2046,6 +2095,7 @@ window.addEventListener("blur", () => {
 window.addEventListener("beforeunload", () => {
   void queueActivePlayerLocationSave(true);
   void queueActiveDayNightStateSave(true);
+  void flushActiveInventoryStateSave();
   disposeRuntime();
 }, eventListenerOptions);
 
@@ -2158,7 +2208,7 @@ function useSelectedHotbarAction(activePlayer: PlayerController, action: ItemAct
       return;
     case "terrain:place-block":
       resetTerraformerState();
-      if (activeBuilderLane === "blocks") {
+      if (inventoryState.activeLane === "blocks") {
         applyBuilderBrushAtTarget("place");
       } else {
         placeSelectedBlock(activePlayer, action.block);
@@ -2948,20 +2998,22 @@ function waitForMilliseconds(ms: number): Promise<void> {
 }
 
 function getActiveHotbarItems(): readonly HotbarItem[] {
-  return activeBuilderLane === "blocks" ? blockHotbarItems : toolHotbarItems;
+  return inventoryState.activeLane === "blocks" ? blockHotbarItems : toolHotbarItems;
 }
 
 function getActiveHotbarIndex(): number {
-  return activeBuilderLane === "blocks" ? selectedBlockHotbarIndex : selectedToolHotbarIndex;
+  const items = getActiveHotbarItems();
+  const index = getHotbarItemIndexById(items, getSelectedInventoryItemId(inventoryState));
+  return index >= 0 ? index : 0;
 }
 
 function getSelectedHotbarItem(): HotbarItem {
-  const activeHotbarItems = getActiveHotbarItems();
-  return activeHotbarItems[normalizeHotbarIndex(getActiveHotbarIndex(), activeHotbarItems.length)] ?? fallbackHotbarItem;
+  return getHotbarItemById(getActiveHotbarItems(), getSelectedInventoryItemId(inventoryState))
+    ?? fallbackHotbarItem;
 }
 
 function getSelectedBuilderBlock(): BlockId {
-  const blockItem = blockHotbarItems[normalizeHotbarIndex(selectedBlockHotbarIndex, blockHotbarItems.length)];
+  const blockItem = getHotbarItemById(blockHotbarItems, inventoryState.selectedBlockItemId);
   const action = blockItem ? getHotbarSecondaryAction(blockItem, itemRegistry) : null;
   return action?.kind === "terrain:place-block" ? action.block : BLOCK.grass;
 }
@@ -2973,7 +3025,7 @@ function getSelectedBuilderBlockName(): string {
 function renderHotbar(): void {
   const activeItems = getActiveHotbarItems();
   const activeIndex = getActiveHotbarIndex();
-  const laneLabel = `${activeBuilderLane === "blocks" ? "Blocks" : "Items"} | ${formatClickFireModeShort(clickFireMode)}`;
+  const laneLabel = `${inventoryState.activeLane === "blocks" ? "Blocks" : "Items"} | ${formatClickFireModeShort(clickFireMode)}`;
 
   const laneNode = document.createElement("div");
   laneNode.className = "hotbar-lane";
@@ -3006,6 +3058,13 @@ function renderHotbar(): void {
     label.className = "hotbar-slot-label";
     label.textContent = getHotbarItemLabel(item, itemRegistry);
     button.appendChild(label);
+
+    if (item.quantity !== null) {
+      const quantity = document.createElement("span");
+      quantity.className = "hotbar-slot-quantity";
+      quantity.textContent = String(item.quantity);
+      button.appendChild(quantity);
+    }
     slotsNode.appendChild(button);
   });
 
@@ -3016,18 +3075,17 @@ function setBuilderLane(
   lane: BuilderLane,
   options: { readonly resumeGameplay?: boolean } = {}
 ): void {
-  if (activeBuilderLane === lane) {
+  if (inventoryState.activeLane === lane) {
     syncBuilderControls();
-    syncLoadoutSelection();
+    syncInventorySelection();
     updateHud();
     if (options.resumeGameplay) resumeFromPause();
     return;
   }
 
-  activeBuilderLane = lane;
+  inventoryState = setInventoryActiveLane(inventoryState, lane, inventoryStateOptions);
   if (lane !== "blocks") builderBrushPreview.hide();
-  selectHotbarIndex(getActiveHotbarIndex());
-  syncLoadoutSelection();
+  applySelectedInventoryItem();
   if (options.resumeGameplay) resumeFromPause();
 }
 
@@ -3036,68 +3094,132 @@ function setBuilderBrushSize(value: unknown): void {
   syncBuilderControls();
 }
 
-function renderLoadoutMenus(): void {
-  renderLoadoutToolCards();
-  renderLoadoutBlockCards();
-  syncLoadoutSelection();
+function renderInventoryMenus(): void {
+  renderInventoryItemCards();
+  renderInventoryBlockCards();
+  renderInventoryBackpack();
+  syncInventorySelection();
 }
 
-function renderLoadoutToolCards(): void {
-  const cards = toolHotbarItems.map((item, index) => {
+function renderInventoryItemCards(): void {
+  const cards = toolHotbarItems.map((item) => {
     const card = document.createElement("button");
-    card.className = "loadout-card";
+    card.className = "inventory-catalog-card inventory-item-card";
     card.type = "button";
-    card.dataset.hotbarIndex = String(index);
+    card.dataset.itemId = item.itemId;
+
+    const header = document.createElement("span");
+    header.className = "inventory-card-header";
 
     const title = document.createElement("span");
-    title.className = "loadout-card-title";
+    title.className = "inventory-card-title";
     title.textContent = getHotbarItemLabel(item, itemRegistry);
 
+    const availability = createUnlimitedCatalogBadge();
+    header.append(title, availability);
+
     const action = document.createElement("span");
-    action.className = "loadout-card-action";
+    action.className = "inventory-card-action";
     action.textContent = describeHotbarItemActions(item);
 
-    card.append(title, action);
+    card.append(header, action);
     card.addEventListener("click", () => {
-      setBuilderLane("items");
-      selectHotbarIndex(index);
+      selectInventoryCatalogItemForGameplay("items", item.itemId);
       resumeFromPause();
     }, eventListenerOptions);
     return card;
   });
 
-  loadoutToolList.replaceChildren(...cards);
+  inventoryItemList.replaceChildren(...cards);
 }
 
-function renderLoadoutBlockCards(): void {
-  const cards = blockHotbarItems.map((item, index) => {
+function renderInventoryBlockCards(): void {
+  const cards = blockHotbarItems.map((item) => {
     const placeAction = getHotbarSecondaryAction(item, itemRegistry);
     const block = placeAction.kind === "terrain:place-block" ? placeAction.block : BLOCK.grass;
     const card = document.createElement("button");
-    card.className = "loadout-block-card";
+    card.className = "inventory-catalog-card inventory-block-card";
     card.type = "button";
-    card.dataset.hotbarIndex = String(index);
+    card.dataset.itemId = item.itemId;
     card.dataset.blockId = String(block);
     card.title = getHotbarItemLabel(item, itemRegistry);
 
     const swatch = document.createElement("span");
-    swatch.className = "loadout-block-swatch";
+    swatch.className = "inventory-block-swatch";
     swatch.style.background = getBlockCssColor(block);
 
     const label = document.createElement("span");
-    label.className = "loadout-block-name";
+    label.className = "inventory-block-name";
     label.textContent = getHotbarItemLabel(item, itemRegistry);
 
-    card.append(swatch, label);
+    card.append(swatch, label, createUnlimitedCatalogBadge());
     card.addEventListener("click", () => {
-      setBuilderLane("blocks");
-      selectHotbarIndex(index);
+      selectInventoryCatalogItemForGameplay("blocks", item.itemId);
       resumeFromPause();
     }, eventListenerOptions);
     return card;
   });
 
-  loadoutBlockList.replaceChildren(...cards);
+  inventoryBlockList.replaceChildren(...cards);
+}
+
+function createUnlimitedCatalogBadge(): HTMLElement {
+  const badge = document.createElement("span");
+  badge.className = "inventory-unlimited-badge";
+  badge.textContent = "\u221e";
+  badge.title = "Unlimited";
+  badge.setAttribute("aria-label", "Unlimited");
+  return badge;
+}
+
+function renderInventoryBackpack(): void {
+  const slots = inventoryState.backpack.slots;
+  const occupiedSlots = slots.filter(Boolean).length;
+  inventoryBackpackStatus.textContent = occupiedSlots === 0
+    ? `Empty | ${slots.length} slots`
+    : `${occupiedSlots} / ${slots.length} slots`;
+
+  const slotNodes = slots.map((stack, index) => {
+    const slot = document.createElement("div");
+    slot.className = "inventory-backpack-slot";
+    slot.classList.toggle("is-empty", !stack);
+    slot.setAttribute("role", "listitem");
+
+    const slotNumber = document.createElement("span");
+    slotNumber.className = "inventory-backpack-slot-number";
+    slotNumber.textContent = String(index + 1);
+    slot.appendChild(slotNumber);
+
+    if (!stack) {
+      slot.setAttribute("aria-label", `Backpack slot ${index + 1}, empty`);
+      return slot;
+    }
+
+    const definition = itemRegistry.get(stack.itemId);
+    const action = definition ? getHotbarSecondaryAction(stack, itemRegistry) : null;
+    if (action?.kind === "terrain:place-block") {
+      const swatch = document.createElement("span");
+      swatch.className = "inventory-backpack-swatch";
+      swatch.style.background = getBlockCssColor(action.block);
+      slot.appendChild(swatch);
+    }
+
+    const label = document.createElement("span");
+    label.className = "inventory-backpack-label";
+    label.textContent = definition?.name ?? stack.itemId;
+
+    const quantity = document.createElement("span");
+    quantity.className = "inventory-stack-quantity";
+    quantity.textContent = String(stack.quantity);
+    slot.append(label, quantity);
+    slot.setAttribute(
+      "aria-label",
+      `Backpack slot ${index + 1}, ${label.textContent}, quantity ${stack.quantity}`
+    );
+    return slot;
+  });
+
+  inventoryBackpackGrid.replaceChildren(...slotNodes);
 }
 
 function describeHotbarItemActions(item: HotbarItem): string {
@@ -3125,23 +3247,21 @@ function describeItemAction(action: ItemAction, buttonLabel: "L" | "R"): string 
   }
 }
 
-function syncLoadoutSelection(): void {
-  const toolActive = activeBuilderLane === "items";
-  const selectedIndex = getActiveHotbarIndex();
-  syncLoadoutCardSelection(loadoutToolList, toolActive ? selectedIndex : -1);
-  syncLoadoutCardSelection(loadoutBlockList, toolActive ? -1 : selectedIndex);
+function syncInventorySelection(): void {
+  syncInventoryCardSelection(inventoryItemList, inventoryState.selectedItemId);
+  syncInventoryCardSelection(inventoryBlockList, inventoryState.selectedBlockItemId);
 }
 
-function syncLoadoutCardSelection(container: HTMLElement, selectedIndex: number): void {
-  for (const card of container.querySelectorAll<HTMLButtonElement>("[data-hotbar-index]")) {
-    const active = Number(card.dataset.hotbarIndex) === selectedIndex;
+function syncInventoryCardSelection(container: HTMLElement, selectedItemId: ItemId): void {
+  for (const card of container.querySelectorAll<HTMLButtonElement>("[data-item-id]")) {
+    const active = card.dataset.itemId === selectedItemId;
     card.classList.toggle("is-active", active);
     card.setAttribute("aria-pressed", String(active));
   }
 }
 
 function renderBuilderPalette(): void {
-  const buttons = PLACEABLE_BLOCKS.map((block, index) => {
+  const buttons = PLACEABLE_BLOCKS.map((block) => {
     const button = document.createElement("button");
     button.className = "builder-block-button";
     button.type = "button";
@@ -3155,12 +3275,7 @@ function renderBuilderPalette(): void {
     button.appendChild(swatch);
 
     button.addEventListener("click", () => {
-      selectedBlockHotbarIndex = normalizeHotbarIndex(index, blockHotbarItems.length);
-      if (activeBuilderLane === "blocks") {
-        selectHotbarIndex(selectedBlockHotbarIndex);
-      } else {
-        setBuilderLane("blocks");
-      }
+      selectInventoryCatalogItemForGameplay("blocks", createBlockItemId(block));
       resumeFromPause();
     }, eventListenerOptions);
     return button;
@@ -3170,8 +3285,8 @@ function renderBuilderPalette(): void {
 }
 
 function syncBuilderControls(): void {
-  builderModeToggleButton.textContent = activeBuilderLane === "blocks" ? "Blocks" : "Items";
-  builderModeToggleButton.setAttribute("aria-pressed", String(activeBuilderLane === "blocks"));
+  builderModeToggleButton.textContent = inventoryState.activeLane === "blocks" ? "Blocks" : "Items";
+  builderModeToggleButton.setAttribute("aria-pressed", String(inventoryState.activeLane === "blocks"));
   builderSelectedBlockValue.textContent = getSelectedBuilderBlockName();
   builderBrushSizeSlider.min = String(BUILDER_BRUSH_MIN_SIZE);
   builderBrushSizeSlider.max = String(BUILDER_BRUSH_MAX_SIZE);
@@ -3193,14 +3308,28 @@ function getBlockCssColor(block: BlockId): string {
 }
 
 function selectHotbarIndex(index: number): void {
+  const activeHotbarItems = getActiveHotbarItems();
+  if (activeHotbarItems.length === 0) return;
+
+  const selectedItem = activeHotbarItems[normalizeHotbarIndex(index, activeHotbarItems.length)];
+  if (!selectedItem) return;
+  selectInventoryCatalogItemForGameplay(inventoryState.activeLane, selectedItem.itemId);
+}
+
+function selectInventoryCatalogItemForGameplay(lane: InventoryLane, itemId: ItemId): void {
+  inventoryState = selectInventoryCatalogItemState(
+    inventoryState,
+    lane,
+    itemId,
+    inventoryStateOptions
+  );
+  if (lane !== "blocks") builderBrushPreview.hide();
+  applySelectedInventoryItem();
+}
+
+function applySelectedInventoryItem(): void {
   resetTerraformerState();
   resetHeldClickRepeatState();
-  const activeHotbarItems = getActiveHotbarItems();
-  if (activeBuilderLane === "blocks") {
-    selectedBlockHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);
-  } else {
-    selectedToolHotbarIndex = normalizeHotbarIndex(index, activeHotbarItems.length);
-  }
   const selectedItem = getSelectedHotbarItem();
   const selectedLabel = getHotbarItemLabel(selectedItem, itemRegistry);
 
@@ -3220,23 +3349,23 @@ function selectHotbarIndex(index: number): void {
   }
 
   syncBuilderControls();
-  syncLoadoutSelection();
+  syncInventorySelection();
   updateHud();
+  void queueActiveInventoryStateSave(false);
 }
 
 function selectCodexPilotWeapon(weapon: CodexPilotWeapon): boolean {
   if (weapon === "selected") return true;
 
-  const targetIndex = toolHotbarItems.findIndex((item) => {
+  const targetItem = toolHotbarItems.find((item) => {
     const primaryAction = getHotbarPrimaryAction(item, itemRegistry);
     if (weapon === "physics-core") return primaryAction.kind === "physics:throw-core";
     if (weapon === "hitscan-core") return primaryAction.kind === "physics:fire-hitscan-core";
     return false;
   });
 
-  if (targetIndex < 0) return false;
-  setBuilderLane("items");
-  selectHotbarIndex(targetIndex);
+  if (!targetItem) return false;
+  selectInventoryCatalogItemForGameplay("items", targetItem.itemId);
   return true;
 }
 
@@ -3343,7 +3472,7 @@ function previewTerraformerTarget(): TerraformerEditPreview | null {
 }
 
 function updateBuilderBrushPreview(activePlayer: PlayerController): void {
-  if (activeBuilderLane !== "blocks" || !activePlayer.isLooking()) {
+  if (inventoryState.activeLane !== "blocks" || !activePlayer.isLooking()) {
     builderBrushPreview.hide();
     return;
   }
@@ -5161,6 +5290,7 @@ async function loadWorld(worldId: string): Promise<void> {
     const registry = requireWorldRegistry();
     const activeWorld = requireWorld();
     const activePlayer = requirePlayer();
+    if (inWorld) await flushActiveInventoryStateSave();
     const activeWorldId = await registry.setActiveWorld(worldId);
     const savedWorld = await registry.getActiveWorld();
     const chunkStorage = await createStorageForSavedWorld(savedWorld);
@@ -5174,6 +5304,7 @@ async function loadWorld(worldId: string): Promise<void> {
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
+    applySavedInventoryState(savedWorld, activeWorldId);
     partialBlockMeshField.clear();
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
@@ -5218,6 +5349,16 @@ async function loadWorld(worldId: string): Promise<void> {
   } finally {
     worldTransitioning = false;
   }
+}
+
+function applySavedInventoryState(savedWorld: SavedWorld, worldId: string): void {
+  inventoryState = normalizeInventoryState(savedWorld.inventoryState, inventoryStateOptions);
+  lastSavedInventoryWorldId = worldId;
+  lastSavedInventoryFingerprint = createInventoryStateFingerprint(inventoryState);
+  renderInventoryBackpack();
+  syncInventorySelection();
+  syncBuilderControls();
+  updateHud();
 }
 
 function maybeStartTestAvatarFromUrl(): void {
@@ -5279,6 +5420,7 @@ async function exitToHome(): Promise<void> {
     const activeWorld = requireWorld();
     await queueActivePlayerLocationSave(true);
     await queueActiveDayNightStateSave(true);
+    await flushActiveInventoryStateSave();
     if (novaChatPanel.isOpen) {
       novaChatPanel.close();
     }
@@ -5418,6 +5560,66 @@ function queueActiveDayNightStateSave(force = false): Promise<void> {
   return dayNightSaveChain;
 }
 
+function queueActiveInventoryStateSave(force = false): Promise<void> {
+  const registry = worldRegistry;
+  const activeWorld = world;
+  if (!inWorld || !registry || !activeWorld) return Promise.resolve();
+
+  const worldId = activeWorld.storage.worldId;
+  const state = cloneInventoryState(inventoryState);
+  const fingerprint = createInventoryStateFingerprint(state);
+  const matchesPending = pendingInventorySave?.worldId === worldId
+    && pendingInventorySave.fingerprint === fingerprint;
+  const matchesSaved = lastSavedInventoryWorldId === worldId
+    && lastSavedInventoryFingerprint === fingerprint;
+  if (!force && (matchesPending || (matchesSaved && pendingInventorySave === null))) {
+    return inventorySaveDrainPromise ?? Promise.resolve();
+  }
+
+  // Keep at most one not-yet-started snapshot. An in-flight IndexedDB write is
+  // allowed to finish, while wheel/digit/card changes made during that write
+  // collapse into the newest state instead of replaying every intermediate id.
+  pendingInventorySave = { registry, worldId, state, fingerprint };
+  if (!inventorySaveDrainPromise) {
+    inventorySaveDrainPromise = drainPendingInventoryStateSaves();
+  }
+  return inventorySaveDrainPromise;
+}
+
+function flushActiveInventoryStateSave(): Promise<void> {
+  return queueActiveInventoryStateSave(true);
+}
+
+async function drainPendingInventoryStateSaves(): Promise<void> {
+  try {
+    while (pendingInventorySave) {
+      const pending = pendingInventorySave;
+      pendingInventorySave = null;
+      try {
+        const updatedWorld = await pending.registry.updateInventoryState(
+          pending.worldId,
+          pending.state
+        );
+        if (!updatedWorld) continue;
+
+        lastSavedInventoryWorldId = pending.worldId;
+        lastSavedInventoryFingerprint = pending.fingerprint;
+      } catch (error) {
+        // Do not poison later selection saves after one transient IndexedDB
+        // failure. Because the saved fingerprint is unchanged, the next change
+        // or lifecycle flush naturally retries the latest complete snapshot.
+        console.warn("Could not persist inventory state", error);
+      }
+    }
+  } finally {
+    inventorySaveDrainPromise = null;
+  }
+}
+
+function createInventoryStateFingerprint(state: InventoryState): string {
+  return JSON.stringify(state);
+}
+
 function capturePlayerLocationSnapshot(): SavedPlayerStateSnapshot | null {
   if (!inWorld || !player) return null;
 
@@ -5527,6 +5729,7 @@ function disposeRuntime(): void {
   if (inWorld) {
     void queueActivePlayerLocationSave(true);
     void queueActiveDayNightStateSave(true);
+    void flushActiveInventoryStateSave();
   }
 
   // The explicit teardown matters mostly in dev: Vite reloads and repeated

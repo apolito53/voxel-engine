@@ -430,12 +430,30 @@ import {
   createHotbarItems,
   createToolHotbarItems,
   getHotbarIndexFromDigitCode,
+  getHotbarItemById,
+  getHotbarItemIndexById,
   getHotbarItemLabel,
   getHotbarPrimaryAction,
   getHotbarScrollDirection,
   getHotbarSecondaryAction,
   stepHotbarIndex
 } from "../src/hotbar";
+import {
+  cloneInventoryState,
+  createDefaultInventoryState,
+  createEmptyInventoryContainer,
+  createVoxelSandboxInventoryOptions,
+  insertInventoryStack,
+  normalizeInventoryContainer,
+  normalizeInventoryState,
+  removeInventoryStack,
+  selectInventoryCatalogItem,
+  setInventoryActiveLane,
+  splitInventoryStack,
+  swapInventorySlots,
+  transferInventoryStack,
+  type InventoryState
+} from "../src/inventory";
 import {
   EMPTY_HANDS_ITEM_ID,
   HITSCAN_CORE_ITEM_ID,
@@ -1267,6 +1285,7 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   const grassItem = createItemStack(createBlockItemId(BLOCK.grass));
 
   assertEqual(firstItem?.itemId, EMPTY_HANDS_ITEM_ID, "tool lane should start in the explicit unarmed state");
+  assertEqual(firstItem?.quantity, null, "creative hotbar entries should not masquerade as finite stacks");
   assertEqual(
     miningToolItem?.itemId,
     MINING_TOOL_ITEM_ID,
@@ -1296,7 +1315,17 @@ test("hotbar lanes separate gameplay tools from build blocks", () => {
   assertEqual(
     combinedHotbarItems.length,
     toolHotbarItems.length + blockHotbarItems.length,
-    "legacy combined hotbar helper should still expose every selectable stack"
+    "combined hotbar helper should still expose every selectable creative entry"
+  );
+  assertEqual(
+    getHotbarItemIndexById(toolHotbarItems, PHYSICS_CORE_ITEM_ID),
+    2,
+    "stable item ids should resolve their current presentation index"
+  );
+  assertEqual(
+    getHotbarItemById(toolHotbarItems, PHYSICS_CORE_ITEM_ID)?.itemId,
+    PHYSICS_CORE_ITEM_ID,
+    "stable-id lookup should return the selected catalog entry"
   );
   assertEqual(
     getHotbarItemLabel(firstItem ?? createItemStack(EMPTY_HANDS_ITEM_ID), itemRegistry),
@@ -1380,6 +1409,227 @@ test("hotbar scrolling wraps predictably", () => {
     stepHotbarIndex(hotbarItems.length - 1, 1, hotbarItems.length),
     0,
     "scrolling forward from last slot should wrap to the first slot"
+  );
+});
+
+test("inventory containers normalize malformed slots against registry stack limits", () => {
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const grassItemId = createBlockItemId(BLOCK.grass);
+  const normalized = normalizeInventoryContainer({
+    slots: [
+      { itemId: grassItemId, quantity: 250 },
+      { itemId: "missing:item", quantity: 4 },
+      { itemId: grassItemId, quantity: Number.NaN },
+      { itemId: grassItemId, quantity: 0 },
+      { itemId: grassItemId, quantity: -3 },
+      { itemId: EMPTY_HANDS_ITEM_ID, quantity: 1 },
+      { itemId: MINING_TOOL_ITEM_ID, quantity: 99 }
+    ]
+  }, itemRegistry, 8);
+
+  assertDeepEqual(
+    normalized.slots,
+    [
+      { itemId: grassItemId, quantity: 99 },
+      null,
+      null,
+      null,
+      null,
+      null,
+      { itemId: MINING_TOOL_ITEM_ID, quantity: 1 },
+      null
+    ],
+    "normalization should clamp oversized stacks and clear unknown, virtual, and non-positive slots"
+  );
+
+  const options = createVoxelSandboxInventoryOptions(itemRegistry, PLACEABLE_BLOCKS);
+  const malformedState = normalizeInventoryState({
+    activeLane: "sideways",
+    selectedItemId: "missing:item",
+    selectedBlockItemId: PHYSICS_CORE_ITEM_ID,
+    backpack: { slots: [{ itemId: grassItemId, quantity: Number.POSITIVE_INFINITY }] }
+  }, options);
+  const defaults = createDefaultInventoryState(options);
+  assertEqual(malformedState.activeLane, "items", "invalid saved lanes should fall back to Items");
+  assertEqual(
+    malformedState.selectedItemId,
+    defaults.selectedItemId,
+    "unknown saved item ids should fall back to the creative default"
+  );
+  assertEqual(
+    malformedState.selectedBlockItemId,
+    defaults.selectedBlockItemId,
+    "cross-lane saved ids should not become block selections"
+  );
+  assertEqual(malformedState.backpack.slots.length, 18, "malformed backpacks should regain the finite slot count");
+  assertEqual(malformedState.backpack.slots[0], null, "non-finite saved quantities should normalize to empty");
+});
+
+test("inventory insertion merges first, fills empty slots, and returns a safe remainder", () => {
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const grassItemId = createBlockItemId(BLOCK.grass);
+  const stoneItemId = createBlockItemId(BLOCK.stone);
+  const container = normalizeInventoryContainer({
+    slots: [
+      { itemId: grassItemId, quantity: 90 },
+      null,
+      { itemId: stoneItemId, quantity: 99 }
+    ]
+  }, itemRegistry, 3);
+  const inserted = insertInventoryStack(
+    container,
+    { itemId: grassItemId, quantity: 120 },
+    itemRegistry
+  );
+
+  assertEqual(inserted.insertedQuantity, 108, "bulk insertion should use merge and empty-slot capacity");
+  assertDeepEqual(
+    inserted.container.slots,
+    [
+      { itemId: grassItemId, quantity: 99 },
+      { itemId: grassItemId, quantity: 99 },
+      { itemId: stoneItemId, quantity: 99 }
+    ],
+    "insertion should merge before allocating a new stack"
+  );
+  assertDeepEqual(
+    inserted.remainder,
+    { itemId: grassItemId, quantity: 12 },
+    "oversized insertion should return the quantity that did not fit"
+  );
+  assertEqual(
+    container.slots[0]?.quantity,
+    90,
+    "pure insertion should leave the caller's container unchanged"
+  );
+
+  const unknown = insertInventoryStack(container, { itemId: "missing:item", quantity: 7 }, itemRegistry);
+  assertEqual(unknown.rejection, "unknown-item", "unknown item ids should be rejected explicitly");
+  assertDeepEqual(unknown.remainder, { itemId: "missing:item", quantity: 7 }, "unknown insertion should lose nothing");
+
+  const invalid = insertInventoryStack(
+    container,
+    { itemId: grassItemId, quantity: Number.NaN },
+    itemRegistry
+  );
+  assertEqual(invalid.rejection, "invalid-quantity", "NaN insertion quantities should be rejected");
+  assertEqual(invalid.changed, false, "invalid quantities should not mutate a container");
+});
+
+test("inventory remove, split, transfer, and swap operations stay bounded and pure", () => {
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const grassItemId = createBlockItemId(BLOCK.grass);
+  const stoneItemId = createBlockItemId(BLOCK.stone);
+  const container = normalizeInventoryContainer({
+    slots: [
+      { itemId: grassItemId, quantity: 10 },
+      { itemId: grassItemId, quantity: 95 },
+      { itemId: stoneItemId, quantity: 3 },
+      null
+    ]
+  }, itemRegistry, 4);
+
+  const removed = removeInventoryStack(container, 0, 500, itemRegistry);
+  assertDeepEqual(removed.removed, { itemId: grassItemId, quantity: 10 }, "oversized removal should stop at the stack size");
+  assertEqual(removed.container.slots[0], null, "removing a full stack should leave a nullable empty slot");
+  assertEqual(
+    removeInventoryStack(container, 0, -1, itemRegistry).rejection,
+    "invalid-quantity",
+    "negative removal quantities should be rejected"
+  );
+
+  const split = splitInventoryStack(container, 1, 3, 5, itemRegistry);
+  assertDeepEqual(
+    [split.container.slots[1], split.container.slots[3]],
+    [
+      { itemId: grassItemId, quantity: 90 },
+      { itemId: grassItemId, quantity: 5 }
+    ],
+    "split should move a strict subset into an empty slot"
+  );
+  assertEqual(
+    splitInventoryStack(container, 1, 3, 0, itemRegistry).rejection,
+    "invalid-quantity",
+    "zero-sized splits should be rejected"
+  );
+
+  const transferred = transferInventoryStack(container, 0, 1, 99, itemRegistry);
+  assertEqual(transferred.movedQuantity, 4, "transfer should merge only up to maxStack");
+  assertDeepEqual(
+    [transferred.container.slots[0], transferred.container.slots[1]],
+    [
+      { itemId: grassItemId, quantity: 6 },
+      { itemId: grassItemId, quantity: 99 }
+    ],
+    "transfer should leave overflow in the source when the target reaches maxStack"
+  );
+  assertEqual(
+    transferInventoryStack(container, 2, 1, 1, itemRegistry).rejection,
+    "incompatible-item",
+    "transfer should not silently swap unlike item ids"
+  );
+
+  const swapped = swapInventorySlots(container, 1, 2, itemRegistry);
+  assertDeepEqual(
+    [swapped.container.slots[1], swapped.container.slots[2]],
+    [
+      { itemId: stoneItemId, quantity: 3 },
+      { itemId: grassItemId, quantity: 95 }
+    ],
+    "explicit swap should exchange unlike stacks without merging them"
+  );
+  assertEqual(container.slots[1]?.itemId, grassItemId, "pure move operations should not mutate their input");
+});
+
+test("inventory state preserves independent stable-id selections and existing action routing", () => {
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const options = createVoxelSandboxInventoryOptions(itemRegistry, PLACEABLE_BLOCKS);
+  const stoneItemId = createBlockItemId(BLOCK.stone);
+  let state = createDefaultInventoryState(options);
+
+  state = selectInventoryCatalogItem(state, "items", PHYSICS_CORE_ITEM_ID, options);
+  state = selectInventoryCatalogItem(state, "blocks", stoneItemId, options);
+  assertEqual(state.activeLane, "blocks", "selecting a block should activate the Blocks lane");
+  assertEqual(
+    state.selectedItemId,
+    PHYSICS_CORE_ITEM_ID,
+    "block selection should preserve the independently selected gameplay item"
+  );
+  assertEqual(state.selectedBlockItemId, stoneItemId, "block selection should persist a stable block item id");
+
+  state = setInventoryActiveLane(state, "items", options);
+  assertEqual(
+    getItemAction(itemRegistry, state.selectedItemId, "primary").kind,
+    "physics:throw-core",
+    "returning to Items should preserve Physics Core action routing"
+  );
+  assertEqual(
+    getItemAction(itemRegistry, state.selectedBlockItemId, "secondary").kind,
+    "terrain:place-block",
+    "remembered block ids should keep the existing placement action"
+  );
+
+  const rejectedSelection = selectInventoryCatalogItem(state, "items", "missing:item", options);
+  assertEqual(
+    rejectedSelection.selectedItemId,
+    PHYSICS_CORE_ITEM_ID,
+    "unknown catalog ids should leave the normalized selection unchanged"
+  );
+
+  const withBackpack: InventoryState = {
+    ...state,
+    backpack: insertInventoryStack(
+      createEmptyInventoryContainer(18),
+      { itemId: stoneItemId, quantity: 4 },
+      itemRegistry
+    ).container
+  };
+  const cloned = cloneInventoryState(withBackpack);
+  (cloned.backpack.slots[0] as { quantity: number }).quantity = 1;
+  assertEqual(
+    withBackpack.backpack.slots[0]?.quantity,
+    4,
+    "serialized inventory clones should own independent nested stack objects"
   );
 });
 
@@ -3044,7 +3294,7 @@ test("lamp blocks register as local light sources", () => {
     32
   );
 
-  assert(PLACEABLE_BLOCKS.includes(BLOCK.lamp), "lamp should be available from the block loadout");
+  assert(PLACEABLE_BLOCKS.includes(BLOCK.lamp), "lamp should be available from the creative block catalog");
   assert(isLocalLightBlock(BLOCK.lamp), "lamp should be recognized by the local-light registry");
   assert(lampDefinition !== null, "lamp should have a renderer light definition");
   assertEqual(lampDefinition?.block, BLOCK.lamp, "lamp light definition should point back to the lamp block id");
@@ -5502,6 +5752,119 @@ test("world registry stores day-night state with saved-world metadata", async ()
     (await registry.getActiveWorld()).dayNightState?.timeOfDay,
     0.73,
     "registry reads should deep-clone day-night metadata"
+  );
+});
+
+test("world registry persists deep-cloned inventory state in isolated world slots", async () => {
+  const database = createMemorySaveDatabase();
+  const registry = await createWorldRegistry(database);
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const options = createVoxelSandboxInventoryOptions(itemRegistry, PLACEABLE_BLOCKS);
+  const grassItemId = createBlockItemId(BLOCK.grass);
+  const stoneItemId = createBlockItemId(BLOCK.stone);
+  const lampItemId = createBlockItemId(BLOCK.lamp);
+  const firstWorld = await registry.createWorld("Inventory A", "inventory-a");
+  const secondWorld = await registry.createWorld("Inventory B", "inventory-b");
+
+  let firstState = createDefaultInventoryState(options);
+  firstState = selectInventoryCatalogItem(firstState, "items", PHYSICS_CORE_ITEM_ID, options);
+  firstState = selectInventoryCatalogItem(firstState, "blocks", stoneItemId, options);
+  firstState = {
+    ...firstState,
+    backpack: insertInventoryStack(
+      firstState.backpack,
+      { itemId: grassItemId, quantity: 12 },
+      itemRegistry
+    ).container
+  };
+
+  let secondState = createDefaultInventoryState(options);
+  secondState = selectInventoryCatalogItem(secondState, "blocks", lampItemId, options);
+  secondState = selectInventoryCatalogItem(secondState, "items", HITSCAN_CORE_ITEM_ID, options);
+
+  const firstWrite = await registry.updateInventoryState(firstWorld.id, firstState);
+  const secondWrite = await registry.updateInventoryState(secondWorld.id, secondState);
+  assert(firstWrite?.inventoryState, "inventory updates should attach state to the first saved world");
+  assert(secondWrite?.inventoryState, "inventory updates should attach state to the second saved world");
+
+  const savedFirst = await database.getWorld(firstWorld.id);
+  const savedSecond = await database.getWorld(secondWorld.id);
+  assertEqual(savedFirst?.inventoryState?.activeLane, "blocks", "the first world should retain its active lane");
+  assertEqual(
+    savedFirst?.inventoryState?.selectedItemId,
+    PHYSICS_CORE_ITEM_ID,
+    "the first world should retain its independent item selection"
+  );
+  assertEqual(
+    savedFirst?.inventoryState?.selectedBlockItemId,
+    stoneItemId,
+    "the first world should retain its independent block selection"
+  );
+  assertEqual(
+    savedFirst?.inventoryState?.backpack.slots[0]?.quantity,
+    12,
+    "the first world's finite backpack should round-trip stack quantities"
+  );
+  assertEqual(savedSecond?.inventoryState?.activeLane, "items", "the second world should keep a separate lane");
+  assertEqual(
+    savedSecond?.inventoryState?.selectedItemId,
+    HITSCAN_CORE_ITEM_ID,
+    "the second world should not inherit the first world's selected item"
+  );
+  assertEqual(
+    savedSecond?.inventoryState?.selectedBlockItemId,
+    lampItemId,
+    "the second world should not inherit the first world's selected block"
+  );
+  assertEqual(
+    savedSecond?.inventoryState?.backpack.slots[0],
+    null,
+    "the second world's backpack should remain isolated"
+  );
+
+  const mutableFirstState = savedFirst?.inventoryState as InventoryState;
+  (mutableFirstState.backpack.slots[0] as { quantity: number }).quantity = 1;
+  assertEqual(
+    (await database.getWorld(firstWorld.id))?.inventoryState?.backpack.slots[0]?.quantity,
+    12,
+    "save backend reads should deep-clone nested backpack stacks"
+  );
+});
+
+test("legacy saved worlds without inventory metadata fall back to creative defaults", async () => {
+  const database = createMemorySaveDatabase();
+  const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
+  const options = createVoxelSandboxInventoryOptions(itemRegistry, PLACEABLE_BLOCKS);
+  const defaults = createDefaultInventoryState(options);
+  await database.putWorld({
+    id: "legacy-no-inventory",
+    name: "Legacy Inventory",
+    seed: "legacy-inventory-seed",
+    terrainProfile: "classic",
+    createdAt: 1,
+    updatedAt: 2
+  });
+
+  const savedWorld = await database.getWorld("legacy-no-inventory");
+  assert(savedWorld?.inventoryState, "legacy world reads should synthesize normalized inventory metadata");
+  assertEqual(
+    savedWorld.inventoryState.selectedItemId,
+    defaults.selectedItemId,
+    "legacy worlds should start with the default creative item"
+  );
+  assertEqual(
+    savedWorld.inventoryState.selectedBlockItemId,
+    defaults.selectedBlockItemId,
+    "legacy worlds should start with the default creative block"
+  );
+  assertEqual(
+    savedWorld.inventoryState.backpack.slots.length,
+    18,
+    "legacy worlds should receive the finite backpack slot count"
+  );
+  assert(
+    savedWorld.inventoryState.backpack.slots.every((slot) => slot === null),
+    "legacy fallback backpacks should start empty"
   );
 });
 

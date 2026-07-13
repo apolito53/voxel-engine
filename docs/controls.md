@@ -11,7 +11,8 @@ the root README.
 - `Superflat Lab` creates a flat grass/dirt/stone test world using the reserved
   `superflat` seed.
 - Loading a world restores the last saved player feet position, look direction,
-  and world time of day.
+  world time of day, active inventory lane, and independent item/block
+  selections.
 - `Resume` captures the mouse after pausing.
 - `Exit to Home` returns to the world list. Switch worlds from the home screen,
   not the pause menu.
@@ -35,6 +36,7 @@ the root README.
   sprint/boost widens FOV and adds peripheral speed lines.
 - `F` toggles flight mode.
 - `Esc` pauses and releases the mouse.
+- `I` opens Inventory from gameplay; press it again to resume.
 
 ## HUD And Debug Keys
 
@@ -73,11 +75,15 @@ the root README.
 - Number keys map to the current lane.
 - The bottom hotbar shows the current lane and the active semi/full-auto click
   mode.
-- Pause menu `Loadout` opens selection cards for `Tools` and `Blocks`; choosing
-  a card switches to that lane, selects the item/block, and resumes gameplay.
+- Pause menu `Inventory` opens `Items` and `Blocks` creative-catalog tabs;
+  choosing a card switches to that lane, selects its stable item id, and resumes
+  gameplay.
+- Creative catalog entries are unlimited. The compact 18-slot Backpack is a
+  finite per-world container reserved for later pickups and drops; it does not
+  expand the bottom hotbar.
 - The `Items` lane contains `Unarmed`, `Terraformer`, `Physics Core`, and
   `Hitscan Core`.
-- `Unarmed` is intentionally inert on both clicks for now.
+- `Unarmed` is intentionally inert, virtual, and non-droppable.
 - `Terraformer` uses `Left click` to delete the exact highlighted sub-block
   cells from the targeted terrain. In full-auto mode, holding `Left click`
   repeats the current edit at a bounded cadence. `ArrowUp` and `ArrowDown`
@@ -114,7 +120,7 @@ the root README.
 Pause menu `Builder` opens admin build controls:
 
 - Switch between item and block lanes.
-- Use the block currently selected in `Loadout > Blocks`.
+- Use the block currently selected in `Inventory > Blocks`.
 - Tune the odd-sized place/erase brush.
 - Run place/erase at the current target.
 - Spawn quick fixtures such as target, wall, platform, and pillar using the

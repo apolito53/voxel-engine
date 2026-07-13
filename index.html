@@ -159,13 +159,13 @@
         <div class="menu-actions">
           <button id="resume-button" class="menu-button menu-main-action" type="button">Resume</button>
           <button
-            id="loadout-button"
+            id="inventory-button"
             class="menu-button secondary"
             type="button"
             aria-expanded="false"
-            aria-controls="pause-loadout-panel"
+            aria-controls="pause-inventory-panel"
           >
-            Loadout
+            Inventory
           </button>
           <button
             id="settings-button"
@@ -672,46 +672,62 @@
               </label>
             </div>
           </div>
-          <div id="pause-loadout-panel" class="loadout-panel" aria-label="Loadout selection" hidden>
-            <div class="settings-tabs" role="tablist" aria-label="Loadout categories">
+          <div id="pause-inventory-panel" class="inventory-panel" aria-label="Inventory" hidden>
+            <div class="settings-tabs inventory-tabs" role="tablist" aria-label="Inventory catalog categories">
               <button
-                id="loadout-tab-tools"
+                id="inventory-tab-items"
                 class="settings-tab is-active"
                 type="button"
                 role="tab"
                 aria-selected="true"
-                aria-controls="loadout-tools-panel"
+                aria-controls="inventory-items-panel"
               >
-                Tools
+                Items
               </button>
               <button
-                id="loadout-tab-blocks"
+                id="inventory-tab-blocks"
                 class="settings-tab"
                 type="button"
                 role="tab"
                 aria-selected="false"
-                aria-controls="loadout-blocks-panel"
+                aria-controls="inventory-blocks-panel"
               >
                 Blocks
               </button>
             </div>
             <div
-              id="loadout-tools-panel"
-              class="loadout-tab-panel"
+              id="inventory-items-panel"
+              class="inventory-tab-panel"
               role="tabpanel"
-              aria-labelledby="loadout-tab-tools"
+              aria-labelledby="inventory-tab-items"
             >
-              <div id="loadout-tool-list" class="loadout-card-list" aria-label="Tool selection"></div>
+              <div
+                id="inventory-item-list"
+                class="inventory-item-grid"
+                aria-label="Creative item catalog"
+              ></div>
             </div>
             <div
-              id="loadout-blocks-panel"
-              class="loadout-tab-panel"
+              id="inventory-blocks-panel"
+              class="inventory-tab-panel"
               role="tabpanel"
-              aria-labelledby="loadout-tab-blocks"
+              aria-labelledby="inventory-tab-blocks"
               hidden
             >
-              <div id="loadout-block-list" class="loadout-block-grid" aria-label="Block selection"></div>
+              <div id="inventory-block-list" class="inventory-block-grid" aria-label="Creative block catalog"></div>
             </div>
+            <section class="inventory-backpack" aria-labelledby="inventory-backpack-title">
+              <div class="inventory-backpack-header">
+                <span id="inventory-backpack-title" class="inventory-backpack-title">Backpack</span>
+                <span id="inventory-backpack-status" class="inventory-backpack-status">Empty | 18 slots</span>
+              </div>
+              <div
+                id="inventory-backpack-grid"
+                class="inventory-backpack-grid"
+                role="list"
+                aria-label="Backpack slots"
+              ></div>
+            </section>
           </div>
           <div id="pause-builder-panel" class="builder-panel" aria-label="Builder tools" hidden>
             <div class="builder-status-row">
@@ -723,7 +739,7 @@
                 <span id="builder-selected-block-value" class="builder-selected-value">Grass</span>
               </div>
             </div>
-            <div class="builder-loadout-hint">Choose block material from Loadout > Blocks.</div>
+            <div class="builder-inventory-hint">Choose block material from Inventory > Blocks.</div>
             <div id="builder-block-palette" class="builder-block-palette" aria-label="Block palette" hidden></div>
             <label class="settings-field" for="builder-brush-size-slider">
               <span class="settings-label-row">

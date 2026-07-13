@@ -1,9 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.18.0 - 2026-07-13
+
+Creative Inventory Foundation.
 
 ### Added
 
+- Added a reusable pure inventory core with fixed nullable slots, registry and
+  max-stack normalization, merge/remainder insertion, removal, splitting,
+  transfer, swapping, unknown-item rejection, and deep-cloneable serialized
+  state.
+- Added per-world inventory metadata for active lane, independent selected item
+  and block ids, and an 18-slot finite Backpack reserved for later pickups.
+  IndexedDB keeps schema version `1`; legacy or malformed world records
+  normalize to creative defaults on read.
+- Added `I` to open or close the pause-menu Inventory, with Items and Blocks
+  catalog tabs, unlimited markers, and a compact Backpack slot grid.
 - Rendered derived Lamp block light on normal chunk terrain through a dedicated
   per-vertex `blockLight` attribute, preserving sealed-room vertex-color
   darkness semantics.
@@ -22,6 +34,19 @@
 
 ### Changed
 
+- Replaced the player-facing Loadout panel with Inventory. Catalog selection
+  still resumes gameplay, while `G`, wheel, digits, and mouse action routing
+  retain their existing behavior.
+- Changed hotbar selection persistence from registry positions to stable item
+  ids. Items and Blocks remember their selections independently, and the
+  bottom hotbar remains lane-specific instead of rendering Backpack slots.
+- Kept Terraformer, Physics Core, Hitscan Core, and every placeable block
+  unlimited-use in the creative catalog. Unarmed remains a virtual inert state;
+  this release adds no ammo, durability, pickup/drop, or placement-consumption
+  mechanics.
+- Added a coalesced inventory metadata save drain that captures selection
+  changes and flushes before world switches/exits, `pagehide`, `beforeunload`,
+  and runtime disposal.
 - Replaced the globally visible 128-PointLight Lamp proxy pool with stable
   per-quality budgets of `0 / 4 / 8 / 16 / 24 / 32` from Potato through Super
   Ultra. Voxel block light remains authoritative for every Lamp, while the
@@ -64,6 +89,11 @@
 
 ### Tests
 
+- Added focused coverage for malformed container/state normalization,
+  merge/remainder insertion, remove/split/transfer/swap behavior, defensive
+  quantities, unknown ids, stable independent lane selection, unchanged item
+  action routing, deep cloning, per-world isolation, persistence, and legacy
+  fallback defaults.
 - Added coverage for quality-scaled Lamp proxy budgets, stable zero-intensity
   slots, block-light-only overflow reporting, Potato's zero-PointLight path,
   quality changes, and high-water PointLight object reuse.

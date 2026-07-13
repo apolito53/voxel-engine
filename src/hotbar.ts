@@ -5,41 +5,62 @@ import {
   MINING_TOOL_ITEM_ID,
   PHYSICS_CORE_ITEM_ID,
   createBlockItemId,
-  createItemStack,
   getItemAction,
   getItemDefinition,
   getItemLabel,
   type ItemAction,
   type ItemCategory,
-  type ItemRegistry,
-  type ItemStack
+  type ItemId,
+  type ItemRegistry
 } from "./items";
 
-export type HotbarItem = ItemStack;
+export type HotbarItem = {
+  readonly itemId: ItemId;
+  // Creative catalog entries are unlimited and deliberately carry null instead
+  // of pretending to be a finite stack of one. Numeric quantities remain
+  // available for future finite hotbar/equipment sources.
+  readonly quantity: number | null;
+};
 
 export type HotbarScrollDirection = -1 | 1;
 
 export function createToolHotbarItems(): readonly HotbarItem[] {
   return [
-    createItemStack(EMPTY_HANDS_ITEM_ID),
-    createItemStack(MINING_TOOL_ITEM_ID),
-    createItemStack(PHYSICS_CORE_ITEM_ID),
-    createItemStack(HITSCAN_CORE_ITEM_ID)
+    createCreativeHotbarItem(EMPTY_HANDS_ITEM_ID),
+    createCreativeHotbarItem(MINING_TOOL_ITEM_ID),
+    createCreativeHotbarItem(PHYSICS_CORE_ITEM_ID),
+    createCreativeHotbarItem(HITSCAN_CORE_ITEM_ID)
   ];
 }
 
 export function createBlockHotbarItems(placeableBlocks: readonly BlockId[]): readonly HotbarItem[] {
-  return placeableBlocks.map((block) => createItemStack(createBlockItemId(block)));
+  return placeableBlocks.map((block) => createCreativeHotbarItem(createBlockItemId(block)));
 }
 
 export function createHotbarItems(placeableBlocks: readonly BlockId[]): readonly HotbarItem[] {
-  // The hotbar stores stacks, not behavior. Item definitions decide what a
-  // primary or secondary click means, which keeps this selection lane reusable
-  // when the engine grows actual tools, weapons, or game-specific commands.
+  // The hotbar stores stable item ids, not behavior or registry positions. Item
+  // definitions decide what a click means, while quantity distinguishes future
+  // finite equipment from the current unlimited creative catalog.
   return [
     ...createToolHotbarItems(),
     ...createBlockHotbarItems(placeableBlocks)
   ];
+}
+
+export function createCreativeHotbarItem(itemId: ItemId): HotbarItem {
+  return { itemId, quantity: null };
+}
+
+export function getHotbarItemIndexById(items: readonly HotbarItem[], itemId: ItemId): number {
+  return items.findIndex((item) => item.itemId === itemId);
+}
+
+export function getHotbarItemById(
+  items: readonly HotbarItem[],
+  itemId: ItemId
+): HotbarItem | null {
+  const index = getHotbarItemIndexById(items, itemId);
+  return index >= 0 ? items[index] ?? null : null;
 }
 
 export function getHotbarScrollDirection(deltaY: number): HotbarScrollDirection | null {
@@ -73,19 +94,19 @@ export function getHotbarIndexFromDigitCode(code: string): number | null {
 }
 
 export function getHotbarItemLabel(item: HotbarItem, registry: ItemRegistry): string {
-  return getItemLabel(registry, item);
+  return getItemLabel(registry, item.itemId);
 }
 
 export function getHotbarItemCategory(item: HotbarItem, registry: ItemRegistry): ItemCategory {
-  return getItemDefinition(registry, item).category;
+  return getItemDefinition(registry, item.itemId).category;
 }
 
 export function getHotbarPrimaryAction(item: HotbarItem, registry: ItemRegistry): ItemAction {
-  return getItemAction(registry, item, "primary");
+  return getItemAction(registry, item.itemId, "primary");
 }
 
 export function getHotbarSecondaryAction(item: HotbarItem, registry: ItemRegistry): ItemAction {
-  return getItemAction(registry, item, "secondary");
+  return getItemAction(registry, item.itemId, "secondary");
 }
 
 export function canMineBlockWithHotbarItem(item: HotbarItem, registry: ItemRegistry): boolean {
