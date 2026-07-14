@@ -5,13 +5,14 @@ promoted work, not every fun idea that crosses the room.
 
 ## Current Recommended Next Slice
 
-- The `v0.19.x` flight line is active. `v0.19.0` establishes a collision-aware
-  third-person camera, visible player avatar, and separate physical-eye/render
-  camera ownership as the prerequisite.
+- The `v0.19.x` flight line is active. `v0.19.0` establishes the third-person
+  camera/avatar prerequisite, while `v0.19.1` adds velocity-driven whole-body
+  flight lean from an upright hover through a near-horizontal boost pose.
 - Replace the current clean debug flight toggle with physical flight: deliberate
   thrust acceleration, retained momentum, drag/braking, boost cost/limits,
-  readable ascent/descent, bank/lean presentation, terrain contact, and a safe
-  landing/recovery transition back to grounded movement.
+  readable ascent/descent, terrain contact, and a safe landing/recovery
+  transition back to grounded movement. Treat the current lean as a visual
+  foundation that real flight mechanics can drive and refine.
 - Preserve first-person comfort and exact tool aim while letting third-person
   communicate body tilt and thruster state. Tune camera lag only after motion is
   mechanically stable, and avoid attaching collision truth to avatar geometry.

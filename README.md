@@ -91,6 +91,9 @@ ignored by git.
   or erases in the Blocks lane; full-auto mode repeats while held
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
+- In third person, the avatar leans with actual flight velocity and approaches
+  a horizontal pose as `Shift` boost reaches full speed; the pose is visual and
+  does not change the physical player collider or tool aim
 - `F3` toggles the debug overlay, including collapsible performance, lighting,
   combat/damage, and local disk-write diagnostics
 - `F4` cycles quality presets

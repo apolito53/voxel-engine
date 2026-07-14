@@ -126,7 +126,9 @@ may select a separate collision-aware third-person render camera, while
 `PlayerAvatar` mirrors player state for presentation. Rendering, frustum
 culling, sky, fog, and screen-space damage indicators follow the selected render
 camera; world streaming and gameplay queries continue to follow the physical
-eye. Keep that boundary intact when physical flight changes orientation.
+eye. Avatar flight tilt derives from actual horizontal velocity and rotates a
+centered presentation pivot; it must not become collision, movement, or camera
+truth. Keep that boundary intact when physical flight changes orientation.
 
 Visual geometry and collision must tell the same story. When a partial mesh or
 support rule changes, test narrow shafts, one-subcell stairs, cross-block seams,

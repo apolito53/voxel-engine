@@ -1,10 +1,24 @@
 import * as THREE from "three";
-import { PLAYER_HEIGHT, SPRINT_SPEED, WALK_SPEED } from "./playerMovement";
+import {
+  FLIGHT_BOOST_SPEED,
+  PLAYER_HEIGHT,
+  SPRINT_SPEED,
+  WALK_SPEED
+} from "./playerMovement";
 
 const AVATAR_WALK_RESPONSE = 14;
 const AVATAR_POSE_RESPONSE = 12;
 const AVATAR_IDLE_BREATH_SPEED = 1.8;
 const AVATAR_MAX_STRIDE_RADIANS = 0.72;
+const AVATAR_FLIGHT_PIVOT_HEIGHT_METERS = PLAYER_HEIGHT * 0.58;
+const AVATAR_FLIGHT_TILT_RESPONSE = 7;
+const AVATAR_FLIGHT_BOOST_TILT_RESPONSE = 9;
+const AVATAR_FLIGHT_RECOVERY_RESPONSE = 11;
+const AVATAR_FLIGHT_TILT_EPSILON = 0.000001;
+const AVATAR_LOCAL_UP = new THREE.Vector3(0, 1, 0);
+
+export const AVATAR_BASE_FLIGHT_TILT_RADIANS = THREE.MathUtils.degToRad(16);
+export const AVATAR_BOOST_FLIGHT_TILT_RADIANS = THREE.MathUtils.degToRad(72);
 
 export type PlayerAvatarFrame = {
   readonly eyePosition: THREE.Vector3;
@@ -35,6 +49,7 @@ type AvatarLeg = {
 export class PlayerAvatar {
   readonly object = new THREE.Group();
 
+  private readonly flightPivot = new THREE.Group();
   private readonly poseRoot = new THREE.Group();
   private readonly upperBody = new THREE.Group();
   private readonly helmet = new THREE.Group();
@@ -47,13 +62,22 @@ export class PlayerAvatar {
   private readonly ownedMaterials = new Set<THREE.Material>();
   private readonly facingForward = new THREE.Vector3();
   private readonly facingRight = new THREE.Vector3();
+  private readonly flightTiltDirection = new THREE.Vector3();
+  private readonly flightTiltTarget = new THREE.Quaternion();
   private walkCycle = 0;
   private visible = false;
 
   constructor() {
     this.object.name = "PlayerAvatar";
     this.object.visible = false;
-    this.object.add(this.poseRoot);
+    // Rotate flight around the body's center instead of its feet. Keeping the
+    // authored pose root offset beneath this pivot preserves the exact grounded
+    // coordinates while allowing the whole silhouette to approach horizontal.
+    this.flightPivot.name = "AvatarFlightPivot";
+    this.flightPivot.position.y = AVATAR_FLIGHT_PIVOT_HEIGHT_METERS;
+    this.object.add(this.flightPivot);
+    this.poseRoot.position.y = -AVATAR_FLIGHT_PIVOT_HEIGHT_METERS;
+    this.flightPivot.add(this.poseRoot);
     this.poseRoot.add(this.upperBody);
 
     const suitMaterial = this.createMaterial({
@@ -287,11 +311,16 @@ export class PlayerAvatar {
     this.facingRight.set(Math.cos(frame.yaw), 0, -Math.sin(frame.yaw));
     const forwardSpeed = frame.velocity.dot(this.facingForward);
     const lateralSpeed = frame.velocity.dot(this.facingRight);
-    const motionLean = THREE.MathUtils.clamp(forwardSpeed / SPRINT_SPEED, -1, 1) * -0.16;
-    const lateralLean = THREE.MathUtils.clamp(lateralSpeed / SPRINT_SPEED, -1, 1) * -0.12;
+    this.updateFlightTilt(deltaSeconds, frame.flying, horizontalSpeed, forwardSpeed, lateralSpeed);
+
+    // Grounded torso lean stays independent from full-body flight orientation.
+    // Mixing both would double the pitch and make boosted flight look folded.
+    const groundPoseStrength = frame.flying ? 0 : 1;
+    const motionLean = THREE.MathUtils.clamp(forwardSpeed / SPRINT_SPEED, -1, 1) * -0.16 * groundPoseStrength;
+    const lateralLean = THREE.MathUtils.clamp(lateralSpeed / SPRINT_SPEED, -1, 1) * -0.12 * groundPoseStrength;
 
     const bodyDrop = crouchStrength * 0.24 + slideStrength * 0.08;
-    const bodyPitch = motionLean - slideStrength * 0.34 - flightStrength * 0.16;
+    const bodyPitch = motionLean - slideStrength * 0.34;
     this.upperBody.position.y = damp(this.upperBody.position.y, -bodyDrop + breathing, AVATAR_POSE_RESPONSE, deltaSeconds);
     this.upperBody.rotation.x = damp(this.upperBody.rotation.x, bodyPitch, AVATAR_POSE_RESPONSE, deltaSeconds);
     this.upperBody.rotation.z = damp(this.upperBody.rotation.z, lateralLean, AVATAR_POSE_RESPONSE, deltaSeconds);
@@ -328,7 +357,7 @@ export class PlayerAvatar {
     const groundedBob = movingOnGround ? Math.abs(Math.sin(this.walkCycle * 2)) * 0.025 * locomotionStrength : 0;
     this.poseRoot.position.y = damp(
       this.poseRoot.position.y,
-      groundedBob,
+      -AVATAR_FLIGHT_PIVOT_HEIGHT_METERS + groundedBob,
       AVATAR_WALK_RESPONSE,
       deltaSeconds
     );
@@ -338,6 +367,43 @@ export class PlayerAvatar {
       frame.flying ? 18 : 6,
       deltaSeconds
     );
+  }
+
+  private updateFlightTilt(
+    deltaSeconds: number,
+    flying: boolean,
+    horizontalSpeed: number,
+    forwardSpeed: number,
+    lateralSpeed: number
+  ): void {
+    const tiltRadians = getAvatarFlightTiltRadians(horizontalSpeed, flying);
+    if (tiltRadians <= AVATAR_FLIGHT_TILT_EPSILON || horizontalSpeed <= AVATAR_FLIGHT_TILT_EPSILON) {
+      this.flightTiltTarget.identity();
+    } else {
+      const inverseHorizontalSpeed = 1 / horizontalSpeed;
+      const sinTilt = Math.sin(tiltRadians);
+
+      // Build the desired body-up axis in avatar-local space. Forward is -Z,
+      // right is +X, so this works for backward, strafe, and diagonal velocity
+      // just as naturally as the ordinary forward-flight case.
+      this.flightTiltDirection.set(
+        lateralSpeed * inverseHorizontalSpeed * sinTilt,
+        Math.cos(tiltRadians),
+        -forwardSpeed * inverseHorizontalSpeed * sinTilt
+      ).normalize();
+      this.flightTiltTarget.setFromUnitVectors(AVATAR_LOCAL_UP, this.flightTiltDirection);
+    }
+
+    const boostBlend = THREE.MathUtils.clamp(
+      (tiltRadians - AVATAR_BASE_FLIGHT_TILT_RADIANS) /
+        (AVATAR_BOOST_FLIGHT_TILT_RADIANS - AVATAR_BASE_FLIGHT_TILT_RADIANS),
+      0,
+      1
+    );
+    const response = flying
+      ? THREE.MathUtils.lerp(AVATAR_FLIGHT_TILT_RESPONSE, AVATAR_FLIGHT_BOOST_TILT_RESPONSE, boostBlend)
+      : AVATAR_FLIGHT_RECOVERY_RESPONSE;
+    dampQuaternion(this.flightPivot.quaternion, this.flightTiltTarget, response, deltaSeconds);
   }
 
   dispose(): void {
@@ -443,8 +509,38 @@ export class PlayerAvatar {
   }
 }
 
+/**
+ * Maps actual horizontal flight speed onto the authored presentation range.
+ * Base flight reaches a restrained lean; speed carried into the boost band
+ * progressively lays the body down without ever reaching a brittle 90 degrees.
+ */
+export function getAvatarFlightTiltRadians(horizontalSpeed: number, flying: boolean): number {
+  if (!flying) return 0;
+
+  const safeSpeed = Number.isFinite(horizontalSpeed) ? Math.max(0, horizontalSpeed) : 0;
+  const baseBlend = THREE.MathUtils.smoothstep(safeSpeed, 0, WALK_SPEED);
+  const boostBlend = THREE.MathUtils.smoothstep(safeSpeed, WALK_SPEED, FLIGHT_BOOST_SPEED);
+  return THREE.MathUtils.clamp(
+    AVATAR_BASE_FLIGHT_TILT_RADIANS * baseBlend +
+      (AVATAR_BOOST_FLIGHT_TILT_RADIANS - AVATAR_BASE_FLIGHT_TILT_RADIANS) * boostBlend,
+    0,
+    AVATAR_BOOST_FLIGHT_TILT_RADIANS
+  );
+}
+
 function damp(current: number, target: number, response: number, deltaSeconds: number): number {
   if (deltaSeconds <= 0 || current === target) return current;
   const blend = 1 - Math.exp(-response * deltaSeconds);
   return current + (target - current) * blend;
+}
+
+function dampQuaternion(
+  current: THREE.Quaternion,
+  target: THREE.Quaternion,
+  response: number,
+  deltaSeconds: number
+): void {
+  if (deltaSeconds <= 0 || current.equals(target)) return;
+  const blend = 1 - Math.exp(-response * deltaSeconds);
+  current.slerp(target, blend).normalize();
 }

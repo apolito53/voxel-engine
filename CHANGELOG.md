@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.19.1 - 2026-07-13
+
+Velocity-Driven Flight Poses.
+
+### Changed
+
+- Made the third-person avatar lean its entire body toward actual horizontal
+  flight velocity, including backward, strafing, and diagonal travel.
+- Added a smooth speed-scaled pose: ordinary flight reaches a restrained
+  16-degree lean, while boost progressively lays the suit down to 72 degrees.
+- Moved flight rotation to a centered body pivot and added quaternion damping
+  so entering flight, accelerating, changing direction, and recovering upright
+  remain fluid without moving collision or camera authority onto the avatar.
+- Left the existing grounded walk/run cadence unchanged for a later animation
+  pass.
+
+### Validation
+
+- Added regression coverage for the speed-to-tilt curve, overspeed clamping,
+  whole-body forward orientation, and upright recovery after flight.
+- `npm.cmd run validate`
+- Chrome gameplay smoke at desktop resolution in third-person ordinary and
+  boosted flight.
+
 ## 0.19.0 - 2026-07-13
 
 Third-Person Flight Foundation.

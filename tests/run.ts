@@ -201,7 +201,12 @@ import {
   shouldStartSlide
 } from "../src/playerMovement";
 import { PlayerController, doesPlayerBoundsCollideWithWorld, isCatchablePointerLockRequest } from "../src/player";
-import { PlayerAvatar } from "../src/playerAvatar";
+import {
+  AVATAR_BASE_FLIGHT_TILT_RADIANS,
+  AVATAR_BOOST_FLIGHT_TILT_RADIANS,
+  PlayerAvatar,
+  getAvatarFlightTiltRadians
+} from "../src/playerAvatar";
 import {
   PlayerViewController,
   normalizePlayerViewMode,
@@ -4011,6 +4016,97 @@ test("player avatar exposes an animated right-hand muzzle in world space", () =>
   assertClose(rightHand.x, 2.31, 0.01, "the authored right hand should remain on the avatar's right side");
   assertClose(rightHand.y, 3.85, 0.01, "the hand muzzle should follow the animated arm above the feet");
   assertClose(rightHand.z, -3, 0.01, "the neutral hand should share the avatar's forward plane");
+  avatar.dispose();
+});
+
+test("player avatar flight tilt grows from a slight lean into a near-horizontal boost", () => {
+  assertEqual(getAvatarFlightTiltRadians(FLIGHT_BOOST_SPEED, false), 0, "ground movement should never tilt the avatar");
+  assertEqual(getAvatarFlightTiltRadians(0, true), 0, "hovering without horizontal momentum should stay upright");
+  assertClose(
+    getAvatarFlightTiltRadians(WALK_SPEED, true),
+    AVATAR_BASE_FLIGHT_TILT_RADIANS,
+    0.000001,
+    "base flight speed should reach the authored gentle lean"
+  );
+
+  const boostBandTilt = getAvatarFlightTiltRadians((WALK_SPEED + FLIGHT_BOOST_SPEED) / 2, true);
+  assert(
+    boostBandTilt > AVATAR_BASE_FLIGHT_TILT_RADIANS && boostBandTilt < AVATAR_BOOST_FLIGHT_TILT_RADIANS,
+    "the boost band should continuously interpolate between the base and boosted poses"
+  );
+  assertClose(
+    getAvatarFlightTiltRadians(FLIGHT_BOOST_SPEED, true),
+    AVATAR_BOOST_FLIGHT_TILT_RADIANS,
+    0.000001,
+    "full boost speed should reach the authored near-horizontal pose"
+  );
+  assertClose(
+    getAvatarFlightTiltRadians(FLIGHT_BOOST_SPEED * 2, true),
+    AVATAR_BOOST_FLIGHT_TILT_RADIANS,
+    0.000001,
+    "unexpected overspeed should clamp to the intended maximum pose"
+  );
+  assert(
+    AVATAR_BASE_FLIGHT_TILT_RADIANS < THREE.MathUtils.degToRad(20),
+    "base flight should read as a slight lean"
+  );
+  assert(
+    AVATAR_BOOST_FLIGHT_TILT_RADIANS > THREE.MathUtils.degToRad(65) &&
+      AVATAR_BOOST_FLIGHT_TILT_RADIANS < Math.PI / 2,
+    "boosted flight should look horizontal without rotating to a brittle exact right angle"
+  );
+});
+
+test("player avatar tilts its whole body with flight velocity and recovers upright", () => {
+  const avatar = new PlayerAvatar();
+  avatar.setVisible(true);
+  const frame = {
+    eyePosition: new THREE.Vector3(0, PLAYER_HEIGHT, 0),
+    feetY: 0,
+    yaw: 0,
+    pitch: 0,
+    velocity: new THREE.Vector3(0, 0, -FLIGHT_BOOST_SPEED),
+    onGround: false,
+    crouching: false,
+    sliding: false,
+    flying: true
+  };
+
+  avatar.update(1, frame);
+  const flightPivot = avatar.object.getObjectByName("AvatarFlightPivot");
+  assert(flightPivot !== undefined, "the avatar should expose a centered whole-body flight pivot");
+
+  const boostedBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  assert(boostedBodyUp.z < -0.9, "forward boost should lay the avatar toward its travel direction");
+  assert(boostedBodyUp.y > 0.2 && boostedBodyUp.y < 0.4, "boost should preserve a small amount of upright lift");
+
+  frame.velocity.set(0, 0, 0);
+  frame.onGround = true;
+  frame.flying = false;
+  avatar.update(1, frame);
+  const recoveredBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  assert(recoveredBodyUp.y > 0.999, "leaving flight should smoothly recover to the grounded upright pose");
+
+  frame.velocity.set(FLIGHT_BOOST_SPEED, 0, 0);
+  frame.onGround = false;
+  frame.flying = true;
+  avatar.update(1, frame);
+  const rightStrafeBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  assert(rightStrafeBodyUp.x > 0.9, "rightward flight should lean the whole avatar toward the right");
+
+  frame.velocity.set(0, 0, FLIGHT_BOOST_SPEED);
+  avatar.update(1, frame);
+  const backwardBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  assert(backwardBodyUp.z > 0.9, "backward flight should lean the whole avatar behind its facing direction");
+
+  const diagonalSpeed = FLIGHT_BOOST_SPEED / Math.SQRT2;
+  frame.velocity.set(diagonalSpeed, 0, diagonalSpeed);
+  avatar.update(1, frame);
+  const diagonalBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  assert(
+    diagonalBodyUp.x > 0.63 && diagonalBodyUp.z > 0.63,
+    "diagonal flight should preserve both components instead of snapping to a cardinal pose"
+  );
   avatar.dispose();
 });
 
