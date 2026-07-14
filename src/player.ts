@@ -97,6 +97,28 @@ type AirClamberGrabCandidate = {
   readonly faceDistance: number;
 };
 
+/**
+ * Writes the camera-facing flight direction without allocating a new vector.
+ * Ground movement intentionally ignores pitch; flight calls this only for its
+ * W/S basis so looking up climbs and looking down dives while strafing stays
+ * level and predictable.
+ */
+export function setFlightForwardDirection(
+  target: THREE.Vector3,
+  yaw: number,
+  pitch: number
+): THREE.Vector3 {
+  const safeYaw = Number.isFinite(yaw) ? yaw : 0;
+  const safePitch = Number.isFinite(pitch) ? pitch : 0;
+  const horizontalScale = Math.cos(safePitch);
+
+  return target.set(
+    -Math.sin(safeYaw) * horizontalScale,
+    Math.sin(safePitch),
+    -Math.cos(safeYaw) * horizontalScale
+  );
+}
+
 export class PlayerController {
   readonly camera: THREE.PerspectiveCamera;
   readonly domElement: HTMLElement;
@@ -349,6 +371,10 @@ export class PlayerController {
     }
 
     if (this.flying) {
+      // Flight follows the physical eye's full look direction. Reusing the
+      // existing forward vector keeps this hot path allocation-neutral beyond
+      // the two movement vectors the controller already creates per frame.
+      setFlightForwardDirection(forward, this.yaw, this.pitch);
       this.updateFlight(delta, forward, right);
       this.updateCrouchViewOffset(delta);
       this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");

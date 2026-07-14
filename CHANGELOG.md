@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.19.2 - 2026-07-14
+
+Camera-Steered Flight Elevation.
+
+### Changed
+
+- Made forward and backward flight follow the physical camera's pitch, so
+  looking up while flying climbs and looking down dives.
+- Kept left/right strafe level and preserved `Space`/`C` as explicit vertical
+  controls, giving camera steering a stable correction axis instead of rotating
+  the entire input frame.
+- Extended the third-person flight pose to follow complete 3D velocity. Climbs
+  remain more upright, while sufficiently fast dives carry the avatar smoothly
+  through horizontal.
+- Deliberately left the current acceleration and drag model unchanged so
+  `v0.19.3` can own retained momentum and velocity-steering behavior as one
+  coherent feel pass.
+
+### Validation
+
+- Added regression coverage for normalized pitch-aware flight directions and
+  boosted climb/dive avatar orientation.
+- `npm.cmd run validate`
+- Chrome gameplay smoke with pointer lock in level flight, climb, dive, strafe,
+  and explicit vertical-control combinations.
+
 ## 0.19.1 - 2026-07-13
 
 Velocity-Driven Flight Poses.

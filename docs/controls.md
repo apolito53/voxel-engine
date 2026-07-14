@@ -19,13 +19,15 @@ the root README.
 
 ## Movement
 
-- `WASD` moves the player.
+- `WASD` moves the player. In flight, `W/S` follow camera pitch to climb or
+  dive, while `A/D` remain level for stable lateral correction.
 - `Mouse` looks around while playing.
 - `V` toggles first/third-person view. Third-person uses a collision-aware chase
   camera and visible articulated player avatar; the selected mode persists in
   this browser.
-- `Space` jumps, or flies upward while flight mode is active.
-- `C` crouches smoothly on foot, or flies downward while flight mode is active.
+- `Space` jumps, or adds direct upward correction while flight mode is active.
+- `C` crouches smoothly on foot, or adds direct downward correction while
+  flight mode is active.
 - `C` while sprinting forward, or landing crouched with enough speed, starts a
   committed slide with an 80% entry-speed pop. Hold `W` to glide longer and
   press `Space` to spring-jump out of the slide.

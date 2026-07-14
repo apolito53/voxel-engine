@@ -75,6 +75,8 @@ ignored by git.
 ## Core Controls
 
 - `WASD` move, `Mouse` look, `Esc` pause/release mouse
+- During flight, `W/S` follow camera elevation for climbing and diving while
+  `A/D` remain level; `Space` and `C` still provide direct vertical correction
 - `V` toggles first/third-person view; the third-person camera retracts around
   full and partially carved terrain instead of clipping through it
 - `I` opens or closes Inventory
@@ -91,9 +93,9 @@ ignored by git.
   or erases in the Blocks lane; full-auto mode repeats while held
 - `Right click` places selected blocks; hold while firing cores for ADS
 - `F` toggles flight
-- In third person, the avatar leans with actual flight velocity and approaches
-  a horizontal pose as `Shift` boost reaches full speed; the pose is visual and
-  does not change the physical player collider or tool aim
+- In third person, the avatar leans with complete 3D flight velocity and
+  approaches its travel direction as `Shift` boost reaches full speed; the pose
+  is visual and does not change the physical player collider or tool aim
 - `F3` toggles the debug overlay, including collapsible performance, lighting,
   combat/damage, and local disk-write diagnostics
 - `F4` cycles quality presets

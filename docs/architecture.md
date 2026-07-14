@@ -120,15 +120,21 @@ steps, sprint vaults, jump-held clambers, and falling edge grabs. Movement code
 should depend on collision/support queries and tuning values rather than chunk
 storage or render meshes.
 
+Ground movement uses a yaw-only forward basis. During flight, forward/backward
+movement follows the physical eye's pitch for climb and dive control, while
+strafe remains level and `Space`/`C` add explicit vertical correction. The
+planned momentum pass may change how quickly velocity turns toward that wish
+direction, but camera orientation must remain intent rather than velocity truth.
+
 The `PlayerController` camera remains the physical eye and authoritative source
 for movement orientation, saves, tool reach, and targeting. `PlayerViewController`
 may select a separate collision-aware third-person render camera, while
 `PlayerAvatar` mirrors player state for presentation. Rendering, frustum
 culling, sky, fog, and screen-space damage indicators follow the selected render
 camera; world streaming and gameplay queries continue to follow the physical
-eye. Avatar flight tilt derives from actual horizontal velocity and rotates a
-centered presentation pivot; it must not become collision, movement, or camera
-truth. Keep that boundary intact when physical flight changes orientation.
+eye. Avatar flight tilt derives from actual 3D velocity and rotates a centered
+presentation pivot; it must not become collision, movement, or camera truth.
+Keep that boundary intact when physical flight changes orientation.
 
 Visual geometry and collision must tell the same story. When a partial mesh or
 support rule changes, test narrow shafts, one-subcell stairs, cross-block seams,

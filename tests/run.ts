@@ -200,7 +200,12 @@ import {
   shouldStartLandingSlide,
   shouldStartSlide
 } from "../src/playerMovement";
-import { PlayerController, doesPlayerBoundsCollideWithWorld, isCatchablePointerLockRequest } from "../src/player";
+import {
+  PlayerController,
+  doesPlayerBoundsCollideWithWorld,
+  isCatchablePointerLockRequest,
+  setFlightForwardDirection
+} from "../src/player";
 import {
   AVATAR_BASE_FLIGHT_TILT_RADIANS,
   AVATAR_BOOST_FLIGHT_TILT_RADIANS,
@@ -3883,6 +3888,25 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
   );
 });
 
+test("flight forward follows camera elevation", () => {
+  const flightForward = new THREE.Vector3();
+  setFlightForwardDirection(flightForward, 0, Math.PI / 6);
+  assertClose(flightForward.x, 0, 0.000001, "zero-yaw flight should not introduce lateral movement");
+  assertClose(flightForward.y, 0.5, 0.000001, "looking thirty degrees up should add a matching climb component");
+  assertClose(
+    flightForward.z,
+    -Math.cos(Math.PI / 6),
+    0.000001,
+    "pitch-steered flight should preserve a unit forward direction"
+  );
+
+  setFlightForwardDirection(flightForward, Math.PI / 2, -Math.PI / 6);
+  assertClose(flightForward.x, -Math.cos(Math.PI / 6), 0.000001, "yaw should rotate the pitched direction around Y");
+  assertClose(flightForward.y, -0.5, 0.000001, "looking down should produce a dive component");
+  assertClose(flightForward.z, 0, 0.000001, "quarter-turn yaw should rotate forward away from Z");
+  assertClose(flightForward.length(), 1, 0.000001, "the pitch-aware forward basis should remain normalized");
+});
+
 test("player view mode normalization rejects stale or malformed preferences", () => {
   assertEqual(
     normalizePlayerViewMode("first-person"),
@@ -4106,6 +4130,51 @@ test("player avatar tilts its whole body with flight velocity and recovers uprig
   assert(
     diagonalBodyUp.x > 0.63 && diagonalBodyUp.z > 0.63,
     "diagonal flight should preserve both components instead of snapping to a cardinal pose"
+  );
+
+  const elevationRadians = Math.PI / 6;
+  frame.pitch = elevationRadians;
+  frame.velocity.set(
+    0,
+    FLIGHT_BOOST_SPEED * Math.sin(elevationRadians),
+    -FLIGHT_BOOST_SPEED * Math.cos(elevationRadians)
+  );
+  avatar.update(1, frame);
+  const climbingBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  const expectedClimbPoseRadians = AVATAR_BOOST_FLIGHT_TILT_RADIANS * (2 / 3);
+  assertClose(
+    climbingBodyUp.y,
+    Math.cos(expectedClimbPoseRadians),
+    0.001,
+    "a thirty-degree climb should keep the boosted body above horizontal"
+  );
+  assertClose(
+    climbingBodyUp.z,
+    -Math.sin(expectedClimbPoseRadians),
+    0.001,
+    "the climbing pose should remain aligned with forward travel"
+  );
+
+  frame.pitch = -elevationRadians;
+  frame.velocity.set(
+    0,
+    -FLIGHT_BOOST_SPEED * Math.sin(elevationRadians),
+    -FLIGHT_BOOST_SPEED * Math.cos(elevationRadians)
+  );
+  avatar.update(1, frame);
+  const divingBodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightPivot.quaternion);
+  const expectedDivePoseRadians = AVATAR_BOOST_FLIGHT_TILT_RADIANS * (4 / 3);
+  assertClose(
+    divingBodyUp.y,
+    Math.cos(expectedDivePoseRadians),
+    0.001,
+    "a boosted dive should carry the body through horizontal"
+  );
+  assertClose(
+    divingBodyUp.z,
+    -Math.sin(expectedDivePoseRadians),
+    0.001,
+    "the diving pose should keep pointing along forward travel"
   );
   avatar.dispose();
 });

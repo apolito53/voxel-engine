@@ -292,6 +292,7 @@ export class PlayerAvatar {
     this.object.rotation.y = frame.yaw;
 
     const horizontalSpeed = Math.hypot(frame.velocity.x, frame.velocity.z);
+    const flightSpeed = frame.velocity.length();
     const movingOnGround = frame.onGround && horizontalSpeed > 0.08 && !frame.sliding;
     const locomotionStrength = movingOnGround
       ? THREE.MathUtils.clamp(horizontalSpeed / WALK_SPEED, 0, 1.2)
@@ -311,7 +312,14 @@ export class PlayerAvatar {
     this.facingRight.set(Math.cos(frame.yaw), 0, -Math.sin(frame.yaw));
     const forwardSpeed = frame.velocity.dot(this.facingForward);
     const lateralSpeed = frame.velocity.dot(this.facingRight);
-    this.updateFlightTilt(deltaSeconds, frame.flying, horizontalSpeed, forwardSpeed, lateralSpeed);
+    this.updateFlightTilt(
+      deltaSeconds,
+      frame.flying,
+      flightSpeed,
+      forwardSpeed,
+      lateralSpeed,
+      frame.velocity.y
+    );
 
     // Grounded torso lean stays independent from full-body flight orientation.
     // Mixing both would double the pitch and make boosted flight look folded.
@@ -372,25 +380,38 @@ export class PlayerAvatar {
   private updateFlightTilt(
     deltaSeconds: number,
     flying: boolean,
-    horizontalSpeed: number,
+    flightSpeed: number,
     forwardSpeed: number,
-    lateralSpeed: number
+    lateralSpeed: number,
+    verticalSpeed: number
   ): void {
-    const tiltRadians = getAvatarFlightTiltRadians(horizontalSpeed, flying);
-    if (tiltRadians <= AVATAR_FLIGHT_TILT_EPSILON || horizontalSpeed <= AVATAR_FLIGHT_TILT_EPSILON) {
+    const tiltRadians = getAvatarFlightTiltRadians(flightSpeed, flying);
+    if (tiltRadians <= AVATAR_FLIGHT_TILT_EPSILON || flightSpeed <= AVATAR_FLIGHT_TILT_EPSILON) {
       this.flightTiltTarget.identity();
     } else {
-      const inverseHorizontalSpeed = 1 / horizontalSpeed;
-      const sinTilt = Math.sin(tiltRadians);
+      const horizontalSpeed = Math.hypot(forwardSpeed, lateralSpeed);
+      const poseProgress = THREE.MathUtils.clamp(tiltRadians / (Math.PI / 2), 0, 1);
+      const travelVertical = THREE.MathUtils.clamp(verticalSpeed / flightSpeed, -1, 1);
+      const travelPolarRadians = Math.acos(travelVertical);
+      const posePolarRadians = travelPolarRadians * poseProgress;
+      const poseHorizontalLength = Math.sin(posePolarRadians);
 
-      // Build the desired body-up axis in avatar-local space. Forward is -Z,
-      // right is +X, so this works for backward, strafe, and diagonal velocity
-      // just as naturally as the ordinary forward-flight case.
-      this.flightTiltDirection.set(
-        lateralSpeed * inverseHorizontalSpeed * sinTilt,
-        Math.cos(tiltRadians),
-        -forwardSpeed * inverseHorizontalSpeed * sinTilt
-      ).normalize();
+      // Blend from upright toward the complete 3D travel vector. Horizontal
+      // flight preserves the authored 16/72-degree poses, climbing stays more
+      // upright, and a boosted dive can naturally pass through horizontal.
+      // Forward is local -Z and right is +X. Pure vertical descent uses forward
+      // as its stable fallback plane instead of allowing an arbitrary flip axis.
+      if (horizontalSpeed > AVATAR_FLIGHT_TILT_EPSILON) {
+        const horizontalPoseScale = poseHorizontalLength / horizontalSpeed;
+        this.flightTiltDirection.set(
+          lateralSpeed * horizontalPoseScale,
+          Math.cos(posePolarRadians),
+          -forwardSpeed * horizontalPoseScale
+        );
+      } else {
+        this.flightTiltDirection.set(0, Math.cos(posePolarRadians), -poseHorizontalLength);
+      }
+      this.flightTiltDirection.normalize();
       this.flightTiltTarget.setFromUnitVectors(AVATAR_LOCAL_UP, this.flightTiltDirection);
     }
 
@@ -510,14 +531,14 @@ export class PlayerAvatar {
 }
 
 /**
- * Maps actual horizontal flight speed onto the authored presentation range.
+ * Maps actual flight speed onto the authored presentation range.
  * Base flight reaches a restrained lean; speed carried into the boost band
  * progressively lays the body down without ever reaching a brittle 90 degrees.
  */
-export function getAvatarFlightTiltRadians(horizontalSpeed: number, flying: boolean): number {
+export function getAvatarFlightTiltRadians(flightSpeed: number, flying: boolean): number {
   if (!flying) return 0;
 
-  const safeSpeed = Number.isFinite(horizontalSpeed) ? Math.max(0, horizontalSpeed) : 0;
+  const safeSpeed = Number.isFinite(flightSpeed) ? Math.max(0, flightSpeed) : 0;
   const baseBlend = THREE.MathUtils.smoothstep(safeSpeed, 0, WALK_SPEED);
   const boostBlend = THREE.MathUtils.smoothstep(safeSpeed, WALK_SPEED, FLIGHT_BOOST_SPEED);
   return THREE.MathUtils.clamp(
