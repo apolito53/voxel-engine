@@ -224,6 +224,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 
 - [docs/controls.md](docs/controls.md): movement, item/block lanes, builder
   tools, settings, debug keys, and quality presets.
+- [docs/architecture.md](docs/architecture.md): engine ownership, runtime flow,
+  worker/main-thread contracts, extraction seams, and parked decisions.
 - [docs/destruction.md](docs/destruction.md): partial-block terrain damage,
   projectile and hitscan core behavior, debris VFX, and parked rubble mechanics.
 - [docs/nova-companion.md](docs/nova-companion.md): Nova Pilot, Nova Terminal,
@@ -235,8 +237,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 - [docs/automation.md](docs/automation.md): F8 avatar, Codex pilot bridge,
   visual scenario recorder, and Chrome/playtest automation notes.
 
-`CODEBASE_INDEX.md` is the surgical code map for module ownership and
-[common change targets](CODEBASE_INDEX.md#common-change-targets). `TODO.md`
+`CODEBASE_INDEX.md` is the surgical code map for module ownership and its
+[task router](CODEBASE_INDEX.md#task-router). `TODO.md`
 keeps coherent parked plans visible, while `FEATURE_SPITBALLS.md` keeps looser
 feature sparks that are not committed scope yet.
 

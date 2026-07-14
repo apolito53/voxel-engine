@@ -2,6 +2,9 @@
 
 This folder keeps the living design notes out of the project front door.
 
+- [architecture.md](architecture.md): runtime ownership, subsystem contracts,
+  worker/main-thread boundaries, extraction seams, and parked architecture
+  decisions that are too detailed for the root codebase index.
 - [controls.md](controls.md): movement, item/block lanes, builder tools,
   settings, debug keys, and quality presets.
 - [destruction.md](destruction.md): partial-block damage, cores, debris VFX, and

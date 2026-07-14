@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.0.1 - 2026-07-13
+
+### Changed
+
+- Rebuilt `CODEBASE_INDEX.md` as a compact task router, ownership map, runtime
+  outline, and high-risk invariant list instead of an always-loaded subsystem
+  encyclopedia.
+- Moved opt-in runtime contracts, extraction seams, and parked architecture
+  decisions into `docs/architecture.md`.
+- Added docs validation limits for codebase-index byte size and line length so
+  future updates cannot quietly recreate the 72 KB routing storm.
+
+### Validation
+
+- `npm.cmd run validate`
+
 ## 0.18.0 - 2026-07-13
 
 Creative Inventory Foundation.

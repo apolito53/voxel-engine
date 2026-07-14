@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT_MARKDOWN_FILES = ["README.md", "CODEBASE_INDEX.md", "CHANGELOG.md", "TODO.md"];
 const DOCS_DIR = path.join(repoRoot, "docs");
+const CODEBASE_INDEX_PATH = path.join(repoRoot, "CODEBASE_INDEX.md");
+const CODEBASE_INDEX_MAX_BYTES = 30_000;
+const CODEBASE_INDEX_MAX_LINE_LENGTH = 320;
 const MARKDOWN_LINK_PATTERN = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 const GENERATED_ANCHOR_PATTERN = /[^a-z0-9 -]/g;
 
@@ -19,6 +22,8 @@ const markdownFiles = [
 for (const filePath of markdownFiles) {
   await checkMarkdownFile(filePath);
 }
+
+await checkCodebaseIndexHygiene();
 
 if (failures.length > 0) {
   console.error("Markdown link check failed:");
@@ -55,6 +60,27 @@ async function checkMarkdownFile(filePath) {
     const lineNumber = countLinesBeforeOffset(markdown, match.index ?? 0);
     checkLocalTarget({ filePath, target, anchors, lineNumber, lines });
   }
+}
+
+async function checkCodebaseIndexHygiene() {
+  if (!existsSync(CODEBASE_INDEX_PATH)) return;
+
+  const markdown = await readFile(CODEBASE_INDEX_PATH, "utf8");
+  const byteLength = Buffer.byteLength(markdown, "utf8");
+  if (byteLength > CODEBASE_INDEX_MAX_BYTES) {
+    failures.push(
+      `CODEBASE_INDEX.md is ${byteLength} bytes; keep the routing map below ` +
+      `${CODEBASE_INDEX_MAX_BYTES} bytes and move deep contracts into docs/architecture.md`
+    );
+  }
+
+  markdown.split(/\r?\n/).forEach((line, index) => {
+    if (line.length <= CODEBASE_INDEX_MAX_LINE_LENGTH) return;
+    failures.push(
+      `CODEBASE_INDEX.md:${index + 1} is ${line.length} characters; ` +
+      `wrap or simplify lines above ${CODEBASE_INDEX_MAX_LINE_LENGTH}`
+    );
+  });
 }
 
 function checkLocalTarget({ filePath, target, anchors, lineNumber, lines }) {
