@@ -162,12 +162,15 @@ Preferred format:
 - `[mechanic]` Spider-Man-ish grappling: swing arcs, tension, release momentum,
   valid anchor feedback, and enough air control to feel expressive rather than
   binary.
-- `[mechanic]` Physics-driven flight mode that pushes/tilts/accelerates instead
-  of the current clean debug-style flight toggle.
+- `[active v0.19.x]` Physics-driven flight mode that pushes, tilts, accelerates,
+  coasts, brakes, contacts terrain, and lands instead of the current clean
+  debug-style toggle. `v0.19.0` supplies the separate chase camera and visible
+  thruster-harness avatar needed to communicate that movement.
 - `[mechanic]` Wall running or wall kicks for high-energy traversal once player
   collision and camera comfort can support it.
 - `[feel]` Movement ability variants should preserve readable first-person
-  camera motion; cool traversal is not worth nausea soup.
+  camera motion and exact eye-ray tool aim; cool traversal is not worth nausea
+  soup.
 - Glider or fall-control item if vertical terrain becomes more interesting.
 - Swimming or buoyancy only after water exists as real gameplay terrain.
 

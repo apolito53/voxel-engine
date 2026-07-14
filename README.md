@@ -2,7 +2,7 @@
 
 A strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering,
 Rapier handles active rigid-body debris VFX, and the engine owns chunk streaming,
-terrain meshing, first-person movement, block edits, partial-block damage,
+terrain meshing, first/third-person movement, block edits, partial-block damage,
 projectile and hitscan cores, Nova companion affordances, automation hooks, and
 performance logging. Chunk generation, chunk meshing, and partial-terrain region
 mesh generation use a shared browser `WorkerPool` with priority lanes and sync
@@ -75,6 +75,8 @@ ignored by git.
 ## Core Controls
 
 - `WASD` move, `Mouse` look, `Esc` pause/release mouse
+- `V` toggles first/third-person view; the third-person camera retracts around
+  full and partially carved terrain instead of clipping through it
 - `I` opens or closes Inventory
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - Low damaged-terrain ledges step up automatically with a short vertical ease,
@@ -98,7 +100,7 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
-Gameplay settings include Terraformer size, Day/Night Cycle, Time of Day,
+Gameplay settings include Camera View, Terraformer size, Day/Night Cycle, Time of Day,
 Physics Core size, velocity, terrain-damaging bounce count, color, and trail
 controls, plus a first-pass procedural sound layer with Sound, Master Volume,
 SFX Volume, and UI Volume controls. Experimental settings include the Cycle

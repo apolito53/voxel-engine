@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-07-13 for `v0.18.0.1`.
+Last reviewed: 2026-07-13 for `v0.19.0`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -18,6 +18,8 @@ runtime contracts or extraction boundaries.
   pose, day/night state, and inventory metadata.
 - The normal runtime treats loose debris as temporary VFX. Durable terrain
   truth lives in full voxels and sparse 3x3x3 partial-block lattices.
+- First/third-person view is presentation state. The physical eye camera remains
+  authoritative for player movement, saves, tool reach, and reticle aim.
 - Local development uses `5173` for Vite and `5174` for hitch/combat logs.
 
 ## Commands
@@ -42,7 +44,7 @@ runtime contracts or extraction boundaries.
 | Lamp block light and local light proxies | [src/voxelBlockLight.ts](src/voxelBlockLight.ts) | [src/blockLightJobs.ts](src/blockLightJobs.ts), [src/localLights.ts](src/localLights.ts), [src/localLightRenderer.ts](src/localLightRenderer.ts) |
 | Sky, day/night, shadows, fog horizon | [src/dayNightCycle.ts](src/dayNightCycle.ts) | [src/skybox.ts](src/skybox.ts), [src/horizonMatte.ts](src/horizonMatte.ts), [src/lighting.ts](src/lighting.ts) |
 | Partial terrain carving and geometry | [src/partialBlocks.ts](src/partialBlocks.ts) | [src/partialBlockMeshField.ts](src/partialBlockMeshField.ts), [src/partialBlockMeshWorker.ts](src/partialBlockMeshWorker.ts), [docs/destruction.md](docs/destruction.md) |
-| Player movement and partial collision | [src/player.ts](src/player.ts) | [src/collision.ts](src/collision.ts), [src/playerMovement.ts](src/playerMovement.ts), [docs/player-partial-collision-plan.md](docs/player-partial-collision-plan.md) |
+| Player movement, view, avatar, partial collision | [src/player.ts](src/player.ts) | [src/playerView.ts](src/playerView.ts), [src/playerAvatar.ts](src/playerAvatar.ts), [src/collision.ts](src/collision.ts), [src/playerMovement.ts](src/playerMovement.ts) |
 | Projectile cores, contacts, fragments | [src/physics.ts](src/physics.ts) | [src/physicsCoreLaunch.ts](src/physicsCoreLaunch.ts), [src/coreAimPreview.ts](src/coreAimPreview.ts), [src/hitscanCore.ts](src/hitscanCore.ts) |
 | Debris rigid bodies, cleanup, rendering | [src/rigidDebris.ts](src/rigidDebris.ts) | [src/debrisSettler.ts](src/debrisSettler.ts), [src/physicsInstancing.ts](src/physicsInstancing.ts), [src/debrisCleanup.ts](src/debrisCleanup.ts) |
 | Items, inventory, hotbar, click mode | [src/items.ts](src/items.ts) | [src/inventory.ts](src/inventory.ts), [src/hotbar.ts](src/hotbar.ts), [src/clickFireMode.ts](src/clickFireMode.ts) |
@@ -66,6 +68,8 @@ runtime contracts or extraction boundaries.
   `partialBlocks.ts` owns the sparse lattice and its pure geometry rules.
 - `PlayerController` consumes `CollisionWorld`; it should not learn chunk
   storage, rendering, or debris ownership details.
+- `PlayerViewController` owns render-camera selection and camera obstruction;
+  `PlayerAvatar` owns only the replaceable visual rig and pose mirroring.
 - `physics.ts` owns transient cores and fragment motion records. Rapier is kept
   behind `RigidDebrisSimulation`; rendering consumes fragment state through
   instanced batches.
@@ -118,6 +122,8 @@ runtime contracts or extraction boundaries.
   light while a genuinely dirty cache rebuilds; do not flash zero-lit geometry.
 - The clear-distance slider, hidden stream horizon, chunk render radius, hard
   fog wall, and horizon matte have different jobs. Do not collapse their radii.
+- Third-person rendering must not move or repurpose the physical eye camera.
+  Player collision, saves, tool reach, and reticle aim depend on that transform.
 - Debris presentation volume cannot exceed removed terrain volume. Normal
   runtime pressure cleanup prefers settled debris and protects fresh airborne
   bursts during their grace window.

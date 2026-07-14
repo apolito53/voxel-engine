@@ -12,6 +12,7 @@
         <span class="hud-pill"><b>WASD</b> move</span>
         <span class="hud-pill"><b>Space/C</b> vertical</span>
         <span class="hud-pill"><b>G/T</b> lane/fire mode</span>
+        <span class="hud-pill"><b>V</b> camera view</span>
         <span class="hud-pill"><b>Terraformer</b> L edit</span>
         <span class="hud-pill"><b>Blocks</b> L erase / R place</span>
         <span class="hud-pill"><b>Cores</b> L fire / hold R ADS</span>
@@ -310,6 +311,30 @@
               aria-labelledby="settings-tab-gameplay"
               hidden
             >
+              <div class="settings-field" role="group" aria-labelledby="view-mode-label">
+                <span class="settings-label-row">
+                  <span id="view-mode-label" class="settings-label">Camera View</span>
+                  <span class="settings-value">V to toggle</span>
+                </span>
+                <div class="segmented-control" aria-label="Player camera view">
+                  <button
+                    id="view-mode-first-button"
+                    class="segmented-control-button is-active"
+                    type="button"
+                    aria-pressed="true"
+                  >
+                    First Person
+                  </button>
+                  <button
+                    id="view-mode-third-button"
+                    class="segmented-control-button"
+                    type="button"
+                    aria-pressed="false"
+                  >
+                    Third Person
+                  </button>
+                </div>
+              </div>
               <label class="settings-field" for="terraformer-size-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Terraformer Size</span>

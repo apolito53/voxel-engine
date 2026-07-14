@@ -201,6 +201,12 @@ import {
   shouldStartSlide
 } from "../src/playerMovement";
 import { PlayerController, doesPlayerBoundsCollideWithWorld, isCatchablePointerLockRequest } from "../src/player";
+import { PlayerAvatar } from "../src/playerAvatar";
+import {
+  PlayerViewController,
+  normalizePlayerViewMode,
+  resolveThirdPersonCameraDistance
+} from "../src/playerView";
 import {
   DEFAULT_PHYSICS_OBJECT_BUDGET,
   MAX_PHYSICS_OBJECT_BUDGET,
@@ -3870,6 +3876,142 @@ test("sprint feedback widens FOV smoothly without touching base camera setup", (
     firstAdsStep > adsFov && firstAdsStep < BASE_CAMERA_FOV,
     "ADS zoom should ease inward instead of snapping"
   );
+});
+
+test("player view mode normalization rejects stale or malformed preferences", () => {
+  assertEqual(
+    normalizePlayerViewMode("first-person"),
+    "first-person",
+    "first-person should remain a valid persisted camera mode"
+  );
+  assertEqual(
+    normalizePlayerViewMode("third-person"),
+    "third-person",
+    "third-person should remain a valid persisted camera mode"
+  );
+  assertEqual(
+    normalizePlayerViewMode("shoulder-cam"),
+    "first-person",
+    "unknown camera modes should fail closed to first-person"
+  );
+  assertEqual(
+    normalizePlayerViewMode(null, "third-person"),
+    "third-person",
+    "callers should be able to choose a deliberate fallback mode"
+  );
+});
+
+test("third-person camera collision retracts against blocks while respecting partial holes", () => {
+  const start = new THREE.Vector3(0.75, 1.5, 0.5);
+  const desiredPosition = new THREE.Vector3(0.75, 1.5, 4.5);
+  const emptyWorld: CollisionWorld = {
+    isSolid: () => false
+  };
+
+  assertClose(
+    resolveThirdPersonCameraDistance(emptyWorld, start, desiredPosition),
+    4,
+    0.000001,
+    "an unobstructed camera boom should reach its full requested distance"
+  );
+
+  const fullBlockWorld: CollisionWorld = {
+    isSolid: (x, y, z) => x === 0 && y === 1 && z === 2
+  };
+  const blockedDistance = resolveThirdPersonCameraDistance(
+    fullBlockWorld,
+    start,
+    desiredPosition
+  );
+  assert(
+    blockedDistance > 1 && blockedDistance < 1.3,
+    "a solid block should stop the camera before its expanded near face"
+  );
+
+  const partialBlockWorld: CollisionWorld = {
+    isSolid: (x, y, z) => x === 0 && y === 1 && z === 2,
+    getCellCollisionBoxes: (x, y, z) => x === 0 && y === 1 && z === 2
+      ? [{ minX: 0, maxX: 1 / 3, minY: 1, maxY: 2, minZ: 2, maxZ: 3 }]
+      : []
+  };
+  assertClose(
+    resolveThirdPersonCameraDistance(partialBlockWorld, start, desiredPosition),
+    4,
+    0.000001,
+    "the camera should pass through empty space beside surviving partial-block geometry"
+  );
+});
+
+test("third-person presentation keeps the gameplay eye camera authoritative", () => {
+  const gameplayCamera = new THREE.PerspectiveCamera(72, 16 / 9, 0.05, 900);
+  gameplayCamera.position.set(3, 8, 5);
+  gameplayCamera.rotation.set(-0.2, 0.65, 0, "YXZ");
+  gameplayCamera.updateMatrixWorld(true);
+  const originalPosition = gameplayCamera.position.clone();
+  const originalQuaternion = gameplayCamera.quaternion.clone();
+  const thirdPersonCamera = new THREE.PerspectiveCamera();
+  const emptyWorld: CollisionWorld = {
+    isSolid: () => false
+  };
+  const view = new PlayerViewController({
+    gameplayCamera,
+    thirdPersonCamera,
+    collisionWorld: emptyWorld,
+    initialMode: "third-person"
+  });
+
+  view.update(1 / 60);
+
+  const lookDirection = new THREE.Vector3();
+  gameplayCamera.getWorldDirection(lookDirection);
+  const expectedAnchor = gameplayCamera.position.clone().add(new THREE.Vector3(0, 0.08, 0));
+  const expectedPosition = gameplayCamera.position
+    .clone()
+    .add(new THREE.Vector3(0, 0.46, 0))
+    .addScaledVector(lookDirection, -3.8);
+
+  assertEqual(view.renderCamera, thirdPersonCamera, "third-person mode should render from the chase camera");
+  assertClose(
+    view.currentThirdPersonDistance,
+    expectedPosition.distanceTo(expectedAnchor),
+    0.000001,
+    "the initialized camera should use the full authored boom length"
+  );
+  assert(
+    thirdPersonCamera.position.distanceTo(gameplayCamera.position) > 3.5,
+    "the chase camera should visibly clear the player avatar"
+  );
+  assert(
+    gameplayCamera.position.equals(originalPosition) && gameplayCamera.quaternion.equals(originalQuaternion),
+    "updating the presentation camera must not alter the physical eye transform"
+  );
+  assertEqual(thirdPersonCamera.fov, gameplayCamera.fov, "the chase camera should inherit movement FOV feedback");
+  assertEqual(thirdPersonCamera.aspect, gameplayCamera.aspect, "the chase camera should inherit viewport aspect");
+
+  assertEqual(view.toggleMode(), "first-person", "the view toggle should return the newly active mode");
+  assertEqual(view.renderCamera, gameplayCamera, "first-person mode should immediately restore the gameplay camera");
+});
+
+test("player avatar exposes an animated right-hand muzzle in world space", () => {
+  const avatar = new PlayerAvatar();
+  avatar.setVisible(true);
+  avatar.update(1 / 60, {
+    eyePosition: new THREE.Vector3(2, 4.8, -3),
+    feetY: 3,
+    yaw: 0,
+    pitch: 0,
+    velocity: new THREE.Vector3(),
+    onGround: true,
+    crouching: false,
+    sliding: false,
+    flying: false
+  });
+
+  const rightHand = avatar.getRightHandWorldPosition(new THREE.Vector3());
+  assertClose(rightHand.x, 2.31, 0.01, "the authored right hand should remain on the avatar's right side");
+  assertClose(rightHand.y, 3.85, 0.01, "the hand muzzle should follow the animated arm above the feet");
+  assertClose(rightHand.z, -3, 0.01, "the neutral hand should share the avatar's forward plane");
+  avatar.dispose();
 });
 
 test("player debug readout reports velocity in meters per second", () => {

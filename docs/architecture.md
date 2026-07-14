@@ -120,6 +120,14 @@ steps, sprint vaults, jump-held clambers, and falling edge grabs. Movement code
 should depend on collision/support queries and tuning values rather than chunk
 storage or render meshes.
 
+The `PlayerController` camera remains the physical eye and authoritative source
+for movement orientation, saves, tool reach, and targeting. `PlayerViewController`
+may select a separate collision-aware third-person render camera, while
+`PlayerAvatar` mirrors player state for presentation. Rendering, frustum
+culling, sky, fog, and screen-space damage indicators follow the selected render
+camera; world streaming and gameplay queries continue to follow the physical
+eye. Keep that boundary intact when physical flight changes orientation.
+
 Visual geometry and collision must tell the same story. When a partial mesh or
 support rule changes, test narrow shafts, one-subcell stairs, cross-block seams,
 ledges, and the transition between step, vault, and clamber bands.

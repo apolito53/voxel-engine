@@ -236,9 +236,17 @@ import {
   type PerformanceHitchRecord,
   type PerformanceHitchStatsSnapshot
 } from "./performanceHitchLog";
+import { PlayerAvatar } from "./playerAvatar";
 import { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import { getPlayerSpeedMetersPerSecond } from "./playerSpeed";
+import {
+  PLAYER_VIEW_TOGGLE_KEY,
+  PlayerViewController,
+  readPlayerViewModePreference,
+  writePlayerViewModePreference,
+  type PlayerViewMode
+} from "./playerView";
 import {
   BLOCK_DAMAGE_IMPACT_SPEED,
   PHYSICS_CORE_BLOCK_DAMAGE,
@@ -571,6 +579,8 @@ const groundDebrisLifetimeForeverToggle = requireElement<HTMLInputElement>("#gro
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
+const firstPersonViewButton = requireElement<HTMLButtonElement>("#view-mode-first-button");
+const thirdPersonViewButton = requireElement<HTMLButtonElement>("#view-mode-third-button");
 const soundEnabledToggle = requireElement<HTMLInputElement>("#sound-enabled-toggle");
 const masterVolumeSlider = requireElement<HTMLInputElement>("#master-volume-slider");
 const masterVolumeValue = requireElement<HTMLElement>("#master-volume-value");
@@ -627,6 +637,15 @@ const sceneFog = new THREE.Fog(WORLD_FOG_COLOR, bootPreset.fogNear, bootPreset.f
 scene.fog = sceneFog;
 
 const camera = new THREE.PerspectiveCamera(
+  BASE_CAMERA_FOV,
+  window.innerWidth / window.innerHeight,
+  0.05,
+  bootPreset.cameraFar
+);
+// PlayerController keeps this first camera as the physical eye/aim anchor.
+// Third-person rendering uses a separate camera so movement and save contracts
+// do not change merely because the user wants to see their body.
+const thirdPersonCamera = new THREE.PerspectiveCamera(
   BASE_CAMERA_FOV,
   window.innerWidth / window.innerHeight,
   0.05,
@@ -867,6 +886,14 @@ const terrainAndRubbleCollisionWorld: CollisionWorld = {
     return Math.max(terrainSupportY, rubbleSupportY);
   }
 };
+const playerViewController = new PlayerViewController({
+  gameplayCamera: camera,
+  thirdPersonCamera,
+  collisionWorld: terrainAndRubbleCollisionWorld,
+  initialMode: readPlayerViewModePreference()
+});
+const playerAvatar = new PlayerAvatar();
+scene.add(playerAvatar.object);
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
 const novaPilotReactions = new NovaPilotReactions({
@@ -1045,6 +1072,7 @@ updatePhysicsCoreControls();
 updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
 syncControlHintsToggle();
+syncPlayerViewControls();
 syncCoreAimPreviewToggle();
 syncAudioControls();
 renderInventoryMenus();
@@ -1314,6 +1342,12 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   controlHintsToggle.addEventListener("change", () => {
     setControlHintsVisible(controlHintsToggle.checked);
+  }, eventListenerOptions);
+  firstPersonViewButton.addEventListener("click", () => {
+    setPlayerViewMode("first-person");
+  }, eventListenerOptions);
+  thirdPersonViewButton.addEventListener("click", () => {
+    setPlayerViewMode("third-person");
   }, eventListenerOptions);
   soundEnabledToggle.addEventListener("change", () => {
     setAudioEnabled(soundEnabledToggle.checked);
@@ -1603,6 +1637,31 @@ function setControlHintsVisible(visible: boolean): void {
 function syncControlHintsToggle(): void {
   controlHintsToggle.checked = controlHintsVisible;
   document.body.classList.toggle("controls-hidden", !controlHintsVisible);
+}
+
+function setPlayerViewMode(mode: PlayerViewMode): void {
+  playerViewController.setMode(mode);
+  writePlayerViewModePreference(playerViewController.mode);
+  syncPlayerViewControls();
+  playerAvatar.setVisible(inWorld && playerViewController.mode === "third-person");
+
+  // Settings can change the mode while gameplay is paused. Build the safe
+  // camera pose now so Resume never exposes one stale frame inside a wall.
+  if (inWorld) playerViewController.update(0);
+}
+
+function togglePlayerViewMode(): void {
+  setPlayerViewMode(
+    playerViewController.mode === "first-person" ? "third-person" : "first-person"
+  );
+}
+
+function syncPlayerViewControls(): void {
+  const firstPerson = playerViewController.mode === "first-person";
+  firstPersonViewButton.classList.toggle("is-active", firstPerson);
+  thirdPersonViewButton.classList.toggle("is-active", !firstPerson);
+  firstPersonViewButton.setAttribute("aria-pressed", String(firstPerson));
+  thirdPersonViewButton.setAttribute("aria-pressed", String(!firstPerson));
 }
 
 function setAudioEnabled(enabled: boolean): void {
@@ -1919,6 +1978,8 @@ window.addEventListener("resize", () => {
   noteUserActivity();
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  thirdPersonCamera.aspect = camera.aspect;
+  thirdPersonCamera.updateProjectionMatrix();
   renderer.setPixelRatio(qualityController.renderPixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
 }, eventListenerOptions);
@@ -1974,6 +2035,13 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (!inWorld) return;
+
+  if (event.code === PLAYER_VIEW_TOGGLE_KEY && !event.repeat) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    togglePlayerViewMode();
+    return;
+  }
 
   if (event.code === "KeyI" && !event.repeat) {
     event.preventDefault();
@@ -2444,6 +2512,7 @@ function animate(): void {
   let debugRubbleStats: RubbleFieldStats | null = null;
   let debugPartialMeshStats = partialBlockMeshField.getStats();
   let debugMinimapMs = minimapRenderer.lastUpdateMs;
+  let activeRenderCamera: THREE.PerspectiveCamera = camera;
 
   const recordTimingSection = (section: FrameTimingSection): void => {
     const now = performance.now();
@@ -2458,6 +2527,21 @@ function animate(): void {
 
     const playerVerticalVelocityBeforeUpdate = activePlayer.velocity.y;
     activePlayer.update(delta);
+    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), isPlayerCoreAdsActive(), delta);
+    playerViewController.update(delta);
+    activeRenderCamera = playerViewController.renderCamera;
+    playerAvatar.setVisible(playerViewController.mode === "third-person");
+    playerAvatar.update(delta, {
+      eyePosition: camera.position,
+      feetY: activePlayer.getFeetY(),
+      yaw: activePlayer.yaw,
+      pitch: activePlayer.pitch,
+      velocity: activePlayer.velocity,
+      onGround: activePlayer.onGround,
+      crouching: activePlayer.crouching,
+      sliding: activePlayer.sliding,
+      flying: activePlayer.flying
+    });
     gameAudio.updatePlayerMotion(delta, {
       active: activePlayer.active,
       onGround: activePlayer.onGround,
@@ -2472,7 +2556,7 @@ function animate(): void {
     camera.getWorldDirection(chunkStreamDirection);
     novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
     recordTimingSection("playerMs");
-    updateChunkStreamFrustum();
+    updateChunkStreamFrustum(activeRenderCamera);
     debugPlayerChunk = activeWorld.streamChunksAround(
       camera.position.x,
       camera.position.z,
@@ -2592,14 +2676,14 @@ function animate(): void {
     updateTargetBlockHighlighter();
     updateBuilderBrushPreview(activePlayer);
     updateCoreAimPreview(activeWorld, activePlayer);
-    updateSprintFeedback(activePlayer.isSprintFeedbackActive(), isPlayerCoreAdsActive(), delta);
-    damageIndicators.update(camera, window.innerWidth, window.innerHeight);
+    damageIndicators.update(activeRenderCamera, window.innerWidth, window.innerHeight);
     recordTimingSection("otherMs");
     minimapRenderer.update(delta);
     debugWorldStats = activeWorld.getStats();
     debugMinimapMs = minimapRenderer.lastUpdateMs;
     recordTimingSection("minimapMs");
   } else {
+    playerAvatar.setVisible(false);
     targetBlockHighlighter.hide();
     localLightRenderer.hide();
     builderBrushPreview.hide();
@@ -2610,19 +2694,19 @@ function animate(): void {
   }
 
   updateSunShadowAnchor();
-  skybox.update(camera);
+  skybox.update(activeRenderCamera);
   horizonMatte.update({
-    camera,
+    camera: activeRenderCamera,
     inWorld,
     quality: qualityController.preset,
     surfaceProvider: world ? horizonMatteSurfaceProvider : null
   });
-  updateWorldBlockMaterialFogCenter(worldMaterial, camera.position);
-  updateWorldBlockMaterialFogCenter(partialBlockMaterial, camera.position);
+  updateWorldBlockMaterialFogCenter(worldMaterial, activeRenderCamera.position);
+  updateWorldBlockMaterialFogCenter(partialBlockMaterial, activeRenderCamera.position);
   novaPilotReactions.update();
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
-  renderer.render(scene, camera);
+  renderer.render(scene, activeRenderCamera);
   const renderEndedAt = performance.now();
   frameTimingSample.renderMs = renderEndedAt - renderStartedAt;
   const frameEndedAt = performance.now();
@@ -2828,10 +2912,12 @@ function drainFrameClockAfterIdle(): void {
   resetFrameMetersAfterIdle();
 }
 
-function updateChunkStreamFrustum(): void {
-  // The world scheduler only needs camera planes, not renderer state, to prefer visible work.
-  camera.updateMatrixWorld();
-  chunkStreamProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+function updateChunkStreamFrustum(viewCamera: THREE.PerspectiveCamera): void {
+  // The scheduler follows the camera the user actually sees. Player-centered
+  // load/unload radii stay unchanged, while visible-first mesh priority tracks
+  // the third-person boom when that mode is active.
+  viewCamera.updateMatrixWorld();
+  chunkStreamProjection.multiplyMatrices(viewCamera.projectionMatrix, viewCamera.matrixWorldInverse);
   chunkStreamFrustum.setFromProjectionMatrix(chunkStreamProjection);
 }
 
@@ -4503,6 +4589,26 @@ function createPlayerCoreFiringSolution(radius: number): PlayerCoreFiringSolutio
   const cameraDirection = direction.lengthSq() > 0.0001
     ? direction.clone().normalize()
     : new THREE.Vector3(0, 0, -1);
+
+  if (playerViewController.mode === "third-person") {
+    // Keep target selection on the physical eye ray, but launch from the
+    // animated avatar hand so third-person shots never emerge from an
+    // invisible first-person muzzle floating in front of the helmet.
+    const handOrigin = playerAvatar
+      .getRightHandWorldPosition(new THREE.Vector3())
+      .addScaledVector(cameraDirection, 0.18);
+    const aimDistance = getPlayerCoreAimDistance(cameraDirection, radius);
+    return {
+      origin: handOrigin,
+      direction: createPlayerCoreShotDirection(
+        handOrigin,
+        camera.position,
+        cameraDirection,
+        aimDistance
+      )
+    };
+  }
+
   const adsOrigin = camera.position.clone().addScaledVector(cameraDirection, PLAYER_CORE_MUZZLE_FORWARD_METERS);
 
   if (rightMouseButtonDown) {
@@ -5436,6 +5542,7 @@ async function exitToHome(): Promise<void> {
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
+    playerAvatar.setVisible(false);
     inWorld = false;
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
@@ -5753,6 +5860,7 @@ function disposeRuntime(): void {
   novaPilotReactions.dispose();
   novaContext.dispose();
   novaPilot.dispose();
+  playerAvatar.dispose();
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();

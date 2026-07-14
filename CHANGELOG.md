@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.19.0 - 2026-07-13
+
+Third-Person Flight Foundation.
+
+### Added
+
+- Added a persisted first/third-person camera mode, available from Gameplay
+  settings or the new `V` shortcut.
+- Added a collision-aware third-person camera boom that retracts against full
+  and partial terrain, snaps inward before clipping, and eases back out after
+  obstructions clear.
+- Added the first player avatar: a lightweight articulated survey suit with an
+  amber visor, teal accents, movement poses, and a twin-thruster flight harness
+  ready for the physical flight work planned across `v0.19.x`.
+- Added third-person core firing from the avatar's animated right hand while
+  preserving reticle convergence and terrain targeting from the physical eye.
+
+### Changed
+
+- Kept the existing player camera authoritative for movement, collision, saves,
+  interaction reach, and aim while the active presentation camera now owns
+  rendering, frustum culling, fog, sky, and damage-indicator projection.
+
+### Validation
+
+- Added regression coverage for camera-mode normalization, collision retraction,
+  partial-block apertures, projection syncing, and physical-eye isolation.
+- `npm.cmd run validate`
+- Chrome gameplay smoke at desktop resolution with pointer lock and both camera
+  modes.
+
 ## 0.18.0.1 - 2026-07-13
 
 ### Changed

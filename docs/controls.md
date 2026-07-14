@@ -21,6 +21,9 @@ the root README.
 
 - `WASD` moves the player.
 - `Mouse` looks around while playing.
+- `V` toggles first/third-person view. Third-person uses a collision-aware chase
+  camera and visible articulated player avatar; the selected mode persists in
+  this browser.
 - `Space` jumps, or flies upward while flight mode is active.
 - `C` crouches smoothly on foot, or flies downward while flight mode is active.
 - `C` while sprinting forward, or landing crouched with enough speed, starts a
@@ -112,6 +115,8 @@ the root README.
   lowered right-side muzzle. Full-auto mode repeats held hitscan shots.
 - Holding `Right click` while firing a core uses centered reticle ADS with a
   slight 15% zoom.
+- In third-person, both core types visibly launch from the avatar's animated
+  right hand while retaining the physical eye ray as the reticle target.
 - `X` despawns active physics cores while keeping loose debris and parked rubble
   experiments.
 
