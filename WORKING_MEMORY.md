@@ -31,14 +31,24 @@ tool availability before future app validation. Docs checks run directly with
 
 ## Remaining Follow-up
 
+Full CI validation remains open: two Ubuntu / Node `22.23.4` attempts failed in
+different unchanged rigid-debris tests before docs checks or the build. The
+cause is unknown; no physics changes were made. Reproduction and evidence are
+tracked in [TODO: CI Rigid-Debris Validation](TODO.md#development-follow-up-ci-rigid-debris-validation).
+
 The existing logger is useful but has verified standard gaps. Concrete work is
 recorded once in [TODO: Local Diagnostics](TODO.md#development-follow-up-local-diagnostics).
 Follow that entry when diagnostics work is chosen; no logger behavior was
 changed during the documentation setup.
 
-## Documentation Verification
+## Verification
 
 `node scripts/check_docs_links.mjs` passes across 17 Markdown files;
 `git diff --check` and the checker syntax check are clean. A temporary missing
 link in this memory file was rejected by the checker, then restored before the
 clean check. All 92 original idea bullets in SPITBALL remain verbatim.
+
+`node scripts/run_tests.mjs` passed all 324 engine robustness tests locally on
+Windows / Node `24.22.1`, including the CI's first failing fast-fall case. Its
+output is retained in ignored `logs/ci-test-repro-20261107.log`. This local
+result does not resolve the differing Ubuntu / Node 22 CI failures.

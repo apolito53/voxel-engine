@@ -224,3 +224,23 @@ follow-ups do not change the gameplay priorities above.
   [src/performanceHitchLog.ts](src/performanceHitchLog.ts) currently ignores
   rejected writes and does not check HTTP success; include an unavailable
   collector repro when validating the eventual change.
+
+## Development Follow-up: CI Rigid-Debris Validation
+
+On 2026-11-07, the [full validation CI run](https://github.com/apolito53/voxel-engine/actions/runs/42355936159)
+failed twice on Ubuntu / Node `22.23.4` before docs checks or the build.
+The first attempt stopped at the fast-falling terrain-collider assertion; the
+retry stopped at the partial-height-rubble support assertion in
+[tests/run.ts](tests/run.ts). The first attempt also reported a Rapier WASM
+trap and recovery errors.
+Locally, Windows / Node `24.22.1` passed all 324 engine robustness tests.
+The tests, [rigid-debris owner](src/rigidDebris.ts), test runner, dependencies,
+lockfile, and CI workflow were unchanged by the documentation setup. The root
+cause remains unknown; no physics changes were made.
+
+- Reproduce the CI environment with locked dependencies and retain the full
+  Rapier failure output, test identity, and runtime details.
+- Investigate the differing Rapier outcomes in the unchanged fast-fall and
+  partial-rubble cases, separating the original WASM failure from recovery
+  errors before choosing a targeted fix. This does not change the gameplay
+  roadmap above.
