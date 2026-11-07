@@ -24,6 +24,7 @@ export type QualitySettings = {
   // clear-view chunk radius where fog begins, not the full streamed horizon.
   readonly loadRadius: number;
   readonly shadowMapSize: number;
+  readonly cloudShadows: boolean;
   readonly blockFragmentCount: number;
   readonly debrisShadows: boolean;
   readonly blockLightMinLevel: number;
@@ -34,6 +35,7 @@ export function createDefaultQualitySettings(preset: QualityPreset): QualitySett
   return {
     loadRadius: normalizeRenderDistance(preset.fogStartRadius),
     shadowMapSize: normalizeShadowMapSize(preset.shadows ? preset.shadowMapSize : 0),
+    cloudShadows: preset.cloudShadows,
     blockFragmentCount: normalizeBlockFragmentCountSetting(preset.blockFragmentCount),
     debrisShadows: preset.debrisShadows,
     blockLightMinLevel: preset.blockLightMinLevel,
@@ -90,6 +92,7 @@ export function normalizeQualitySettings(
   return {
     loadRadius: normalizeRenderDistance(settings.loadRadius, fallback.loadRadius),
     shadowMapSize: normalizeShadowMapSize(settings.shadowMapSize, fallback.shadowMapSize),
+    cloudShadows: normalizeBooleanSetting(settings.cloudShadows, fallback.cloudShadows),
     blockFragmentCount: normalizeBlockFragmentCountSetting(
       settings.blockFragmentCount ?? fallback.blockFragmentCount
     ),

@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-07 for `v0.19.0`.
+Last reviewed: 2026-11-07 for `v0.19.1`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -45,6 +45,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Chunk materials, atlas, voxel lighting | [src/blockTextureAtlas.ts](src/blockTextureAtlas.ts) | [src/blockColors.ts](src/blockColors.ts), [src/blockTextureTiles.ts](src/blockTextureTiles.ts), [src/voxelLighting.ts](src/voxelLighting.ts) |
 | Lamp block light and local light proxies | [src/voxelBlockLight.ts](src/voxelBlockLight.ts) | [src/blockLightJobs.ts](src/blockLightJobs.ts), [src/localLights.ts](src/localLights.ts), [src/localLightRenderer.ts](src/localLightRenderer.ts) |
 | Sky, elevated clouds, day/night, fog | [src/skybox.ts](src/skybox.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/dayNightCycle.ts](src/dayNightCycle.ts), [src/horizonMatte.ts](src/horizonMatte.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
+| Sun/cloud shadows and shadow camera | [src/shadows.ts](src/shadows.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/qualityController.ts](src/qualityController.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Partial terrain carving and geometry | [src/partialBlocks.ts](src/partialBlocks.ts) | [src/partialBlockMeshField.ts](src/partialBlockMeshField.ts), [src/partialBlockMeshWorker.ts](src/partialBlockMeshWorker.ts), [docs/destruction.md](docs/destruction.md) |
 | Player movement and partial collision | [src/player.ts](src/player.ts) | [src/collision.ts](src/collision.ts), [src/playerMovement.ts](src/playerMovement.ts), [docs/player-partial-collision-plan.md](docs/player-partial-collision-plan.md) |
 | Projectile cores, contacts, fragments | [src/physics.ts](src/physics.ts) | [src/physicsCoreLaunch.ts](src/physicsCoreLaunch.ts), [src/coreAimPreview.ts](src/coreAimPreview.ts), [src/hitscanCore.ts](src/hitscanCore.ts) |
@@ -122,6 +123,9 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
   light while a genuinely dirty cache rebuilds; do not flash zero-lit geometry.
 - The clear-distance slider, hidden stream horizon, chunk render radius, hard
   fog wall, and horizon matte have different jobs. Do not collapse their radii.
+- Cloud casting extends shadow depth only along the fixed sun direction; keep
+  the shadow plane texel grid and original terrain range intact. Fade cloud
+  coverage before the map edge and skip its caster when disabled or at night.
 - Debris presentation volume cannot exceed removed terrain volume. Normal
   runtime pressure cleanup prefers settled debris and protects fresh airborne
   bursts during their grace window.

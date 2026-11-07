@@ -137,6 +137,12 @@ background, horizon matte, and outdoor terrain exposure shift together as the
 world clock moves, while the directional shadow direction stays fixed for this
 first pass. Atmosphere clipping has a separate minimum camera range, so cloud
 visibility never expands terrain streaming or changes the terrain fog wall.
+`Settings > Graphics > Cloud Shadows` adds gentle moving daytime shade using
+the existing sun shadow map. It defaults on for Normal and higher and off on
+Potato/Low; switching it changes Custom settings. Shadow Quality must be above
+Off, and the saved cloud preference survives while global shadows are disabled.
+Night skips cloud casting. Its shadow coverage fades out around the existing
+nearby map footprint, with no extra map or terrain-streaming cost.
 The night exposure pass dims sky and hemisphere fill, but direct
 local Lamp spill remains intact so open and sealed Lamp-lit rooms read
 consistently. Placeable Lamp blocks are shader-emissive on every visible Lamp

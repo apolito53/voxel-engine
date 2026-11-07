@@ -213,6 +213,13 @@ export class QualityController {
     }, false);
   }
 
+  setCloudShadowsEnabled(enabled: boolean): void {
+    this.updateSettings({
+      ...this.settings,
+      cloudShadows: enabled
+    }, false);
+  }
+
   setBlockLightMinLevel(level: unknown): void {
     const minLevel = normalizeBlockLightLevelSetting(level, this.settings.blockLightMinLevel);
     this.updateSettings({
@@ -367,7 +374,10 @@ export class QualityController {
       label: this.presetId === CUSTOM_PRESET_ID ? QUALITY_PRESETS.custom.label : basePreset.label,
       shadows,
       shadowMapSize: shadows ? shadowMapSize : basePreset.shadowMapSize,
-      shadowIntensity: shadows ? basePreset.shadowIntensity : 0,
+      // Potato/Low start with shadows off. Explicitly enabling their Custom
+      // shadow map must also give it visible strength instead of retaining 0.
+      shadowIntensity: shadows ? basePreset.shadowIntensity || QUALITY_PRESETS.normal.shadowIntensity : 0,
+      cloudShadows: this.settings.cloudShadows,
       fogStartRadius,
       renderRadius: Math.min(loadRadius, fogOpaqueRadius + FOG_RENDER_SAFETY_CHUNKS),
       loadRadius,

@@ -26,6 +26,13 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   real depth ordering when flying through/above clouds and the atmosphere
   camera-range floor on all presets without increasing terrain streaming. See
   [lighting and sky](docs/architecture.md#lighting-and-sky).
+- Cloud shadows share the existing directional map. Their elevated casters
+  require lifting the light along its fixed direction and extending far by the
+  same displacement; check cloud-plane intersections at all tilted frustum
+  corners, not just light altitude or a center ray. Keep the shadow plane and
+  terrain range stable, fade cloud-only depth coverage before the map boundary,
+  and preserve Lamp emission/block light. See the same
+  [lighting and sky contract](docs/architecture.md#lighting-and-sky).
 - Partial-mesh draw caps and reduced rigid-debris solver cadence were tried
   and reverted: their visible cost outweighed the benefit. Reopen performance
   work from a named repro and fresh diagnostics; preserve the lesson before

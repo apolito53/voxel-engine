@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.19.1 - 2026-11-07
+
+### Added
+
+- Moving daytime cloud shadows on terrain and other sun-shadow receivers,
+  reusing the existing directional shadow map. Stable partial depth coverage
+  keeps shade gentle and fades it away before the map boundary.
+- A `Graphics > Cloud Shadows` toggle, on by default on Normal and higher and
+  off on Potato/Low. Custom settings save its preference independently of
+  global Shadow Quality; cloud casting stops when shadows are off or at night.
+
+### Changed
+
+- The sun shadow camera extends only along its existing light direction while
+  clouds cast, containing the elevated cloud layer without shrinking terrain
+  coverage or changing map width, resolution, terrain distance, or streaming.
+  Disabling cloud shadows restores the original rig.
+- Enabling Shadow Quality in Custom settings based on Potato/Low now gives
+  the sun shadow map visible strength instead of retaining the off preset's zero.
+
+### Validation
+
+- Added preset/default, older-settings, malformed-flag, preference round-trip,
+  low-preset Custom, daylight/caster lifecycle, instanced-depth, owned-resource,
+  and tilted-frustum cloud/terrain coverage tests. Full local validation passes
+  with all 335 engine robustness tests.
+- In-app browser review verified terrain shade on/off, the graphics checkbox,
+  persisted preferences, global-shadow dependency, and nighttime behavior
+  without WebGL/runtime errors.
+
 ## 0.19.0 - 2026-11-07
 
 ### Added

@@ -30,6 +30,7 @@ export type QualityPreset = {
   readonly shadowBias: number;
   readonly shadowNormalBias: number;
   readonly shadowIntensity: number;
+  readonly cloudShadows: boolean;
   readonly fogStartRadius: number;
   readonly fogFalloffRadius: number;
   readonly fogHiddenRadius: number;
@@ -115,6 +116,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00015,
     shadowNormalBias: 0.035,
     shadowIntensity: 0,
+    cloudShadows: false,
     fogStartRadius: 2,
     fogFalloffRadius: 1,
     fogHiddenRadius: 2,
@@ -144,6 +146,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00015,
     shadowNormalBias: 0.035,
     shadowIntensity: 0,
+    cloudShadows: false,
     fogStartRadius: 3,
     fogFalloffRadius: 1,
     fogHiddenRadius: 2,
@@ -173,6 +176,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00012,
     shadowNormalBias: 0.028,
     shadowIntensity: 0.78,
+    cloudShadows: true,
     fogStartRadius: 6,
     fogFalloffRadius: 1,
     fogHiddenRadius: 2,
@@ -202,6 +206,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00012,
     shadowNormalBias: 0.028,
     shadowIntensity: 0.78,
+    cloudShadows: true,
     fogStartRadius: 6,
     fogFalloffRadius: 1,
     fogHiddenRadius: 2,
@@ -231,6 +236,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.0001,
     shadowNormalBias: 0.03,
     shadowIntensity: 0.8,
+    cloudShadows: true,
     fogStartRadius: 12,
     fogFalloffRadius: 2,
     fogHiddenRadius: 3,
@@ -260,6 +266,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00008,
     shadowNormalBias: 0.032,
     shadowIntensity: 0.82,
+    cloudShadows: true,
     fogStartRadius: 18,
     fogFalloffRadius: 2,
     fogHiddenRadius: 3,
@@ -289,6 +296,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
     shadowBias: -0.00008,
     shadowNormalBias: 0.034,
     shadowIntensity: 0.82,
+    cloudShadows: true,
     fogStartRadius: 36,
     fogFalloffRadius: 2,
     fogHiddenRadius: 3,

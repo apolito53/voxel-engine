@@ -143,6 +143,8 @@ Pause menu `Settings` is split into three tabs.
 - Quality preset
 - Fog start distance
 - Shadow quality
+- Cloud Shadows toggle for gentle moving daytime shade; requires Shadow
+  Quality above Off and retains its saved preference while global shadows are off
 - Minimum/Maximum Light Level, a rendered block-light clamp over the underlying
   0..15 Lamp light field
 - Debris Shadows toggle for loose-fragment shadow casting
@@ -174,7 +176,7 @@ Pause menu `Settings` is split into three tabs.
   60 minutes
 - Allow Super Ultra Mode
 
-Quality slider edits switch the dropdown to `Custom` so built-in presets stay
+Quality slider or shadow-toggle edits switch the dropdown to `Custom` so built-in presets stay
 clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any
 visible bars when turned off. `Gameplay > Sound` mutes or enables the procedural
 Web Audio layer, with separate master, SFX, and UI volume sliders persisted in
@@ -204,6 +206,12 @@ their lighting without teleporting the banks. All quality presets retain clouds;
 Potato and Low use a shorter cloud horizon, independent from terrain fog and
 chunk distance. A separate atmosphere camera range prevents low quality from
 clipping overhead clouds without loading or revealing additional terrain.
+Cloud Shadows defaults on for Normal and higher and off for Potato/Low. It
+reuses the existing sun shadow map, adds one instanced cloud depth draw while
+active, and fades its shade out before the nearby map boundary. Turning it off,
+setting Shadow Quality to Off, or reaching night skips that caster draw; visible
+clouds and their wind continue. Shadows affect direct sunlight rather than
+Lamp emission or the derived block-light field.
 The world clock
 shifts fog, background, horizon matte, outdoor terrain exposure, and sky/light
 colors together. The sun and moon visuals move through the sky, but the
@@ -216,15 +224,15 @@ and chunk meshes do not remesh during the cycle.
   shards/block, 8m active debris bubble, 28m local-light radius, one-chunk fog wall.
 - `Low`: low-end baseline, no shadows, 128 physics bodies, 72 max debris
   shards/block, 12m active debris bubble, 40m local-light radius, one-chunk fog wall.
-- `Normal`: 2x clear distance, shadows, 192 physics bodies, 108 max debris
+- `Normal`: 2x clear distance, terrain/cloud shadows, 192 physics bodies, 108 max debris
   shards/block, 20m active debris bubble, 56m local-light radius, one-chunk fog wall.
-- `High`: 4x clear distance, sharper shadows, debris shadows, 512 physics
+- `High`: 4x clear distance, sharper terrain/cloud shadows, debris shadows, 512 physics
   bodies, 144 max debris shards/block, 32m active debris bubble, 72m local-light radius,
   two-chunk fog wall.
-- `Ultra`: 6x clear distance, sharper shadows, debris shadows, 1024 physics
+- `Ultra`: 6x clear distance, sharper terrain/cloud shadows, debris shadows, 1024 physics
   bodies, 180 max debris shards/block, 48m active debris bubble, 96m local-light radius,
   two-chunk fog wall.
-- `Super Ultra`: 12x clear distance, highest shadow resolution, debris shadows,
+- `Super Ultra`: 12x clear distance, highest terrain/cloud shadow resolution, debris shadows,
   4096 physics bodies, 216 max debris shards/block, 72m active debris bubble, 128m
   local-light radius, two-chunk fog wall. This is a stress-test mode and requires an
   opt-in from the pause menu once `Ultra` is selected.

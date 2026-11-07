@@ -69,7 +69,7 @@ import {
   type WorldRegistry
 } from "./chunkStorage";
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
-import { CloudLayer } from "./cloudLayer";
+import { CLOUD_TOP_HEIGHT_METERS, CloudLayer } from "./cloudLayer";
 import {
   DEFAULT_CLICK_FIRE_MODE,
   formatClickFireMode,
@@ -360,6 +360,8 @@ import {
 } from "./rubble";
 import {
   createDirectionalShadowBasis,
+  getCloudShadowCoverage,
+  getDirectionalShadowDepthRange,
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "./shadows";
@@ -546,6 +548,8 @@ const blockLightMinValue = requireElement<HTMLElement>("#block-light-min-value")
 const blockLightMaxSlider = requireElement<HTMLInputElement>("#block-light-max-slider");
 const blockLightMaxValue = requireElement<HTMLElement>("#block-light-max-value");
 const debrisShadowsToggle = requireElement<HTMLInputElement>("#debris-shadows-toggle");
+const cloudShadowsToggle = requireElement<HTMLInputElement>("#cloud-shadows-toggle");
+const cloudShadowsHint = requireElement<HTMLElement>("#cloud-shadows-hint");
 const debrisCountSlider = requireElement<HTMLInputElement>("#debris-count-slider");
 const debrisCountValue = requireElement<HTMLElement>("#debris-count-value");
 const terraformerSizeSlider = requireElement<HTMLInputElement>("#terraformer-size-slider");
@@ -1269,6 +1273,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   debrisShadowsToggle.addEventListener("change", () => {
     qualityController.setDebrisShadowsEnabled(debrisShadowsToggle.checked);
+  }, eventListenerOptions);
+  cloudShadowsToggle.addEventListener("change", () => {
+    qualityController.setCloudShadowsEnabled(cloudShadowsToggle.checked);
   }, eventListenerOptions);
   debrisCountSlider.addEventListener("input", () => {
     qualityController.setBlockFragmentCount(debrisCountSlider.value);
@@ -4821,6 +4828,11 @@ function updateSettingsControls(): void {
   blockLightMaxValue.textContent = formatBlockLightLevel(preset.blockLightMaxLevel);
 
   debrisShadowsToggle.checked = preset.debrisShadows;
+  cloudShadowsToggle.checked = preset.cloudShadows;
+  cloudShadowsToggle.disabled = !preset.shadows;
+  cloudShadowsHint.textContent = preset.shadows
+    ? "Moving daytime shade from clouds. Fades out at night."
+    : "Requires Shadow Quality above Off. Your cloud-shadow preference is saved.";
 
   debrisCountSlider.min = String(BLOCK_FRAGMENT_MIN_COUNT);
   debrisCountSlider.max = String(BLOCK_FRAGMENT_MAX_COUNT);
@@ -5707,12 +5719,21 @@ function clearPhysicsCores(): void {
 }
 
 function updateSunShadowAnchor(): void {
+  const preset = qualityController.preset;
+  const cloudCoverage = inWorld ? getCloudShadowCoverage(preset, dayNightVisualState) : 0;
+  cloudLayer.setShadows(cloudCoverage, preset.shadowMapSize);
+  const depthRange = getDirectionalShadowDepthRange(preset, SUN_OFFSET,
+    cloudCoverage > 0 ? CLOUD_TOP_HEIGHT_METERS : null);
+  if (sun.shadow.camera.far !== depthRange.cameraFar) {
+    sun.shadow.camera.far = depthRange.cameraFar;
+    sun.shadow.camera.updateProjectionMatrix();
+  }
   desiredShadowAnchor.set(camera.position.x, 0, camera.position.z);
-  const anchor = qualityController.preset.shadows
+  const anchor = preset.shadows
     ? snapShadowAnchorToTexelGrid(
       desiredShadowAnchor,
       shadowBasis,
-      getShadowTexelSize(qualityController.preset),
+      getShadowTexelSize(preset),
       stableShadowAnchor
     )
     : stableShadowAnchor.copy(desiredShadowAnchor);
@@ -5720,7 +5741,7 @@ function updateSunShadowAnchor(): void {
   // Move the light and target together so the sun direction stays constant
   // while the orthographic shadow projection remains stable around the player.
   sunTarget.position.copy(anchor);
-  sun.position.copy(anchor).add(SUN_OFFSET);
+  sun.position.copy(anchor).addScaledVector(SUN_OFFSET, depthRange.lightOffsetScale);
   sunTarget.updateMatrixWorld();
   sun.updateMatrixWorld();
 }

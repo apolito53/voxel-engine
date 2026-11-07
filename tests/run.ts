@@ -266,7 +266,7 @@ import {
   getPartialBlockMeshBuildJobPayloadTransfers
 } from "../src/partialBlockMeshWorkerProtocol";
 import { RollingFrameRateMeter } from "../src/frameRateMeter";
-import { shouldShowSuperUltraOptIn } from "../src/qualityController";
+import { QualityController, shouldShowSuperUltraOptIn } from "../src/qualityController";
 import {
   CUSTOM_PRESET_ID,
   DEFAULT_BLOCK_LIGHT_MIN_LEVEL,
@@ -292,7 +292,10 @@ import {
   normalizeBlockLightLevelSetting,
   normalizeQualitySettings,
   normalizeRenderDistance,
-  normalizeShadowQualityLevel
+  normalizeShadowQualityLevel,
+  readQualitySettingsPreference,
+  writeQualitySettingsPreference,
+  QUALITY_SETTINGS_STORAGE_PREFIX
 } from "../src/qualitySettings";
 import { voxelRaycast } from "../src/raycast";
 import {
@@ -330,6 +333,8 @@ import {
 } from "../src/rigidDebrisAdmission";
 import {
   createDirectionalShadowBasis,
+  getCloudShadowCoverage,
+  getDirectionalShadowDepthRange,
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
 } from "../src/shadows";
@@ -566,6 +571,7 @@ import {
 } from "../src/skybox";
 import {
   CLOUD_BASE_HEIGHT_METERS,
+  CLOUD_TOP_HEIGHT_METERS,
   CLOUD_CELL_SIZE_METERS,
   CLOUD_MAX_VIEW_DISTANCE_METERS,
   CLOUD_STEP_HEIGHT_METERS,
@@ -13092,6 +13098,7 @@ test("quality settings clamp custom menu overrides", () => {
     {
       loadRadius: 6,
       shadowMapSize: 2048,
+      cloudShadows: true,
       blockFragmentCount: 108,
       debrisShadows: false,
       blockLightMinLevel: 1,
@@ -13158,6 +13165,77 @@ test("quality settings clamp custom menu overrides", () => {
     "debris count label should show the clamped mass-safe shard count"
   );
   assertEqual(formatBlockLightLevel(1), "Level 1", "block-light labels should show integer solver levels");
+});
+
+test("cloud-shadow settings inherit preset defaults and survive older or malformed saves", () => {
+  const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const stored = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => { stored.set(key, value); }
+  } });
+  try {
+    for (const [id, preset] of Object.entries(QUALITY_PRESETS)) {
+      const expected = id !== "potato" && id !== "low";
+      assertEqual(createDefaultQualitySettings(preset).cloudShadows, expected,
+        `${preset.label} should choose a deliberate cloud-shadow default`);
+      stored.set(`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, JSON.stringify({ loadRadius: 5 }));
+      assertEqual(readQualitySettingsPreference("custom", preset).cloudShadows, expected,
+        "older settings missing the flag must inherit their actual Custom base");
+      for (const malformed of [null, 0, 1, "yes", {}, []]) {
+        stored.set(`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, JSON.stringify({ cloudShadows: malformed }));
+        assertEqual(readQualitySettingsPreference("custom", preset).cloudShadows, expected,
+          "malformed flags must retain the base default");
+      }
+    }
+    const defaults = createDefaultQualitySettings(QUALITY_PRESETS.normal);
+    const saved = { ...defaults, cloudShadows: true, shadowMapSize: 0 };
+    writeQualitySettingsPreference("custom", saved, QUALITY_PRESETS.normal);
+    assertDeepEqual(readQualitySettingsPreference("custom", QUALITY_PRESETS.normal), saved,
+      "global shadows off must not erase the cloud-shadow checkbox preference on reload");
+    writeQualitySettingsPreference("custom", { ...saved, cloudShadows: false }, QUALITY_PRESETS.normal);
+    assertEqual(readQualitySettingsPreference("custom", QUALITY_PRESETS.normal).cloudShadows, false,
+      "an explicit cloud-shadow opt-out must round-trip");
+    for (const value of ["true", "false"]) {
+      stored.set(`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, JSON.stringify({ cloudShadows: value }));
+      assertEqual(readQualitySettingsPreference("custom", QUALITY_PRESETS.normal).cloudShadows, value === "true",
+        "legacy boolean strings should normalize consistently with other toggles");
+    }
+    stored.set(`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, "{broken json");
+    assertEqual(readQualitySettingsPreference("custom", QUALITY_PRESETS.normal).cloudShadows, true,
+      "a broken settings object must fall back safely");
+  } finally {
+    if (storageDescriptor) Object.defineProperty(globalThis, "localStorage", storageDescriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+test("Custom shadows enabled from a low preset have visible strength without changing its defaults", () => {
+  const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const stored = new Map<string, string>([
+    ["voxel-quality-preset", "custom"],
+    ["voxel-custom-quality-base", "low"],
+    [`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, JSON.stringify({ shadowMapSize: 2048, cloudShadows: true })]
+  ]);
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: (key: string) => stored.get(key) ?? null
+  } });
+  try {
+    const controller = new QualityController({
+      renderer: {}, camera: new THREE.PerspectiveCamera(), sun: new THREE.DirectionalLight(),
+      skyLight: new THREE.HemisphereLight(), fog: new THREE.Fog(0, 0, 100),
+      qualitySelect: {}, superUltraToggleRow: {}, superUltraToggle: {},
+      updateSunShadowAnchor: () => {}, onQualityChanged: () => {}
+    });
+    assertEqual(controller.preset.shadows, true, "Custom should honor the requested shadow map");
+    assertEqual(controller.preset.cloudShadows, true, "Custom should keep the separately saved cloud preference");
+    assert(controller.preset.shadowIntensity > 0, "an enabled shadow map needs visible sun-shadow strength");
+    assertEqual(QUALITY_PRESETS.low.shadows, false, "the built-in Low preset must still disable shadows");
+    assertEqual(QUALITY_PRESETS.low.cloudShadows, false, "Low's cloud-shadow default must remain off");
+  } finally {
+    if (storageDescriptor) Object.defineProperty(globalThis, "localStorage", storageDescriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
 });
 
 test("physics object budget clamps and steps predictably", () => {
@@ -14176,18 +14254,68 @@ test("cloud palettes and visibility survive every sky phase and quality preset",
   }
 });
 
+test("cloud casting follows daylight and quality while retaining cloud motion and instanced depth", () => {
+  const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
+  const midnight = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0 }));
+  const dawn = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.25 }));
+  const coverage = getCloudShadowCoverage(QUALITY_PRESETS.normal, noon);
+  assert(coverage > 0 && coverage < 1, "clouds should add partial daytime shade, not black out the sun");
+  assert(getCloudShadowCoverage(QUALITY_PRESETS.normal, dawn) < coverage,
+    "dawn should fade cloud shade with the daylight");
+  assertEqual(getCloudShadowCoverage(QUALITY_PRESETS.normal, midnight), 0,
+    "night should omit cloud caster work entirely");
+  assertEqual(getCloudShadowCoverage({ ...QUALITY_PRESETS.normal, shadows: false }, noon), 0,
+    "global shadows off must override a checked cloud preference");
+  assertEqual(getCloudShadowCoverage({ ...QUALITY_PRESETS.normal, cloudShadows: false }, noon), 0,
+    "the dedicated checkbox must remove cloud casting");
+
+  const layer = new CloudLayer(SUN_OFFSET, noon);
+  const camera = new THREE.PerspectiveCamera();
+  const running = { active: true, unpaused: true, visible: true };
+  layer.update(camera, 0, running, QUALITY_PRESETS.normal);
+  const firstMatrix = new THREE.Matrix4();
+  layer.object.getMatrixAt(0, firstMatrix);
+  layer.setShadows(coverage, QUALITY_PRESETS.normal.shadowMapSize);
+  assertEqual(layer.object.castShadow, true, "daylight should enable the one existing mesh as a caster");
+  assertEqual(layer.object.receiveShadow, false, "clouds do not pay for or self-receive terrain shadow shading");
+  const depthMaterial = layer.object.customDepthMaterial;
+  assert(depthMaterial instanceof THREE.MeshDepthMaterial, "casting must use Three's instanced depth material");
+  const shader = {
+    uniforms: {}, vertexShader: THREE.ShaderLib.depth.vertexShader, fragmentShader: THREE.ShaderLib.depth.fragmentShader
+  };
+  depthMaterial.onBeforeCompile(shader, {});
+  assertEqual(shader.vertexShader, THREE.ShaderLib.depth.vertexShader,
+    "the real depth pass must preserve Three's instanceMatrix and geometry projection");
+  assertEqual(shader.uniforms.cloudShadowCoverage.value, coverage, "compiled depth uniforms must read live coverage");
+  layer.setShadows(0, QUALITY_PRESETS.normal.shadowMapSize);
+  assertEqual(layer.object.castShadow, false, "off must skip the cloud draw in the shadow pass");
+  layer.update(camera, 0.1, running, QUALITY_PRESETS.normal);
+  const secondMatrix = new THREE.Matrix4();
+  layer.object.getMatrixAt(0, secondMatrix);
+  assert(secondMatrix.elements[12] !== firstMatrix.elements[12], "disabling casting must not freeze cloud wind");
+  assertEqual(layer.object.customDepthMaterial, depthMaterial, "toggles must reuse their owned depth material");
+  assertEqual(shader.uniforms.cloudShadowCoverage.value, 0, "toggling must update existing compiled uniforms");
+  layer.setShadows(coverage, QUALITY_PRESETS.normal.shadowMapSize);
+  layer.reset();
+  assertEqual(layer.object.castShadow, false, "world transitions must immediately clear the old caster");
+  layer.dispose();
+  layer.setShadows(coverage, QUALITY_PRESETS.normal.shadowMapSize);
+  assertEqual(layer.object.castShadow, false, "a disposed cloud layer must never resume casting");
+});
+
 test("cloud disposal releases owned resources once and removes the scene object", () => {
   const layer = new CloudLayer(SUN_OFFSET, createDayNightVisualState(createDefaultDayNightState()));
   const scene = new THREE.Scene();
   scene.add(layer.object);
-  const disposed = { geometry: 0, material: 0, instances: 0 };
+  const disposed = { geometry: 0, material: 0, depth: 0, instances: 0 };
   layer.object.geometry.addEventListener("dispose", () => { disposed.geometry += 1; });
   layer.object.material.addEventListener("dispose", () => { disposed.material += 1; });
+  layer.object.customDepthMaterial?.addEventListener("dispose", () => { disposed.depth += 1; });
   layer.object.addEventListener("dispose", () => { disposed.instances += 1; });
   layer.dispose();
   layer.dispose();
-  assertEqual(JSON.stringify(disposed), JSON.stringify({ geometry: 1, material: 1, instances: 1 }),
-    "HMR/unload disposal must release both shared geometry/material and instance data exactly once");
+  assertEqual(JSON.stringify(disposed), JSON.stringify({ geometry: 1, material: 1, depth: 1, instances: 1 }),
+    "HMR/unload disposal must release geometry, visible/depth materials and instance data exactly once");
   assertEqual(scene.children.length, 0, "disposed atmosphere must leave the scene graph");
   layer.update(new THREE.PerspectiveCamera(), 0.1,
     { active: true, unpaused: true, visible: true }, QUALITY_PRESETS.normal);
@@ -14268,6 +14396,50 @@ test("chunk sky exposure darkens sealed air pockets", () => {
     enclosedTopShade,
     "enclosed ceiling faces should not keep directional edge glow"
   );
+});
+
+test("cloud shadow depth range contains the tilted cloud planes and preserves terrain coverage on every preset", () => {
+  const basis = createDirectionalShadowBasis(SUN_OFFSET);
+  const toSun = SUN_OFFSET.clone().normalize();
+  for (const preset of Object.values(QUALITY_PRESETS)) {
+    const anchor = snapShadowAnchorToTexelGrid(new THREE.Vector3(-1234.56, 0, 987.65), basis, getShadowTexelSize(preset));
+    const range = getDirectionalShadowDepthRange(preset, SUN_OFFSET, CLOUD_TOP_HEIGHT_METERS);
+    assert(range.lightOffsetScale > 1, `${preset.label} must put the real light ahead of cloud casters`);
+    assertClose(range.cameraFar - preset.shadowCameraFar, SUN_OFFSET.length() * (range.lightOffsetScale - 1),
+      1e-7, "far must increase by exactly the light's forward extension");
+    const camera = new THREE.OrthographicCamera(-preset.shadowCameraSize, preset.shadowCameraSize,
+      preset.shadowCameraSize, -preset.shadowCameraSize, 0.5, range.cameraFar);
+    camera.position.copy(anchor).addScaledVector(SUN_OFFSET, range.lightOffsetScale);
+    camera.lookAt(anchor);
+    camera.updateMatrixWorld();
+    for (const height of [CLOUD_BASE_HEIGHT_METERS, CLOUD_TOP_HEIGHT_METERS]) {
+      for (const u of [-preset.shadowCameraSize, preset.shadowCameraSize]) {
+        for (const v of [-preset.shadowCameraSize, preset.shadowCameraSize]) {
+          const point = anchor.clone().addScaledVector(basis.right, u).addScaledVector(basis.up, v);
+          point.addScaledVector(toSun, (height - point.y) / toSun.y);
+          const projected = point.clone().project(camera);
+          assert(Math.abs(projected.x) <= 1.000001 && Math.abs(projected.y) <= 1.000001 &&
+            Math.abs(projected.z) <= 1.000001,
+          `${preset.label} must contain cloud-plane intersections at every tilted frustum corner`);
+        }
+      }
+    }
+    for (const x of [-20, 0, 20]) {
+      for (const z of [-20, 0, 20]) {
+        const ground = anchor.clone().add(new THREE.Vector3(x, -anchor.y, z)).project(camera);
+        assert(Math.abs(ground.x) <= 1 && Math.abs(ground.y) <= 1 && Math.abs(ground.z) <= 1,
+          `${preset.label} must retain ground receivers underneath the player`);
+      }
+    }
+    const oldFarReceiver = anchor.clone().addScaledVector(toSun, SUN_OFFSET.length() - preset.shadowCameraFar + 0.01);
+    assert(oldFarReceiver.project(camera).z <= 1, "the old far receiver must not be clipped by the lifted rig");
+    const off = getDirectionalShadowDepthRange(preset, SUN_OFFSET, null);
+    assertDeepEqual(off, { lightOffsetScale: 1, cameraFar: preset.shadowCameraFar },
+      "turning clouds off must restore the original light position and far plane");
+    assertEqual(camera.left, -preset.shadowCameraSize, "clouds must not dilute horizontal shadow texels");
+    assertVectorNearlyEqual(camera.position.clone().sub(anchor).normalize(), toSun,
+      "cloud shadows must preserve the fixed sun direction");
+  }
 });
 
 test("directional shadow anchor snaps to stable light-space texels", () => {

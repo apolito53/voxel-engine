@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { QualityPreset } from "./qualityPresets";
+import type { DayNightVisualState } from "./dayNightCycle";
 
 export type DirectionalShadowBasis = {
   readonly right: THREE.Vector3;
@@ -9,6 +10,49 @@ export type DirectionalShadowBasis = {
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const FALLBACK_UP = new THREE.Vector3(0, 0, 1);
+const SHADOW_NEAR_METERS = 0.5;
+const CLOUD_CASTER_DEPTH_MARGIN_METERS = 4;
+export const CLOUD_SHADOW_MAX_COVERAGE = 0.6;
+export const CLOUD_SHADOW_FULL_RADIUS = 0.65;
+
+export type DirectionalShadowDepthRange = {
+  readonly lightOffsetScale: number;
+  readonly cameraFar: number;
+};
+
+export function getCloudShadowCoverage(
+  quality: Pick<QualityPreset, "shadows" | "cloudShadows">,
+  visual: Pick<DayNightVisualState, "dayFactor">
+): number {
+  if (!quality.shadows || !quality.cloudShadows || !Number.isFinite(visual.dayFactor)) return 0;
+  // Fade naturally with daylight and skip the caster entirely once night has
+  // removed the sun. The saved checkbox remains independent of this gate.
+  return CLOUD_SHADOW_MAX_COVERAGE * Math.max(0, Math.min(1, visual.dayFactor));
+}
+
+export function getDirectionalShadowDepthRange(
+  preset: Pick<QualityPreset, "shadowCameraSize" | "shadowCameraFar">,
+  sunOffset: THREE.Vector3,
+  cloudTopHeight: number | null
+): DirectionalShadowDepthRange {
+  const originalDistance = sunOffset.length();
+  if (cloudTopHeight === null || sunOffset.y <= 0 || originalDistance <= 0) {
+    return { lightOffsetScale: 1, cameraFar: preset.shadowCameraFar };
+  }
+
+  const basis = createDirectionalShadowBasis(sunOffset);
+  const sunHeightPerMeter = sunOffset.y / originalDistance;
+  // At a given world height the sunward-most point of the unchanged shadow
+  // footprint lies at its lower light-space Y edge. Place the light ahead of
+  // that point, then add the same distance to far so no terrain range is lost.
+  const casterDistance = (cloudTopHeight + Math.abs(basis.up.y) * preset.shadowCameraSize) / sunHeightPerMeter;
+  const extension = Math.max(0,
+    casterDistance + SHADOW_NEAR_METERS + CLOUD_CASTER_DEPTH_MARGIN_METERS - originalDistance);
+  return {
+    lightOffsetScale: 1 + extension / originalDistance,
+    cameraFar: preset.shadowCameraFar + extension
+  };
+}
 
 export function getShadowTexelSize(preset: QualityPreset): number {
   return (preset.shadowCameraSize * 2) / preset.shadowMapSize;

@@ -3,10 +3,12 @@ import * as THREE from "three";
 import type { DayNightVisualState, RgbColorTuple } from "./dayNightCycle";
 import type { QualityPreset } from "./qualityPresets";
 import { SKY_ATMOSPHERE_GLSL, getProceduralSkySunDirection } from "./skybox";
+import { CLOUD_SHADOW_FULL_RADIUS } from "./shadows";
 
 export const CLOUD_BASE_HEIGHT_METERS = 144;
 export const CLOUD_CELL_SIZE_METERS = 16;
 export const CLOUD_STEP_HEIGHT_METERS = 4;
+export const CLOUD_TOP_HEIGHT_METERS = CLOUD_BASE_HEIGHT_METERS + CLOUD_STEP_HEIGHT_METERS * 3;
 export const CLOUD_TILE_CELLS = 64;
 export const CLOUD_TILE_SIZE_METERS = CLOUD_TILE_CELLS * CLOUD_CELL_SIZE_METERS;
 export const CLOUD_MAX_VIEW_DISTANCE_METERS = 920;
@@ -146,6 +148,10 @@ export class CloudLayer {
   private elapsedSeconds = 0;
   private disposed = false;
   private readonly matrix = new THREE.Matrix4();
+  private readonly shadowUniforms = {
+    cloudShadowCoverage: { value: 0 },
+    cloudShadowMapSize: { value: 1 }
+  };
   private readonly uniforms = {
     skyTopColor: { value: new THREE.Color() },
     skyHorizonColor: { value: new THREE.Color() },
@@ -205,6 +211,7 @@ export class CloudLayer {
     this.object.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.object.frustumCulled = false;
     this.object.visible = false;
+    this.object.customDepthMaterial = this.createDepthMaterial();
     this.object.raycast = () => { /* Atmosphere never participates in world picking. */ };
     this.setState(visual);
   }
@@ -227,6 +234,14 @@ export class CloudLayer {
     this.elapsedSeconds = 0;
     this.object.visible = false;
     this.object.count = 0;
+    this.object.castShadow = false;
+  }
+
+  setShadows(coverage: number, shadowMapSize: number): void {
+    const normalizedCoverage = Number.isFinite(coverage) ? Math.max(0, Math.min(1, coverage)) : 0;
+    this.shadowUniforms.cloudShadowCoverage.value = normalizedCoverage;
+    this.shadowUniforms.cloudShadowMapSize.value = Math.max(1, shadowMapSize);
+    this.object.castShadow = !this.disposed && normalizedCoverage > 0;
   }
 
   update(
@@ -264,10 +279,45 @@ export class CloudLayer {
     if (this.disposed) return;
     this.disposed = true;
     this.object.visible = false;
+    this.object.castShadow = false;
     this.object.removeFromParent();
     this.object.geometry.dispose();
     this.object.material.dispose();
+    this.object.customDepthMaterial?.dispose();
     this.object.dispose();
+  }
+
+  private createDepthMaterial(): THREE.MeshDepthMaterial {
+    // Reuse Three's depth vertex shader, including instanceMatrix, so moving
+    // cloud banks and their shadows always use exactly the same geometry.
+    const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.shadowUniforms);
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `
+          #include <common>
+          uniform float cloudShadowCoverage;
+          uniform float cloudShadowMapSize;
+          float cloudBayer2(vec2 p) {
+            return 2.0 * p.x + 3.0 * p.y - 4.0 * p.x * p.y;
+          }
+        `)
+        .replace("#include <clipping_planes_fragment>", `
+          #include <clipping_planes_fragment>
+          vec2 cloudShadowUv = gl_FragCoord.xy / cloudShadowMapSize;
+          float cloudRadius = length(cloudShadowUv * 2.0 - 1.0);
+          float cloudEdgeFade = 1.0 - smoothstep(${CLOUD_SHADOW_FULL_RADIUS.toFixed(2)}, 1.0, cloudRadius);
+          vec2 cloudPixel = mod(floor(gl_FragCoord.xy), 4.0);
+          float cloudThreshold = (4.0 * cloudBayer2(mod(cloudPixel, 2.0)) +
+            cloudBayer2(floor(cloudPixel / 2.0)) + 0.5) / 16.0;
+          if (cloudThreshold >= cloudShadowCoverage * cloudEdgeFade) discard;
+        `);
+    };
+    // Stable ordered shadow-texel coverage gives translucent-looking shade
+    // through the existing PCF filter, without blending depth or a second map.
+    // Its radial edge fade cannot reveal the map's hard square boundary.
+    material.customProgramCacheKey = () => "voxel-cloud-depth-v1";
+    return material;
   }
 }
 

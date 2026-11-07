@@ -181,15 +181,38 @@ Cloud wind advances from clamped active, unpaused, visible frame deltas,
 independently of world time. Clock edits only recolor the layer; hidden frames,
 pause, and existing idle hibernation do not accumulate catch-up drift. Cloud
 wind is transient presentation, reset on world entry/exit and excluded from
-saved-world metadata. The reused runtime owns cloud geometry, material, and
-instance-buffer disposal on HMR/unload. Clouds have no collision, picking,
-terrain-light, or shadow-map role.
+saved-world metadata. The reused runtime owns cloud geometry, visible/depth
+materials, and instance-buffer disposal on HMR/unload. Clouds have no collision,
+picking, or voxel-light role.
+
+Cloud shadows reuse the one existing directional sun map and the cloud mesh's
+real moving instance transforms. `shadows.ts` gates partial cloud coverage by
+the separately saved Cloud Shadows preference, global shadows, and daylight.
+Normal and higher default on; Potato/Low default off. The Custom checkbox
+preference survives global shadows being off. Off/night set `castShadow=false`,
+omitting the cloud depth draw without removing visible clouds or their wind.
+The owned `MeshDepthMaterial` preserves Three's standard instanced vertex path;
+stable ordered coverage gives gentle shade through the existing PCF filter.
+Cloud depth coverage fades radially through the map's outer 35%, preventing a
+hard square footprint without changing terrain receiver shaders. Clouds do not
+receive shadows. Lamp emission, local PointLight spill, and block light remain
+independent of the directional map.
+
+The original sun light position is below the cloud layer. While clouds cast,
+`getDirectionalShadowDepthRange` moves that light farther along the same fixed
+sun direction until both cloud planes fit across every tilted orthographic
+corner. Increasing the far plane by that exact displacement preserves the
+original terrain range. Orthographic XY bounds, map resolution, shadow-anchor
+texel snapping, and terrain streaming stay unchanged; off/night restore the
+original light offset and far plane. This adds one instanced depth draw and
+some caster rasterization, with no second shadow map or streamed terrain.
 
 `qualityPresets.ts` gives every preset an independent 1800m atmosphere camera
 far floor. Effective Custom settings preserve that floor through their base
 preset. Keep it larger than the cloud fade, and keep the fade shorter than a
 cloud tile so replacement copies stay invisible. This projection allowance
-does not alter terrain fog, chunk render/stream/unload radii, or shadow range.
+does not alter terrain fog or chunk render/stream/unload radii. The independent
+cloud-shadow depth extension above is unrelated to atmosphere camera clipping.
 
 Block-light arrays are derived caches, not saved world truth. Lamp or opaque
 terrain edits dirty affected light bounds. Chunk meshes consume accepted light
