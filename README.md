@@ -1,5 +1,11 @@
 # Voxel Sandbox Engine
 
+For project work, start with [AGENTS.md](AGENTS.md).
+[WORKING_MEMORY.md](WORKING_MEMORY.md) is the current handoff;
+[CRYSTALIZED_MEMORY.md](CRYSTALIZED_MEMORY.md) preserves lasting decisions.
+[TODO.md](TODO.md) tracks actionable work, and [SPITBALL.md](SPITBALL.md)
+holds tentative ideas and suggestions.
+
 A strict-TypeScript browser voxel sandbox prototype. Three.js handles rendering,
 Rapier handles active rigid-body debris VFX, and the engine owns chunk streaming,
 terrain meshing, first-person movement, block edits, partial-block damage,
@@ -237,10 +243,11 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 - [docs/automation.md](docs/automation.md): F8 avatar, Codex pilot bridge,
   visual scenario recorder, and Chrome/playtest automation notes.
 
-`CODEBASE_INDEX.md` is the surgical code map for module ownership and its
-[task router](CODEBASE_INDEX.md#task-router). `TODO.md`
-keeps coherent parked plans visible, while `FEATURE_SPITBALLS.md` keeps looser
-feature sparks that are not committed scope yet.
+[CODEBASE_INDEX.md](CODEBASE_INDEX.md) is the surgical code map for module
+ownership and its [task router](CODEBASE_INDEX.md#task-router).
+[TODO.md](TODO.md) keeps coherent parked plans visible, while
+[SPITBALL.md](SPITBALL.md) keeps looser feature sparks that are not committed
+scope yet.
 
 ## Development Checks
 
@@ -254,8 +261,8 @@ git diff --check
 ```
 
 `npm.cmd run test` also runs the Markdown docs-link check, so broken local
-README/docs references and TypeScript source-hygiene regressions fail alongside
-the engine robustness tests.
+entry-document, instruction, memory, planning, and focused-doc references fail
+alongside TypeScript source-hygiene checks and the engine robustness tests.
 `npm.cmd run validate` runs the normal test, production build, and whitespace
 diff check sequence in one pass.
 GitHub Actions runs the same validation command on pushes and pull requests to

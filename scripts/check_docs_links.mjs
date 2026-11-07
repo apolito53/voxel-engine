@@ -4,7 +4,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const ROOT_MARKDOWN_FILES = ["README.md", "CODEBASE_INDEX.md", "CHANGELOG.md", "TODO.md"];
+const ROOT_MARKDOWN_FILES = [
+  "README.md",
+  "AGENTS.md",
+  "CODEBASE_INDEX.md",
+  "WORKING_MEMORY.md",
+  "CRYSTALIZED_MEMORY.md",
+  "CHANGELOG.md",
+  "TODO.md",
+  "SPITBALL.md"
+];
 const DOCS_DIR = path.join(repoRoot, "docs");
 const CODEBASE_INDEX_PATH = path.join(repoRoot, "CODEBASE_INDEX.md");
 const CODEBASE_INDEX_MAX_BYTES = 30_000;

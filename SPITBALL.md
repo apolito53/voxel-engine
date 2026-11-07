@@ -1,4 +1,4 @@
-# Feature Spitballs
+# Spitball
 
 Loose ideas live here before they deserve a plan. This file is intentionally
 messier than `TODO.md`: half-formed features, "that might be fun" notes,
@@ -39,8 +39,9 @@ Preferred format:
   `[feel]`, `[mechanic]`, `[tech]`, `[debug]`, `[maybe]`, or `[risky]`.
 - If an idea becomes actionable, promote it to `TODO.md` with the goal, first
   slice, constraints, and validation shape.
-- If an idea turns into shipped behavior or a firm engine decision, move the
-  durable fact into the focused docs or `CODEBASE_INDEX.md`.
+- If an idea turns into shipped behavior or a firm engine decision, update the
+  focused docs and record lasting knowledge in `CRYSTALIZED_MEMORY.md`.
+  Keep `CODEBASE_INDEX.md` focused on routing to the owning material.
 
 ## World Feel
 

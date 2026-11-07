@@ -206,3 +206,21 @@ Official docs to re-check before implementation:
 - Responses streaming: https://developers.openai.com/api/docs/guides/streaming
 - Realtime WebRTC: https://developers.openai.com/api/docs/guides/realtime-webrtc
 - Realtime client secrets: https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets
+
+## Development Follow-up: Local Diagnostics
+
+Verified in the owning sources during the 2026-11-07 startup review. These
+follow-ups do not change the gameplay priorities above.
+
+- Restrict the local collector's browser-origin policy to the intended local
+  app origins. [scripts/hitch-log-server.mjs](scripts/hitch-log-server.mjs)
+  binds to loopback but currently returns wildcard CORS headers.
+- Add a documented disk-retention policy for generated hitch/combat logs,
+  server markers, and visual runs, preserving deliberately retained evidence.
+  The collector and [dev launcher](scripts/dev-server.mjs) currently append
+  files without automatic rotation or expiry.
+- Make local hitch/runtime-diagnostic delivery failures visible without
+  disrupting the app or creating unbounded retries.
+  [src/performanceHitchLog.ts](src/performanceHitchLog.ts) currently ignores
+  rejected writes and does not check HTTP success; include an unavailable
+  collector repro when validating the eventual change.

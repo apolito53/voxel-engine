@@ -7,6 +7,10 @@ behavior, and which invariants are easy to break. Read
 [docs/architecture.md](docs/architecture.md) only when a task needs deeper
 runtime contracts or extraction boundaries.
 
+For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
+[WORKING_MEMORY.md](WORKING_MEMORY.md) handoff and selective
+[CRYSTALIZED_MEMORY.md](CRYSTALIZED_MEMORY.md) decisions before substantive work.
+
 ## Current State
 
 - Strict TypeScript browser app built with Vite and native ES modules.
@@ -161,7 +165,7 @@ runtime contracts or extraction boundaries.
 - [docs/future-webgpu-overhaul.md](docs/future-webgpu-overhaul.md): shelved GPU
   experiment lessons and the future renderer direction.
 - [TODO.md](TODO.md): promoted next work and parked plans.
-- [FEATURE_SPITBALLS.md](FEATURE_SPITBALLS.md): less-committed ideas.
+- [SPITBALL.md](SPITBALL.md): less-committed ideas.
 
 ## Maintenance Contract
 
