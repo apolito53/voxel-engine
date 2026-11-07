@@ -19,6 +19,12 @@ const MAX_TILE_INSTANCES = 9;
 export type CloudColumn = { readonly bottom: number; readonly top: number };
 export type CloudPalette = { readonly top: RgbColorTuple; readonly underside: RgbColorTuple };
 export type CloudWindOffset = { readonly x: number; readonly z: number };
+export type CloudLayerDebugState = {
+  readonly wind: CloudWindOffset;
+  readonly viewDistance: number;
+  readonly visible: boolean;
+  readonly casting: boolean;
+};
 type CloudAdvanceOptions = {
   readonly active: boolean;
   readonly unpaused: boolean;
@@ -147,6 +153,7 @@ export class CloudLayer {
   readonly object: THREE.InstancedMesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private elapsedSeconds = 0;
   private disposed = false;
+  private wind: CloudWindOffset = { x: 0, z: 0 };
   private readonly matrix = new THREE.Matrix4();
   private readonly shadowUniforms = {
     cloudShadowCoverage: { value: 0 },
@@ -232,9 +239,19 @@ export class CloudLayer {
 
   reset(): void {
     this.elapsedSeconds = 0;
+    this.wind = { x: 0, z: 0 };
     this.object.visible = false;
     this.object.count = 0;
     this.object.castShadow = false;
+  }
+
+  getDebugState(): CloudLayerDebugState {
+    return {
+      wind: this.wind,
+      viewDistance: this.uniforms.cloudViewDistance.value,
+      visible: this.object.visible,
+      casting: this.object.castShadow
+    };
   }
 
   setShadows(coverage: number, shadowMapSize: number): void {
@@ -254,6 +271,7 @@ export class CloudLayer {
     if (!this.object.visible) return;
     this.elapsedSeconds = advanceCloudElapsedTime(this.elapsedSeconds, deltaSeconds, options);
     const wind = getCloudWindOffset(this.elapsedSeconds);
+    this.wind = wind;
     const anchorX = getCloudTileAnchor(camera.position.x, wind.x);
     const anchorZ = getCloudTileAnchor(camera.position.z, wind.z);
     const viewDistance = getCloudViewDistance(quality);

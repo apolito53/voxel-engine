@@ -545,6 +545,21 @@
                   These controls can absolutely body your framerate. If your computer spontaneously combusts, that's on you.
                 </span>
               </div>
+              <label class="settings-toggle" for="cloud-shadow-guides-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Cloud Shadow Guides</span>
+                  <span id="cloud-shadow-guides-hint" class="settings-toggle-hint">
+                    Match nearby cloud banks to sampled terrain contacts by color and sun-ray guides.
+                    Requires daytime, Cloud Shadows, and Shadow Quality above Off. Debug only; defaults off.
+                  </span>
+                </span>
+                <input
+                  id="cloud-shadow-guides-toggle"
+                  class="toggle-input"
+                  type="checkbox"
+                  aria-describedby="cloud-shadow-guides-hint"
+                />
+              </label>
               <label class="settings-field" for="cycle-length-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Cycle Length</span>
@@ -801,6 +816,7 @@
       </div>
     </div>
     <div id="crosshair"></div>
+    <div id="cloud-shadow-guides-overlay" class="cloud-shadow-guides-overlay" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1808,6 +1808,51 @@ body.controls-hidden #hud {
   --crosshair-shadow: rgba(0, 0, 0, 0.42);
 }
 
+.cloud-shadow-guides-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  font: 11px/1.45 ui-monospace, monospace;
+  color: #f3f6fa;
+  text-shadow: 0 1px 3px #000;
+}
+
+.cloud-shadow-guide-legend {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border: 1px solid #ffffff38;
+  border-radius: 8px;
+  background: #07121cdd;
+}
+
+.cloud-shadow-guide-legend strong { display: block; margin-bottom: 4px; }
+
+@media (max-width: 620px) {
+  .cloud-shadow-guide-legend {
+    top: 196px;
+    font-size: 10px;
+    width: min(330px, calc(100vw - 32px));
+  }
+}
+
+.cloud-shadow-guide-label {
+  position: absolute;
+  transform: translate(-50%, -120%);
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: #07121cd9;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+body:not(.playing) .cloud-shadow-guides-overlay { display: none; }
+
 #crosshair::before,
 #crosshair::after {
   content: "";

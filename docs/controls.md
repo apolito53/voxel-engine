@@ -175,6 +175,24 @@ Pause menu `Settings` is split into three tabs.
 - Cycle Length, which changes the default 20-minute day/night cycle from 5 to
   60 minutes
 - Allow Super Ultra Mode
+- Cloud Shadow Guides, an optional visual diagnostic for nearby cloud banks
+
+`Experimental > Cloud Shadow Guides` defaults off and saves separately from
+quality presets. Colored cloud edges, a representative fixed-sun ray, and
+matching colored terrain-contact crosses identify each nearby bank; labels and
+a legend name the banks. Amber marks where cloud shadow coverage begins to
+fade, and white marks the existing directional map's outer edge. Contact colors
+dim through that same fade region. Turning this debug view on does not enable
+Cloud Shadows or change graphics quality, wind, or shadow strength.
+
+These are **sampled guides**, not a display of individual shadow pixels. They
+show up to three nearby banks and 128 contact samples, refreshed four times per
+second. Contacts follow actual full/partial terrain along the fixed directional
+sun, rather than projecting onto a flat floor. Missing terrain/chunks, void,
+depth clipping, local sample limits, and unsampled cloud side faces can leave
+gaps; those gaps do not establish that no shadow exists. The legend reports
+unloaded paths and inactive global shadows, Cloud Shadows, or night. No guides
+draw or terrain queries run while the diagnostic is off.
 
 Quality slider or shadow-toggle edits switch the dropdown to `Custom` so built-in presets stay
 clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any

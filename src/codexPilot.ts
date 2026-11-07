@@ -5,6 +5,7 @@ import type { PerformanceHitchLogPass, PerformanceHitchRecord } from "./performa
 import type { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import type { VoxelWorld } from "./world";
+import type { CloudShadowDebugSnapshot } from "./cloudShadowDebug";
 
 export const CODEX_PILOT_GLOBAL_NAME = "__VOXEL_CODEX_PILOT__";
 
@@ -92,6 +93,7 @@ export type CodexPilotPlayResult = {
 
 export type CodexPilotApi = {
   snapshot(): CodexPilotSnapshot;
+  cloudShadowGuides(enabled?: boolean): CloudShadowDebugSnapshot | null;
   startPass(label?: string): PerformanceHitchLogPass | null;
   run(command: string): AdminCommandResult;
   superflat(): Promise<CodexPilotSnapshot>;
@@ -117,6 +119,8 @@ export type CodexPilotHooks = {
   fireSelectedPrimary(): void;
   setAdsActive(active: boolean): void;
   getCoreAimPreviewEnabled(): boolean;
+  getCloudShadowDebugSnapshot?(): CloudShadowDebugSnapshot;
+  setCloudShadowDebugEnabled?(enabled: boolean): void;
   setCoreAimPreviewEnabled(enabled: boolean): void;
   resumePlayer(): void;
   startHitchPass(label?: string): PerformanceHitchLogPass;
@@ -139,6 +143,13 @@ export class CodexPilot {
   get api(): CodexPilotApi {
     return {
       snapshot: () => this.snapshot(),
+      cloudShadowGuides: (enabled) => {
+        if (typeof enabled === "boolean") {
+          this.hooks.setCloudShadowDebugEnabled?.(enabled);
+          this.hooks.noteActivity();
+        }
+        return this.hooks.getCloudShadowDebugSnapshot?.() ?? null;
+      },
       startPass: (label) => this.startPass(label),
       run: (command) => this.run(command),
       superflat: () => this.superflat(),

@@ -208,6 +208,32 @@ texel snapping, and terrain streaming stay unchanged; off/night restore the
 original light offset and far plane. This adds one instanced depth draw and
 some caster rasterization, with no second shadow map or streamed terrain.
 
+`cloudShadowDebug.ts` owns the optional Cloud Shadow Guides diagnostic, separate
+from graphics-quality state. It identifies four-connected banks on the toroidal
+64x64 cloud field and reads `CloudLayer.getDebugState()` for the actual wind and
+visibility. Matching bank colors link exposed cloud edges, one representative
+fixed-sun connector, and sparse full/partial-terrain contact crosses. It uses
+the real snapped shadow anchor, fixed light basis, near/far range, radial fade,
+and daylight/shadow gates; the moving visual sun is not its projection source.
+
+Contact sampling is local and bounded to three banks / 128 cloud-column rays
+per refresh, with 96 additional terrain rays for fade/edge rings. Refreshes run
+at most four times per second during ordinary motion, with immediate rebuilds
+on enable, world switch, teleport, wrap, or shadow-range changes. First-hit
+queries reuse `VoxelWorld.raycastTerraformerTarget`, preserving partial geometry;
+chunk-grid traversal rejects paths through unloaded terrain below world height
+instead of treating missing chunks as proven clear sky. Void/missing/depth-clipped
+samples produce no fabricated ground contact. This is geometric sampling, not
+pixel-exact shadow ownership or a second renderer/shadow map.
+
+The diagnostic caches bank topology/colors and reuses bounded DynamicDraw
+geometry buffers. Its lines ignore terrain fog to remain visible at cloud
+distances, while depth testing preserves terrain/cloud occlusion.
+Turning it off skips update-state allocation, terrain queries,
+and all helper draws. World entry/exit clears stale guides; runtime disposal
+releases the owned buffers/materials/overlay and detaches the group. The pilot
+inspection route is documented in [automation](automation.md#codex-pilot-bridge).
+
 `qualityPresets.ts` gives every preset an independent 1800m atmosphere camera
 far floor. Effective Custom settings preserve that floor through their base
 preset. Keep it larger than the cloud fade, and keep the fade shorter than a

@@ -33,6 +33,9 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   terrain range stable, fade cloud-only depth coverage before the map boundary,
   and preserve Lamp emission/block light. See the same
   [lighting and sky contract](docs/architecture.md#lighting-and-sky).
+  Cloud-shadow debug guides share that fixed projection and owned wind; sampled
+  terrain contacts must honor partial geometry and reject paths through unloaded
+  terrain rather than inventing a flat footprint or claiming pixel ownership.
 - Partial-mesh draw caps and reduced rigid-debris solver cadence were tried
   and reverted: their visible cost outweighed the benefit. Reopen performance
   work from a named repro and fresh diagnostics; preserve the lesson before

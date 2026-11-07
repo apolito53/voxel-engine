@@ -593,6 +593,12 @@ import {
   getHorizonMatteRadii,
   shouldShowHorizonMatte
 } from "../src/horizonMatte";
+import {
+  CLOUD_SHADOW_DEBUG_MAX_BANKS, CLOUD_SHADOW_DEBUG_MAX_CONTACTS, CLOUD_SHADOW_DEBUG_STORAGE_KEY,
+  CloudShadowDebug, createCloudBankIds, getCloudBankId, getCloudShadowGuideRadius,
+  projectCloudGuideToHeight, readCloudShadowDebugPreference, traceCloudShadowContact,
+  writeCloudShadowDebugPreference, type CloudShadowDebugUpdate
+} from "../src/cloudShadowDebug";
 
 type TestCase = {
   readonly name: string;
@@ -14457,6 +14463,161 @@ test("directional shadow anchor snaps to stable light-space texels", () => {
     snappedAnchor,
     "sub-texel motion should not move the stabilized shadow anchor"
   );
+});
+
+test("cloud bank identities connect both periodic seams and stay stable across tile copies", () => {
+  const cells = new Set(["0,0", "7,0", "0,7", "4,4"]);
+  const ids = createCloudBankIds(8, (x, z) => cells.has(`${x},${z}`));
+  assertEqual(getCloudBankId(ids, 0, 0, 8), getCloudBankId(ids, 7, 0, 8), "X seam must keep one bank");
+  assertEqual(getCloudBankId(ids, 0, 0, 8), getCloudBankId(ids, 0, 7, 8), "Z seam must keep one bank");
+  assertEqual(getCloudBankId(ids, -8, 8, 8), getCloudBankId(ids, 0, 0, 8), "negative and repeated copies keep IDs");
+  assert(getCloudBankId(ids, 4, 4, 8) !== getCloudBankId(ids, 0, 0, 8), "disconnected banks need separate IDs");
+  assertEqual(getCloudBankId(ids, 3, 3, 8), 0, "clear sky has no bank");
+});
+
+test("cloud guide projection follows the fixed shadow sun and preserves the actual radial footprint", () => {
+  const source = new THREE.Vector3(48, 152, -36);
+  const contact = projectCloudGuideToHeight(source, 30);
+  assertClose(contact.y, 30, 1e-8, "projection reaches the requested height");
+  assert(contact.x < source.x && contact.z > source.z, "cast direction must be away from the real sun");
+  assertClose(source.clone().sub(contact).normalize().dot(SUN_OFFSET.clone().normalize()), 1, 1e-8,
+    "rays must use fixed SUN_OFFSET rather than the moving visual disk");
+  const anchor = new THREE.Vector3(-15, 0, 21);
+  assertClose(getCloudShadowGuideRadius(source, anchor, 80), getCloudShadowGuideRadius(contact, anchor, 80), 1e-8,
+    "cloud and contact share the same light-space map radius at any terrain height");
+});
+
+test("cloud guide terrain contacts honor partial surfaces and reject unknown earlier terrain", () => {
+  const world = new VoxelWorld({ seed: "cloud-guide-partial" });
+  const blocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
+  const partial = {
+    block: BLOCK.stone, position: { x: 5, y: 10, z: 5 }, damage: 9, maxHealth: 27, cuts: [],
+    removedVisualCellIndexes: Array.from({ length: 27 }, (_v, index) => index)
+      .filter((index) => Math.floor(index / 3) % 3 === 2)
+  };
+  const chunk = world.addGeneratedChunk(0, 0, blocks, false);
+  chunk.setLocal(5, 10, 5, BLOCK.stone);
+  // Loading a saved partial cell is the same public hydration path used by a world save.
+  const partialWorld = new VoxelWorld({ seed: "cloud-guide-partial-saved" });
+  partialWorld.addGeneratedChunk(0, 0, chunk.blocks.slice(), false, [partial]);
+  partialWorld.addGeneratedChunk(0, -1, blocks.slice(), false);
+  const target = new THREE.Vector3(5.5, 10 + 2 / 3, 5.5);
+  const source = projectCloudGuideToHeight(target, 20);
+  const result = traceCloudShadowContact(partialWorld, source);
+  assertEqual(result.kind, "hit", "a loaded partial block must produce a verified contact");
+  if (result.kind !== "hit") return;
+  assertClose(result.point.y, target.y, 1e-6, "guide must land on surviving partial material, below the old cube top");
+  assertVectorNearlyEqual(result.point, target, "partial contact must follow the actual diagonal sun ray");
+  const unknown = traceCloudShadowContact({
+    getChunk: (cx, cz) => cz < 0 ? undefined : partialWorld.getChunk(cx, cz),
+    raycastTerraformerTarget: (origin, direction, reach) => partialWorld.raycastTerraformerTarget(origin, direction, reach)
+  }, source);
+  assertEqual(unknown.kind, "unknown", "an unloaded span before a known hit cannot certify the first terrain contact");
+  assertEqual(traceCloudShadowContact({
+    getChunk: () => chunk, raycastTerraformerTarget: () => null
+  }, source).kind, "miss", "loaded void must omit contact without inventing a flat floor");
+});
+
+test("cloud shadow guides bound work, reuse buffers, follow wind and stop completely when gated or disposed", () => {
+  const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
+  const layer = new CloudLayer(SUN_OFFSET, noon);
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(-132, 71.8, 199);
+  layer.setShadows(1, 2048);
+  layer.update(camera, 0.1, { active: true, unpaused: true, visible: true }, QUALITY_PRESETS.normal);
+  const state = layer.getDebugState();
+  const matrix = new THREE.Matrix4();
+  layer.object.getMatrixAt(0, matrix);
+  assertClose((matrix.elements[12] - state.wind.x) / CLOUD_TILE_SIZE_METERS,
+    Math.round((matrix.elements[12] - state.wind.x) / CLOUD_TILE_SIZE_METERS), 1e-6,
+    "debug wind must be the owned wind used by the actual instance matrices");
+  let queries = 0;
+  const chunk = new Chunk(0, 0);
+  const scene = new THREE.Scene();
+  const guides = new CloudShadowDebug(scene);
+  const preset = QUALITY_PRESETS.normal;
+  const depth = getDirectionalShadowDepthRange(preset, SUN_OFFSET, CLOUD_TOP_HEIGHT_METERS);
+  const anchor = new THREE.Vector3(camera.position.x, 0, camera.position.z);
+  const options: CloudShadowDebugUpdate = {
+    camera, cloud: state, inWorld: true, shadows: true, cloudShadows: true, coverage: 1,
+    anchor, lightPosition: anchor.clone().addScaledVector(SUN_OFFSET, depth.lightOffsetScale),
+    cameraSize: preset.shadowCameraSize, cameraNear: 0.5, cameraFar: depth.cameraFar, deltaSeconds: 0,
+    world: {
+      getChunk: () => chunk,
+      raycastTerraformerTarget(origin, direction) {
+        queries += 1;
+        const distance = (origin.y - 38) / -direction.y;
+        return { block: { x: 0, y: 37, z: 0 }, normal: { x: 0, y: 1, z: 0 }, distance,
+          point: { x: origin.x + direction.x * distance, y: 38, z: origin.z + direction.z * distance } };
+      }
+    }
+  };
+  guides.update(options);
+  assertEqual(queries, 0, "off must not query any terrain");
+  guides.setEnabled(true);
+  guides.update(options);
+  const snapshot = guides.snapshot();
+  assert(snapshot.banks.length > 0, "the real review pose needs at least one nearby bank");
+  assert(snapshot.banks.length <= CLOUD_SHADOW_DEBUG_MAX_BANKS, "nearby bank budget must be bounded");
+  assert(snapshot.sampledContacts > 0 && snapshot.sampledContacts <= CLOUD_SHADOW_DEBUG_MAX_CONTACTS,
+    "contacts must be useful and bounded");
+  assert(queries <= CLOUD_SHADOW_DEBUG_MAX_CONTACTS + 96, "contacts and coverage rings have a fixed ray budget");
+  assertEqual(guides.object.visible, true, "active guides should draw");
+  const geometry = (guides.object.children[0] as THREE.LineSegments).geometry;
+  const position = geometry.getAttribute("position");
+  const firstQueries = queries;
+  guides.update({ ...options, deltaSeconds: 0.1 });
+  assertEqual(queries, firstQueries, "steady frames must reuse cached terrain contacts");
+  guides.update({ ...options, deltaSeconds: 0.2 });
+  assert(queries > firstQueries, "the bounded refresh cadence should resample moving clouds");
+  assertEqual((guides.object.children[0] as THREE.LineSegments).geometry, geometry, "refresh reuses GPU geometry");
+  assertEqual(geometry.getAttribute("position"), position, "refresh reuses existing typed buffer attributes");
+  for (const gate of [{ shadows: false }, { cloudShadows: false }, { coverage: 0 }, { inWorld: false }]) {
+    const before = queries;
+    guides.update({ ...options, ...gate });
+    assertEqual(queries, before, "inactive guides must not query terrain");
+    assertEqual(guides.object.visible, false, "inactive gates must hide old guides immediately");
+  }
+  guides.update(options);
+  assertEqual(guides.snapshot().status, "active", "re-enabling casting should refresh immediately");
+  guides.reset();
+  assertEqual(guides.snapshot().sampledContacts, 0, "world reset must drop stale contacts");
+  guides.setEnabled(false);
+  const beforeOff = queries;
+  guides.update(options);
+  assertEqual(queries, beforeOff, "turning off must stop all queries immediately");
+  let disposals = 0;
+  geometry.addEventListener("dispose", () => { disposals += 1; });
+  guides.dispose();
+  guides.dispose();
+  guides.setEnabled(true);
+  guides.update(options);
+  assertEqual(queries, beforeOff, "disposed guides must never reactivate or query terrain");
+  assertEqual(disposals, 1, "owned geometry must be disposed exactly once");
+  assertEqual(scene.children.length, 0, "teardown must detach the helper group");
+  layer.dispose();
+});
+
+test("cloud guide preference defaults off and tolerates older, invalid and unavailable storage", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value)
+  } });
+  try {
+    assertEqual(readCloudShadowDebugPreference(), false, "older profiles without a debug key default off");
+    writeCloudShadowDebugPreference(true);
+    assertEqual(readCloudShadowDebugPreference(), true, "explicit debug preference should round-trip");
+    values.set(CLOUD_SHADOW_DEBUG_STORAGE_KEY, "definitely");
+    assertEqual(readCloudShadowDebugPreference(), false, "malformed values must not enable debugging");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
+    assertEqual(readCloudShadowDebugPreference(), false, "unavailable storage defaults off");
+    writeCloudShadowDebugPreference(true);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
 });
 
 let passed = 0;

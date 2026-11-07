@@ -109,6 +109,10 @@ Physics Core size, velocity, terrain-damaging bounce count, color, and trail
 controls, plus a first-pass procedural sound layer with Sound, Master Volume,
 SFX Volume, and UI Volume controls. Experimental settings include the Cycle
 Length slider for stretching or compressing the default 20-minute sky cycle.
+`Experimental > Cloud Shadow Guides` matches nearby cloud edges, representative
+sun rays, and sampled terrain contacts by bank color. It defaults off; the
+on-screen legend distinguishes local samples, map fade/edge guides, and inactive
+shadow/night settings. See [the settings guide](docs/controls.md#settings).
 Audio defaults are intentionally forward in the mix so terrain, movement, and
 UI cues are audible without pushing the OS volume to nonsense territory.
 Browser audio unlocks after the first normal click or key press.

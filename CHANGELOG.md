@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.19.3 - 2026-11-07
+
+### Added
+
+- `Settings > Experimental > Cloud Shadow Guides`: matching bank-colored cloud
+  edges, representative sun rays, and sampled contacts on loaded terrain show
+  which nearby cloud bank casts toward which part of the world. Amber and white
+  guides mark the existing map's fade start and outer edge.
+- A small legend explains the sample/bank budget, daylight, missing terrain
+  coverage, and inactive shadow/night gates. The debug preference defaults off,
+  persists independently of graphics quality, and does not alter shadow strength.
+- A Codex Pilot `cloudShadowGuides()` control/snapshot for repeatable inspection.
+
+### Validation
+
+- Added periodic bank identity, fixed-sun projection, actual partial-terrain
+  contact, unloaded-path, bounded refresh, buffer reuse, lifecycle, and debug
+  preference coverage. All 340 engine robustness tests pass locally.
+
 ## 0.19.2 - 2026-11-07
 
 ### Changed

@@ -71,6 +71,9 @@ import {
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
 import { CLOUD_TOP_HEIGHT_METERS, CloudLayer } from "./cloudLayer";
 import {
+  CloudShadowDebug, readCloudShadowDebugPreference, writeCloudShadowDebugPreference
+} from "./cloudShadowDebug";
+import {
   DEFAULT_CLICK_FIRE_MODE,
   formatClickFireMode,
   formatClickFireModeShort,
@@ -574,6 +577,8 @@ const groundDebrisLifetimeSlider = requireElement<HTMLInputElement>("#ground-deb
 const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-lifetime-value");
 const groundDebrisLifetimeForeverToggle = requireElement<HTMLInputElement>("#ground-debris-lifetime-forever-toggle");
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
+const cloudShadowGuidesToggle = requireElement<HTMLInputElement>("#cloud-shadow-guides-toggle");
+const cloudShadowGuidesOverlay = requireElement<HTMLElement>("#cloud-shadow-guides-overlay");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
 const soundEnabledToggle = requireElement<HTMLInputElement>("#sound-enabled-toggle");
@@ -651,6 +656,7 @@ const skybox = createSkybox(SUN_OFFSET, createProceduralSkyState(dayNightVisualS
 scene.add(skybox.object);
 const cloudLayer = new CloudLayer(SUN_OFFSET, dayNightVisualState);
 scene.add(cloudLayer.object);
+const cloudShadowDebug = new CloudShadowDebug(scene, cloudShadowGuidesOverlay);
 const horizonMatte = new HorizonMatte(WORLD_FOG_COLOR);
 scene.add(horizonMatte.object);
 const localLightRenderer = new LocalLightRenderer(scene);
@@ -722,6 +728,8 @@ let nextPrimaryClickActionAtMs = 0;
 let nextSecondaryClickActionAtMs = 0;
 let terraformerState: TerraformerState | null = null;
 let coreAimPreviewEnabled = false;
+let cloudShadowGuidesEnabled = readCloudShadowDebugPreference();
+cloudShadowDebug.setEnabled(cloudShadowGuidesEnabled);
 
 const engineEvents = createEngineEventBus();
 const gameAudio = new GameAudio({
@@ -954,6 +962,8 @@ const codexPilot = new CodexPilot({
     rightMouseButtonDown = active;
   },
   getCoreAimPreviewEnabled: () => coreAimPreviewEnabled,
+  getCloudShadowDebugSnapshot: () => cloudShadowDebug.snapshot(),
+  setCloudShadowDebugEnabled: setCloudShadowGuidesEnabled,
   setCoreAimPreviewEnabled,
   resumePlayer: () => requirePlayer().resume(),
   startHitchPass: (label) => performanceHitchLog.startPass(label),
@@ -1053,6 +1063,7 @@ updateGroundDebrisBudgetControls();
 syncHealthBarsToggle();
 syncControlHintsToggle();
 syncCoreAimPreviewToggle();
+cloudShadowGuidesToggle.checked = cloudShadowGuidesEnabled;
 syncAudioControls();
 renderInventoryMenus();
 renderBuilderPalette();
@@ -1318,6 +1329,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   coreAimPreviewToggle.addEventListener("change", () => {
     setCoreAimPreviewEnabled(coreAimPreviewToggle.checked);
+  }, eventListenerOptions);
+  cloudShadowGuidesToggle.addEventListener("change", () => {
+    setCloudShadowGuidesEnabled(cloudShadowGuidesToggle.checked);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -1661,6 +1675,14 @@ function setCoreAimPreviewEnabled(enabled: boolean): void {
 
 function syncCoreAimPreviewToggle(): void {
   coreAimPreviewToggle.checked = coreAimPreviewEnabled;
+}
+
+function setCloudShadowGuidesEnabled(enabled: boolean): void {
+  cloudShadowGuidesEnabled = enabled;
+  cloudShadowGuidesToggle.checked = enabled;
+  cloudShadowDebug.setEnabled(enabled);
+  writeCloudShadowDebugPreference(enabled);
+  noteUserActivity();
 }
 
 function canAdjustTerraformerSizeFromKeyboard(): boolean {
@@ -2627,6 +2649,18 @@ function animate(): void {
     unpaused: Boolean(player?.active),
     visible: !document.hidden
   }, qualityController.preset);
+  if (cloudShadowGuidesEnabled) {
+    const preset = qualityController.preset;
+    cloudShadowDebug.update({
+      camera, cloud: cloudLayer.getDebugState(), world, inWorld,
+      shadows: preset.shadows, cloudShadows: preset.cloudShadows,
+      coverage: getCloudShadowCoverage(preset, dayNightVisualState),
+      anchor: stableShadowAnchor, lightPosition: sun.position,
+      cameraSize: preset.shadowCameraSize,
+      cameraNear: sun.shadow.camera.near, cameraFar: sun.shadow.camera.far,
+      deltaSeconds: delta
+    });
+  }
   horizonMatte.update({
     camera,
     inWorld,
@@ -5354,6 +5388,7 @@ async function loadWorld(worldId: string): Promise<void> {
     document.body.classList.add("in-world");
     inWorld = true;
     cloudLayer.reset();
+    cloudShadowDebug.reset();
     engineEvents.emit("world:loaded", {
       worldId: activeWorldId,
       name: savedWorld.name,
@@ -5460,6 +5495,7 @@ async function exitToHome(): Promise<void> {
     lastPartialBlockMeshUpdateMs = 0;
     inWorld = false;
     cloudLayer.reset();
+    cloudShadowDebug.reset();
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
     pauseMenu.classList.add("is-hidden");
@@ -5795,6 +5831,7 @@ function disposeRuntime(): void {
   horizonMatte.dispose();
   skybox.dispose();
   cloudLayer.dispose();
+  cloudShadowDebug.dispose();
   disposeWorldBlockMaterial(worldMaterial);
   disposeWorldBlockMaterial(partialBlockMaterial);
   renderer.renderLists.dispose();
