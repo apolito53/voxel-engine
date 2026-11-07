@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.19.0 - 2026-11-07
+
+### Added
+
+- Real elevated voxel cloud banks with stepped volume, open gaps, bright tops,
+  shaded sides/undersides, and gentle wind. Clouds stay at world elevation
+  144–156m, so walking and flight reveal parallax from below, inside, and above.
+- Bounded shared cloud geometry with exposed faces, seamless deterministic
+  horizontal tiling, independent atmospheric fade, and explicit runtime disposal.
+
+### Changed
+
+- Overhauled the procedural sky with a deeper blue zenith, warm sunward
+  dawn/dusk haze, smaller sun/moon disks, subtle lunar shading, and sparse
+  antialiased stars. Removed the former shader-painted cloud bands.
+- Kept clouds on every quality preset, shortening their independent horizon on
+  Potato/Low. An atmosphere camera-range floor prevents low-quality clipping
+  without changing terrain fog, chunk streaming, or shadow coverage.
+- Cloud wind follows active unpaused play time, freezes during hidden/idle
+  frames, and resets between worlds. Time-of-day edits recolor clouds while
+  preserving their position and the existing saved-clock behavior.
+
+### Validation
+
+- Added cloud field/seam, exposed-face/winding, fixed-altitude, drift/pause,
+  time-jump, negative/distant recentering, palette, quality-clipping, and
+  resource-disposal coverage to the engine robustness suite.
+- Full validation passed with all 331 engine tests; in-app browser review covered noon,
+  dusk horizon continuity, midnight sky, Potato clouds, and flight below,
+  inside, and above the layer without WebGL/runtime errors.
+
 ## 0.18.0.1 - 2026-07-13
 
 ### Changed

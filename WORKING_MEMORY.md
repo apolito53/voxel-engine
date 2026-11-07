@@ -1,55 +1,66 @@
 # Working Memory
 
-Current handoff: 2026-11-07.
+Current handoff: 2026-11-07, sky overhaul for `v0.19.0`.
 
-The project now has [local instructions](AGENTS.md), selective
-[durable memory](CRYSTALIZED_MEMORY.md), and entry-document routes to its
-memory and planning files. The populated idea collection is now
-[SPITBALL.md](SPITBALL.md); its original feature ideas are preserved. The
-documentation checker covers all four instruction/memory/idea files alongside
-the existing README, codebase index, changelog, TODO, and focused docs.
+## Current State
 
-The app remains `v0.18.0.1`. [CODEBASE_INDEX.md](CODEBASE_INDEX.md) is the small
-ownership map; [docs/architecture.md](docs/architecture.md) remains the deeper
-contract reference. [TODO.md](TODO.md#current-recommended-next-slice) keeps
-equipment/pickup gameplay and sound as the current next lanes. This
-documentation setup did not select a new gameplay slice.
+The sky now has a deeper blue zenith, directional warm twilight, restrained
+sun/moon disks, sparse stars, and real elevated voxel clouds. `src/skybox.ts`
+owns atmosphere/celestials; `src/cloudLayer.ts` owns the fixed 144–156m cloud
+banks, seamless periodic geometry, independent active-time wind, quality-scaled
+cloud horizon, and disposal. The old shader cloud bands are removed. The shared
+sky/cloud atmosphere converges to the existing world fog color at the horizon
+so directional twilight can sit above the terrain/matte seam.
 
-## Local Runtime Snapshot
+Every quality preset keeps clouds and an independent 1800m atmosphere camera
+far floor. Terrain fog, streaming/render radii, world saves, and directional
+terrain shadows keep their existing contracts. Wind pauses with paused/hidden
+play and existing idle hibernation, resets on world entry/exit, and does not
+jump when the Time of Day slider moves. See
+[lighting and sky](docs/architecture.md#lighting-and-sky) for the boundaries and
+[controls](docs/controls.md#quality-presets) for existing quality settings.
 
-On 2026-11-07, the app at `http://127.0.0.1:5173` and the collector at
-`http://127.0.0.1:5174/health` were verified. The home screen browser smoke,
-collector hitch/combat writes, and Vite same-origin combat writes passed.
-These ports are centrally reserved. Recheck listeners and health before relying
-on this snapshot; no preview service was launched or reserved by this work.
-Local runtime details live in ignored `logs/local-runtime-20261107.jsonl`.
+## Verification And Delivery
 
-Locked dependencies were installed without a lockfile change. Node was
-available, but npm was absent from the shell PATH during the session; recheck
-tool availability before future app validation. Docs checks run directly with
-`node scripts/check_docs_links.mjs`.
+Type checking and all 331 engine robustness tests pass locally, including seven
+new cloud cases covering field seams, exposed faces/winding, drift/pause,
+fixed altitude/parallax, clock edits, negative/distant recentering, quality
+clipping, palettes, and resource disposal. Full `npm run validate` also passes:
+typecheck, 106-file source hygiene, all 331 tests, 17-file documentation checks,
+production build, and whitespace checks. The build retains its known large
+vendor chunk warning. npm was absent from PATH; the installed Node plus the
+previously extracted npm CLI ran validation with a temporary command shim.
+
+In-app browser review verified ground-level noon/dawn, dusk horizon continuity, real cloud
+geometry from below/inside/above, visible Potato clouds, and midnight stars/moon
+above the layer, with no WebGL/runtime errors. The initial dusk review exposed
+a hard fog/sky seam; sharing the true fog color and blending at the horizon
+fixed it, and the browser recapture confirmed the smooth join. Sky implementation
+and code review are complete, with no further sky work selected. Remote branch
+and configured delivery status are checked during Git delivery.
+
+The review uses a separate local `Sky Review` world with seed
+`sky-review-20261107`, preserving existing played saves. Ignored screenshots and
+test output live under `logs/visual-runs/2026-11-07-sky-review/`,
+`logs/sky-overhaul-tests.log`, and `logs/sky-overhaul-validate.log`. Local Vite
+`127.0.0.1:5173` and collector
+`127.0.0.1:5174` keep their central reservations; no services or ports changed.
 
 ## Remaining Follow-up
 
-On 2026-11-07, two Ubuntu / Node `22.23.4` CI attempts failed in different
-rigid-debris tests before docs checks or the build. A
-[subsequent full CI run](https://github.com/apolito53/voxel-engine/actions/runs/42356216133)
-passed with app/test code unchanged. The intermittent cause is unknown; no
-physics changes were made. Investigation and prior failure evidence are
-tracked in [TODO: CI Rigid-Debris Validation](TODO.md#development-follow-up-ci-rigid-debris-validation).
+This sky request does not select a new gameplay lane.
+[TODO: Current Recommended Next Slice](TODO.md#current-recommended-next-slice)
+still routes equipment/pickup gameplay and sound work; [SPITBALL.md](SPITBALL.md)
+preserves weather and other tentative ideas.
 
-The existing logger is useful but has verified standard gaps. Concrete work is
-recorded once in [TODO: Local Diagnostics](TODO.md#development-follow-up-local-diagnostics).
-Follow that entry when diagnostics work is chosen; no logger behavior was
-changed during the documentation setup.
-
-## Verification
-
-`node scripts/check_docs_links.mjs` passes across 17 Markdown files;
-`git diff --check` and the checker syntax check are clean. A temporary missing
-link in this memory file was rejected by the checker, then restored before the
-clean check. All 92 original idea bullets in SPITBALL remain verbatim.
-
-`node scripts/run_tests.mjs` passed all 324 engine robustness tests locally on
-Windows / Node `24.22.1`, including the CI's first failing fast-fall case. Its
-output is retained in ignored `logs/ci-test-repro-20261107.log`.
+Existing local-logger standard gaps remain tracked once in
+[TODO: Local Diagnostics](TODO.md#development-follow-up-local-diagnostics).
+Unchanged rigid-debris tests had intermittent Ubuntu / Node `22.23.4` CI
+failures before a later successful run. The first full sky validation also
+reproduced the fast-fall Rapier failure on Windows / Node `24.22.1`; the clean
+retry passed all 331 tests without physics or runner changes. The first failure
+is retained in `logs/sky-overhaul-validate-rapier-failure.log`. The cause remains
+unknown. Reproduction
+and prior failure evidence stay in
+[TODO: CI Rigid-Debris Validation](TODO.md#development-follow-up-ci-rigid-debris-validation).
+No diagnostics or physics behavior changed in the sky pass.

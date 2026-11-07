@@ -125,11 +125,19 @@ same circular horizon instead of a screen-shaped fog slab. A render-only
 fog-colored horizon matte fills the far world below the wall in normal terrain
 worlds, so high-altitude views read as atmospheric continuation instead of
 empty sky. The old daytime skybox is now a legacy asset; runtime sky visuals
-come from a procedural dome with a gradient sky, fixed-direction sun/moon
-disks, sparse stars, and cloud bands that stay above the horizon. Fog,
+come from a procedural atmosphere with a richer blue zenith, directional warm
+dawn/dusk haze, restrained sun/moon disks, and sparse pinpoint stars. Chunky
+cloud banks occupy real world elevation at 144–156m, with stepped tops, shaded
+undersides, and open gaps. They drift gently with active play time and show
+parallax when walking or flying below, through, or above them. Changing the
+world clock recolors clouds without moving them; pause, hidden tabs, and the
+existing idle hibernation also pause their wind. Every graphics preset retains
+clouds, with a shorter independent cloud horizon on Potato and Low. Fog,
 background, horizon matte, and outdoor terrain exposure shift together as the
 world clock moves, while the directional shadow direction stays fixed for this
-first pass. The night exposure pass dims sky and hemisphere fill, but direct
+first pass. Atmosphere clipping has a separate minimum camera range, so cloud
+visibility never expands terrain streaming or changes the terrain fog wall.
+The night exposure pass dims sky and hemisphere fill, but direct
 local Lamp spill remains intact so open and sealed Lamp-lit rooms read
 consistently. Placeable Lamp blocks are shader-emissive on every visible Lamp
 face, so dense fixtures and Lamp walls read as the same glowing material

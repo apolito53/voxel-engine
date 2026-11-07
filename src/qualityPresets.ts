@@ -11,6 +11,9 @@ export const SUPER_ULTRA_PRESET_ID = "superUltra";
 export const QUALITY_PRESET_ORDER = ["potato", "low", "normal", "high", "ultra"] as const;
 export const FOG_RENDER_SAFETY_CHUNKS = 1;
 export const DEFAULT_BLOCK_LIGHT_MIN_LEVEL = 1;
+// Atmosphere has its own distance budget. Raising camera clipping must never
+// expand chunk streaming, terrain render distance, fog, or shadow coverage.
+export const ATMOSPHERE_CAMERA_FAR_METERS = 1800;
 
 export type StandardQualityPresetId = (typeof QUALITY_PRESET_ORDER)[number];
 export type BuiltInQualityPresetId = StandardQualityPresetId | typeof SUPER_ULTRA_PRESET_ID;
@@ -74,7 +77,7 @@ function createQualityPreset(definition: QualityPresetDefinition): QualityPreset
   const renderRadius = Math.min(loadRadius, fogOpaqueRadius + FOG_RENDER_SAFETY_CHUNKS);
   const fogNear = preset.fogStartRadius * CHUNK_SIZE;
   const fogFar = fogOpaqueRadius * CHUNK_SIZE;
-  const cameraFar = Math.max(minCameraFar, fogFar + CHUNK_SIZE * 2);
+  const cameraFar = Math.max(ATMOSPHERE_CAMERA_FAR_METERS, minCameraFar, fogFar + CHUNK_SIZE * 2);
   const blockLightMinLevel = normalizePresetBlockLightLevel(definition.blockLightMinLevel, DEFAULT_BLOCK_LIGHT_MIN_LEVEL);
   const blockLightMaxLevel = normalizePresetBlockLightLevel(definition.blockLightMaxLevel, BLOCK_LIGHT_MAX_LEVEL);
 

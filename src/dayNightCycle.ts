@@ -43,7 +43,6 @@ export type DayNightVisualState = {
   readonly sunColor: RgbColorTuple;
   readonly moonColor: RgbColorTuple;
   readonly starIntensity: number;
-  readonly cloudOpacity: number;
   readonly sunDiscIntensity: number;
   readonly moonDiscIntensity: number;
   readonly fogHex: string;
@@ -152,14 +151,14 @@ export function createDayNightVisualState(state: DayNightState): DayNightVisualS
     addWeightedColors([
       [hexToRgb(0x020411), nightFactor],
       [hexToRgb(0x2a244a), twilightFactor * 0.8],
-      [hexToRgb(0x49a9ff), dayFactor]
+      [hexToRgb(0x2679cf), dayFactor]
     ])
   );
   const skyHorizonColor = normalizeColor(
     addWeightedColors([
       [hexToRgb(0x0a1020), nightFactor],
-      [hexToRgb(0xffb075), twilightFactor * 0.85],
-      [hexToRgb(0xc6e5f5), dayFactor]
+      [hexToRgb(0x9b8dad), twilightFactor * 0.65],
+      [hexToRgb(0xc1dfef), dayFactor]
     ])
   );
   const skyLowerColor = normalizeColor(
@@ -221,8 +220,7 @@ export function createDayNightVisualState(state: DayNightState): DayNightVisualS
     ),
     moonColor: hexToRgb(0xcbd8ff),
     starIntensity: clampNumber(nightFactor * 1.25 - twilightFactor * 0.25, 0, 1),
-    cloudOpacity: clampNumber(0.22 + dayFactor * 0.42 + twilightFactor * 0.1, 0.18, 0.68),
-    sunDiscIntensity: clampNumber(dayFactor * 1.35 + twilightFactor * 0.45, 0, 1.45),
+    sunDiscIntensity: clampNumber(dayFactor * 1.05 + twilightFactor * 0.4, 0, 1.2),
     moonDiscIntensity: clampNumber(nightFactor * 0.65, 0, 0.75),
     fogHex: colorToHexLabel(fogColor)
   };

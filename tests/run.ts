@@ -565,6 +565,23 @@ import {
   getSkyboxAlignedSunDirection
 } from "../src/skybox";
 import {
+  CLOUD_BASE_HEIGHT_METERS,
+  CLOUD_CELL_SIZE_METERS,
+  CLOUD_MAX_VIEW_DISTANCE_METERS,
+  CLOUD_STEP_HEIGHT_METERS,
+  CLOUD_TILE_CELLS,
+  CLOUD_TILE_SIZE_METERS,
+  CLOUD_WIND_METERS_PER_SECOND,
+  CloudLayer,
+  advanceCloudElapsedTime,
+  createCloudPalette,
+  createCloudTileGeometry,
+  getCloudTileAnchor,
+  getCloudViewDistance,
+  getCloudWindOffset,
+  sampleCloudColumn
+} from "../src/cloudLayer";
+import {
   HORIZON_MATTE_EXTENSION_CHUNKS,
   HORIZON_MATTE_INSET_CHUNKS,
   getHorizonMatteRadii,
@@ -13984,6 +14001,197 @@ test("procedural sky sun direction lines up with the real directional light", ()
     SKYBOX_LOWER_FOG_MASK_START_Y < SKYBOX_LOWER_FOG_MASK_END_Y && SKYBOX_LOWER_FOG_MASK_END_Y < 0,
     "procedural sky lower fog mask should stay below the true horizon so the hard fog wall does not climb into the sky"
   );
+});
+
+test("cloud columns form a sparse seamless world field above the terrain volume", () => {
+  let occupied = 0;
+  const heights = new Set<number>();
+  for (let z = 0; z < CLOUD_TILE_CELLS; z += 1) {
+    for (let x = 0; x < CLOUD_TILE_CELLS; x += 1) {
+      const column = sampleCloudColumn(x, z);
+      if (column.top > 0) {
+        occupied += 1;
+        heights.add(column.top);
+        assert(column.top > column.bottom, "every occupied column must have positive thickness");
+      }
+      assertEqual(
+        JSON.stringify(sampleCloudColumn(x - CLOUD_TILE_CELLS * 7, z + CLOUD_TILE_CELLS * 3)),
+        JSON.stringify(column),
+        "negative and distant tile copies must agree at every boundary"
+      );
+    }
+  }
+  const coverage = occupied / CLOUD_TILE_CELLS ** 2;
+  assert(coverage > 0.12 && coverage < 0.55, `clouds need banks and generous holes, got ${coverage}`);
+  assert(heights.size >= 3, "banks should have stepped thickness instead of being flat sky cards");
+  assert(CLOUD_BASE_HEIGHT_METERS > WORLD_HEIGHT, "clouds must occupy a fixed elevation above generated terrain");
+});
+
+test("cloud geometry emits only exposed outward faces, including seamless tile edges", () => {
+  const geometry = createCloudTileGeometry();
+  const positions = geometry.getAttribute("position");
+  const normals = geometry.getAttribute("normal");
+  const index = geometry.getIndex();
+  assert(index !== null, "cloud geometry must be indexed");
+  assert(positions.count > 0 && positions.count < 50000, "a tile must have a bounded nonempty mesh");
+  const halfTile = CLOUD_TILE_SIZE_METERS / 2;
+  const contains = (point: THREE.Vector3): boolean => {
+    const column = sampleCloudColumn(
+      Math.floor((point.x + halfTile) / CLOUD_CELL_SIZE_METERS),
+      Math.floor((point.z + halfTile) / CLOUD_CELL_SIZE_METERS)
+    );
+    return column.top > 0 && point.y > column.bottom * CLOUD_STEP_HEIGHT_METERS &&
+      point.y < column.top * CLOUD_STEP_HEIGHT_METERS;
+  };
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  for (let vertex = 0; vertex < positions.count; vertex += 4) {
+    const center = new THREE.Vector3();
+    for (let corner = 0; corner < 4; corner += 1) {
+      center.add(a.fromBufferAttribute(positions, vertex + corner));
+    }
+    center.multiplyScalar(0.25);
+    normal.fromBufferAttribute(normals, vertex);
+    assert(contains(center.clone().addScaledVector(normal, -0.01)), "every face needs cloud material behind it");
+    assert(!contains(center.clone().addScaledVector(normal, 0.01)), "internal and shared seam faces must be omitted");
+    a.fromBufferAttribute(positions, vertex);
+    b.fromBufferAttribute(positions, vertex + 1).sub(a);
+    c.fromBufferAttribute(positions, vertex + 2).sub(a);
+    assert(b.cross(c).dot(normal) > 0, "face winding must match its outward shade normal");
+  }
+  geometry.dispose();
+});
+
+test("cloud wind pauses with the runtime and stays independent of the world clock", () => {
+  const running = { active: true, unpaused: true, visible: true };
+  assertClose(advanceCloudElapsedTime(10, 0.1, running), 10.1, 1e-8, "active drift should use elapsed frame time");
+  for (const options of [
+    { ...running, active: false }, { ...running, unpaused: false }, { ...running, visible: false }
+  ]) {
+    assertEqual(advanceCloudElapsedTime(10, 1, options), 10, "inactive, paused, and hidden clouds must freeze");
+  }
+  assertEqual(advanceCloudElapsedTime(10, Infinity, running), 10, "invalid deltas must not poison wind");
+  assertEqual(advanceCloudElapsedTime(10, -1, running), 10, "negative deltas must not reverse wind");
+  assertEqual(advanceCloudElapsedTime(10, 60, running), 10.25, "resume gaps must not teleport clouds");
+  const periodSeconds = CLOUD_TILE_SIZE_METERS / CLOUD_WIND_METERS_PER_SECOND.x;
+  const before = getCloudWindOffset(periodSeconds - 0.01);
+  const after = getCloudWindOffset(periodSeconds + 0.01);
+  assertClose(after.x + CLOUD_TILE_SIZE_METERS - before.x, 0.02 * CLOUD_WIND_METERS_PER_SECOND.x, 1e-8,
+    "wrapping the X wind must keep the periodic field continuous");
+  assertClose(after.z - before.z, 0.02 * CLOUD_WIND_METERS_PER_SECOND.z, 1e-8,
+    "wrapping X must not reset diagonal Z wind");
+  const longRunning = getCloudWindOffset(1e9);
+  assert(longRunning.x >= 0 && longRunning.x < CLOUD_TILE_SIZE_METERS, "long-running X wind should stay bounded");
+  assert(longRunning.z >= 0 && longRunning.z < CLOUD_TILE_SIZE_METERS, "long-running Z wind should stay bounded");
+});
+
+test("cloud transforms preserve altitude, camera parallax, and placement during time jumps", () => {
+  const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5, cycleEnabled: false }));
+  const layer = new CloudLayer(SUN_OFFSET, noon);
+  const camera = new THREE.PerspectiveCamera();
+  const paused = { active: true, unpaused: false, visible: true };
+  const transforms = (): number[][] => {
+    const matrix = new THREE.Matrix4();
+    return Array.from({ length: layer.object.count }, (_, index) => {
+      layer.object.getMatrixAt(index, matrix);
+      return matrix.elements.slice(12, 15);
+    });
+  };
+  camera.position.set(2, 40, 2);
+  layer.update(camera, 0, paused, QUALITY_PRESETS.normal);
+  const initial = transforms();
+  camera.position.set(12, 149, 7);
+  layer.update(camera, 0, paused, QUALITY_PRESETS.normal);
+  assertEqual(JSON.stringify(transforms()), JSON.stringify(initial), "walking and flying must not drag cloud geometry");
+  camera.position.y = 240;
+  layer.setState(createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.75 })));
+  layer.update(camera, 1, paused, QUALITY_PRESETS.normal);
+  assertEqual(JSON.stringify(transforms()), JSON.stringify(initial), "clock changes and altitude must only recolor clouds");
+  layer.update(camera, 0.1, { ...paused, unpaused: true }, QUALITY_PRESETS.normal);
+  const drifted = transforms();
+  assertClose(drifted[0][0] - initial[0][0], 0.085, 0.0002, "wind should continue even with a frozen world clock");
+  for (const translation of drifted) {
+    assertEqual(translation[1], CLOUD_BASE_HEIGHT_METERS, "all tile bases must remain at world cloud altitude");
+  }
+  layer.reset();
+  assertEqual(layer.object.visible, false, "world exit/reset should hide clouds immediately");
+  layer.update(camera, 0, paused, QUALITY_PRESETS.normal);
+  assertEqual(JSON.stringify(transforms()), JSON.stringify(initial), "entering another world should reset wind independently");
+  layer.dispose();
+});
+
+test("cloud recentering exchanges only invisible tiles and supports negative or distant teleports", () => {
+  const layer = new CloudLayer(SUN_OFFSET, createDayNightVisualState(createDefaultDayNightState()));
+  const camera = new THREE.PerspectiveCamera();
+  const options = { active: true, unpaused: false, visible: true };
+  const centers = (): THREE.Vector3[] => {
+    const matrix = new THREE.Matrix4();
+    return Array.from({ length: layer.object.count }, (_, index) => {
+      layer.object.getMatrixAt(index, matrix);
+      return new THREE.Vector3().setFromMatrixPosition(matrix);
+    });
+  };
+  camera.position.set(-CLOUD_TILE_SIZE_METERS / 2 - 0.01, 50, 10);
+  layer.update(camera, 0, options, QUALITY_PRESETS.normal);
+  const before = centers();
+  camera.position.x += 0.02;
+  layer.update(camera, 0, options, QUALITY_PRESETS.normal);
+  const after = centers();
+  for (const removed of before.filter((point) => !after.some((next) => next.equals(point)))) {
+    const nearestX = Math.max(0, Math.abs(removed.x - camera.position.x) - CLOUD_TILE_SIZE_METERS / 2);
+    const nearestZ = Math.max(0, Math.abs(removed.z - camera.position.z) - CLOUD_TILE_SIZE_METERS / 2);
+    assert(Math.hypot(nearestX, nearestZ) > CLOUD_MAX_VIEW_DISTANCE_METERS,
+      "tiles must be fully past the atmosphere fade before recentering removes them");
+  }
+  for (const [x, z] of [[-1e6, 1e6], [1e6, -1e6], [-0.01, -0.01]]) {
+    camera.position.set(x, 150, z);
+    layer.update(camera, 0, options, QUALITY_PRESETS.potato);
+    const anchorX = getCloudTileAnchor(x, 0) * CLOUD_TILE_SIZE_METERS;
+    const anchorZ = getCloudTileAnchor(z, 0) * CLOUD_TILE_SIZE_METERS;
+    assert(centers().some((point) => point.x === anchorX && point.z === anchorZ),
+      "teleports must establish the correct deterministic tile without waiting for gradual recentering");
+    assert(layer.object.count > 0 && layer.object.count <= 9, "travel must keep instance work bounded");
+  }
+  layer.dispose();
+});
+
+test("cloud palettes and visibility survive every sky phase and quality preset", () => {
+  for (const timeOfDay of [0, 0.19, 0.25, 0.32, 0.5, 0.68, 0.75, 0.81]) {
+    const palette = createCloudPalette(createDayNightVisualState(createDefaultDayNightState({ timeOfDay })));
+    assertFiniteColor(palette.top, "cloud top palette");
+    assertFiniteColor(palette.underside, "cloud underside palette");
+    assert(palette.top.every((channel, index) => channel > palette.underside[index]),
+      "cloud volume needs readable shaded undersides at every time of day");
+  }
+  const midnight = createCloudPalette(createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0 })));
+  const noon = createCloudPalette(createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 })));
+  assert(midnight.top[2] < noon.top[2] * 0.6, "night clouds should dim rather than remain day-white");
+  for (const quality of Object.values(QUALITY_PRESETS)) {
+    const distance = getCloudViewDistance(quality);
+    assert(distance > CLOUD_BASE_HEIGHT_METERS, `${quality.label} should retain overhead clouds from ground level`);
+    assert(distance < quality.cameraFar, `${quality.label} must fade clouds before its real clipping plane`);
+    assert(distance < CLOUD_TILE_SIZE_METERS, `${quality.label} must hide exchanging tile copies`);
+  }
+});
+
+test("cloud disposal releases owned resources once and removes the scene object", () => {
+  const layer = new CloudLayer(SUN_OFFSET, createDayNightVisualState(createDefaultDayNightState()));
+  const scene = new THREE.Scene();
+  scene.add(layer.object);
+  const disposed = { geometry: 0, material: 0, instances: 0 };
+  layer.object.geometry.addEventListener("dispose", () => { disposed.geometry += 1; });
+  layer.object.material.addEventListener("dispose", () => { disposed.material += 1; });
+  layer.object.addEventListener("dispose", () => { disposed.instances += 1; });
+  layer.dispose();
+  layer.dispose();
+  assertEqual(JSON.stringify(disposed), JSON.stringify({ geometry: 1, material: 1, instances: 1 }),
+    "HMR/unload disposal must release both shared geometry/material and instance data exactly once");
+  assertEqual(scene.children.length, 0, "disposed atmosphere must leave the scene graph");
+  layer.update(new THREE.PerspectiveCamera(), 0.1,
+    { active: true, unpaused: true, visible: true }, QUALITY_PRESETS.normal);
+  assertEqual(layer.object.visible, false, "a disposed layer must never become visible again");
 });
 
 test("voxel face shading follows the real sun direction", () => {

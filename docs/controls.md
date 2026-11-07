@@ -194,8 +194,17 @@ matte below the wall, so flying high shows a distant atmospheric base instead
 of open sky where chunks are intentionally hidden. Floating-islands worlds
 leave this fake floor disabled so the void remains visible.
 Runtime sky visuals are procedural: the old sunlit skybox remains in the repo
-as a legacy asset, but active worlds render a gradient sky dome with sun/moon
-disks, stars, and cloud bands that stay above the horizon. The world clock
+as a legacy asset, but active worlds render a blue atmospheric dome with warm
+sunward twilight, sun/moon disks, and sparse stars. Clouds are opaque stepped
+voxel banks at world elevation 144–156m, with shaded sides and undersides. Flight
+can pass below, through, or above the layer; horizontal movement reveals real
+parallax. Wind follows active play time, pauses with gameplay/hidden tabs/idle
+hibernation, and resets when entering a world. The Time of Day slider changes
+their lighting without teleporting the banks. All quality presets retain clouds;
+Potato and Low use a shorter cloud horizon, independent from terrain fog and
+chunk distance. A separate atmosphere camera range prevents low quality from
+clipping overhead clouds without loading or revealing additional terrain.
+The world clock
 shifts fog, background, horizon matte, outdoor terrain exposure, and sky/light
 colors together. The sun and moon visuals move through the sky, but the
 directional shadow anchor remains fixed in this first pass so terrain shading

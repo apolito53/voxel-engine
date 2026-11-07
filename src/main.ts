@@ -69,6 +69,7 @@ import {
   type WorldRegistry
 } from "./chunkStorage";
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
+import { CloudLayer } from "./cloudLayer";
 import {
   DEFAULT_CLICK_FIRE_MODE,
   formatClickFireMode,
@@ -644,6 +645,8 @@ scene.add(skyLight);
 
 const skybox = createSkybox(SUN_OFFSET, createProceduralSkyState(dayNightVisualState));
 scene.add(skybox.object);
+const cloudLayer = new CloudLayer(SUN_OFFSET, dayNightVisualState);
+scene.add(cloudLayer.object);
 const horizonMatte = new HorizonMatte(WORLD_FOG_COLOR);
 scene.add(horizonMatte.object);
 const localLightRenderer = new LocalLightRenderer(scene);
@@ -1792,6 +1795,7 @@ function applyDayNightVisuals(): void {
   scene.background = sceneBackgroundColor;
   sceneFog.color.copy(sceneBackgroundColor);
   skybox.setState(createProceduralSkyState(dayNightVisualState));
+  cloudLayer.setState(dayNightVisualState);
   horizonMatte.setColor(sceneBackgroundColor);
 
   sun.intensity = qualityController.preset.sunIntensity * dayNightVisualState.sunIntensityScale;
@@ -2611,6 +2615,11 @@ function animate(): void {
 
   updateSunShadowAnchor();
   skybox.update(camera);
+  cloudLayer.update(camera, delta, {
+    active: inWorld,
+    unpaused: Boolean(player?.active),
+    visible: !document.hidden
+  }, qualityController.preset);
   horizonMatte.update({
     camera,
     inWorld,
@@ -5332,6 +5341,7 @@ async function loadWorld(worldId: string): Promise<void> {
     pauseMenu.classList.add("is-hidden");
     document.body.classList.add("in-world");
     inWorld = true;
+    cloudLayer.reset();
     engineEvents.emit("world:loaded", {
       worldId: activeWorldId,
       name: savedWorld.name,
@@ -5437,6 +5447,7 @@ async function exitToHome(): Promise<void> {
     renderedPartialBlockRevision = -1;
     lastPartialBlockMeshUpdateMs = 0;
     inWorld = false;
+    cloudLayer.reset();
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
     pauseMenu.classList.add("is-hidden");
@@ -5762,6 +5773,7 @@ function disposeRuntime(): void {
   localLightRenderer.dispose();
   horizonMatte.dispose();
   skybox.dispose();
+  cloudLayer.dispose();
   disposeWorldBlockMaterial(worldMaterial);
   disposeWorldBlockMaterial(partialBlockMaterial);
   renderer.renderLists.dispose();

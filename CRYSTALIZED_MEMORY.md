@@ -20,6 +20,12 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   explicit gameplay decision before introducing resource consumption. Persist
   stable item IDs and preserve older world saves. See
   [inventory and persistence](docs/architecture.md#items-inventory-and-persistence).
+- Sky atmosphere, elevated clouds, and terrain visibility have independent
+  distance roles. Clouds occupy fixed world elevation and use elapsed active
+  play time for wind; saved clock edits only affect their lighting. Preserve
+  real depth ordering when flying through/above clouds and the atmosphere
+  camera-range floor on all presets without increasing terrain streaming. See
+  [lighting and sky](docs/architecture.md#lighting-and-sky).
 - Partial-mesh draw caps and reduced rigid-debris solver cadence were tried
   and reverted: their visible cost outweighed the benefit. Reopen performance
   work from a named repro and fresh diagnostics; preserve the lesson before

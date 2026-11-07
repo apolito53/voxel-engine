@@ -236,11 +236,17 @@ trap and recovery errors.
 Locally, Windows / Node `24.22.1` passed all 324 engine robustness tests.
 Later the same day, a [subsequent full CI run](https://github.com/apolito53/voxel-engine/actions/runs/42356216133)
 passed with app/test code unchanged, establishing intermittent outcomes.
+The `v0.19.0` sky-validation pass also reproduced the fast-falling assertion
+and Rapier WASM/recovery errors locally on Windows / Node `24.22.1`, between
+successful 331-test runs with the same physics and test-runner code. The clean
+full-validation retry passed. This behavior is therefore not limited to CI;
+local passing/failing output is retained in ignored
+`logs/sky-overhaul-{tests,validate,validate-rapier-failure}.log`.
 The tests, [rigid-debris owner](src/rigidDebris.ts), test runner, dependencies,
 lockfile, and CI workflow were unchanged by the documentation setup. The root
 cause remains unknown; no physics changes were made.
 
-- Reproduce the intermittent outcomes in the CI environment with locked
+- Reproduce the intermittent outcomes locally and in CI with locked
   dependencies; retain successful and failing results, full Rapier output,
   test identity, and runtime details.
 - Investigate the differing Rapier outcomes in the unchanged fast-fall and

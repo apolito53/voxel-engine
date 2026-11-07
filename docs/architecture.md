@@ -157,6 +157,40 @@ Terrain lighting has several layers with different costs:
 - worker-derived integer block light illuminates terrain and partial cavities;
 - a quality-scaled nearest PointLight pool adds smooth local highlights.
 
+`skybox.ts` owns the far-depth procedural atmosphere, directional twilight,
+celestial disks, and stars. Its shared atmosphere shader also supplies the
+distant color for `cloudLayer.ts`; clouds do not consume terrain fog. The shared
+atmosphere converges to the actual world fog color at the true horizon, lifting
+directional twilight above that seam so the existing fog wall stays continuous.
+The sky
+dome writes at the clip-space far plane, independently of its small physical
+sphere radius. The directional terrain light/shadow rig retains its established
+fixed direction while the visual sun/moon follow the saved world clock.
+
+`CloudLayer` owns render-only, opaque stepped voxel banks at a fixed world
+base of 144m, reaching at most 156m. A deterministic periodic 1024m field emits
+only exposed faces, including across tile seams. Up to nine instances of that
+shared geometry cover the camera's horizontal neighborhood in one draw call;
+tile exchange occurs beyond the independent cloud fade. Recentring changes
+which periodic copies draw, never their world placement or altitude. Potato,
+Low, and Normal-or-higher cloud horizons are 520m, 680m, and 920m respectively.
+The opaque material keeps correct face/terrain depth ordering from below,
+inside, or above banks, while the distant edge blends into the same sky haze.
+
+Cloud wind advances from clamped active, unpaused, visible frame deltas,
+independently of world time. Clock edits only recolor the layer; hidden frames,
+pause, and existing idle hibernation do not accumulate catch-up drift. Cloud
+wind is transient presentation, reset on world entry/exit and excluded from
+saved-world metadata. The reused runtime owns cloud geometry, material, and
+instance-buffer disposal on HMR/unload. Clouds have no collision, picking,
+terrain-light, or shadow-map role.
+
+`qualityPresets.ts` gives every preset an independent 1800m atmosphere camera
+far floor. Effective Custom settings preserve that floor through their base
+preset. Keep it larger than the cloud fade, and keep the fade shorter than a
+cloud tile so replacement copies stay invisible. This projection allowance
+does not alter terrain fog, chunk render/stream/unload radii, or shadow range.
+
 Block-light arrays are derived caches, not saved world truth. Lamp or opaque
 terrain edits dirty affected light bounds. Chunk meshes consume accepted light
 buffers, while partial regions clone the relevant cached light and derive local
