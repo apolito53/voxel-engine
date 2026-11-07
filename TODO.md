@@ -234,12 +234,15 @@ retry stopped at the partial-height-rubble support assertion in
 [tests/run.ts](tests/run.ts). The first attempt also reported a Rapier WASM
 trap and recovery errors.
 Locally, Windows / Node `24.22.1` passed all 324 engine robustness tests.
+Later the same day, a [subsequent full CI run](https://github.com/apolito53/voxel-engine/actions/runs/42356216133)
+passed with app/test code unchanged, establishing intermittent outcomes.
 The tests, [rigid-debris owner](src/rigidDebris.ts), test runner, dependencies,
 lockfile, and CI workflow were unchanged by the documentation setup. The root
 cause remains unknown; no physics changes were made.
 
-- Reproduce the CI environment with locked dependencies and retain the full
-  Rapier failure output, test identity, and runtime details.
+- Reproduce the intermittent outcomes in the CI environment with locked
+  dependencies; retain successful and failing results, full Rapier output,
+  test identity, and runtime details.
 - Investigate the differing Rapier outcomes in the unchanged fast-fall and
   partial-rubble cases, separating the original WASM failure from recovery
   errors before choosing a targeted fix. This does not change the gameplay

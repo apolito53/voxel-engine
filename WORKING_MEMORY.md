@@ -31,9 +31,11 @@ tool availability before future app validation. Docs checks run directly with
 
 ## Remaining Follow-up
 
-Full CI validation remains open: two Ubuntu / Node `22.23.4` attempts failed in
-different unchanged rigid-debris tests before docs checks or the build. The
-cause is unknown; no physics changes were made. Reproduction and evidence are
+On 2026-11-07, two Ubuntu / Node `22.23.4` CI attempts failed in different
+rigid-debris tests before docs checks or the build. A
+[subsequent full CI run](https://github.com/apolito53/voxel-engine/actions/runs/42356216133)
+passed with app/test code unchanged. The intermittent cause is unknown; no
+physics changes were made. Investigation and prior failure evidence are
 tracked in [TODO: CI Rigid-Debris Validation](TODO.md#development-follow-up-ci-rigid-debris-validation).
 
 The existing logger is useful but has verified standard gaps. Concrete work is
@@ -50,5 +52,4 @@ clean check. All 92 original idea bullets in SPITBALL remain verbatim.
 
 `node scripts/run_tests.mjs` passed all 324 engine robustness tests locally on
 Windows / Node `24.22.1`, including the CI's first failing fast-fall case. Its
-output is retained in ignored `logs/ci-test-repro-20261107.log`. This local
-result does not resolve the differing Ubuntu / Node 22 CI failures.
+output is retained in ignored `logs/ci-test-repro-20261107.log`.
