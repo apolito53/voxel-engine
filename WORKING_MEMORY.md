@@ -1,61 +1,48 @@
 # Working Memory
 
-Current handoff: 2026-11-07, cloud shadows for `v0.19.1`.
+Current handoff: 2026-11-07, darker cloud shadows for `v0.19.2`.
 
 ## Current State
 
-The real 144–156m voxel clouds now cast gentle moving daytime shade through
-the existing directional sun shadow map. `src/cloudLayer.ts` owns the visible
-and instanced depth materials, stable partial depth coverage, radial shadow-map
-edge fade, active-time wind, reset, and disposal. `src/shadows.ts` owns daylight
-gating and the depth-range policy. Cloud shadows change no terrain receiver
-shader, Lamp emission, derived block light, sun direction, orthographic map
-width/resolution, terrain fog, streaming radius, or saved world data.
+Cloud shadows now use 100% maximum daytime depth coverage instead of 60%, so
+patch interiors read darker. This is a small tuning change in
+`src/shadows.ts`; the existing daylight fade and radial fade across the shadow
+map's outer 35% remain. The owned instanced depth material in
+`src/cloudLayer.ts` retains stable ordered coverage for those fades.
 
-`Settings > Graphics > Cloud Shadows` defaults on for Normal and higher and off
-for Potato/Low. Edits fork into Custom; its preference persists separately from
-global Shadow Quality. Global shadows Off disables the checkbox while retaining
-its check state and explaining why. Off/night skip the cloud depth draw and
-restore the original sun rig. When active, the sun moves farther along its
-existing direction and far extends by exactly that amount, preserving terrain
-coverage while containing the tilted cloud-plane intersections. Custom shadows
-enabled from a Potato/Low base also gain visible shadow intensity.
-
-The `v0.19.0` procedural atmosphere, fixed cloud altitude, active-time wind,
-all-preset clouds, and independent 1800m atmosphere camera floor remain in
-place. See [lighting and sky](docs/architecture.md#lighting-and-sky) and
-[controls](docs/controls.md#settings) for the owning contracts.
+The shared directional shadow map, sun-shadow strength, tilted depth-range
+policy, terrain receivers, Lamp emission, block light, cloud geometry/wind, and
+terrain streaming remain unchanged. Cloud Shadows still defaults on for Normal
+and higher and off for Potato/Low. Its Custom preference survives global shadows
+being off, and off/night skips cloud casting and restores the original sun rig.
+See [lighting and sky](docs/architecture.md#lighting-and-sky) and
+[settings](docs/controls.md#settings) for the owning contracts.
 
 ## Verification And Delivery
 
-Full local validation passed on the first run with all 335 engine robustness
-tests: typecheck, 106-file source hygiene, 17-file Markdown links, production
-build, and whitespace checks. New coverage includes defaults/backward-compatible
-preferences, malformed flags and round-trip storage, Low-based Custom shadow
-strength, daylight/caster gates, continued wind when disabled, the standard
-instanced depth vertex path, owned depth-material disposal, and every tilted
-frustum corner across preset bounds. The known large vendor chunk warning
-remains. npm is absent from PATH; the installed Node plus the previous temporary
-npm CLI/shim ran validation. Output is in ignored
-`logs/cloud-shadows-validate.log`.
+Full local validation passed on its first run: all 335 engine robustness tests,
+typecheck, 106-file source hygiene, 17-file Markdown links, production build, and
+whitespace checks. The existing cloud-casting test now requires full noon depth
+coverage while retaining dawn/night, global shadows, toggle, wind, and lifecycle
+checks. The known vendor chunk-size warning remains. Output is retained in
+ignored `logs/cloud-shadows-darker-validate.log`; the previous temporary npm shim
+was reused because npm is absent from PATH.
 
-In-app browser review confirmed stepped cloud shade on terrain at noon without
-a hard square boundary or WebGL errors. On/off captures show the shade being
-removed; the menu checkbox works and its opt-out survives reload. Global Shadow
-Quality Off disables the control while retaining its checked preference across
-reload, and restoring Normal enables it again. Midnight review also passed
-without runtime errors. Implementation and code review are complete; remote
-branch and configured delivery status are checked during Git delivery.
-Review uses the separate local
-`Sky Review` world and ignored evidence under
-`logs/visual-runs/2026-11-07-cloud-shadows/`, preserving existing played saves.
-The reserved Vite `127.0.0.1:5173` and collector `127.0.0.1:5174` services
-were reused; no ports or services changed.
+An in-app browser comparison in the separate `Sky Review` world matched the
+previous noon/Normal view at feet `(-160, 110, 157)`, yaw `0`, pitch `-0.85`.
+Shadow interiors are visibly darker, the outer fade stays soft, and no WebGL or
+runtime errors were reported. Evidence is retained in ignored
+`logs/visual-runs/2026-11-07-cloud-shadows-darker/`. The earlier `v0.19.1`
+review verified the unchanged toggle, persistence, global-shadow gate, and night
+behavior. Implementation and review are complete; remote branch and configured
+delivery status are checked during Git delivery. Reserved Vite
+`127.0.0.1:5173` and collector `127.0.0.1:5174` services were reused; no ports
+or services changed.
 
 ## Remaining Follow-up
 
-No additional gameplay or sky work is selected by this completed implementation.
-The [current gameplay shortlist](TODO.md#current-recommended-next-slice) remains
+No further gameplay or sky tuning is selected. The
+[current gameplay shortlist](TODO.md#current-recommended-next-slice) remains
 equipment/pickup gameplay and sound work. Existing
 [local-logger gaps](TODO.md#development-follow-up-local-diagnostics) and
 [intermittent Rapier/CI validation failures](TODO.md#development-follow-up-ci-rigid-debris-validation)

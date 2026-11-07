@@ -12,7 +12,7 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const FALLBACK_UP = new THREE.Vector3(0, 0, 1);
 const SHADOW_NEAR_METERS = 0.5;
 const CLOUD_CASTER_DEPTH_MARGIN_METERS = 4;
-export const CLOUD_SHADOW_MAX_COVERAGE = 0.6;
+export const CLOUD_SHADOW_MAX_COVERAGE = 1;
 export const CLOUD_SHADOW_FULL_RADIUS = 0.65;
 
 export type DirectionalShadowDepthRange = {

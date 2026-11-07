@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.2 - 2026-11-07
+
+### Changed
+
+- Darkened moving cloud shadows by increasing maximum daytime caster coverage
+  from 60% to 100%. Patch interiors now have solid shadow coverage while the
+  existing soft map boundary, daylight fade, and cloud-shadow settings remain.
+  Sun-shadow strength, terrain receivers, Lamp emission, and block light are
+  unchanged.
+
+### Validation
+
+- Updated the existing cloud-casting test to require full noon coverage while
+  retaining dawn, night, global-shadow, and dedicated-toggle checks.
+- Full local validation passes with all 335 engine robustness tests.
+
 ## 0.19.1 - 2026-11-07
 
 ### Added

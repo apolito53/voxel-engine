@@ -14259,7 +14259,7 @@ test("cloud casting follows daylight and quality while retaining cloud motion an
   const midnight = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0 }));
   const dawn = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.25 }));
   const coverage = getCloudShadowCoverage(QUALITY_PRESETS.normal, noon);
-  assert(coverage > 0 && coverage < 1, "clouds should add partial daytime shade, not black out the sun");
+  assert(coverage >= 0.99 && coverage <= 1, "noon cloud interiors should fully occlude direct sunlight");
   assert(getCloudShadowCoverage(QUALITY_PRESETS.normal, dawn) < coverage,
     "dawn should fade cloud shade with the daylight");
   assertEqual(getCloudShadowCoverage(QUALITY_PRESETS.normal, midnight), 0,

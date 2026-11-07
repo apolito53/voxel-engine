@@ -143,7 +143,7 @@ Pause menu `Settings` is split into three tabs.
 - Quality preset
 - Fog start distance
 - Shadow quality
-- Cloud Shadows toggle for gentle moving daytime shade; requires Shadow
+- Cloud Shadows toggle for pronounced moving daytime shade; requires Shadow
   Quality above Off and retains its saved preference while global shadows are off
 - Minimum/Maximum Light Level, a rendered block-light clamp over the underlying
   0..15 Lamp light field
@@ -212,6 +212,8 @@ active, and fades its shade out before the nearby map boundary. Turning it off,
 setting Shadow Quality to Off, or reaching night skips that caster draw; visible
 clouds and their wind continue. Shadows affect direct sunlight rather than
 Lamp emission or the derived block-light field.
+Daytime patch interiors use full shadow coverage for darker shade, while
+daylight and coverage-edge fades preserve the soft boundary.
 The world clock
 shifts fog, background, horizon matte, outdoor terrain exposure, and sky/light
 colors together. The sun and moon visuals move through the sky, but the

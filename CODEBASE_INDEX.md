@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-07 for `v0.19.1`.
+Last reviewed: 2026-11-07 for `v0.19.2`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read

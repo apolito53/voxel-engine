@@ -186,13 +186,14 @@ materials, and instance-buffer disposal on HMR/unload. Clouds have no collision,
 picking, or voxel-light role.
 
 Cloud shadows reuse the one existing directional sun map and the cloud mesh's
-real moving instance transforms. `shadows.ts` gates partial cloud coverage by
+real moving instance transforms. `shadows.ts` gates cloud depth coverage by
 the separately saved Cloud Shadows preference, global shadows, and daylight.
 Normal and higher default on; Potato/Low default off. The Custom checkbox
 preference survives global shadows being off. Off/night set `castShadow=false`,
 omitting the cloud depth draw without removing visible clouds or their wind.
 The owned `MeshDepthMaterial` preserves Three's standard instanced vertex path;
-stable ordered coverage gives gentle shade through the existing PCF filter.
+daytime patch interiors use full depth coverage for pronounced shade, while
+stable ordered coverage softens daylight/edge fades through the existing PCF filter.
 Cloud depth coverage fades radially through the map's outer 35%, preventing a
 hard square footprint without changing terrain receiver shaders. Clouds do not
 receive shadows. Lamp emission, local PointLight spill, and block light remain

@@ -313,7 +313,7 @@ export class CloudLayer {
           if (cloudThreshold >= cloudShadowCoverage * cloudEdgeFade) discard;
         `);
     };
-    // Stable ordered shadow-texel coverage gives translucent-looking shade
+    // Stable ordered shadow-texel coverage softens daylight and edge fades
     // through the existing PCF filter, without blending depth or a second map.
     // Its radial edge fade cannot reveal the map's hard square boundary.
     material.customProgramCacheKey = () => "voxel-cloud-depth-v1";
