@@ -75,8 +75,10 @@ coverage from instructions alone.
 - Behavior changes, including shared helpers: run the smallest useful tests for
   the changed behavior, affected direct consumers, and shared contracts, plus
   relevant lint or `npm.cmd run typecheck`. Use the same checks during iteration
-  and at ordinary commit or push. `npm.cmd run test` runs the full test suite
-  and does not filter tests by argument.
+  and at ordinary commit or push. Choose native groups or title selectors from
+  [the testing guide](docs/testing.md); `npm.cmd run test:focused` runs only
+  selected engine cases. `npm.cmd run test` retains the full gate and rejects
+  arguments. Keep group ownership and its documented command map current.
 - A planned milestone or release checkpoint or a broad, high-risk, or
   shared-infrastructure change can justify `npm.cmd run validate`. Run checks
   explicitly requested by the task. A build, deployment, ordinary commit, or
@@ -88,7 +90,8 @@ coverage from instructions alone.
   affected, including worker, rendering, lighting, or pointer-lock behavior.
   Use Chrome for pointer lock and first-person feel.
 
-Use [CODEBASE_INDEX.md](CODEBASE_INDEX.md#validation) for the validation map.
+Use [docs/testing.md](docs/testing.md) for the system-to-command map and
+[CODEBASE_INDEX.md](CODEBASE_INDEX.md#validation) for validation routing.
 Do not search generated `node_modules/`, `dist/`, or `.test-dist/` during routine
 source discovery. Keep `.env.local`, `.vercel/`, tokens, and other secrets out
 of output and commits.

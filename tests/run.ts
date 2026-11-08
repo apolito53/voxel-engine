@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { menuNavigationTests } from "./menuNavigation";
+import { runSelectedTests } from "../scripts/test_selection.mjs";
 import {
   BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
   BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
@@ -15153,14 +15154,7 @@ function createSunGlareTestHarness() {
 
 tests.push(...menuNavigationTests);
 
-let passed = 0;
-for (const { name, run } of tests) {
-  await run();
-  passed += 1;
-  console.log(`ok ${passed} - ${name}`);
-}
-
-console.log(`\n${passed}/${tests.length} engine robustness tests passed`);
+await runSelectedTests(tests, process.argv.slice(2));
 
 function isPowerOfTwo(value: number): boolean {
   return Number.isInteger(value) && value > 0 && (value & (value - 1)) === 0;

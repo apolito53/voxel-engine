@@ -266,6 +266,8 @@ For the full control map, builder tools, settings tabs, and quality presets, see
 
 ## Deeper Docs
 
+- [docs/testing.md](docs/testing.md): focused system groups/title selectors,
+  group discovery, and full/browser verification boundaries.
 - [docs/controls.md](docs/controls.md): movement, item/block lanes, builder
   tools, settings, debug keys, and quality presets.
 - [docs/architecture.md](docs/architecture.md): engine ownership, runtime flow,
@@ -290,6 +292,8 @@ scope yet.
 ## Development Checks
 
 ```powershell
+npm.cmd run test:menus
+npm.cmd run test:focused -- --group player --group partial-terrain
 npm.cmd run typecheck
 npm.cmd run source:check
 npm.cmd run docs:check
@@ -297,6 +301,12 @@ npm.cmd run test
 npm.cmd run build
 git diff --check
 ```
+
+Choose focused checks with [the testing guide](docs/testing.md), including
+discovery via `npm.cmd run test:focused -- --list`. Focused commands execute only
+selected engine cases; choose typechecking, docs, or browser checks separately
+for the affected contracts. `npm.cmd run test` accepts no selection arguments
+and retains the full gate, including selector regression tests.
 
 `npm.cmd run test` also runs the Markdown docs-link check, so broken local
 entry-document, instruction, memory, planning, and focused-doc references fail

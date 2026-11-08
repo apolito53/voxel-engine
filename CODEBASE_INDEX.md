@@ -31,6 +31,8 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 - Dev server only: `npm.cmd run dev -- --port 5173`
 - Log receiver only: `npm.cmd run debug:logs`
 - Type check: `npm.cmd run typecheck`
+- Focused tests: `npm.cmd run test:focused -- --group <name>`;
+  [system-to-command map](docs/testing.md#focused-engine-tests).
 - Tests and docs checks: `npm.cmd run test`
 - Production build: `npm.cmd run build`
 - Full local gate: `npm.cmd run validate`
@@ -62,6 +64,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Browser automation and visual runs | [src/codexPilot.ts](src/codexPilot.ts) | [src/testAvatar.ts](src/testAvatar.ts), [src/visualTestScenarios.ts](src/visualTestScenarios.ts), [docs/automation.md](docs/automation.md) |
 | Nova Pilot and Terminal | [src/novaPilot.ts](src/novaPilot.ts) | [src/novaContext.ts](src/novaContext.ts), [src/novaChat.ts](src/novaChat.ts), [docs/nova-companion.md](docs/nova-companion.md) |
 | Procedural audio and settings | [src/audioEngine.ts](src/audioEngine.ts) | [src/audioSettings.ts](src/audioSettings.ts) |
+| Focused tests, group ownership, selector tooling | [docs/testing.md](docs/testing.md) | [scripts/test_groups.mjs](scripts/test_groups.mjs), [scripts/test_selection.mjs](scripts/test_selection.mjs), [tests/test_selection.test.mjs](tests/test_selection.test.mjs) |
 
 ## Ownership Boundaries
 
@@ -159,8 +162,10 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 - Behavior changes, including shared helpers: run the smallest useful tests for
   the changed behavior, affected direct consumers, and shared contracts, plus
   relevant lint or `npm.cmd run typecheck`. Use the same checks during iteration
-  and at ordinary commit or push. `npm.cmd run test` runs the full test suite
-  and does not filter tests by argument.
+  and at ordinary commit or push. Choose groups/title selectors from
+  [the testing guide](docs/testing.md). `npm.cmd run test:focused` runs selected
+  engine cases; `npm.cmd run test` keeps the full gate and rejects arguments.
+  `npm.cmd run test:groups` checks ownership coverage without running cases.
 - Docs-only change: `npm.cmd run docs:check` and `git diff --check`.
 - A planned milestone or release checkpoint or a broad, high-risk, or
   shared-infrastructure change can justify `npm.cmd run validate`. Run checks
@@ -180,6 +185,8 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 ## Deeper References
 
 - [docs/README.md](docs/README.md): focused documentation index.
+- [docs/testing.md](docs/testing.md): focused system groups, selectors, discovery,
+  and full/browser verification boundaries.
 - [docs/architecture.md](docs/architecture.md): runtime contracts, subsystem
   boundaries, bolt-on direction, and parked architecture decisions.
 - [docs/controls.md](docs/controls.md): controls, settings, builder, and quality.

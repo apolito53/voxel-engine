@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Development
+
+- Added focused engine-test groups and literal title selectors, with discovery,
+  complete ownership checks, strict argument errors, and lightweight npm aliases.
+- Kept the full test/validation gate, added selector regressions, and made its
+  full-test entry reject selection arguments with a focused-command hint.
+
 ## 0.21.1 - 2026-11-07
 
 ### Changed

@@ -2,6 +2,8 @@
 
 This folder keeps the living design notes out of the project front door.
 
+- [testing.md](testing.md): system-to-command map, native groups/title selectors,
+  discovery/coverage checks, and full/browser verification boundaries.
 - [architecture.md](architecture.md): runtime ownership, subsystem contracts,
   worker/main-thread boundaries, extraction seams, and parked architecture
   decisions that are too detailed for the root codebase index.
