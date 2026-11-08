@@ -25,6 +25,9 @@ worktree when necessary.
 - Executable behavior belongs to the focused owners in `src/`, runtime and
   validation tooling in `scripts/`, and server handlers in `api/`. Confirm
   changeable claims against their owning source.
+- Maintain [player release notes](PLAYER_CHANGELOG.md) alongside production
+  releases. The start and pause menus display these; `CHANGELOG.md` retains the
+  technical history.
 - [CODEBASE_INDEX.md](CODEBASE_INDEX.md) is the compact task router and
   ownership map. Keep it below 30,000 bytes, with lines no longer than 320
   characters. Update affected routes when owners or entry points change.

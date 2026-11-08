@@ -57,3 +57,8 @@ Implementation, source review, and visual verification are complete for normal
 `main` delivery. Git history and configured CI/deployment results remain the
 publication records. Existing local logger gaps remain tracked once in
 [TODO](TODO.md#development-follow-up-local-diagnostics).
+
+The existing start/pause Release Notes reader now uses the separate
+[player-facing changelog](PLAYER_CHANGELOG.md); keep it current for production
+releases. Typecheck, production build, documentation links, and a local browser
+check of the formatted start-menu notes passed for this change.

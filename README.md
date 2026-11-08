@@ -1,5 +1,8 @@
 # Voxel Sandbox Engine
 
+The start and pause menus open [player-friendly release notes](PLAYER_CHANGELOG.md).
+Update them alongside production releases; the technical history remains in [CHANGELOG.md](CHANGELOG.md).
+
 For project work, start with [AGENTS.md](AGENTS.md).
 [WORKING_MEMORY.md](WORKING_MEMORY.md) is the current handoff;
 [CRYSTALIZED_MEMORY.md](CRYSTALIZED_MEMORY.md) preserves lasting decisions.

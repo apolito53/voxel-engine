@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import changelogMarkdown from "../CHANGELOG.md?raw";
+import changelogMarkdown from "../PLAYER_CHANGELOG.md?raw";
 import packageManifest from "../package.json";
 import "./style.css";
 import {
