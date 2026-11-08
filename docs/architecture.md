@@ -175,6 +175,52 @@ face colors retain only neutral ambient, upward sky fill and underside darkness;
 sealed/cut shading, Lamp emission and block light keep their separate contracts.
 Clock updates do not schedule chunk or partial-terrain mesh jobs.
 
+`sunGlare.ts` owns the optional camera optical effect. The existing scene draws
+directly to the canvas with its original antialiasing and color conventions;
+the procedural sky/cloud shaders already author display RGB, whereas standard
+materials own their output conversion. Glare therefore screen-blends a warm
+halo, veil, and narrow horizontal streak over that finished image without a
+full-scene color target, HDR/tone-mapping change, or second output conversion.
+DOM menus and HUD remain outside the effect. Its projection consumes the same
+live unit solar vector and camera projection as the disk, with alignment,
+frame-edge, true-horizon, daylight, and world-activity gates. Golden-hour
+twilight/solar elevation warms the optical contribution. The effect does not
+change world light, shadows, terrain streaming, or worker jobs.
+
+Default-on Glare Occlusion renders the real scene/materials into a fixed
+32x32 target cropped around the angular disk. The query camera keeps the main
+camera's exact world/view transforms, near/far planes, and cloud-distance
+origin; only its projection changes. Standard and partial terrain, instanced
+debris, solid objects, alpha-tested surfaces, and opaque cloud banks retain
+their actual depth/discard behavior. The sky writes no depth, so clear depth
+1 marks exposed disk rays. Intentional `depthWrite=false` guides, glows,
+poofs, beams, previews, and the horizon matte are non-solid and do not occlude.
+
+A one-pixel GPU reduction weights 256 depth samples over the actual angular
+disk, then two byte targets smooth partial exposure without CPU readback.
+Completely blocked disks extinguish every glare component immediately; byte
+history snaps near its target to avoid a permanent quantized leak. World
+changes, teleports, large projected solar/camera jumps, and toggle changes
+invalidate history. Explicit Codex Pilot diagnostics may read that one pixel;
+ordinary frames never do. The small target bounds fragment work and storage,
+but the extra scene traversal and submitted vertices still cost CPU/GPU work,
+especially for uncullable cloud/debris instance batches. Renderer counters
+retain the original main-scene/shadow-reset baseline, then accumulate query,
+reduction, and overlay so F3/logs report the actual additional work consistently.
+
+Disabling occlusion releases/skips its depth and history targets while keeping
+the optical overlay; strength zero releases all effect-owned resources and
+uses the original single-render path. Tiny target dimensions stay fixed over
+resize/DPR/quality changes, while crop and optical aspect use the live camera
+and drawing buffer. Renderer target, viewport/scissor, clear policy, shadow
+update flags, and counter ownership restore through `finally`; the extra view
+never updates shadow maps. HMR/unload releases owned geometry/materials/targets,
+context restoration recreates them lazily, and a failed supplemental pass
+falls back to the existing scene renderer and emits one bounded diagnostic
+through the existing local collector. Normal scene errors keep their
+existing reporting path. Controls/persistence live with quality settings;
+Normal and higher use 100%, Low 65%, Potato Off, with occlusion defaulting on.
+
 `CloudLayer` owns render-only, opaque stepped voxel banks at a fixed world
 base of 144m, reaching at most 156m. A deterministic periodic 1024m field emits
 only exposed faces, including across tile seams. Up to nine instances of that

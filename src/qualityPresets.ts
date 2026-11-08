@@ -31,6 +31,8 @@ export type QualityPreset = {
   readonly shadowNormalBias: number;
   readonly shadowIntensity: number;
   readonly cloudShadows: boolean;
+  readonly sunGlareStrength: number;
+  readonly sunGlareOcclusion: boolean;
   readonly fogStartRadius: number;
   readonly fogFalloffRadius: number;
   readonly fogHiddenRadius: number;
@@ -60,11 +62,13 @@ export type QualityPreset = {
 type QualityPresetRuntimeFields = "fogNear" | "fogFar" | "cameraFar" | "renderRadius" | "loadRadius" | "unloadRadius";
 type QualityPresetDefinition = Omit<
   QualityPreset,
-  QualityPresetRuntimeFields | "blockLightMinLevel" | "blockLightMaxLevel"
+  QualityPresetRuntimeFields | "blockLightMinLevel" | "blockLightMaxLevel" | "sunGlareStrength" | "sunGlareOcclusion"
 > & {
   readonly minCameraFar: number;
   readonly blockLightMinLevel?: number;
   readonly blockLightMaxLevel?: number;
+  readonly sunGlareStrength?: number;
+  readonly sunGlareOcclusion?: boolean;
 };
 
 // The player-facing render distance is the clear-view radius. Fog reaches full
@@ -91,7 +95,9 @@ function createQualityPreset(definition: QualityPresetDefinition): QualityPreset
     loadRadius,
     unloadRadius: loadRadius + 1,
     blockLightMinLevel: Math.min(blockLightMinLevel, blockLightMaxLevel),
-    blockLightMaxLevel: Math.max(blockLightMinLevel, blockLightMaxLevel)
+    blockLightMaxLevel: Math.max(blockLightMinLevel, blockLightMaxLevel),
+    sunGlareStrength: definition.sunGlareStrength ?? 100,
+    sunGlareOcclusion: definition.sunGlareOcclusion ?? true
   };
 }
 
@@ -107,6 +113,7 @@ function normalizePresetBlockLightLevel(value: unknown, fallback: number): numbe
 export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
   potato: createQualityPreset({
     label: "Potato",
+    sunGlareStrength: 0,
     distanceScale: 0.5,
     pixelRatioLimit: 1,
     shadows: false,
@@ -137,6 +144,7 @@ export const QUALITY_PRESETS: Record<QualityPresetId, QualityPreset> = {
   }),
   low: createQualityPreset({
     label: "Low",
+    sunGlareStrength: 65,
     distanceScale: 1,
     pixelRatioLimit: 1,
     shadows: false,

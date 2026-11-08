@@ -263,6 +263,21 @@
                   value="2"
                 />
               </label>
+              <label class="settings-field" for="sun-glare-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Sun Glare</span>
+                  <span id="sun-glare-value" class="settings-value">100%</span>
+                </span>
+                <input id="sun-glare-slider" class="range-input" type="range" min="0" max="200" step="5" value="100" aria-describedby="sun-glare-hint" />
+                <span id="sun-glare-hint" class="settings-toggle-hint">Warm camera glow when looking toward the sun. Slide to zero to turn it off.</span>
+              </label>
+              <label class="settings-toggle" for="sun-glare-occlusion-toggle">
+                <span class="settings-toggle-copy">
+                  <span class="settings-toggle-title">Glare Occlusion</span>
+                  <span id="sun-glare-occlusion-hint" class="settings-toggle-hint">Terrain, clouds, and solid objects block sun glare.</span>
+                </span>
+                <input id="sun-glare-occlusion-toggle" class="toggle-input" type="checkbox" checked aria-describedby="sun-glare-occlusion-hint" />
+              </label>
               <label class="settings-field" for="block-light-min-slider">
                 <span class="settings-label-row">
                   <span class="settings-label">Minimum Light Level</span>

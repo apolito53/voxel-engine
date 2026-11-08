@@ -6,6 +6,12 @@ import type { PlayerController } from "./player";
 import { PLAYER_HEIGHT } from "./playerMovement";
 import type { VoxelWorld } from "./world";
 import type { CloudShadowDebugSnapshot } from "./cloudShadowDebug";
+import type { SunGlareDebugSnapshot } from "./sunGlare";
+
+export type CodexPilotSunGlareSettings = {
+  readonly strength?: number;
+  readonly occlusion?: boolean;
+};
 
 export const CODEX_PILOT_GLOBAL_NAME = "__VOXEL_CODEX_PILOT__";
 
@@ -94,6 +100,8 @@ export type CodexPilotPlayResult = {
 export type CodexPilotApi = {
   snapshot(): CodexPilotSnapshot;
   cloudShadowGuides(enabled?: boolean): CloudShadowDebugSnapshot | null;
+  /** Settings apply on the next frame; the snapshot always describes the last rendered frame. */
+  sunGlare(settings?: CodexPilotSunGlareSettings): SunGlareDebugSnapshot | null;
   startPass(label?: string): PerformanceHitchLogPass | null;
   run(command: string): AdminCommandResult;
   superflat(): Promise<CodexPilotSnapshot>;
@@ -121,6 +129,8 @@ export type CodexPilotHooks = {
   getCoreAimPreviewEnabled(): boolean;
   getCloudShadowDebugSnapshot?(): CloudShadowDebugSnapshot;
   setCloudShadowDebugEnabled?(enabled: boolean): void;
+  getSunGlareSnapshot?(): SunGlareDebugSnapshot;
+  setSunGlare?(settings: CodexPilotSunGlareSettings): void;
   setCoreAimPreviewEnabled(enabled: boolean): void;
   resumePlayer(): void;
   startHitchPass(label?: string): PerformanceHitchLogPass;
@@ -149,6 +159,13 @@ export class CodexPilot {
           this.hooks.noteActivity();
         }
         return this.hooks.getCloudShadowDebugSnapshot?.() ?? null;
+      },
+      sunGlare: (settings) => {
+        if (settings) {
+          this.hooks.setSunGlare?.(settings);
+          this.hooks.noteActivity();
+        }
+        return this.hooks.getSunGlareSnapshot?.() ?? null;
       },
       startPass: (label) => this.startPass(label),
       run: (command) => this.run(command),

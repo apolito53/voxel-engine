@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.20.0 - 2026-11-07
+
+### Added
+
+- Warm camera sun glare with a broad amber halo, soft lens veil, and restrained
+  horizontal streak. It follows the same solar direction as the visible disk,
+  grows warmer around golden hour, and fades away off-axis or at night.
+- `Settings > Graphics > Sun Glare` controls strength from Off to 200%.
+  Separate `Glare Occlusion`, enabled by default, lets actual rendered terrain,
+  carved openings, cloud banks, and solid objects cover all or part of the disk.
+- A small Codex Pilot control/snapshot exposes sun projection and measured
+  visibility for repeatable visual checks.
+
+### Rendering
+
+- The original scene still renders directly to the canvas, preserving its
+  existing colors and antialiasing. Optical glare blends over that image and
+  leaves DOM menus and HUD sharp.
+- Occlusion uses a fixed 32px cropped scene-depth query and tiny GPU visibility
+  history. Disabling occlusion skips that work; turning glare off restores the
+  original single scene draw without effect targets or fullscreen passes.
+- Transparent visual guides, glows, and trails that intentionally do not write
+  scene depth remain non-solid. Solid geometry and opaque clouds block glare.
+
 ## 0.19.4 - 2026-11-07
 
 ### Fixed

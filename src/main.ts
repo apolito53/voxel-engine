@@ -210,6 +210,7 @@ import {
   type InventoryState
 } from "./inventory";
 import { SUN_OFFSET, getDirectSunHorizonFade, getSolarDirection } from "./lighting";
+import { SunGlare } from "./sunGlare";
 import { LocalLightRenderer } from "./localLightRenderer";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
@@ -316,10 +317,14 @@ import {
   RENDER_DISTANCE_STEP,
   SHADOW_QUALITY_MAX_LEVEL,
   SHADOW_QUALITY_MIN_LEVEL,
+  SUN_GLARE_STRENGTH_MIN,
+  SUN_GLARE_STRENGTH_MAX,
+  SUN_GLARE_STRENGTH_STEP,
   formatBlockLightLevel,
   formatBlockFragmentCount,
   formatRenderDistance,
   formatShadowQuality,
+  formatSunGlareStrength,
   getShadowQualityLevel
 } from "./qualitySettings";
 import { voxelRaycast, type VoxelRaycastHit } from "./raycast";
@@ -547,6 +552,10 @@ const physicsBudgetSlider = requireElement<HTMLInputElement>("#physics-budget-sl
 const despawnObjectsButton = requireElement<HTMLButtonElement>("#despawn-objects-button");
 const shadowQualitySlider = requireElement<HTMLInputElement>("#shadow-quality-slider");
 const shadowQualityValue = requireElement<HTMLElement>("#shadow-quality-value");
+const sunGlareSlider = requireElement<HTMLInputElement>("#sun-glare-slider");
+const sunGlareValue = requireElement<HTMLElement>("#sun-glare-value");
+const sunGlareOcclusionToggle = requireElement<HTMLInputElement>("#sun-glare-occlusion-toggle");
+const sunGlareOcclusionHint = requireElement<HTMLElement>("#sun-glare-occlusion-hint");
 const blockLightMinSlider = requireElement<HTMLInputElement>("#block-light-min-slider");
 const blockLightMinValue = requireElement<HTMLElement>("#block-light-min-value");
 const blockLightMaxSlider = requireElement<HTMLInputElement>("#block-light-max-slider");
@@ -624,6 +633,9 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
+const sunGlare = new SunGlare(renderer, (error) => {
+  recordRuntimeRenderDiagnostic("sun-glare-disabled", { error: serializeRuntimeError(error) });
+});
 
 const WORLD_FOG_COLOR = 0xb6d8ee;
 
@@ -969,6 +981,12 @@ const codexPilot = new CodexPilot({
   getCoreAimPreviewEnabled: () => coreAimPreviewEnabled,
   getCloudShadowDebugSnapshot: () => cloudShadowDebug.snapshot(),
   setCloudShadowDebugEnabled: setCloudShadowGuidesEnabled,
+  getSunGlareSnapshot: () => sunGlare.snapshot(),
+  setSunGlare: (settings) => {
+    if (settings.strength !== undefined) qualityController.setSunGlareStrength(settings.strength);
+    if (settings.occlusion !== undefined) qualityController.setSunGlareOcclusionEnabled(settings.occlusion);
+    sunGlare.reset();
+  },
   setCoreAimPreviewEnabled,
   resumePlayer: () => requirePlayer().resume(),
   startHitchPass: (label) => performanceHitchLog.startPass(label),
@@ -1078,6 +1096,7 @@ installRuntimeRenderDiagnostics();
 
 function installRuntimeRenderDiagnostics(): void {
   renderer.domElement.addEventListener("webglcontextlost", (event) => {
+    sunGlare.handleContextLoss();
     // If WebGL dies while the DOM menu still works, the normal frame/hitch
     // path may stop giving us useful evidence. Keep this breadcrumb tiny and
     // local so the next log review can distinguish a renderer context loss
@@ -1091,6 +1110,7 @@ function installRuntimeRenderDiagnostics(): void {
   }, eventListenerOptions);
 
   renderer.domElement.addEventListener("webglcontextrestored", () => {
+    sunGlare.handleContextRestore();
     recordRuntimeRenderDiagnostic("webgl-context-restored", {
       canvasWidth: renderer.domElement.width,
       canvasHeight: renderer.domElement.height
@@ -1280,6 +1300,13 @@ function wireMenuControls(): void {
   despawnObjectsButton.addEventListener("click", clearToys, eventListenerOptions);
   shadowQualitySlider.addEventListener("input", () => {
     qualityController.setShadowQualityLevel(shadowQualitySlider.value);
+  }, eventListenerOptions);
+  sunGlareSlider.addEventListener("input", () => {
+    qualityController.setSunGlareStrength(sunGlareSlider.value);
+  }, eventListenerOptions);
+  sunGlareOcclusionToggle.addEventListener("change", () => {
+    qualityController.setSunGlareOcclusionEnabled(sunGlareOcclusionToggle.checked);
+    sunGlare.reset();
   }, eventListenerOptions);
   blockLightMinSlider.addEventListener("input", () => {
     qualityController.setBlockLightMinLevel(blockLightMinSlider.value);
@@ -2681,7 +2708,12 @@ function animate(): void {
   novaPilotReactions.update();
   recordTimingSection("otherMs");
   const renderStartedAt = performance.now();
-  renderer.render(scene, camera);
+  const renderQuality = qualityController.preset;
+  sunGlare.render(scene, camera, {
+    inWorld, solarDirection, visual: dayNightVisualState,
+    strength: renderQuality.sunGlareStrength, occlusion: renderQuality.sunGlareOcclusion,
+    deltaSeconds: delta
+  });
   const renderEndedAt = performance.now();
   frameTimingSample.renderMs = renderEndedAt - renderStartedAt;
   const frameEndedAt = performance.now();
@@ -4858,6 +4890,17 @@ function updateSettingsControls(): void {
   shadowQualitySlider.value = String(getShadowQualityLevel(preset.shadows ? preset.shadowMapSize : 0));
   shadowQualityValue.textContent = formatShadowQuality(preset.shadows ? preset.shadowMapSize : 0);
 
+  sunGlareSlider.min = String(SUN_GLARE_STRENGTH_MIN);
+  sunGlareSlider.max = String(SUN_GLARE_STRENGTH_MAX);
+  sunGlareSlider.step = String(SUN_GLARE_STRENGTH_STEP);
+  sunGlareSlider.value = String(preset.sunGlareStrength);
+  sunGlareValue.textContent = formatSunGlareStrength(preset.sunGlareStrength);
+  sunGlareOcclusionToggle.checked = preset.sunGlareOcclusion;
+  sunGlareOcclusionToggle.disabled = preset.sunGlareStrength <= 0;
+  sunGlareOcclusionHint.textContent = preset.sunGlareStrength > 0
+    ? "Terrain, clouds, and solid objects block sun glare."
+    : "Enable Sun Glare to use occlusion. Your preference is saved.";
+
   blockLightMinSlider.min = String(BLOCK_LIGHT_LEVEL_MIN);
   blockLightMinSlider.max = String(BLOCK_LIGHT_LEVEL_MAX);
   blockLightMinSlider.step = String(BLOCK_LIGHT_LEVEL_STEP);
@@ -5397,6 +5440,7 @@ async function loadWorld(worldId: string): Promise<void> {
     document.body.classList.add("in-world");
     inWorld = true;
     cloudLayer.reset();
+    sunGlare.reset();
     cloudShadowDebug.reset();
     engineEvents.emit("world:loaded", {
       worldId: activeWorldId,
@@ -5504,6 +5548,7 @@ async function exitToHome(): Promise<void> {
     lastPartialBlockMeshUpdateMs = 0;
     inWorld = false;
     cloudLayer.reset();
+    sunGlare.reset();
     cloudShadowDebug.reset();
     engineEvents.emit("world:exited", { worldId: null });
     document.body.classList.remove("in-world", "playing");
@@ -5845,6 +5890,7 @@ function disposeRuntime(): void {
   skybox.dispose();
   cloudLayer.dispose();
   cloudShadowDebug.dispose();
+  sunGlare.dispose();
   disposeWorldBlockMaterial(worldMaterial);
   disposeWorldBlockMaterial(partialBlockMaterial);
   renderer.renderLists.dispose();

@@ -143,6 +143,15 @@ shadows, cloud shading, and debug rays share that clock-driven direction;
 terrain meshes keep only neutral ambient/sky/underside shading. Atmosphere
 clipping has a separate minimum camera range, so cloud
 visibility never expands terrain streaming or changes the terrain fog wall.
+`Settings > Graphics > Sun Glare` adds a warm optical halo and soft camera veil
+when looking toward that same sun, with extra amber warmth around golden hour.
+Strength runs from Off to 200%; the separate `Glare Occlusion` toggle defaults
+on so real terrain, carved openings, clouds, and solid objects cover the disk.
+Normal and higher default to 100%, Low to 65%, and Potato to Off. The original
+scene color and HUD stay intact. Occlusion uses a tiny cropped scene-depth pass;
+turning glare off restores the original direct scene draw. See
+[lighting and sky](docs/architecture.md#lighting-and-sky) for the cost and
+transparent-effect boundary.
 `Settings > Graphics > Cloud Shadows` adds pronounced moving daytime shade,
 with solid shadow cores and soft coverage edges, using the existing sun shadow
 map. It defaults on for Normal and higher and off on

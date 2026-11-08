@@ -31,6 +31,10 @@ await globalThis.__VOXEL_CODEX_PILOT__.startPass("label")
 globalThis.__VOXEL_CODEX_PILOT__.cloudShadowGuides(true)
 globalThis.__VOXEL_CODEX_PILOT__.cloudShadowGuides()
 globalThis.__VOXEL_CODEX_PILOT__.cloudShadowGuides(false)
+
+globalThis.__VOXEL_CODEX_PILOT__.sunGlare({ strength: 100, occlusion: true })
+// Wait for a rendered frame before measuring the new setting.
+globalThis.__VOXEL_CODEX_PILOT__.sunGlare()
 ```
 
 `cloudShadowGuides(enabled?)` controls the same saved debug preference as
@@ -43,6 +47,15 @@ The diagnostic respects the graphics/daylight/cloud-horizon gates and never chan
 quality or enables shadow casting itself. Use its coordinates to frame matching
 cloud/terrain views; the guides remain sparse local samples, not depth-map
 pixel ownership. See [settings](controls.md#settings) for the visual key/limits.
+
+`sunGlare(settings?)` changes the same Custom graphics preferences as the
+Sun Glare strength slider (`0..200`, with `0` Off) and separate Glare Occlusion
+checkbox. It returns the last rendered frame's gate, configured strength,
+projected sun UV, alignment, raw/smoothed disk visibility, effective strength,
+and resource/query size. Setter calls therefore return the previous frame;
+wait for a frame and query again to verify the change. The explicit diagnostic
+reads only the one-pixel GPU visibility history; ordinary gameplay never reads
+it back. Use matching time, pose, viewport, and settings for visual comparisons.
 
 Current scripted plays include:
 

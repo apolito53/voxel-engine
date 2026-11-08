@@ -143,6 +143,13 @@ Pause menu `Settings` is split into three tabs.
 - Quality preset
 - Fog start distance
 - Shadow quality
+- Sun Glare strength from Off to 200%, with a warmer halo/veil around golden
+  hour while looking toward the visible sun. Normal and higher use 100%, Low
+  65%, and Potato Off; changing the slider creates Custom settings.
+- Glare Occlusion, on by default and independent of shadow quality. Terrain,
+  surviving partial geometry, opaque clouds, and solid objects block the sun
+  disk, including fractional exposure at edges. Its saved preference survives
+  glare being Off. Transparent glows, previews, and trails remain non-solid.
 - Cloud Shadows toggle for pronounced moving daytime shade; requires Shadow
   Quality above Off and retains its saved preference while global shadows are off
 - Minimum/Maximum Light Level, a rendered block-light clamp over the underlying

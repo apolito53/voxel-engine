@@ -293,10 +293,16 @@ import {
   normalizeQualitySettings,
   normalizeRenderDistance,
   normalizeShadowQualityLevel,
+  normalizeSunGlareStrength,
+  formatSunGlareStrength,
   readQualitySettingsPreference,
   writeQualitySettingsPreference,
   QUALITY_SETTINGS_STORAGE_PREFIX
 } from "../src/qualitySettings";
+import {
+  SunGlare, createSunGlareFrame, configureSunGlareQueryCamera,
+  SUN_GLARE_QUERY_SIZE, type SunGlareInput
+} from "../src/sunGlare";
 import { voxelRaycast } from "../src/raycast";
 import {
   DEFAULT_GROUND_DEBRIS_BUDGET,
@@ -13110,6 +13116,8 @@ test("quality settings clamp custom menu overrides", () => {
       loadRadius: 6,
       shadowMapSize: 2048,
       cloudShadows: true,
+      sunGlareStrength: 100,
+      sunGlareOcclusion: true,
       blockFragmentCount: 108,
       debrisShadows: false,
       blockLightMinLevel: 1,
@@ -14853,6 +14861,294 @@ test("cloud guide preference defaults off and tolerates older, invalid and unava
     else Reflect.deleteProperty(globalThis, "localStorage");
   }
 });
+
+test("sun glare settings inherit the Custom base and preserve separate strength and occlusion", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const stored = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => { stored.set(key, value); }
+  } });
+  try {
+    for (const preset of Object.values(QUALITY_PRESETS)) {
+      const defaults = createDefaultQualitySettings(preset);
+      assertEqual(defaults.sunGlareOcclusion, true, "occlusion must default on on every quality tier");
+      stored.set(`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, JSON.stringify({ loadRadius: 5 }));
+      const legacy = readQualitySettingsPreference("custom", preset);
+      assertEqual(legacy.sunGlareStrength, preset.sunGlareStrength, "old Custom saves inherit their actual base strength");
+      assertEqual(legacy.sunGlareOcclusion, true, "a missing occlusion preference must keep solids opaque");
+      for (const malformed of [null, "", "hello", {}, [], true]) {
+        stored.set(`${QUALITY_SETTINGS_STORAGE_PREFIX}custom`, JSON.stringify({
+          sunGlareStrength: malformed, sunGlareOcclusion: malformed
+        }));
+        const restored = readQualitySettingsPreference("custom", preset);
+        assertEqual(restored.sunGlareStrength, defaults.sunGlareStrength, "invalid strength keeps the base default");
+        assertEqual(restored.sunGlareOcclusion, true, "invalid occlusion keeps the on default");
+      }
+    }
+    assertEqual(QUALITY_PRESETS.potato.sunGlareStrength, 0, "Potato keeps its original single scene draw by default");
+    assertEqual(normalizeSunGlareStrength(-2), 0, "the strength slider has a real off end");
+    assertEqual(normalizeSunGlareStrength(999), 200, "strength is bounded");
+    assertEqual(normalizeSunGlareStrength(Number.NaN, 65), 65, "invalid live values retain their setting");
+    assertEqual(formatSunGlareStrength(0), "Off", "zero has a readable label");
+    const saved = { ...createDefaultQualitySettings(QUALITY_PRESETS.normal), sunGlareStrength: 0, sunGlareOcclusion: false };
+    writeQualitySettingsPreference("custom", saved, QUALITY_PRESETS.normal);
+    assertDeepEqual(readQualitySettingsPreference("custom", QUALITY_PRESETS.normal), saved,
+      "turning glare off must not lose the separate occlusion opt-out on reload");
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+test("sun glare follows the shared solar direction through time, camera translation, zoom and aspect", () => {
+  const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.05, 1800);
+  for (const time of [0.28, 0.42, 0.5, 0.68, 0.73]) {
+    const input = createTestSunGlareInput(time);
+    camera.position.set(123, 170, -91);
+    camera.lookAt(camera.position.clone().add(input.solarDirection));
+    for (const aspect of [0.6, 16 / 9, 3]) {
+      camera.aspect = aspect;
+      camera.zoom = 1.15;
+      camera.updateProjectionMatrix();
+      const frame = createSunGlareFrame(camera, input);
+      assertEqual(frame.gate, "active", "every visible sun pose should activate the effect");
+      assertClose(frame.sunUv![0], 0.5, 1e-7, "solar X must project onto the visible disk center");
+      assertClose(frame.sunUv![1], 0.5, 1e-7, "solar Y must project onto the visible disk center");
+      assert(frame.strength > 0 && frame.strength < 3, "authored strength must remain finite and bounded");
+      assert(frame.cropRadius.every((radius) => radius > 0 && Number.isFinite(radius)), "disk query needs finite bounds");
+    }
+  }
+  const sunset = createTestSunGlareInput(0.73);
+  camera.lookAt(camera.position.clone().add(sunset.solarDirection));
+  assert(createSunGlareFrame(camera, sunset).warmth > 0.7, "low sun should gain an amber golden-hour tint");
+});
+
+test("sun glare rejects home, off, night, behind-camera, offscreen and invalid projections", () => {
+  const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.05, 1800);
+  const input = createTestSunGlareInput();
+  camera.lookAt(input.solarDirection);
+  assertEqual(createSunGlareFrame(camera, { ...input, inWorld: false }).gate, "home", "menus do not gain camera glare");
+  assertEqual(createSunGlareFrame(camera, { ...input, strength: 0 }).gate, "off", "zero disables all effect work");
+  assertEqual(createSunGlareFrame(camera, createTestSunGlareInput(0)).gate, "night", "a below-horizon sun must not glare");
+  assertEqual(createSunGlareFrame(camera, { ...input, solarDirection: new THREE.Vector3(0, 0, -1) }).gate, "night",
+    "the exact true horizon must not leak a night halo");
+  camera.lookAt(input.solarDirection.clone().negate());
+  assertEqual(createSunGlareFrame(camera, input).gate, "off-screen", "behind-camera solar projection must be rejected");
+  camera.lookAt(new THREE.Vector3(-input.solarDirection.z, input.solarDirection.y, input.solarDirection.x));
+  assertEqual(createSunGlareFrame(camera, input).gate, "off-screen", "a far lateral sun must skip all effect passes");
+  assertEqual(createSunGlareFrame(camera, { ...input, solarDirection: new THREE.Vector3(Number.NaN, 1, 0) }).gate,
+    "invalid", "nonfinite solar direction must never reach shaders");
+  camera.projectionMatrix.elements[0] = Number.POSITIVE_INFINITY;
+  assertEqual(createSunGlareFrame(camera, input).gate, "invalid", "invalid camera projections must be rejected");
+});
+
+test("sun query crops projection without moving the camera or changing its clipping and visible material state", () => {
+  const camera = new THREE.PerspectiveCamera(68, 16 / 9, 0.05, 1800);
+  const input = createTestSunGlareInput(0.7);
+  camera.position.set(-160, 170, 157);
+  camera.lookAt(camera.position.clone().add(input.solarDirection));
+  camera.rotateY(0.12);
+  camera.rotateZ(0.21);
+  camera.setViewOffset(1280, 720, 40, 15, 1200, 680);
+  const frame = createSunGlareFrame(camera, input);
+  const originalProjection = camera.projectionMatrix.clone();
+  const originalWorld = camera.matrixWorld.clone();
+  const originalView = JSON.stringify(camera.view);
+  const query = new THREE.PerspectiveCamera();
+  configureSunGlareQueryCamera(query, camera, frame);
+  query.updateMatrixWorld();
+  assertDeepEqual(query.matrixWorld.elements, originalWorld.elements, "cloud cameraPosition must remain exactly the main world position");
+  assertDeepEqual(query.matrixWorldInverse.elements, camera.matrixWorldInverse.elements, "query view transform must match exactly");
+  const center = camera.position.clone().addScaledVector(input.solarDirection, 100).project(query);
+  assertClose(center.x, 0, 1e-6, "sun disk must be centered in the depth query");
+  assertClose(center.y, 0, 1e-6, "cropping must work with camera roll and existing view offsets");
+  assertEqual(query.near, camera.near, "near clipping must remain the real scene near plane");
+  assertEqual(query.far, camera.far, "cloud/terrain far clipping must remain the real scene far plane");
+  assertDeepEqual(camera.projectionMatrix.elements, originalProjection.elements, "query must not mutate the main projection");
+  assertEqual(JSON.stringify(camera.view), originalView, "query must not mutate the main camera view offset");
+});
+
+test("sun glare off draws once, occlusion off skips all query work, and full rendering aggregates real passes", () => {
+  const harness = createSunGlareTestHarness();
+  const effect = new SunGlare(harness.renderer);
+  const input = createTestSunGlareInput();
+  const camera = harness.camera;
+  effect.render(harness.scene, camera, { ...input, strength: 0 });
+  assertEqual(harness.draws.length, 1, "off must preserve the original one-draw path");
+  assertEqual(effect.snapshot().resourcesAllocated, false, "off must allocate no targets, materials or fullscreen geometry");
+  harness.draws.length = 0;
+  effect.render(harness.scene, camera, { ...input, occlusion: false });
+  assertEqual(harness.draws.length, 2, "occlusion disabled needs only scene plus optical overlay");
+  assertEqual(effect.snapshot().occlusionResourcesAllocated, false, "occlusion off must not allocate depth/history targets");
+  assertEqual(harness.readbacks, 0, "even explicit unoccluded snapshots need no GPU readback");
+  harness.draws.length = 0;
+  effect.render(harness.scene, camera, input);
+  assertEqual(harness.draws.length, 4, "active occlusion adds exactly a cropped scene and one-pixel reduction");
+  assertEqual(harness.draws[0].counterAutoReset, true, "main scene must preserve the original shadow-counter baseline");
+  assert(harness.draws.slice(1).every((draw) => !draw.counterAutoReset), "supplemental draws must accumulate onto that baseline");
+  assertEqual(harness.draws[1].scene, harness.scene, "the query must use real scene materials, geometry and alpha tests");
+  assertEqual(harness.draws[1].target?.width, SUN_GLARE_QUERY_SIZE, "the depth query has a fixed tiny physical size");
+  assertEqual(harness.draws[1].shadowUpdate, false, "the tiny query must not rerender any shadow maps");
+  assertEqual(harness.draws[2].target?.width, 1, "visibility reduction rasterizes one pixel");
+  assertEqual(harness.countedDraws, 4, "renderer.info must account for every real added draw");
+  assertEqual(harness.readbacks, 0, "ordinary frames must never read visibility back to CPU");
+  assertEqual(effect.snapshot().visibility, 128 / 255, "the explicit snapshot reports GPU history rather than guessed terrain rays");
+  assertEqual(harness.readbacks, 1, "only the explicit diagnostic performs a bounded pixel readback");
+  effect.render(harness.scene, camera, { ...input, strength: 0 });
+  assertEqual(effect.snapshot().resourcesAllocated, false, "turning off must release the effect's GPU resources");
+  effect.dispose();
+});
+
+test("sun glare restores renderer state after success and failure and falls back without breaking the frame loop", () => {
+  const harness = createSunGlareTestHarness();
+  const fallbacks: unknown[] = [];
+  const effect = new SunGlare(harness.renderer, (error) => { fallbacks.push(error); });
+  const input = createTestSunGlareInput();
+  effect.render(harness.scene, harness.camera, input);
+  assertEqual(harness.renderer.getRenderTarget(), harness.originalTarget, "effect must restore the caller's render target");
+  assertDeepEqual(harness.renderer.getViewport(new THREE.Vector4()).toArray(), [4, 7, 1280, 720], "viewport must restore");
+  assertDeepEqual(harness.renderer.getScissor(new THREE.Vector4()).toArray(), [8, 9, 900, 600], "scissor must restore");
+  assertEqual(harness.renderer.getScissorTest(), true, "scissor enable must restore");
+  assertEqual(harness.renderer.autoClear, true, "auto clear must restore");
+  assertEqual(harness.renderer.shadowMap.autoUpdate, true, "shadow update policy must restore");
+  assertEqual(harness.renderer.shadowMap.needsUpdate, false, "the main scene's consumed shadow refresh must stay consumed");
+  assertEqual(harness.renderer.info.autoReset, true, "normal info-reset ownership must restore");
+  harness.draws.length = 0;
+  harness.failAtDraw = 3;
+  const warn = console.warn;
+  console.warn = () => {};
+  try { effect.render(harness.scene, harness.camera, input); } finally { console.warn = warn; }
+  assertEqual(harness.renderer.getRenderTarget(), harness.originalTarget, "a failed reduction must restore the caller target");
+  assertEqual(harness.renderer.autoClear, true, "a failed reduction must restore clear policy");
+  assertEqual(harness.renderer.shadowMap.autoUpdate, true, "a failed reduction must not disable world shadows");
+  assertEqual(effect.snapshot().gate, "unavailable", "an effect failure needs an explicit diagnostic fallback state");
+  assertEqual(fallbacks.length, 1, "a failed supplemental pass must emit one bounded diagnostic callback");
+  harness.draws.length = 0;
+  harness.failAtDraw = 0;
+  effect.render(harness.scene, harness.camera, input);
+  assertEqual(harness.draws.length, 1, "failed effects must leave the original renderer usable next frame");
+  assertEqual(fallbacks.length, 1, "fallback frames must not repeat the same diagnostic every frame");
+  effect.dispose();
+
+  const originalFailure = createSunGlareTestHarness();
+  originalFailure.failAtDraw = 1;
+  const originalEffect = new SunGlare(originalFailure.renderer);
+  let ordinarySceneError: unknown = null;
+  try { originalEffect.render(originalFailure.scene, originalFailure.camera, input); }
+  catch (error) { ordinarySceneError = error; }
+  assert(ordinarySceneError instanceof Error, "original scene errors must keep their normal reporting path");
+  assertEqual(originalFailure.renderer.info.autoReset, true, "original scene errors must still restore info ownership");
+  assertEqual(originalEffect.snapshot().gate, "active", "an ordinary scene failure must not be mislabeled as a glare failure");
+  originalEffect.dispose();
+});
+
+test("sun glare history invalidates across reset, teleport and toggles while ordinary motion smooths", () => {
+  const harness = createSunGlareTestHarness();
+  const effect = new SunGlare(harness.renderer);
+  const input = createTestSunGlareInput();
+  const render = (): number => {
+    harness.draws.length = 0;
+    effect.render(harness.scene, harness.camera, input);
+    const mesh = harness.draws[2].scene.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+    return mesh.material.uniforms.historyValid.value as number;
+  };
+  assertEqual(render(), 0, "new effects must not reuse undefined history");
+  assertEqual(render(), 1, "stable consecutive views should smooth visibility");
+  harness.camera.position.x += 0.2;
+  assertEqual(render(), 1, "ordinary player motion should retain smooth history");
+  harness.camera.position.x += 20;
+  assertEqual(render(), 0, "teleports must not carry the previous place's glare exposure");
+  effect.reset();
+  assertEqual(render(), 0, "world resets must invalidate GPU visibility");
+  effect.render(harness.scene, harness.camera, { ...input, occlusion: false });
+  assertEqual(render(), 0, "reenabling occlusion must measure this frame rather than reuse an unoccluded value");
+  effect.dispose();
+});
+
+test("sun glare fixed-size resources survive resize and release exactly once through context loss and disposal", () => {
+  const harness = createSunGlareTestHarness();
+  const effect = new SunGlare(harness.renderer);
+  const input = createTestSunGlareInput();
+  effect.render(harness.scene, harness.camera, input);
+  const target = harness.draws[1].target!;
+  const overlayMesh = harness.draws[3].scene.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+  let targetDisposals = 0;
+  let materialDisposals = 0;
+  let geometryDisposals = 0;
+  target.addEventListener("dispose", () => { targetDisposals += 1; });
+  overlayMesh.material.addEventListener("dispose", () => { materialDisposals += 1; });
+  overlayMesh.geometry.addEventListener("dispose", () => { geometryDisposals += 1; });
+  harness.size.set(3200, 1800);
+  harness.camera.aspect = 3200 / 1800;
+  harness.camera.updateProjectionMatrix();
+  effect.render(harness.scene, harness.camera, input);
+  assertEqual(target.width, SUN_GLARE_QUERY_SIZE, "DPR/resize must not grow the tiny visibility budget");
+  assertEqual(overlayMesh.material.uniforms.aspect.value, 3200 / 1800, "optical circles must follow actual drawing-buffer aspect");
+  effect.handleContextLoss();
+  assertEqual(effect.snapshot().gate, "context-lost", "context loss should suppress the effect");
+  effect.handleContextLoss();
+  assertDeepEqual([targetDisposals, materialDisposals, geometryDisposals], [1, 1, 1], "owned resources dispose once");
+  effect.handleContextRestore();
+  effect.render(harness.scene, harness.camera, input);
+  assertEqual(effect.snapshot().gate, "active", "restored contexts must lazily recreate effect resources");
+  effect.dispose();
+  effect.dispose();
+  harness.draws.length = 0;
+  effect.render(harness.scene, harness.camera, input);
+  assertEqual(harness.draws.length, 0, "disposed effects must never reactivate or touch a disposed renderer");
+});
+
+function createTestSunGlareInput(time = 0.42): SunGlareInput {
+  return {
+    inWorld: true, solarDirection: getSolarDirection(time),
+    visual: createDayNightVisualState(createDefaultDayNightState({ timeOfDay: time })),
+    strength: 100, occlusion: true, deltaSeconds: 1 / 60
+  };
+}
+
+function createSunGlareTestHarness() {
+  const originalTarget = new THREE.WebGLRenderTarget(1280, 720);
+  const size = new THREE.Vector2(1280, 720);
+  let target: THREE.WebGLRenderTarget | null = originalTarget;
+  const viewport = new THREE.Vector4(4, 7, 1280, 720);
+  const scissor = new THREE.Vector4(8, 9, 900, 600);
+  let scissorTest = true;
+  const draws: { scene: THREE.Scene; camera: THREE.Camera; target: THREE.WebGLRenderTarget | null;
+    shadowUpdate: boolean; counterAutoReset: boolean }[] = [];
+  const harness = { draws, originalTarget, size, readbacks: 0, countedDraws: 0, failAtDraw: 0 };
+  const renderer = {
+    autoClear: true,
+    info: { autoReset: true, reset: () => { harness.countedDraws = 0; } },
+    shadowMap: { autoUpdate: true, needsUpdate: true },
+    getRenderTarget: () => target,
+    setRenderTarget: (next: THREE.WebGLRenderTarget | null) => { target = next; },
+    getViewport: (result: THREE.Vector4) => result.copy(viewport),
+    setViewport: (next: THREE.Vector4) => { viewport.copy(next); },
+    getScissor: (result: THREE.Vector4) => result.copy(scissor),
+    setScissor: (next: THREE.Vector4) => { scissor.copy(next); },
+    getScissorTest: () => scissorTest,
+    setScissorTest: (next: boolean) => { scissorTest = next; },
+    getDrawingBufferSize: (result: THREE.Vector2) => result.copy(size),
+    readRenderTargetPixels: (_target: THREE.WebGLRenderTarget, _x: number, _y: number, _w: number, _h: number, output: Uint8Array) => {
+      harness.readbacks += 1;
+      output.set([128, 64, 0, 255]);
+    },
+    render: (scene: THREE.Scene, camera: THREE.Camera) => {
+      if (renderer.info.autoReset) renderer.info.reset();
+      harness.countedDraws += 1;
+      draws.push({ scene, camera, target, shadowUpdate: renderer.shadowMap.autoUpdate || renderer.shadowMap.needsUpdate,
+        counterAutoReset: renderer.info.autoReset });
+      renderer.shadowMap.needsUpdate = false;
+      if (harness.failAtDraw === draws.length) throw new Error("simulated visibility failure");
+    }
+  };
+  const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.05, 1800);
+  camera.lookAt(createTestSunGlareInput().solarDirection);
+  return { ...harness, renderer: renderer as unknown as THREE.WebGLRenderer, camera, scene: new THREE.Scene(),
+    get readbacks() { return harness.readbacks; }, get countedDraws() { return harness.countedDraws; },
+    get failAtDraw() { return harness.failAtDraw; }, set failAtDraw(value: number) { harness.failAtDraw = value; } };
+}
 
 let passed = 0;
 for (const { name, run } of tests) {

@@ -18,6 +18,9 @@ export const BLOCK_FRAGMENT_MAX_COUNT = BLOCK_DEBRIS_MAX_FRAGMENT_COUNT;
 export const BLOCK_LIGHT_LEVEL_MIN = BLOCK_LIGHT_MIN_LEVEL;
 export const BLOCK_LIGHT_LEVEL_MAX = BLOCK_LIGHT_MAX_LEVEL;
 export const BLOCK_LIGHT_LEVEL_STEP = 1;
+export const SUN_GLARE_STRENGTH_MIN = 0;
+export const SUN_GLARE_STRENGTH_MAX = 200;
+export const SUN_GLARE_STRENGTH_STEP = 5;
 
 export type QualitySettings = {
   // Historical name kept for localStorage compatibility. This value is now the
@@ -25,6 +28,8 @@ export type QualitySettings = {
   readonly loadRadius: number;
   readonly shadowMapSize: number;
   readonly cloudShadows: boolean;
+  readonly sunGlareStrength: number;
+  readonly sunGlareOcclusion: boolean;
   readonly blockFragmentCount: number;
   readonly debrisShadows: boolean;
   readonly blockLightMinLevel: number;
@@ -36,6 +41,8 @@ export function createDefaultQualitySettings(preset: QualityPreset): QualitySett
     loadRadius: normalizeRenderDistance(preset.fogStartRadius),
     shadowMapSize: normalizeShadowMapSize(preset.shadows ? preset.shadowMapSize : 0),
     cloudShadows: preset.cloudShadows,
+    sunGlareStrength: normalizeSunGlareStrength(preset.sunGlareStrength),
+    sunGlareOcclusion: preset.sunGlareOcclusion,
     blockFragmentCount: normalizeBlockFragmentCountSetting(preset.blockFragmentCount),
     debrisShadows: preset.debrisShadows,
     blockLightMinLevel: preset.blockLightMinLevel,
@@ -93,6 +100,8 @@ export function normalizeQualitySettings(
     loadRadius: normalizeRenderDistance(settings.loadRadius, fallback.loadRadius),
     shadowMapSize: normalizeShadowMapSize(settings.shadowMapSize, fallback.shadowMapSize),
     cloudShadows: normalizeBooleanSetting(settings.cloudShadows, fallback.cloudShadows),
+    sunGlareStrength: normalizeSunGlareStrength(settings.sunGlareStrength, fallback.sunGlareStrength),
+    sunGlareOcclusion: normalizeBooleanSetting(settings.sunGlareOcclusion, fallback.sunGlareOcclusion),
     blockFragmentCount: normalizeBlockFragmentCountSetting(
       settings.blockFragmentCount ?? fallback.blockFragmentCount
     ),
@@ -106,6 +115,19 @@ export function normalizeRenderDistance(value: unknown, fallback = RENDER_DISTAN
   const numericValue = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numericValue)) return clampRenderDistance(fallback);
   return clampRenderDistance(Math.round(numericValue / RENDER_DISTANCE_STEP) * RENDER_DISTANCE_STEP);
+}
+
+export function normalizeSunGlareStrength(value: unknown, fallback = 100): number {
+  const numericValue = typeof value === "number" || (typeof value === "string" && value.trim() !== "")
+    ? Number(value) : Number.NaN;
+  const strength = Number.isFinite(numericValue) ? numericValue : fallback;
+  return Math.max(SUN_GLARE_STRENGTH_MIN, Math.min(SUN_GLARE_STRENGTH_MAX,
+    Math.round(strength / SUN_GLARE_STRENGTH_STEP) * SUN_GLARE_STRENGTH_STEP));
+}
+
+export function formatSunGlareStrength(value: number): string {
+  const strength = normalizeSunGlareStrength(value);
+  return strength === 0 ? "Off" : `${strength}%`;
 }
 
 export function normalizeShadowQualityLevel(value: unknown, fallbackMapSize = 0): number {

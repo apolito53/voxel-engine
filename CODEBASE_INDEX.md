@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-07 for `v0.19.4`.
+Last reviewed: 2026-11-07 for `v0.20.0`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -46,6 +46,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Lamp block light and local light proxies | [src/voxelBlockLight.ts](src/voxelBlockLight.ts) | [src/blockLightJobs.ts](src/blockLightJobs.ts), [src/localLights.ts](src/localLights.ts), [src/localLightRenderer.ts](src/localLightRenderer.ts) |
 | Sky, elevated clouds, day/night, fog | [src/skybox.ts](src/skybox.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/dayNightCycle.ts](src/dayNightCycle.ts), [src/horizonMatte.ts](src/horizonMatte.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Shared solar direction, sun/cloud shadows and shadow camera | [src/lighting.ts](src/lighting.ts) | [src/shadows.ts](src/shadows.ts), [src/cloudLayer.ts](src/cloudLayer.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
+| Camera sun glare, disk occlusion and optical composite | [src/sunGlare.ts](src/sunGlare.ts) | [src/qualitySettings.ts](src/qualitySettings.ts), [src/codexPilot.ts](src/codexPilot.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Cloud-bank shadow debug guides | [src/cloudShadowDebug.ts](src/cloudShadowDebug.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/codexPilot.ts](src/codexPilot.ts), [docs/controls.md](docs/controls.md#settings) |
 | Partial terrain carving and geometry | [src/partialBlocks.ts](src/partialBlocks.ts) | [src/partialBlockMeshField.ts](src/partialBlockMeshField.ts), [src/partialBlockMeshWorker.ts](src/partialBlockMeshWorker.ts), [docs/destruction.md](docs/destruction.md) |
 | Player movement and partial collision | [src/player.ts](src/player.ts) | [src/collision.ts](src/collision.ts), [src/playerMovement.ts](src/playerMovement.ts), [docs/player-partial-collision-plan.md](docs/player-partial-collision-plan.md) |
@@ -143,6 +144,9 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
   and test first-person changes in Chrome.
 - Renderer-owned helpers, workers, audio, input listeners, and physics bodies
   need explicit disposal during world exit, HMR, and browser unload.
+- Sun glare preserves the direct scene's existing display colors. Its tiny
+  depth query uses the actual main-camera world transform and real materials;
+  never replace it with terrain-only ray guesses or a second color conversion.
 - `.env.local` and `.vercel/` contain local deployment linkage and stay
   untracked. Never print or commit the private Blob token.
 

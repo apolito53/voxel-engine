@@ -44,3 +44,10 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   work from a named repro and fresh diagnostics; preserve the lesson before
   repeating those approaches. See
   [the optimization dead ends](docs/performance-hitch-logging.md#parked-optimization-dead-end).
+- Camera sun glare preserves the established direct scene color path: custom
+  sky/cloud shaders author display color, while standard materials perform
+  their output transform. Keep optical composition separate unless a future
+  color-pipeline change deliberately reconciles both. Sun occlusion comes from
+  actual scene depth and the same main-camera world transform, including
+  partial terrain and clouds; transparent presentation guides remain non-solid.
+  See [lighting and sky](docs/architecture.md#lighting-and-sky).

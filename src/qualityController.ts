@@ -20,6 +20,7 @@ import {
   normalizeQualitySettings,
   normalizeBlockLightLevelSetting,
   normalizeRenderDistance,
+  normalizeSunGlareStrength,
   createDefaultQualitySettings,
   getShadowMapSizeForQualityLevel,
   type QualitySettings
@@ -220,6 +221,17 @@ export class QualityController {
     }, false);
   }
 
+  setSunGlareStrength(strength: unknown): void {
+    this.updateSettings({
+      ...this.settings,
+      sunGlareStrength: normalizeSunGlareStrength(strength, this.settings.sunGlareStrength)
+    }, false);
+  }
+
+  setSunGlareOcclusionEnabled(enabled: boolean): void {
+    this.updateSettings({ ...this.settings, sunGlareOcclusion: enabled }, false);
+  }
+
   setBlockLightMinLevel(level: unknown): void {
     const minLevel = normalizeBlockLightLevelSetting(level, this.settings.blockLightMinLevel);
     this.updateSettings({
@@ -378,6 +390,8 @@ export class QualityController {
       // shadow map must also give it visible strength instead of retaining 0.
       shadowIntensity: shadows ? basePreset.shadowIntensity || QUALITY_PRESETS.normal.shadowIntensity : 0,
       cloudShadows: this.settings.cloudShadows,
+      sunGlareStrength: this.settings.sunGlareStrength,
+      sunGlareOcclusion: this.settings.sunGlareOcclusion,
       fogStartRadius,
       renderRadius: Math.min(loadRadius, fogOpaqueRadius + FOG_RENDER_SAFETY_CHUNKS),
       loadRadius,
