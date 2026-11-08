@@ -8,6 +8,7 @@ import type { VoxelWorld } from "./world";
 import type { CloudShadowDebugSnapshot } from "./cloudShadowDebug";
 import type { SunGlareDebugSnapshot } from "./sunGlare";
 import type { FriendlyNpcMessage, FriendlyNpcSnapshot } from "./friendlyNpcs";
+import type { BirdWildlifeSnapshot } from "./birdWildlife";
 
 export type CodexPilotSunGlareSettings = {
   readonly strength?: number;
@@ -104,6 +105,10 @@ export type CodexPilotApi = {
   /** Settings apply on the next frame; the snapshot always describes the last rendered frame. */
   sunGlare(settings?: CodexPilotSunGlareSettings): SunGlareDebugSnapshot | null;
   friendlyNpcs(): FriendlyNpcSnapshot | null;
+  birds(): BirdWildlifeSnapshot | null;
+  respawnBirds(): BirdWildlifeSnapshot | null;
+  clearBirds(): BirdWildlifeSnapshot | null;
+  friendlyNpcsEnabled(enabled?: boolean): boolean;
   talkToNpc(): FriendlyNpcMessage | null;
   respawnFriendlyNpcs(): FriendlyNpcSnapshot | null;
   clearFriendlyNpcs(): FriendlyNpcSnapshot | null;
@@ -137,6 +142,11 @@ export type CodexPilotHooks = {
   getSunGlareSnapshot?(): SunGlareDebugSnapshot;
   setSunGlare?(settings: CodexPilotSunGlareSettings): void;
   getFriendlyNpcs?(): FriendlyNpcSnapshot;
+  getBirds?(): BirdWildlifeSnapshot;
+  respawnBirds?(): BirdWildlifeSnapshot;
+  clearBirds?(): BirdWildlifeSnapshot;
+  getFriendlyNpcsEnabled?(): boolean;
+  setFriendlyNpcsEnabled?(enabled: boolean): void;
   talkToNpc?(): FriendlyNpcMessage | null;
   respawnFriendlyNpcs?(): FriendlyNpcSnapshot;
   clearFriendlyNpcs?(): FriendlyNpcSnapshot;
@@ -163,6 +173,19 @@ export class CodexPilot {
     return {
       snapshot: () => this.snapshot(),
       friendlyNpcs: () => this.hooks.getFriendlyNpcs?.() ?? null,
+      birds: () => this.hooks.getBirds?.() ?? null,
+      respawnBirds: () => {
+        this.hooks.noteActivity();
+        return this.hooks.respawnBirds?.() ?? null;
+      },
+      clearBirds: () => {
+        this.hooks.noteActivity();
+        return this.hooks.clearBirds?.() ?? null;
+      },
+      friendlyNpcsEnabled: (enabled) => {
+        if (typeof enabled === "boolean") this.hooks.setFriendlyNpcsEnabled?.(enabled);
+        return this.hooks.getFriendlyNpcsEnabled?.() ?? false;
+      },
       talkToNpc: () => {
         this.hooks.noteActivity();
         return this.hooks.talkToNpc?.() ?? null;

@@ -84,8 +84,12 @@ export const TEST_GROUPS = {
     prefixes: ["nova "]
   },
   npcs: {
-    description: "Friendly NPC movement, perception, interactions, and lifecycle",
+    description: "Friendly NPC preference, movement, perception, interactions, and lifecycle",
     prefixes: ["friendly npc "]
+  },
+  wildlife: {
+    description: "Bird flock movement, terrain safety, and lifecycle",
+    prefixes: ["bird wildlife "]
   },
   audio: {
     description: "Persisted audio settings and volume normalization",

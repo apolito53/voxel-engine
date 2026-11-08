@@ -13,6 +13,10 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   reads loaded terrain and surviving partial collision boxes through a small
   query boundary; missing chunks are impassable. Keep simulation, presentation,
   and world lifecycle separate. See [friendly NPCs](docs/friendly-npcs.md).
+- Friendly Wanderers is an opt-in Debug experiment, default off since
+  `v0.23.0`; its eventual role is undecided. Birds are the first default ambient
+  wildlife. Keep their loaded-only flight state and instanced presentation
+  independent of the human conversation system. See [wildlife](docs/wildlife.md).
 - Full voxels and sparse 3x3x3 partial-block lattices own durable terrain truth.
   Loose debris is presentation, so its quality budget must not change gameplay
   material or damage accounting. Automatic debris-to-rubble conversion remains

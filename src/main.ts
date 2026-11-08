@@ -220,6 +220,10 @@ import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
 import { FRIENDLY_NPC_TALK_KEY, FriendlyNpcController } from "./friendlyNpcController";
 import type { FriendlyNpcWorld } from "./friendlyNpcNavigation";
+import { readFriendlyNpcPreference, writeFriendlyNpcPreference } from "./friendlyNpcPreference";
+import { BirdWildlifeRenderer } from "./birdWildlifeRenderer";
+import type { BirdWildlifeWorld } from "./birdWildlife";
+import { findBirdTreePerch } from "./birdTreePerches";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { shouldDeferPartialBlockMeshUpdate } from "./partialBlockMeshBudget";
 import { PartialBlockMeshField } from "./partialBlockMeshField";
@@ -595,6 +599,7 @@ const groundDebrisLifetimeValue = requireElement<HTMLElement>("#ground-debris-li
 const groundDebrisLifetimeForeverToggle = requireElement<HTMLInputElement>("#ground-debris-lifetime-forever-toggle");
 const coreAimPreviewToggle = requireElement<HTMLInputElement>("#core-aim-preview-toggle");
 const cloudShadowGuidesToggle = requireElement<HTMLInputElement>("#cloud-shadow-guides-toggle");
+const friendlyNpcsToggle = requireElement<HTMLInputElement>("#friendly-npcs-toggle");
 const cloudShadowGuidesOverlay = requireElement<HTMLElement>("#cloud-shadow-guides-overlay");
 const healthBarsToggle = requireElement<HTMLInputElement>("#health-bars-toggle");
 const controlHintsToggle = requireElement<HTMLInputElement>("#control-hints-toggle");
@@ -907,6 +912,8 @@ const terrainAndRubbleCollisionWorld: CollisionWorld = {
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
 const friendlyNpcs = new FriendlyNpcController(scene);
+const birdWildlife = new BirdWildlifeRenderer(scene);
+let friendlyNpcsEnabled = readFriendlyNpcPreference();
 const friendlyNpcWorld: FriendlyNpcWorld = {
   isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
   getCellCollisionBoxes: (x, y, z) => requireWorld().getCellCollisionBoxes(x, y, z),
@@ -916,8 +923,28 @@ const friendlyNpcWorld: FriendlyNpcWorld = {
     return Boolean(activeWorld.getChunk(cx, cz));
   }
 };
+const birdWildlifeWorld: BirdWildlifeWorld = {
+  ...friendlyNpcWorld,
+  getTreePerch: (x, z) => findBirdTreePerch({
+    isColumnLoaded: friendlyNpcWorld.isColumnLoaded,
+    getTopBlock: (columnX, columnZ) => requireWorld().getTopBlock(columnX, columnZ),
+    getCellCollisionBoxes: (cellX, cellY, cellZ) => requireWorld().getCellCollisionBoxes(cellX, cellY, cellZ)
+  }, x, z),
+  getColumnTopHeight: (x, z) => {
+    if (!friendlyNpcWorld.isColumnLoaded(x, z)) return null;
+    const top = requireWorld().getTopBlock(x, z);
+    return top.block === BLOCK.air ? null : top.y + 1;
+  }
+};
+function seedBirdWildlife() {
+  if (!player || !world) return birdWildlife.snapshot();
+  camera.getWorldDirection(direction);
+  return birdWildlife.seed(birdWildlifeWorld, {
+    x: camera.position.x, y: player.getFeetY(), z: camera.position.z
+  }, direction);
+}
 function seedFriendlyNpcs() {
-  if (!player || !world) return friendlyNpcs.snapshot();
+  if (!friendlyNpcsEnabled || !player || !world) return friendlyNpcs.snapshot();
   camera.getWorldDirection(direction);
   return friendlyNpcs.seed(friendlyNpcWorld, {
     x: camera.position.x, y: player.getFeetY(), z: camera.position.z
@@ -1005,7 +1032,15 @@ const codexPilot = new CodexPilot({
   setCloudShadowDebugEnabled: setCloudShadowGuidesEnabled,
   getSunGlareSnapshot: () => sunGlare.snapshot(),
   getFriendlyNpcs: () => friendlyNpcs.snapshot(),
-  talkToNpc: () => inWorld && !worldTransitioning && player?.active && !document.hidden
+  getBirds: () => birdWildlife.snapshot(),
+  respawnBirds: () => inWorld && !worldTransitioning ? seedBirdWildlife() : birdWildlife.snapshot(),
+  clearBirds: () => {
+    birdWildlife.clear();
+    return birdWildlife.snapshot();
+  },
+  getFriendlyNpcsEnabled: () => friendlyNpcsEnabled,
+  setFriendlyNpcsEnabled,
+  talkToNpc: () => friendlyNpcsEnabled && inWorld && !worldTransitioning && player?.active && !document.hidden
     ? friendlyNpcs.talk(friendlyNpcWorld, camera.position) : null,
   respawnFriendlyNpcs: () => inWorld && !worldTransitioning ? seedFriendlyNpcs() : friendlyNpcs.snapshot(),
   clearFriendlyNpcs: () => {
@@ -1117,6 +1152,7 @@ syncHealthBarsToggle();
 syncControlHintsToggle();
 syncCoreAimPreviewToggle();
 cloudShadowGuidesToggle.checked = cloudShadowGuidesEnabled;
+friendlyNpcsToggle.checked = friendlyNpcsEnabled;
 syncAudioControls();
 renderInventoryMenus();
 renderBuilderPalette();
@@ -1269,7 +1305,7 @@ function wireMenuControls(): void {
   const activePlayer = requirePlayer();
 
   activePlayer.onPauseChange = (paused: boolean) => {
-    friendlyNpcs.setActive(inWorld && !paused && !worldTransitioning && !document.hidden);
+    friendlyNpcs.setActive(friendlyNpcsEnabled && inWorld && !paused && !worldTransitioning && !document.hidden);
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
     if (paused) {
       clearPointerHoldState();
@@ -1378,6 +1414,9 @@ function wireMenuControls(): void {
   }, eventListenerOptions);
   cloudShadowGuidesToggle.addEventListener("change", () => {
     setCloudShadowGuidesEnabled(cloudShadowGuidesToggle.checked);
+  }, eventListenerOptions);
+  friendlyNpcsToggle.addEventListener("change", () => {
+    setFriendlyNpcsEnabled(friendlyNpcsToggle.checked);
   }, eventListenerOptions);
   healthBarsToggle.addEventListener("change", () => {
     setHealthBarsEnabled(healthBarsToggle.checked);
@@ -1663,6 +1702,16 @@ function setCloudShadowGuidesEnabled(enabled: boolean): void {
   cloudShadowGuidesToggle.checked = enabled;
   cloudShadowDebug.setEnabled(enabled);
   writeCloudShadowDebugPreference(enabled);
+  noteUserActivity();
+}
+
+function setFriendlyNpcsEnabled(enabled: boolean): void {
+  if (friendlyNpcsEnabled === enabled) return;
+  friendlyNpcsEnabled = enabled;
+  friendlyNpcsToggle.checked = enabled;
+  writeFriendlyNpcPreference(enabled);
+  friendlyNpcs.clear();
+  if (enabled && inWorld && !worldTransitioning) seedFriendlyNpcs();
   noteUserActivity();
 }
 
@@ -2004,7 +2053,7 @@ document.addEventListener("keydown", (event) => {
 
   if (!inWorld) return;
 
-  if (event.code === FRIENDLY_NPC_TALK_KEY && !event.repeat && !worldTransitioning &&
+  if (event.code === FRIENDLY_NPC_TALK_KEY && friendlyNpcsEnabled && !event.repeat && !worldTransitioning &&
     requirePlayer().active && !document.hidden) {
     event.preventDefault();
     friendlyNpcs.talk(friendlyNpcWorld, camera.position);
@@ -2525,6 +2574,8 @@ function animate(): void {
     camera.getWorldDirection(chunkStreamDirection);
     novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
     friendlyNpcs.update(delta, friendlyNpcWorld, camera.position,
+      friendlyNpcsEnabled && activePlayer.active && !worldTransitioning && !document.hidden);
+    birdWildlife.update(delta, birdWildlifeWorld, camera.position,
       activePlayer.active && !worldTransitioning && !document.hidden);
     recordTimingSection("playerMs");
     updateChunkStreamFrustum();
@@ -5398,6 +5449,7 @@ async function loadWorld(worldId: string): Promise<void> {
 
     // Loading from the home screen is the only place world slots swap into the active engine.
     friendlyNpcs.clear();
+    birdWildlife.clear();
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     applySavedInventoryState(savedWorld, activeWorldId);
     pauseTabs.select("settings-button");
@@ -5423,6 +5475,7 @@ async function loadWorld(worldId: string): Promise<void> {
     camera.getWorldDirection(direction);
     novaPilot.setActive(true, camera.position, direction, activeWorld);
     seedFriendlyNpcs();
+    seedBirdWildlife();
     lastSavedPlayerLocation = capturePlayerLocationSnapshot();
     nextPlayerLocationAutosaveAt = performance.now() + PLAYER_LOCATION_AUTOSAVE_MS;
     nextDayNightAutosaveAt = performance.now() + DAY_NIGHT_AUTOSAVE_MS;
@@ -5516,6 +5569,7 @@ async function exitToHome(): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
   friendlyNpcs.clear();
+  birdWildlife.clear();
   clearPointerHoldState();
 
   try {
@@ -5873,6 +5927,7 @@ function disposeRuntime(): void {
   novaContext.dispose();
   novaPilot.dispose();
   friendlyNpcs.dispose();
+  birdWildlife.dispose();
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();

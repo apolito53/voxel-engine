@@ -9,6 +9,43 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.23.0 - 2026-11-08
+
+### Added
+
+- Added transient bird wildlife: two faster six-bird formations near cloud
+  height and three independent lower birds with canopy approach, folded-wing
+  rest, and takeoff. Full/partial terrain sweeps and live foot support handle
+  obstacles, unloaded columns, and edited tree surfaces.
+- Added a single bounded instanced renderer with opaque depth writes,
+  alpha-hashed arrival fades, articulated flight wings, compact perched wings
+  and feet, and independent atmospheric haze for the high formations.
+- Added typed bird snapshots and clear/reseed pilot fixtures, a wildlife test
+  group, and focused wildlife ownership/controls documentation.
+
+### Changed
+
+- Friendly Wanderers is now an opt-in Debug experiment, default off. The
+  browser preference gates automatic spawning and interaction; disabling
+  clears the group immediately. Repeated enable calls preserve the visit.
+- Bird simulation pauses with active play and clears on world change/exit;
+  distant-travel recycling stays bounded and respects travel direction at
+  different refresh rates. No terrain streaming or save schema changes.
+
+### Validation
+
+- Passed 154 focused NPC/wildlife/menu/automation/world/partial cases, including
+  17 wildlife cases, plus a separate 96-case debris run, TypeScript, source
+  hygiene, seven selector checks, documentation links, and production build.
+- Chrome verified natural woodland landing/rest/takeoff, high formations on
+  Normal/Potato, opt-in/disable behavior, frozen pause state, direct world
+  switching, clear/reseed, exit, and idempotent teardown/reload. A local canvas
+  recording captured all four solo flight/landing/rest/takeoff states.
+- Three combined full-suite attempts stopped at already tracked rigid-debris
+  rubble or fast-fall assertions, with WASM recovery errors. The unchanged
+  baseline passed one full run and one debris run, so cause remains unresolved.
+  The new renderer test isolates its UUID RNG; physics/assertions are unchanged.
+
 ## 0.22.0 - 2026-11-08
 
 ### Added

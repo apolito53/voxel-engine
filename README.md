@@ -18,10 +18,11 @@ mesh generation use a shared browser `WorkerPool` with priority lanes and sync
 fallbacks, keeping the browser-first engine portable while opening the door for
 more CPU-heavy systems to move off the main thread.
 
-Friendly wanderers bring the first NPC population to each world visit: three
-named characters roam near your entry area, notice you, and share a few words
-when approached. See [the NPC guide](docs/friendly-npcs.md) for controls, terrain
-navigation, and the current transient-population limits.
+Faster bird formations cruise near the clouds while solo birds zip around the
+terrain and perch on trees. See [wildlife](docs/wildlife.md) for the first slice.
+The three named friendly wanderers remain available as an opt-in experiment in
+Pause > Debug and default off. See [the NPC guide](docs/friendly-npcs.md) for
+controls, terrain navigation, and the transient-population limits.
 
 World units are metric: `1 block = 1 meter`. The active world volume is 96m
 tall, with legacy 48m edited chunk saves expanded on read so older maps remain

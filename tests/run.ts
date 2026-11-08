@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { readFileSync } from "node:fs";
 import { menuNavigationTests } from "./menuNavigation";
 import { runSelectedTests } from "../scripts/test_selection.mjs";
 import {
@@ -113,6 +114,32 @@ import {
   FRIENDLY_NPC_TALK_REACH,
   FriendlyNpcSimulation
 } from "../src/friendlyNpcs";
+import {
+  FRIENDLY_NPC_PREFERENCE_KEY,
+  readFriendlyNpcPreference,
+  writeFriendlyNpcPreference
+} from "../src/friendlyNpcPreference";
+import {
+  BIRD_FLOCK_COUNT,
+  BIRD_MAX_SPEED,
+  BIRD_POPULATION_CAP,
+  BIRD_RECYCLE_DISTANCE,
+  BIRDS_PER_FLOCK,
+  SOLO_BIRD_COUNT,
+  SOLO_BIRD_MAX_SPEED,
+  BirdWildlifeSimulation
+} from "../src/birdWildlife";
+import {
+  BIRD_MAX_SWEEP_DISTANCE,
+  SOLO_BIRD_PERCH_BODY_HEIGHT,
+  isBirdLandingVolumeClear,
+  isBirdPerchSupported,
+  isBirdVolumeClear,
+  sweepBirdLanding,
+  sweepBirdFlight
+} from "../src/birdWildlifeCollision";
+import { BirdWildlifeRenderer } from "../src/birdWildlifeRenderer";
+import { findBirdTreePerch } from "../src/birdTreePerches";
 import {
   PhysicsCoreAimPreview,
   isAimPreviewLatticeCellVisibleFromPoint,
@@ -731,6 +758,656 @@ function createFriendlyNpcTestWorld() {
     }
   };
 }
+
+function createBirdWildlifeTestWorld() {
+  const terrain = createFriendlyNpcTestWorld();
+  return {
+    ...terrain,
+    world: {
+      ...terrain.world,
+      getColumnTopHeight(x: number, z: number): number | null {
+        return terrain.missingGroundColumns.has(`${Math.floor(x)},${Math.floor(z)}`) ? null : 1;
+      }
+    }
+  };
+}
+
+function createBirdCanopyTestWorld() {
+  const fixture = createBirdWildlifeTestWorld();
+  const canopy = { present: true };
+  return {
+    ...fixture,
+    canopy,
+    world: {
+      ...fixture.world,
+      isSolid(x: number, y: number, z: number): boolean {
+        return (canopy.present && y === 9) || fixture.world.isSolid(x, y, z);
+      },
+      getColumnTopHeight(): number { return canopy.present ? 10 : 1; },
+      getTreePerch(x: number, z: number): { x: number; y: number; z: number } | null {
+        if (!canopy.present || !fixture.world.isColumnLoaded(x, z)) return null;
+        return { x: Math.floor(x) + 0.5, y: 10, z: Math.floor(z) + 0.5 };
+      }
+    }
+  };
+}
+
+test("bird wildlife collision sweeps full and partial terrain and respects loaded boundaries", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const from = { x: 0, y: 6.5, z: 0.5 };
+  const to = { x: 3.5, y: 6.5, z: 0.5 };
+  fixture.solidCells.add("1,5,0");
+  assert(isBirdVolumeClear(fixture.world, from) && isBirdVolumeClear(fixture.world, to), "both ends of the flight should be clear");
+  assert(!sweepBirdFlight(fixture.world, from, to), "the swept bird must not pass through a full block between clear endpoints");
+
+  fixture.partialCells.set("1,5,0", [{ minX: 1, maxX: 2, minY: 5, maxY: 5 + 1 / 3, minZ: 0, maxZ: 1 }]);
+  assert(sweepBirdFlight(fixture.world, from, to), "the bird should pass above a carved partial block's surviving low slab");
+  fixture.partialCells.set("1,5,0", [{ minX: 1, maxX: 2, minY: 5 + 2 / 3, maxY: 6, minZ: 0, maxZ: 1 }]);
+  assert(!sweepBirdFlight(fixture.world, from, to), "surviving high partial geometry must block the swept wings");
+
+  fixture.solidCells.delete("1,5,0");
+  fixture.partialCells.delete("1,5,0");
+  fixture.unloadedColumns.add("1,0");
+  assert(!sweepBirdFlight(fixture.world, from, to), "flight must not cross an unloaded column");
+  assert(!isBirdVolumeClear(fixture.world, { x: 0.5, y: 110, z: 0.5 }), "a wing cannot enter unloaded columns above the terrain ceiling either");
+  fixture.unloadedColumns.clear();
+  assert(!sweepBirdFlight(fixture.world, from, { ...from, x: BIRD_MAX_SWEEP_DISTANCE + 0.01 }), "oversized flight sweeps must be rejected");
+  assert(!isBirdVolumeClear(fixture.world, { ...from, y: Number.NaN }), "invalid flight coordinates must be rejected");
+});
+
+test("bird wildlife tree perches use loaded leaves or wood and surviving partial surfaces", () => {
+  let loaded = true;
+  let block: number = BLOCK.leaves;
+  let partial: readonly CollisionBounds[] | null = null;
+  let topQueries = 0;
+  const world = {
+    isColumnLoaded(): boolean { return loaded; },
+    getTopBlock(x: number, z: number): { block: number; y: number } {
+      topQueries += 1;
+      assertEqual(x, -1, "tree queries should use the floored negative column");
+      assertEqual(z, 2, "tree queries should use the floored column");
+      return { block, y: 10 };
+    },
+    getCellCollisionBoxes(): readonly CollisionBounds[] | null { return partial; }
+  };
+  const expected = { x: -0.5, y: 11, z: 2.5 };
+  assertDeepEqual(findBirdTreePerch(world, -0.1, 2.7), expected, "a full leaf block should offer its actual top center");
+  block = BLOCK.wood;
+  assertDeepEqual(findBirdTreePerch(world, -0.1, 2.7), expected, "wood should also offer a tree perch");
+  block = BLOCK.stone;
+  assertEqual(findBirdTreePerch(world, -0.1, 2.7), null, "ordinary terrain must not masquerade as a tree");
+  loaded = false;
+  const queriesBefore = topQueries;
+  assertEqual(findBirdTreePerch(world, -0.1, 2.7), null, "an unloaded column should offer no perch");
+  assertEqual(topQueries, queriesBefore, "perch discovery must not query or generate an unloaded column");
+
+  loaded = true;
+  block = BLOCK.leaves;
+  partial = [
+    { minX: -0.9, maxX: -0.8, minY: 10, maxY: 11, minZ: 2.1, maxZ: 2.9 },
+    { minX: -0.9, maxX: -0.6, minY: 10, maxY: 10.5, minZ: 2.1, maxZ: 2.4 },
+    { minX: -0.75, maxX: -0.25, minY: 10, maxY: 10.75, minZ: 2.25, maxZ: 2.75 }
+  ];
+  assertDeepEqual(findBirdTreePerch(world, -0.1, 2.7), { x: -0.5, y: 10.75, z: 2.5 },
+    "a damaged tree should use its highest wide-enough surviving box instead of the former full voxel top");
+  partial = [];
+  assertEqual(findBirdTreePerch(world, -0.1, 2.7), null, "a fully removed partial block cannot support a bird");
+  assertEqual(findBirdTreePerch(world, Number.NaN, 2.7), null, "invalid column coordinates must be rejected");
+});
+
+test("bird wildlife landing clearance and foot support follow the live tree surface", () => {
+  const fixture = createBirdCanopyTestWorld();
+  const perch = { x: 0.5, y: 10, z: 0.5 };
+  const landed = { ...perch, y: perch.y + SOLO_BIRD_PERCH_BODY_HEIGHT };
+  const above = { ...landed, y: landed.y + 1.5 };
+  assert(isBirdPerchSupported(fixture.world, perch, Math.PI / 4), "both rotated feet should rest on a real tree top");
+  assert(isBirdLandingVolumeClear(fixture.world, landed, 0), "folded wings should let a bird rest directly on the canopy");
+  assert(!isBirdVolumeClear(fixture.world, landed), "the wider in-flight envelope must remain separate from the perched body");
+  assert(sweepBirdLanding(fixture.world, above, landed, 0), "a clear approach should reach the supported landing position");
+
+  fixture.solidCells.add("0,10,0");
+  assert(!isBirdLandingVolumeClear(fixture.world, landed, 0), "a block placed through the resting body must obstruct the perch");
+  assert(!sweepBirdLanding(fixture.world, above, landed, 0), "landing must not tunnel through an obstructed approach");
+  fixture.solidCells.delete("0,10,0");
+  fixture.partialCells.set("0,9,0", [{ minX: 0.42, maxX: 0.58, minY: 9, maxY: 10, minZ: 0.42, maxZ: 0.58 }]);
+  assert(isBirdPerchSupported(fixture.world, perch, Math.PI / 4), "a viable partial surface should support both feet when rotated");
+  fixture.partialCells.set("0,9,0", [{ minX: 0.47, maxX: 0.53, minY: 9, maxY: 10, minZ: 0.47, maxZ: 0.53 }]);
+  assert(!isBirdPerchSupported(fixture.world, perch, Math.PI / 4), "a surviving sliver too small for the feet must not support a bird");
+  fixture.partialCells.clear();
+  fixture.canopy.present = false;
+  assert(!isBirdPerchSupported(fixture.world, perch), "destroying the tree should invalidate a remembered perch immediately");
+});
+
+test("bird wildlife seeds bounded deterministic flocks without inventing loaded terrain", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const origin = { x: 0.5, y: 1, z: 0.5 };
+  const first = simulation.seed(fixture.world, origin);
+  assertEqual(first.populationCap, BIRD_POPULATION_CAP, "the published bird cap should describe the simulation");
+  assertEqual(first.flocks.length, BIRD_FLOCK_COUNT, "a visit should contain the bounded flock count");
+  assertEqual(first.birds.length, BIRD_POPULATION_CAP, "open loaded air should populate both flocks and the solo birds");
+  assertEqual(first.birds.filter((bird) => bird.role === "solo").length, SOLO_BIRD_COUNT, "the lower solo population should stay bounded");
+  assertEqual(first.birds.filter((bird) => bird.role === "flock").length, BIRD_FLOCK_COUNT * BIRDS_PER_FLOCK,
+    "cloud formations should retain their own bounded population");
+  assertEqual(new Set(first.birds.map((bird) => bird.id)).size, first.birds.length, "birds should have distinct stable ids");
+  for (const flock of first.flocks) {
+    assertEqual(first.birds.filter((bird) => bird.flockId === flock.id).length, BIRDS_PER_FLOCK, "flock membership should stay bounded");
+  }
+  for (const bird of first.birds) {
+    assert(bird.visible && isBirdVolumeClear(fixture.world, bird.position), "each visible seeded bird should have safe flight clearance");
+  }
+  const expected = simulation.snapshot();
+  (first.birds[0].position as { x: number }).x += 1000;
+  (first.flocks[0].center as { x: number }).x += 1000;
+  assertDeepEqual(simulation.snapshot(), expected, "editing a snapshot must not mutate live flight state");
+  simulation.update(0.1, fixture.world, { ...origin, y: 2.5 });
+  simulation.clear();
+  assertDeepEqual(simulation.snapshot(), { birds: [], flocks: [], elapsedSeconds: 0, populationCap: BIRD_POPULATION_CAP },
+    "clear should remove the entire previous visit");
+  assertDeepEqual(simulation.seed(fixture.world, origin), expected, "reseed should reproduce the same flock positions and identities");
+
+  let queries = 0;
+  const unloaded = { ...fixture.world, isColumnLoaded(): boolean { queries += 1; return false; } };
+  const absent = simulation.seed(unloaded, origin);
+  assert(absent.birds.every((bird) => !bird.visible), "birds must not spawn visibly into unloaded air");
+  assert(absent.birds.length <= BIRD_POPULATION_CAP && queries < 200, "failed loaded-terrain discovery should remain bounded");
+  const loadedVoid = { ...fixture.world, isSolid: (): boolean => false, getColumnTopHeight: (): number | null => null };
+  assertEqual(simulation.seed(loadedVoid, origin).birds.filter((bird) => bird.visible).length, BIRD_POPULATION_CAP,
+    "loaded empty columns should remain usable sky rather than fabricated solid ground");
+});
+
+test("bird wildlife solo birds keep flying quickly over treeless ground", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const initial = simulation.seed(fixture.world, { ...player, y: 1 });
+  const solos = initial.birds.filter((bird) => bird.role === "solo");
+  assertEqual(solos.length, SOLO_BIRD_COUNT, "treeless terrain should still have solo birds");
+  for (const bird of solos) {
+    assert(bird.visible && bird.position.y > 1 && bird.position.y < 50, "solo birds should start above terrain and below cloud flocks");
+  }
+  let speedTotal = 0;
+  let samples = 0;
+  let maxTravel = 0;
+  let sawGlide = false;
+  for (let tick = 0; tick < 150; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    for (const bird of simulation.snapshot().birds.filter((candidate) => candidate.role === "solo")) {
+      const start = solos.find((candidate) => candidate.id === bird.id);
+      assert(start && bird.visible && bird.state === "flying" && bird.perch === null,
+        "a solo bird over Superflat-like terrain should continue flying without an invented perch");
+      assert(isBirdVolumeClear(fixture.world, bird.position), "a flying solo bird should stay clear of terrain");
+      const speed = Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z);
+      assert(speed <= SOLO_BIRD_MAX_SPEED + 0.00001, "solo speed should stay bounded");
+      if (!bird.flapping) {
+        sawGlide = true;
+        assert(Math.abs(bird.wingAngle) <= 0.2, "a declared solo glide should hold a shallow wing angle");
+      }
+      if (tick >= 10) { speedTotal += speed; samples += 1; }
+      maxTravel = Math.max(maxTravel, Math.hypot(bird.position.x - start.position.x, bird.position.z - start.position.z));
+    }
+  }
+  assert(samples > 0 && speedTotal / samples >= 9 && maxTravel > 5 && sawGlide,
+    "solo birds should sustain fast, independent flight and glide over treeless ground");
+});
+
+test("bird wildlife keeps responding to a sampled terrain rise between probes", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  let top: number | null = 1;
+  const risingWorld = { ...fixture.world, getColumnTopHeight(): number | null { return top; } };
+  const raised = new BirdWildlifeSimulation(631);
+  const flat = new BirdWildlifeSimulation(631);
+  const seed = { ...player, y: 1 };
+  raised.seed(risingWorld, seed);
+  flat.seed(fixture.world, seed);
+  top = 30;
+  for (let tick = 0; tick < 5; tick += 1) {
+    raised.update(0.1, risingWorld, player);
+    flat.update(0.1, fixture.world, player);
+  }
+  const raisedBird = raised.snapshot().birds.find((bird) => bird.role === "solo");
+  const flatBird = flat.snapshot().birds.find((bird) => bird.id === raisedBird?.id);
+  assert(raisedBird && flatBird && raisedBird.position.y > flatBird.position.y + 2,
+    "the bird should keep climbing after a height sample until the next terrain probe");
+  for (let tick = 0; tick < 15; tick += 1) raised.update(0.1, risingWorld, player);
+  const highY = raised.snapshot().birds.find((bird) => bird.id === raisedBird.id)?.position.y;
+  assert(highY !== undefined, "the climbing solo should retain its identity");
+  top = null;
+  for (let tick = 0; tick < 40; tick += 1) raised.update(0.1, risingWorld, player);
+  const afterVoid = raised.snapshot().birds.find((bird) => bird.id === raisedBird.id);
+  assert(afterVoid && afterVoid.position.y < highY - 2, "a later loaded empty column should release the stale elevated target");
+});
+
+test("bird wildlife solo birds approach, rest on a tree, and take off again", () => {
+  const fixture = createBirdCanopyTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const seed = simulation.seed(fixture.world, { ...player, y: 1 });
+  const progress = new Map(seed.birds.filter((bird) => bird.role === "solo").map((bird) => [bird.id, {
+    landing: false, perched: false, takingOff: false, flyingAgain: false, restFrames: 0
+  }]));
+  let previous = seed;
+  for (let tick = 0; tick < 600; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    const frame = simulation.snapshot();
+    for (const bird of frame.birds.filter((candidate) => candidate.role === "solo")) {
+      const seen = progress.get(bird.id);
+      const before = previous.birds.find((candidate) => candidate.id === bird.id);
+      assert(seen && before, "solo identity should survive its landing sequence");
+      if (!bird.visible) continue;
+      const distance = Math.hypot(bird.position.x - before.position.x, bird.position.y - before.position.y, bird.position.z - before.position.z);
+      assert(distance <= SOLO_BIRD_MAX_SPEED * 0.1 + 0.00001, "visible approach and takeoff should move continuously");
+      if (bird.foldedWings) {
+        assert(!bird.flapping, "folded wings should not be reported as flapping");
+        assert(isBirdLandingVolumeClear(fixture.world, bird.position, bird.yaw), "a folded bird should fit its resting envelope");
+      }
+      else assert(isBirdVolumeClear(fixture.world, bird.position), "an extended bird should keep its flight clearance");
+      if (bird.state === "landing") seen.landing = true;
+      if (bird.state === "perched") {
+        assert(bird.perch && bird.foldedWings, "a resting solo bird should retain its real perch and fold its wings");
+        assert(isBirdPerchSupported(fixture.world, bird.perch, bird.yaw), "both feet should remain supported");
+        assertClose(bird.position.y, bird.perch.y + SOLO_BIRD_PERCH_BODY_HEIGHT, 0.00001, "the resting body should sit on the surface");
+        if (before.state === "perched") {
+          assertClose(distance, 0, 0.00001, "a resting bird should remain still");
+          seen.restFrames += 1;
+        }
+        seen.perched = true;
+      }
+      if (seen.perched && bird.state === "taking-off") seen.takingOff = true;
+      if (seen.takingOff && bird.state === "flying") seen.flyingAgain = true;
+    }
+    previous = frame;
+    if ([...progress.values()].some((seen) => seen.landing && seen.perched && seen.restFrames >= 10 && seen.takingOff && seen.flyingAgain)) break;
+  }
+  assert([...progress.values()].some((seen) => seen.landing && seen.perched && seen.restFrames >= 10 && seen.takingOff && seen.flyingAgain),
+    "at least one solo bird should complete an approach, visible rest, takeoff, and return to flight");
+});
+
+test("bird wildlife finds and lands on a lone tree near the outer flight path", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  let treeQueries = 0;
+  const tree = { x: 16.5, y: 8, z: 0.5 };
+  const isTreeColumn = (x: number, z: number): boolean => Math.floor(x) === 16 && Math.floor(z) === 0;
+  const world = {
+    ...fixture.world,
+    isSolid(x: number, y: number, z: number): boolean {
+      return (isTreeColumn(x, z) && y === 7) || fixture.world.isSolid(x, y, z);
+    },
+    getColumnTopHeight(x: number, z: number): number { return isTreeColumn(x, z) ? 8 : 1; },
+    getTreePerch(x: number, z: number): typeof tree | null {
+      if (!isTreeColumn(x, z)) return null;
+      treeQueries += 1;
+      return tree;
+    }
+  };
+  const playerFeet = { x: 0.5, y: 1, z: 0.5 };
+  const playerEye = { ...playerFeet, y: 2.5 };
+  const control = new BirdWildlifeSimulation(631);
+  const noPerchWorld = { ...world, getTreePerch: undefined };
+  control.seed(noPerchWorld, playerFeet);
+  let nearest = Infinity;
+  for (let tick = 0; tick < 900; tick += 1) {
+    control.update(0.1, noPerchWorld, playerEye);
+    for (const bird of control.snapshot().birds.filter((candidate) => candidate.role === "solo" && candidate.visible)) {
+      nearest = Math.min(nearest, Math.hypot(bird.position.x - tree.x, bird.position.z - tree.z));
+    }
+  }
+  assert(nearest < 2, "the solitary tree should lie near a normal solo flight path");
+
+  const simulation = new BirdWildlifeSimulation(631);
+  simulation.seed(world, playerFeet);
+  let landed = false;
+  for (let tick = 0; tick < 900; tick += 1) {
+    simulation.update(0.1, world, playerEye);
+    landed ||= simulation.snapshot().birds.some((bird) => bird.role === "solo" && bird.visible && bird.state === "perched" &&
+      bird.perch?.x === tree.x && bird.perch.y === tree.y && bird.perch.z === tree.z);
+    if (landed) break;
+  }
+  assert(treeQueries > 0, "nearby flight paths must search beyond the original home-centered square");
+  assert(landed, "a reachable lone crown near the flight path should eventually host a resting bird");
+});
+
+test("bird wildlife abandons a destroyed or obstructed perch", () => {
+  function perchedFixture() {
+    const fixture = createBirdCanopyTestWorld();
+    const simulation = new BirdWildlifeSimulation(631);
+    const player = { x: 0.5, y: 2.5, z: 0.5 };
+    simulation.seed(fixture.world, { ...player, y: 1 });
+    for (let tick = 0; tick < 400; tick += 1) {
+      simulation.update(0.1, fixture.world, player);
+      const bird = simulation.snapshot().birds.find((candidate) => candidate.role === "solo" && candidate.state === "perched");
+      if (bird) return { fixture, simulation, player, bird };
+    }
+    throw new Error("fixture should produce a perched solo bird");
+  }
+  const destroyed = perchedFixture();
+  destroyed.fixture.canopy.present = false;
+  destroyed.simulation.update(0.1, destroyed.fixture.world, destroyed.player);
+  const departed = destroyed.simulation.snapshot().birds.find((bird) => bird.id === destroyed.bird.id);
+  assert(departed && departed.state !== "perched", "removing the tree must immediately end the perch");
+  for (let tick = 0; tick < 15; tick += 1) destroyed.simulation.update(0.1, destroyed.fixture.world, destroyed.player);
+  const airborne = destroyed.simulation.snapshot().birds.find((bird) => bird.id === destroyed.bird.id);
+  assert(airborne && airborne.visible && airborne.state === "flying" && isBirdVolumeClear(destroyed.fixture.world, airborne.position),
+    "a bird whose tree vanished should take off into clear air");
+
+  const obstructed = perchedFixture();
+  const position = obstructed.bird.position;
+  const blockedCell = `${Math.floor(position.x)},${Math.floor(position.y)},${Math.floor(position.z)}`;
+  obstructed.fixture.solidCells.add(blockedCell);
+  obstructed.simulation.update(0.1, obstructed.fixture.world, obstructed.player);
+  const hidden = obstructed.simulation.snapshot().birds.find((bird) => bird.id === obstructed.bird.id);
+  assert(hidden && !hidden.visible, "a block placed through the resting body should hide the bird immediately");
+  obstructed.fixture.solidCells.delete(blockedCell);
+  for (let tick = 0; tick < 20; tick += 1) obstructed.simulation.update(0.1, obstructed.fixture.world, obstructed.player);
+  const recovered = obstructed.simulation.snapshot().birds.find((bird) => bird.id === obstructed.bird.id);
+  assert(recovered && recovered.visible && (recovered.foldedWings
+    ? isBirdLandingVolumeClear(obstructed.fixture.world, recovered.position, recovered.yaw)
+    : isBirdVolumeClear(obstructed.fixture.world, recovered.position)), "the bird should recover only in clear air");
+});
+
+test("bird wildlife keeps its wings clear during takeoff beside an edited wall", () => {
+  const fixture = createBirdCanopyTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  simulation.seed(fixture.world, { ...player, y: 1 });
+  let selectedId: number | null = null;
+  for (let tick = 0; tick < 600 && selectedId === null; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    for (const bird of simulation.snapshot().birds.filter((candidate) => candidate.role === "solo" && candidate.state === "perched")) {
+      const x = Math.floor(bird.position.x);
+      const z = Math.floor(bird.position.z);
+      const bottom = Math.floor(bird.position.y);
+      const target = { ...bird.position, y: bird.position.y + 2.2 };
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const cells = Array.from({ length: 6 }, (_, offset) => `${x + dx},${bottom + offset},${z + dz}`);
+        cells.forEach((cell) => fixture.solidCells.add(cell));
+        if (isBirdLandingVolumeClear(fixture.world, bird.position, bird.yaw) &&
+          sweepBirdLanding(fixture.world, bird.position, target, bird.yaw) && !isBirdVolumeClear(fixture.world, target)) {
+          selectedId = bird.id;
+          break;
+        }
+        cells.forEach((cell) => fixture.solidCells.delete(cell));
+      }
+      if (selectedId !== null) break;
+    }
+  }
+  assert(selectedId !== null, "fixture should place a wall outside the folded hull but inside the extended wing envelope");
+  let sawTakeoff = false;
+  let reachedSafeOutcome = false;
+  for (let tick = 0; tick < 160; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    const bird = simulation.snapshot().birds.find((candidate) => candidate.id === selectedId);
+    assert(bird, "the edited-wall bird should retain its identity");
+    if (!bird.visible) { reachedSafeOutcome = true; break; }
+    assert(bird.foldedWings
+      ? isBirdLandingVolumeClear(fixture.world, bird.position, bird.yaw)
+      : isBirdVolumeClear(fixture.world, bird.position), "a visible bird must never unfold into the wall");
+    sawTakeoff ||= bird.state === "taking-off";
+    if (sawTakeoff && bird.state === "flying") { reachedSafeOutcome = true; break; }
+  }
+  assert(sawTakeoff && reachedSafeOutcome, "the bird should safely clear the wall or hide after a bounded takeoff attempt");
+});
+
+test("bird wildlife flies coherently with flap, glide, and banking within speed limits", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const initial = simulation.seed(fixture.world, { ...player, y: 1 });
+  let previous = initial;
+  let sawFlap = false;
+  let sawGlide = false;
+  let sawBank = false;
+  const wingAngles = new Set<number>();
+  let maxTravel = 0;
+  let speedTotal = 0;
+  let speedSamples = 0;
+  for (const bird of initial.birds.filter((candidate) => candidate.role === "flock")) {
+    assert(bird.position.y >= 130 && bird.position.y <= 141, "open-world formations should start high near the clouds");
+  }
+  for (let tick = 0; tick < 150; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    const frame = simulation.snapshot();
+    assertEqual(frame.birds.length, BIRD_POPULATION_CAP, "flight should keep the population bounded");
+    for (const bird of frame.birds.filter((candidate) => candidate.role === "flock")) {
+      const before = previous.birds.find((candidate) => candidate.id === bird.id);
+      const start = initial.birds.find((candidate) => candidate.id === bird.id);
+      const flock = frame.flocks.find((candidate) => candidate.id === bird.flockId);
+      assert(bird.visible && flock && before && start, "open-air flock members should stay visible with stable identities");
+      assert(isBirdVolumeClear(fixture.world, bird.position), "the complete animated bird should stay clear of terrain");
+      const speed = Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z);
+      assert(speed <= BIRD_MAX_SPEED + 0.00001, "flock speed should remain bounded");
+      if (tick >= 10) { speedTotal += speed; speedSamples += 1; }
+      assert(Math.hypot(bird.position.x - before.position.x, bird.position.y - before.position.y, bird.position.z - before.position.z) <= BIRD_MAX_SPEED * 0.1 + 0.00001,
+        "an ordinary frame should move a bird continuously");
+      assert(Math.hypot(bird.position.x - flock.center.x, bird.position.y - flock.center.y, bird.position.z - flock.center.z) < 15,
+        "birds should remain with their own flock");
+      maxTravel = Math.max(maxTravel, Math.hypot(bird.position.x - start.position.x, bird.position.y - start.position.y, bird.position.z - start.position.z));
+      sawFlap ||= bird.flapping;
+      sawGlide ||= !bird.flapping;
+      sawBank ||= Math.abs(bird.bank) > 0.02;
+      wingAngles.add(Math.round(bird.wingAngle * 100));
+    }
+    previous = frame;
+  }
+  assert(maxTravel > 5 && sawFlap && sawGlide && sawBank && wingAngles.size > 10,
+    "live birds should travel, flap, glide, and bank rather than freeze or share one fixed pose");
+  assert(speedSamples > 0 && speedTotal / speedSamples >= 8, "high formations should sustain fast flight rather than drift slowly");
+  simulation.update(0, fixture.world, player);
+  assertDeepEqual(simulation.snapshot(), previous, "a paused zero-delta update should preserve all flight state");
+  simulation.update(60, fixture.world, player);
+  const clamped = simulation.snapshot();
+  assertClose(clamped.elapsedSeconds - previous.elapsedSeconds, 0.1, 0.00001, "a stalled frame should be clamped");
+  for (const bird of clamped.birds.filter((candidate) => candidate.role === "flock")) {
+    const before = previous.birds.find((candidate) => candidate.id === bird.id)?.position;
+    const after = bird.position;
+    assert(before, "a long frame should retain each flock member");
+    assert(Math.hypot(after.x - before.x, after.y - before.y, after.z - before.z) <= BIRD_MAX_SPEED * 0.1 + 0.00001,
+      "a long frame should not teleport birds through terrain");
+  }
+});
+
+test("bird wildlife hides after terrain edits and recovers only in safe air", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const first = simulation.seed(fixture.world, { ...player, y: 1 }).birds.find((bird) => bird.role === "solo");
+  assert(first, "the fixture should seed a low solo bird inside the editable terrain height");
+  const blockedCell = `${Math.floor(first.position.x)},${Math.floor(first.position.y)},${Math.floor(first.position.z)}`;
+  fixture.solidCells.add(blockedCell);
+  assert(!isBirdVolumeClear(fixture.world, first.position), "the edit should intersect the bird's full body");
+  simulation.update(0.1, fixture.world, player);
+  const hidden = simulation.snapshot().birds.find((bird) => bird.id === first.id);
+  assert(hidden && !hidden.visible, "terrain placed through a bird must hide it on the next update");
+  for (let tick = 0; tick < 20; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    const retry = simulation.snapshot().birds.find((bird) => bird.id === first.id);
+    assert(retry && (!retry.visible || isBirdVolumeClear(fixture.world, retry.position)), "a retry must not reappear inside the surviving obstacle");
+  }
+  fixture.solidCells.delete(blockedCell);
+  for (let tick = 0; tick < 20; tick += 1) simulation.update(0.1, fixture.world, player);
+  const recovered = simulation.snapshot().birds.find((bird) => bird.id === first.id);
+  assert(recovered && recovered.visible && isBirdVolumeClear(fixture.world, recovered.position), "a hidden bird should recover in safe loaded air");
+});
+
+test("bird wildlife recycles bounded flocks around a teleport and waits for streamed air", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  simulation.seed(fixture.world, { x: 0.5, y: 1, z: 0.5 });
+  const destination = { x: 1000, y: 2.5, z: 1000 };
+  simulation.update(0.1, fixture.world, destination);
+  const recycled = simulation.snapshot();
+  assertEqual(recycled.birds.length, BIRD_POPULATION_CAP, "teleport recycling must not grow the population");
+  for (const flock of recycled.flocks) {
+    assertEqual(flock.recycleCount, 1, "each distant flock should recycle once");
+    assert(Math.hypot(flock.center.x - destination.x, flock.center.z - destination.z) < BIRD_RECYCLE_DISTANCE,
+      "recycled cloud-height flocks should be horizontally local to the new player position");
+  }
+  assert(recycled.birds.every((bird) => !bird.visible || (bird.opacity >= 0 && bird.opacity < 1)), "recycled visible birds should fade in");
+
+  let loaded = false;
+  const streaming = { ...fixture.world, isColumnLoaded(): boolean { return loaded; } };
+  const pending = simulation.seed(streaming, { x: 0.5, y: 1, z: 0.5 });
+  assert(pending.birds.every((bird) => !bird.visible), "unloaded spawn candidates should stay hidden");
+  for (let tick = 0; tick < 20; tick += 1) simulation.update(0.1, streaming, { x: 0.5, y: 2.5, z: 0.5 });
+  assert(simulation.snapshot().birds.every((bird) => !bird.visible), "birds should keep waiting while the terrain remains unloaded");
+  loaded = true;
+  for (let tick = 0; tick < 20; tick += 1) simulation.update(0.1, streaming, { x: 0.5, y: 2.5, z: 0.5 });
+  assert(simulation.snapshot().birds.every((bird) => bird.visible && isBirdVolumeClear(streaming, bird.position)),
+    "birds should recover only after their air is loaded and clear");
+});
+
+test("bird wildlife does not recycle continuously above a high roof", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const highRoof = {
+    ...fixture.world,
+    isSolid(_x: number, y: number): boolean { return y === 0 || y === 88; },
+    getColumnTopHeight(): number { return 89; }
+  };
+  const simulation = new BirdWildlifeSimulation(631);
+  simulation.seed(highRoof, { x: 0, y: 1.3, z: 0 });
+  for (let tick = 0; tick < 120; tick += 1) simulation.update(1 / 60, highRoof, { x: 0, y: 3, z: 0 });
+  const frame = simulation.snapshot();
+  assert(frame.flocks.every((flock) => flock.recycleCount <= 1), "a stationary player below a high roof must not trigger re-placement every frame");
+  assert(frame.birds.some((bird) => bird.visible && bird.opacity > 0.8), "visible birds should complete their fade instead of being reset indefinitely");
+});
+
+test("bird wildlife remains visible around a player traveling steadily forward", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  simulation.seed(fixture.world, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 });
+  let sawRecycledFlockNearOrAhead = false;
+  for (let tick = 0; tick < 600; tick += 1) {
+    const player = { x: 0, y: 2.5, z: tick * 0.6 };
+    simulation.update(0.1, fixture.world, player);
+    const frame = simulation.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "travel recycling must keep the population bounded");
+    sawRecycledFlockNearOrAhead ||= frame.flocks.some((flock) => flock.visible && flock.recycleCount > 0 && flock.center.z >= player.z - 5);
+  }
+  assert(sawRecycledFlockNearOrAhead, "recycled flocks should sometimes appear to the side or ahead during sustained forward travel");
+});
+
+test("bird wildlife follows a turned traveler's heading at ordinary and high refresh", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  for (const refreshRate of [60, 144]) {
+    const simulation = new BirdWildlifeSimulation(631);
+    simulation.seed(fixture.world, { x: 0, y: 1.3, z: 0 }, { x: 0, y: 0, z: -1 });
+    let aheadOffset: number | null = null;
+    for (let tick = 1; tick <= refreshRate * 35; tick += 1) {
+      const player = { x: 4 * tick / refreshRate, y: 3, z: 0 };
+      simulation.update(1 / refreshRate, fixture.world, player);
+      const flock = simulation.snapshot().flocks.find((candidate) => candidate.id === 0);
+      if (flock && flock.recycleCount > 0) {
+        assert(flock.visible, `the first recycled flock should be visible at ${refreshRate} Hz`);
+        aheadOffset = flock.center.x - player.x;
+        break;
+      }
+    }
+    assert(aheadOffset !== null && aheadOffset > 5,
+      `the first recycled flock should appear ahead of eastward travel at ${refreshRate} Hz`);
+  }
+});
+
+test("bird wildlife presentation pauses and releases its scene resources", () => {
+  // Three.js allocates random UUIDs here; keep this synchronous test from
+  // advancing the global random stream used by later physics fixtures.
+  const originalRandom = Math.random;
+  let randomState = 631;
+  Math.random = () => {
+    randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+    return randomState / 4294967296;
+  };
+  try {
+    const fixture = createBirdWildlifeTestWorld();
+    const scene = new THREE.Scene();
+    const renderer = new BirdWildlifeRenderer(scene);
+    const batches: THREE.InstancedMesh[] = [];
+    renderer.object.traverse((object) => { if (object instanceof THREE.InstancedMesh) batches.push(object); });
+    assertEqual(batches.length, 1, "birds should use one bounded instanced scene batch");
+    const batch = batches[0];
+    let geometryDisposals = 0;
+    let materialDisposals = 0;
+    batch.geometry.addEventListener("dispose", () => { geometryDisposals += 1; });
+    const material = batch.material as THREE.Material;
+    material.addEventListener("dispose", () => { materialDisposals += 1; });
+    assert(material.depthWrite && !material.transparent, "opaque bird bodies must write depth so rear details do not show through them");
+    assertEqual(batch.count, 0, "an unseeded visit should draw no birds");
+    const player = { x: 0.5, y: 2.5, z: 0.5 };
+    renderer.seed(fixture.world, { ...player, y: 1 });
+    assert(batch.count > 0 && batch.count <= BIRD_POPULATION_CAP * 20, "seeded birds should fit in the bounded batch");
+    const before = renderer.snapshot();
+    const matrixBefore = Array.from(batch.instanceMatrix.array);
+    renderer.update(1, fixture.world, player, false);
+    assertDeepEqual(renderer.snapshot(), before, "inactive presentation must pause simulation state");
+    assertDeepEqual(Array.from(batch.instanceMatrix.array), matrixBefore, "inactive presentation must preserve instance transforms");
+    renderer.update(0.1, fixture.world, player, true);
+    assert(renderer.snapshot().elapsedSeconds > before.elapsedSeconds, "active presentation should resume flight");
+    assert(Array.from(batch.instanceMatrix.array).some((value, index) => value !== matrixBefore[index]), "active flight should update the rendered transforms");
+    renderer.clear();
+    assertEqual(batch.count, 0, "clearing a visit should hide every instance");
+    assertEqual(renderer.snapshot().birds.length, 0, "clearing presentation should release the visit population");
+    renderer.seed(fixture.world, { ...player, y: 1 });
+    assert(batch.count > 0, "a new visit should reuse the batch");
+    renderer.dispose();
+    renderer.dispose();
+    assert(!scene.children.includes(renderer.object), "dispose should detach the presentation from the scene");
+    assertEqual(geometryDisposals, 1, "shared geometry should be disposed once");
+    assertEqual(materialDisposals, 1, "shared material should be disposed once");
+    assertEqual(renderer.snapshot().birds.length, 0, "disposed presentation should not retain birds");
+    renderer.seed(fixture.world, { ...player, y: 1 });
+    assertEqual(renderer.snapshot().birds.length, 0, "a disposed presentation should not restart");
+  } finally {
+    Math.random = originalRandom;
+  }
+});
+
+test("friendly npc preference defaults off and tolerates invalid or unavailable storage", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string): string | null => values.get(key) ?? null,
+    setItem: (key: string, value: string): void => { values.set(key, value); }
+  };
+  assertEqual(readFriendlyNpcPreference(storage), false, "a missing preference must leave the experiment disabled");
+  writeFriendlyNpcPreference(true, storage);
+  assertEqual(readFriendlyNpcPreference(storage), true, "an explicit opt-in should survive a preference read");
+  writeFriendlyNpcPreference(false, storage);
+  assertEqual(readFriendlyNpcPreference(storage), false, "turning the experiment off should persist");
+  for (const malformed of ["1", "TRUE", "null", "", "yes", "{broken"]) {
+    values.set(FRIENDLY_NPC_PREFERENCE_KEY, malformed);
+    assertEqual(readFriendlyNpcPreference(storage), false, `invalid value ${malformed} must not enable the experiment`);
+  }
+  const unavailable = {
+    getItem(): string | null { throw new Error("blocked"); },
+    setItem(): void { throw new Error("blocked"); }
+  };
+  assertEqual(readFriendlyNpcPreference(unavailable), false, "unavailable storage must default off");
+  writeFriendlyNpcPreference(true, unavailable);
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  try {
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
+    assertEqual(readFriendlyNpcPreference(), false, "a blocked browser storage getter must also default off");
+    writeFriendlyNpcPreference(true);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+test("friendly npc opt-in control is labeled in the Debug panel", () => {
+  const html = readFileSync("index.html", "utf8");
+  const main = readFileSync("src/main.ts", "utf8");
+  const debugStart = html.indexOf('id="pause-debug-panel"');
+  const debugEnd = html.indexOf('<footer class="pause-footer">');
+  assert(debugStart >= 0 && debugEnd > debugStart, "the Debug panel should be present");
+  const debug = html.slice(debugStart, debugEnd);
+  const matches = [...html.matchAll(/\bid="friendly-npcs-toggle"/g)];
+  assertEqual(matches.length, 1, "the opt-in should have one unique control");
+  assert(debug.includes('for="friendly-npcs-toggle"') && debug.includes("Friendly Wanderers"), "the Debug checkbox should have its visible label");
+  const checkbox = debug.match(/<input\b[^>]*id="friendly-npcs-toggle"[^>]*>/)?.[0] ?? "";
+  assert(/\btype="checkbox"/.test(checkbox), "the opt-in control should be a checkbox");
+  assert(!/\bchecked\b/.test(checkbox), "the HTML default should be unchecked");
+  assert(main.includes('"#friendly-npcs-toggle"'), "the Debug control should have a runtime binding");
+});
 
 test("friendly npc stand positions respect partial support, side walls, and headroom", () => {
   const fixture = createFriendlyNpcTestWorld();

@@ -1,16 +1,24 @@
 # Friendly NPCs
 
-The first NPC slice adds a small group of friendly wanderers near the player's
-world-entry position. They stroll within a local home area, stop to idle, and
-notice a nearby player. Approach an unobstructed wanderer and press `E` when
-the greeting hint appears. Nova Pilot remains a separate companion system.
+Friendly Wanderers is an optional NPC experiment, disabled by default since
+`v0.23.0`. Enable it under Pause > Debug to spawn the three characters near you.
+They stroll within a local home area, stop to idle, and notice a nearby player.
+Approach an unobstructed wanderer and press `E` when the greeting hint appears.
+Nova Pilot and ambient [birds](wildlife.md) retain separate owners.
+
+The toggle saves a browser preference, separate from world data. Turning it off
+clears the group and dialogue immediately. An enabled preference seeds a fresh
+group when loading another world. Missing, invalid, or unavailable preferences
+default off. The system remains available while its eventual role is undecided.
+Its storage contract lives in
+[friendlyNpcPreference.ts](../src/friendlyNpcPreference.ts).
 
 ## Scope And Lifecycle
 
 Mira, Bram, and Fern have distinct palettes and authored greetings. The
 population is transient and bounded to three characters per visit; a sparse or
 heavily edited entry area can have fewer when safe spawn positions are absent. A world
-load or switch creates a fresh group after terrain and the saved player pose
+load or switch with the experiment enabled creates a fresh group after terrain and the saved player pose
 are ready. Leaving the world clears them. NPC state is not saved in IndexedDB;
 this introduces no migration or change to existing world data.
 

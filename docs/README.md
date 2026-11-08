@@ -15,6 +15,8 @@ This folder keeps the living design notes out of the project front door.
   reactions, and future model-hook notes.
 - [friendly-npcs.md](friendly-npcs.md): friendly wanderers, bounded local
   navigation, greetings, world lifecycle, and verification hooks.
+- [wildlife.md](wildlife.md): ambient bird flocks, flight, terrain queries,
+  rendering, lifecycle, and the initial wildlife scope.
 - [performance-hitch-logging.md](performance-hitch-logging.md): render horizon
   counters, worker-pool telemetry, local/remote hitch logging, persistent
   combat damage logs, debug HUD metrics, server markers, and visual recordings.

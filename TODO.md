@@ -5,8 +5,12 @@ promoted work, not every fun idea that crosses the room.
 
 ## Current Recommended Next Slice
 
+- The first bird wildlife slice is implemented in `v0.23.0`; see
+  [wildlife](docs/wildlife.md). Nesting, audio, and an ecosystem are
+  possible later slices, with no implementation chosen yet.
 - Friendly NPC foundation is implemented in `v0.22.0`; see
   [friendly NPCs](docs/friendly-npcs.md) for behavior and current limits.
+  Friendly Wanderers now defaults off behind the Debug experiment toggle.
   Persistent identities, destinations across streamed terrain, and richer
   interactions remain possible follow-ups, with no implementation chosen yet.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
@@ -250,6 +254,15 @@ local passing/failing output is retained in ignored
 The tests, [rigid-debris owner](src/rigidDebris.ts), test runner, dependencies,
 lockfile, and CI workflow were unchanged by the documentation setup. The root
 cause remains unknown; no physics changes were made.
+
+The 2026-11-08 wildlife pass reproduced the same partial-rubble and fast-fall
+assertions locally. The unchanged `e7581d0` baseline passed a full gate and a
+separate debris run during comparison; this does not establish the cause.
+Three.js object UUID creation consumes `Math.random`, and fragment angular
+velocity uses that stream too, so test-order/spin sampling is a plausible
+interaction to capture in a future deterministic repro. The new renderer test
+now scopes and restores its own UUID RNG; physics behavior/assertions remain
+unchanged. Passing retries do not resolve this watchlist.
 
 - Reproduce the intermittent outcomes locally and in CI with locked
   dependencies; retain successful and failing results, full Rapier output,

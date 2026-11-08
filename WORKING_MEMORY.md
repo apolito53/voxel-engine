@@ -1,34 +1,39 @@
 # Working Memory
 
-Current handoff: 2026-11-08. `v0.22.0` adds the first friendly NPC population.
-Normal delivery is `main`; the clean implementation lives in the managed
-`voxel-friendly-npcs/voxel-engine` worktree on `codex/friendly-npcs`.
+Current handoff: 2026-11-08, `v0.23.0` bird wildlife. Delivery branch is `main`;
+managed implementation: `voxel-friendly-npcs/voxel-engine`, branch
+`codex/bird-wildlife`. The canonical checkout's separate Moss & Ember art pass
+remains untouched and excluded (still based on `34ccaf8`). Reconcile that dirty
+checkout deliberately before using it; do not publish art as part of syncing.
 
-Mira, Bram, and Fern spawn on safe loaded terrain near the restored entry pose,
-roam locally, idle, notice/wave, and offer authored dialogue through `E`.
-[The NPC guide](docs/friendly-npcs.md) owns scope, navigation, lifecycle and
-limits; [automation](docs/automation.md#codex-pilot-bridge) owns pilot fixtures.
-NPCs are transient per visit, capped at three (fewer when no safe spawn exists).
-There is no NPC persistence, combat, job system, or general long-range routing.
-Invalid support/body clearance hides a person and retries nearby safe terrain.
-Nova Pilot retains its separate owner.
+[Wildlife](docs/wildlife.md) owns the first bird slice: 12 formation birds around
+130–140m near the cloud base, cruising ~9.5m/s, plus three faster lower solos.
+Solos approach exposed loaded leaf/wood, rest with folded wings/feet supported,
+and take off. Perch/terrain edits revalidate live geometry; constrained takeoff
+keeps wings folded until flight clearance exists. One depth-writing instanced
+batch caps rendering at 15 birds / 180 parts. Formation haze is independent of
+terrain fog; solos retain terrain fog. No extra streaming, persistence, nesting,
+combat, or audio. [Automation](docs/automation.md#codex-pilot-bridge) owns fixtures.
 
-Verification: all 370 engine cases, all seven selector checks, TypeScript,
-source hygiene (112 files), documentation links (19 files), production build,
-and whitespace checks passed. The build keeps its existing large-chunk warning.
-Chrome verified visible Superflat/varied-terrain spawn, walking/attention, `E`,
-pointer lock, unchanged pause snapshots and blocked paused interaction, exit,
-direct world switch, clear/reseed, and idempotent teardown/reload. Dialogue fits
-and avoids Nova's toast at desktop, 390x844 and 844x390. No runtime exceptions
-occurred in the final teardown/reload check. These are bounded smoke checks,
-not long-session or arbitrary-maze navigation acceptance.
+Anthony chose Friendly Wanderers as an opt-in Debug experiment, default off.
+The saved browser preference gates spawning/E interaction; disabling clears
+immediately. Enabling twice preserves the visit. [NPC guide](docs/friendly-npcs.md).
 
-Ignored receipts: `logs/npc-full-tests.log`, `logs/npc-build.log`, and
-`logs/visual-runs/2026-11-08-friendly-npcs/` in the managed worktree.
-Existing intermittent Rapier tests and local diagnostics gaps remain in TODO.
+Verification: wildlife17/17, NPC14/14; focused affected-consumer union154/154;
+isolated current debris96/96; TypeScript,118-file source hygiene,7 selectors,
+20-file docs links, production build and whitespace checks passed. The build
+keeps its existing chunk advisory. Three combined full-suite attempts failed
+at the tracked partial-rubble/fast-fall Rapier assertions, including WASM errors.
+The unchanged e7581d0 baseline passed370/370 and96/96 debris in a bounded audit;
+that does not establish cause. Renderer UUID RNG is scoped/restored in its new
+synchronous test. No physics/assertion changes; do not claim the flake resolved.
+See the existing TODO watchlist and ignored logs/bird-wildlife-* receipts.
 
-The canonical checkout has a separate uncommitted Moss & Ember terrain-art pass
-based on `34ccaf8`. It was left untouched and excluded from this delivery;
-its original art handoff remains there. Reconcile it with remote main carefully
-before using that checkout for further implementation; do not publish the art
-merely as part of syncing NPCs. Its normal local app/collector were preserved.
+Chrome verified woodland perches/rest/takeoff, high flocks on Normal/Potato,
+default-off/enable/disable and idempotence, identical paused bird snapshots,
+direct world switch, clear/reseed, exit, and double teardown/reload. No console
+errors observed in the final check. A 10-second canvas recording captured all
+four solo states; local evidence is under logs/visual-runs/2026-11-08-bird-wildlife/.
+The existing5174 collector stored its video under canonical logs/visual-runs/
+2026-11-08/2026-11-08t06-16-58-871z-bird-canopy-flight-l6ps3v/.
+Natural-tree and bounded simulation checks are not ecosystem acceptance.

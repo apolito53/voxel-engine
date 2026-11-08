@@ -1,5 +1,11 @@
 # Player release notes
 
+## 0.23.0 - 2026-11-08
+
+- Faster bird formations cruise high near the clouds, with flapping wings, glides, and banking turns.
+- Solo birds zip around lower down and can settle on tree canopies before taking flight again.
+- Friendly Wanderers are now an optional experiment. Enable them under Pause > Debug when you want to try the three characters; they default off.
+
 ## 0.22.0 - 2026-11-08
 
 - Meet friendly wanderers near where you enter a world. They stroll, take breaks, and turn to greet you when you approach.

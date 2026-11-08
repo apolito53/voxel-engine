@@ -37,11 +37,19 @@ globalThis.__VOXEL_CODEX_PILOT__.sunGlare({ strength: 100, occlusion: true })
 globalThis.__VOXEL_CODEX_PILOT__.sunGlare()
 
 globalThis.__VOXEL_CODEX_PILOT__.friendlyNpcs()
+globalThis.__VOXEL_CODEX_PILOT__.friendlyNpcsEnabled(true)
 globalThis.__VOXEL_CODEX_PILOT__.talkToNpc()
 globalThis.__VOXEL_CODEX_PILOT__.respawnFriendlyNpcs()
 globalThis.__VOXEL_CODEX_PILOT__.clearFriendlyNpcs()
+
+globalThis.__VOXEL_CODEX_PILOT__.birds()
+globalThis.__VOXEL_CODEX_PILOT__.respawnBirds()
+globalThis.__VOXEL_CODEX_PILOT__.clearBirds()
 ```
 
+`friendlyNpcsEnabled(enabled?)` reads or changes the same saved, default-off
+Debug experiment preference. Repeating the current value does not reset the
+population. Enable the experiment before using its spawn/talk fixtures.
 `friendlyNpcs()` returns copied population poses/states, visibility, current
 nearby interaction target/message, and active simulation time. `talkToNpc()`
 uses the same range, terrain sight, and active-play gate as `E`.
@@ -49,6 +57,12 @@ uses the same range, terrain sight, and active-play gate as `E`.
 player pose in loaded terrain; `clearFriendlyNpcs()` removes it. These fixture
 controls change only NPC session state, never saved terrain or the NPC cap.
 See [friendly NPCs](friendly-npcs.md) for lifecycle and navigation limits.
+
+`birds()` returns copied bird/flock poses, wing and flight state, visibility,
+active elapsed time, and the population cap. `respawnBirds()` replaces the
+transient flocks near the current player pose; `clearBirds()` removes them for
+the current visit. They leave terrain and the Friendly Wanderers preference
+alone. See [wildlife](wildlife.md) for the first slice and its limits.
 
 `cloudShadowGuides(enabled?)` controls the same saved debug preference as
 `Debug > Cloud Shadow Guides`. Its snapshot reports the

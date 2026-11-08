@@ -195,6 +195,10 @@ Preferred format:
 
 - Friendly wanderers are the first entity-AI foundation, chosen for `v0.22.0`.
   See [the NPC system](docs/friendly-npcs.md) for the shipped scope and limits.
+  Their role in the game remains undecided; `v0.23.0` makes them opt-in.
+- Birds are the first ambient wildlife in `v0.23.0`; see
+  [wildlife](docs/wildlife.md). Canopy perching is included; nesting remains an
+  idea for later.
 - `[mechanic]` Future computer-controlled enemies:
   perception, pathing around voxel terrain, simple attack decisions, and damage
   routing separate from terrain destruction.

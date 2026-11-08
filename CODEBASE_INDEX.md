@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-08 for `v0.22.0`.
+Last reviewed: 2026-11-08 for `v0.23.0`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -64,6 +64,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Browser automation and visual runs | [src/codexPilot.ts](src/codexPilot.ts) | [src/testAvatar.ts](src/testAvatar.ts), [src/visualTestScenarios.ts](src/visualTestScenarios.ts), [docs/automation.md](docs/automation.md) |
 | Nova Pilot and Terminal | [src/novaPilot.ts](src/novaPilot.ts) | [src/novaContext.ts](src/novaContext.ts), [src/novaChat.ts](src/novaChat.ts), [docs/nova-companion.md](docs/nova-companion.md) |
 | Friendly NPCs, grounded roaming and greetings | [src/friendlyNpcs.ts](src/friendlyNpcs.ts) | [src/friendlyNpcNavigation.ts](src/friendlyNpcNavigation.ts), [src/friendlyNpcController.ts](src/friendlyNpcController.ts), [docs/friendly-npcs.md](docs/friendly-npcs.md) |
+| Bird wildlife and flock flight | [src/birdWildlife.ts](src/birdWildlife.ts) | [src/birdWildlifeRenderer.ts](src/birdWildlifeRenderer.ts), [docs/wildlife.md](docs/wildlife.md), [src/main.ts](src/main.ts) |
 | Procedural audio and settings | [src/audioEngine.ts](src/audioEngine.ts) | [src/audioSettings.ts](src/audioSettings.ts) |
 | Focused tests, group ownership, selector tooling | [docs/testing.md](docs/testing.md) | [scripts/test_groups.mjs](scripts/test_groups.mjs), [scripts/test_selection.mjs](scripts/test_selection.mjs), [tests/test_selection.test.mjs](tests/test_selection.test.mjs) |
 
