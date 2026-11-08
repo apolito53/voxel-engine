@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-08 for `v0.23.1`.
+Last reviewed: 2026-11-08 for `v0.24.0`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -45,7 +45,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Pause workspace, menu tabs, keyboard focus | [src/menuNavigation.ts](src/menuNavigation.ts) | [index.html](index.html), [src/style.css](src/style.css), [src/main.ts](src/main.ts), [docs/controls.md](docs/controls.md#world-flow) |
 | World streaming, edits, chunk scheduling | [src/world.ts](src/world.ts) | [src/chunk.ts](src/chunk.ts), [src/chunkJobs.ts](src/chunkJobs.ts), [src/chunkProtocol.ts](src/chunkProtocol.ts) |
 | Terrain profiles, trees, world height | [src/terrain.ts](src/terrain.ts) | [src/voxelConstants.ts](src/voxelConstants.ts), [src/blocks.ts](src/blocks.ts), [src/chunkStorage.ts](src/chunkStorage.ts) |
-| Chunk materials, atlas, voxel lighting | [src/blockTextureAtlas.ts](src/blockTextureAtlas.ts) | [src/blockColors.ts](src/blockColors.ts), [src/blockTextureTiles.ts](src/blockTextureTiles.ts), [src/voxelLighting.ts](src/voxelLighting.ts) |
+| Chunk materials, atlas, connected pixel art | [src/blockTextureAtlas.ts](src/blockTextureAtlas.ts) | [src/blockTextureSelection.ts](src/blockTextureSelection.ts), [src/blockTextureTiles.ts](src/blockTextureTiles.ts), [docs/terrain-art.md](docs/terrain-art.md) |
 | Lamp block light and local light proxies | [src/voxelBlockLight.ts](src/voxelBlockLight.ts) | [src/blockLightJobs.ts](src/blockLightJobs.ts), [src/localLights.ts](src/localLights.ts), [src/localLightRenderer.ts](src/localLightRenderer.ts) |
 | Sky, elevated clouds, day/night, fog | [src/skybox.ts](src/skybox.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/dayNightCycle.ts](src/dayNightCycle.ts), [src/horizonMatte.ts](src/horizonMatte.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Shared solar direction, sun/cloud shadows and shadow camera | [src/lighting.ts](src/lighting.ts) | [src/shadows.ts](src/shadows.ts), [src/cloudLayer.ts](src/cloudLayer.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |

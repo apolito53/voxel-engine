@@ -1,0 +1,137 @@
+{
+  "format": "sunwashed-terrain/1",
+  "name": "Sunwashed",
+  "tileSize": 32,
+  "variants": 64,
+  "cornerOrder": [
+    "NW",
+    "NE",
+    "SE",
+    "SW"
+  ],
+  "cornerBits": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "variantIndex": "cornerMask + interiorAlternative * 16",
+  "atlas": {
+    "columns": 32,
+    "rows": 28
+  },
+  "representativeBlockColors": {
+    "grass": "#949e60",
+    "dirt": "#b18e66",
+    "stone": "#cbc5ad",
+    "sand": "#dec791",
+    "ember": "#66513f",
+    "rubble": "#c1af91",
+    "wood": "#a28558",
+    "leaves": "#7d914c",
+    "moss": "#8ca154",
+    "bush": "#607540",
+    "lamp": "#dcbc7a"
+  },
+  "workshopCommit": "718f17700084a8c356e3babe6b17b7774a570c1e",
+  "materials": [
+    {
+      "key": "grassTop",
+      "source": "grassTop.pixel.json",
+      "preview": "grassTop.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "grassSide",
+      "source": "grassSide.pixel.json",
+      "preview": "grassSide.png",
+      "edgeMode": "horizontal",
+      "note": "Grass cap over earth; only horizontal seams match. Vertical cap discontinuity is intentional."
+    },
+    {
+      "key": "dirt",
+      "source": "dirt.pixel.json",
+      "preview": "dirt.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "stone",
+      "source": "stone.pixel.json",
+      "preview": "stone.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "sand",
+      "source": "sand.pixel.json",
+      "preview": "sand.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "ember",
+      "source": "ember.pixel.json",
+      "preview": "ember.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "rubble",
+      "source": "rubble.pixel.json",
+      "preview": "rubble.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "woodSide",
+      "source": "woodSide.pixel.json",
+      "preview": "woodSide.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "woodTop",
+      "source": "woodTop.pixel.json",
+      "preview": "woodTop.png",
+      "edgeMode": "object",
+      "note": "Four object-centered alternatives repeat across the sixteen masks."
+    },
+    {
+      "key": "leaves",
+      "source": "leaves.pixel.json",
+      "preview": "leaves.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "mossTop",
+      "source": "mossTop.pixel.json",
+      "preview": "mossTop.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "mossSide",
+      "source": "mossSide.pixel.json",
+      "preview": "mossSide.png",
+      "edgeMode": "horizontal",
+      "note": "Grass cap over earth; only horizontal seams match. Vertical cap discontinuity is intentional."
+    },
+    {
+      "key": "bush",
+      "source": "bush.pixel.json",
+      "preview": "bush.png",
+      "edgeMode": "connected",
+      "note": "All compatible horizontal and vertical corner-mask edges match across all alternatives."
+    },
+    {
+      "key": "lamp",
+      "source": "lamp.pixel.json",
+      "preview": "lamp.png",
+      "edgeMode": "object",
+      "note": "Four object-centered alternatives repeat across the sixteen masks."
+    }
+  ]
+}

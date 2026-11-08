@@ -1,0 +1,164 @@
+{
+  "authoringEngine": "Pixel Workshop local shared engine, commit 718f17700084a8c356e3babe6b17b7774a570c1e",
+  "purpose": "Original review-only material proposals; no runtime integration",
+  "tileSize": 32,
+  "variantsPerMask": 4,
+  "patchSeed": 38784,
+  "cornerOrder": [
+    "NW",
+    "NE",
+    "SE",
+    "SW"
+  ],
+  "cornerBits": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "latticeTileCoverage": [
+    1,
+    2,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    14
+  ],
+  "sets": [
+    {
+      "style": "sunwashed",
+      "material": "grass",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "sunwashed/grass-sheet",
+      "patch": "sunwashed/grass-patch"
+    },
+    {
+      "style": "sunwashed",
+      "material": "stone",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "sunwashed/stone-sheet",
+      "patch": "sunwashed/stone-patch"
+    },
+    {
+      "style": "sunwashed",
+      "material": "dirt",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "sunwashed/dirt-sheet",
+      "patch": "sunwashed/dirt-patch"
+    },
+    {
+      "style": "sunwashed",
+      "material": "bark",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "sunwashed/bark-sheet",
+      "patch": "sunwashed/bark-patch"
+    },
+    {
+      "style": "wildwood",
+      "material": "grass",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "wildwood/grass-sheet",
+      "patch": "wildwood/grass-patch"
+    },
+    {
+      "style": "wildwood",
+      "material": "stone",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "wildwood/stone-sheet",
+      "patch": "wildwood/stone-patch"
+    },
+    {
+      "style": "wildwood",
+      "material": "dirt",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "wildwood/dirt-sheet",
+      "patch": "wildwood/dirt-patch"
+    },
+    {
+      "style": "wildwood",
+      "material": "bark",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "wildwood/bark-sheet",
+      "patch": "wildwood/bark-patch"
+    },
+    {
+      "style": "mineral-frontier",
+      "material": "grass",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "mineral-frontier/grass-sheet",
+      "patch": "mineral-frontier/grass-patch"
+    },
+    {
+      "style": "mineral-frontier",
+      "material": "stone",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "mineral-frontier/stone-sheet",
+      "patch": "mineral-frontier/stone-patch"
+    },
+    {
+      "style": "mineral-frontier",
+      "material": "dirt",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "mineral-frontier/dirt-sheet",
+      "patch": "mineral-frontier/dirt-patch"
+    },
+    {
+      "style": "mineral-frontier",
+      "material": "bark",
+      "uniqueTiles": 64,
+      "opaquePixels": 65536,
+      "compatiblePairs": 2048,
+      "comparedEdgePixels": 65536,
+      "sheet": "mineral-frontier/bark-sheet",
+      "patch": "mineral-frontier/bark-patch"
+    }
+  ],
+  "totalTiles": 768,
+  "totalOpaqueTilePixels": 786432,
+  "totalCompatiblePairs": 24576,
+  "totalComparedEdgePixels": 786432,
+  "nativeDocumentsValidated": 792,
+  "exportedNativeDocuments": 24,
+  "exportedPngs": 24,
+  "exportedOpaquePixels": 1523712,
+  "indexedJsonBytes": 863765
+}

@@ -24,6 +24,10 @@ The three named friendly wanderers remain available as an opt-in experiment in
 Pause > Debug and default off. See [the NPC guide](docs/friendly-npcs.md) for
 controls, terrain navigation, and the transient-population limits.
 
+The Sunwashed art set supplies 32×32 pixel materials and matching block
+previews. Its [editable Pixel Workshop source and export workflow](docs/terrain-art.md)
+live in this repository alongside the game-ready textures.
+
 World units are metric: `1 block = 1 meter`. The active world volume is 96m
 tall, with legacy 48m edited chunk saves expanded on read so older maps remain
 aligned with the current terrain profile.

@@ -14,6 +14,9 @@ promoted work, not every fun idea that crosses the room.
   Friendly Wanderers now defaults off behind the Debug experiment toggle.
   Persistent identities, destinations across streamed terrain, and richer
   interactions remain possible follow-ups, with no implementation chosen yet.
+- Sunwashed's stronger-noise material set and connected tiling are implemented
+  in `v0.24.0`; see [the art workflow](docs/terrain-art.md). All three study sets
+  and earlier comparison passes are retained for future biome work.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:

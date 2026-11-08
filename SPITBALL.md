@@ -50,6 +50,10 @@ Preferred format:
   washes.
 - Better biome identity: colder highlands, dry washes, denser groves, exposed
   stone ridges.
+- `[feel]` Use the [retained terrain art sets](assets/terrain/studies-2026-11-08/README.md)
+  as future biome material families. Sunwashed's stronger noise pass is the
+  selected main direction; keep Wildwood and Mineral Frontier available for
+  regional variation. Biome implementation and transitions remain exploratory.
 - Ambient world motion that stays cheap: drifting leaves, grass sway, dust
   puffs, small water-surface shimmer once water exists.
 - World screenshots or postcards saved with each local world slot.

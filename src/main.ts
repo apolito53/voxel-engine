@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import changelogMarkdown from "../PLAYER_CHANGELOG.md?raw";
 import packageManifest from "../package.json";
+import terrainAtlasUrl from "./assets/terrain-atlas.png";
 import "./style.css";
 import {
   ADMIN_COMMAND_TOGGLE_KEY,
@@ -43,6 +44,12 @@ import {
   updateWorldBlockMaterialDayNight,
   updateWorldBlockMaterialFogCenter
 } from "./blockTextureAtlas";
+import {
+  BLOCK_TEXTURE_ATLAS_CSS_SIZE,
+  BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE,
+  getBlockTextureAtlasCssPosition,
+  getBlockTextureBaseTileId
+} from "./blockTextureTiles";
 import {
   BUILDER_BRUSH_MAX_SIZE,
   BUILDER_BRUSH_MIN_SIZE,
@@ -766,6 +773,11 @@ const gameAudio = new GameAudio({
 const itemRegistry = createVoxelSandboxItemRegistry(BLOCKS, PLACEABLE_BLOCKS);
 const inventoryStateOptions = createVoxelSandboxInventoryOptions(itemRegistry, PLACEABLE_BLOCKS);
 let inventoryState = createDefaultInventoryState(inventoryStateOptions);
+let renderedHotbarState: {
+  readonly lane: InventoryLane;
+  readonly selectedItemId: ItemId;
+  readonly clickFireMode: ClickFireMode;
+} | null = null;
 const toolHotbarItems = createToolHotbarItems();
 const blockHotbarItems = createBlockHotbarItems(PLACEABLE_BLOCKS);
 const fallbackHotbarItem = createCreativeHotbarItem(EMPTY_HANDS_ITEM_ID);
@@ -2964,7 +2976,18 @@ function updateChunkStreamFrustum(): void {
 }
 
 function updateHud(): void {
+  // Creative hotbar contents and registry are fixed; these are its changing inputs.
+  // Avoid rebuilding the textured previews on every animation frame.
+  const lane = inventoryState.activeLane;
+  const selectedItemId = getSelectedInventoryItemId(inventoryState);
+  if (
+    renderedHotbarState?.lane === lane &&
+    renderedHotbarState.selectedItemId === selectedItemId &&
+    renderedHotbarState.clickFireMode === clickFireMode
+  ) return;
+
   renderHotbar();
+  renderedHotbarState = { lane, selectedItemId, clickFireMode };
 }
 
 function processPhysicsImpacts(
@@ -3176,10 +3199,7 @@ function renderHotbar(): void {
 
     const placeAction = getHotbarSecondaryAction(item, itemRegistry);
     if (placeAction.kind === "terrain:place-block") {
-      const swatch = document.createElement("span");
-      swatch.className = "hotbar-slot-swatch";
-      swatch.style.background = getBlockCssColor(placeAction.block);
-      button.appendChild(swatch);
+      button.appendChild(createBlockTexturePreview(placeAction.block, "hotbar-slot-swatch"));
     }
 
     const label = document.createElement("span");
@@ -3272,9 +3292,7 @@ function renderInventoryBlockCards(): void {
     card.dataset.blockId = String(block);
     card.title = getHotbarItemLabel(item, itemRegistry);
 
-    const swatch = document.createElement("span");
-    swatch.className = "inventory-block-swatch";
-    swatch.style.background = getBlockCssColor(block);
+    const swatch = createBlockTexturePreview(block, "inventory-block-swatch");
 
     const label = document.createElement("span");
     label.className = "inventory-block-name";
@@ -3326,10 +3344,7 @@ function renderInventoryBackpack(): void {
     const definition = itemRegistry.get(stack.itemId);
     const action = definition ? getHotbarSecondaryAction(stack, itemRegistry) : null;
     if (action?.kind === "terrain:place-block") {
-      const swatch = document.createElement("span");
-      swatch.className = "inventory-backpack-swatch";
-      swatch.style.background = getBlockCssColor(action.block);
-      slot.appendChild(swatch);
+      slot.appendChild(createBlockTexturePreview(action.block, "inventory-backpack-swatch"));
     }
 
     const label = document.createElement("span");
@@ -3397,10 +3412,7 @@ function renderBuilderPalette(): void {
     button.setAttribute("aria-label", BLOCKS[block].name);
     button.dataset.blockId = String(block);
 
-    const swatch = document.createElement("span");
-    swatch.className = "builder-block-swatch";
-    swatch.style.background = getBlockCssColor(block);
-    button.appendChild(swatch);
+    button.appendChild(createBlockTexturePreview(block, "builder-block-swatch"));
 
     button.addEventListener("click", () => {
       selectInventoryCatalogItemForGameplay("blocks", createBlockItemId(block));
@@ -3430,9 +3442,28 @@ function syncBuilderControls(): void {
   }
 }
 
-function getBlockCssColor(block: BlockId): string {
-  const [r, g, b] = BLOCKS[block].color;
-  return `rgb(${Math.round(r * 255)} ${Math.round(g * 255)} ${Math.round(b * 255)})`;
+function createBlockTexturePreview(block: BlockId, className: string): HTMLElement {
+  const preview = document.createElement("span");
+  preview.className = `block-preview ${className}`;
+  preview.setAttribute("aria-hidden", "true");
+  preview.style.setProperty("--block-atlas", `url("${terrainAtlasUrl}")`);
+  preview.style.setProperty("--block-atlas-size", BLOCK_TEXTURE_ATLAS_CSS_SIZE);
+
+  // A plain block ID is also its mesh key with variant zero. Previews show the
+  // first authored alternative using the same two-dimensional atlas as terrain.
+  const atlasPosition = (normal: readonly [number, number, number]) => {
+    const tile = getBlockTextureBaseTileId(block, normal) * BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE;
+    return getBlockTextureAtlasCssPosition(tile);
+  };
+  preview.style.setProperty("--block-top-position", atlasPosition([0, 1, 0]));
+  preview.style.setProperty("--block-side-position", atlasPosition([1, 0, 0]));
+
+  for (const face of ["top", "left", "right"]) {
+    const faceNode = document.createElement("span");
+    faceNode.className = `block-preview-face block-preview-${face}`;
+    preview.appendChild(faceNode);
+  }
+  return preview;
 }
 
 function selectHotbarIndex(index: number): void {

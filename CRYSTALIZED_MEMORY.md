@@ -36,6 +36,26 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   behavior in `menuNavigation.ts`, pause/shortcut policy in `main.ts`, and
   controls bound to their existing preference/inventory owners. See
   [the pause workspace controls](docs/controls.md#world-flow).
+- Authored full-color terrain pixels own material hue; chunk/worker/partial
+  vertices carry neutral lighting. Keep separate block tints for untextured
+  debris, and export menu previews from the same editable Workshop source.
+  See [terrain art](docs/terrain-art.md) for source, export, and palette ownership.
+- Judge terrain art across repeated surfaces, not only isolated tiles. Anthony
+  requested connected tiling and less recognizable repetition on 2026-11-08;
+  he requested stronger noise after the first restrained increase as well.
+  Variation should remain visible across a large surface: rough patch shapes,
+  uneven mark density and clustered grain, while retaining material direction.
+  The [material studies](assets/terrain/studies-2026-11-08/README.md)
+  established Sunwashed with the stronger noise pass as Anthony's selected
+  direction on 2026-11-08. Preserve all three complete sets, including Wildwood
+  and Mineral Frontier, for future biome work. Runtime v0.24.0 preserves the
+  selected grass/dirt/stone/bark pixels exactly and extends the palette to all
+  faces. Shared-corner selection stays in the shader over world UVs to retain
+  greedy meshing; cap and object motifs have explicit edge exceptions. See
+  [the art contract](docs/terrain-art.md) for atlas orientation and exports.
+- `BLOCKS.color` is linear RGB for Three.js consumers. The 2D minimap converts
+  it to display sRGB before applying height shade; writing linear channels
+  directly as image bytes makes the selected palette too dark.
 - Sky atmosphere, elevated clouds, and terrain visibility have independent
   distance roles. Clouds occupy fixed world elevation and use elapsed active
   play time for wind; saved clock edits only affect their lighting. Preserve

@@ -1,8 +1,13 @@
 import { BLOCK } from "./blocks";
-import { getBlockColorVariantFromMeshKey, getBlockFromMeshKey } from "./blockColors";
+import { getBlockFromMeshKey } from "./blockColors";
+import {
+  BLOCK_TEXTURE_CORNER_MASK_COUNT,
+  BLOCK_TEXTURE_INTERIOR_ALTERNATIVE_COUNT,
+  getConnectedBlockTextureVariant
+} from "./blockTextureSelection";
 
-export const BLOCK_TEXTURE_TILE_SIZE_PX = 16;
-export const BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE = 4;
+export const BLOCK_TEXTURE_TILE_SIZE_PX = 32;
+export const BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE = BLOCK_TEXTURE_CORNER_MASK_COUNT * BLOCK_TEXTURE_INTERIOR_ALTERNATIVE_COUNT;
 
 export const BLOCK_TEXTURE_TILE = {
   grassTop: 0,
@@ -23,8 +28,9 @@ export const BLOCK_TEXTURE_TILE = {
 
 export const BLOCK_TEXTURE_BASE_TILE_COUNT = 14;
 export const BLOCK_TEXTURE_TILE_COUNT = BLOCK_TEXTURE_BASE_TILE_COUNT * BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE;
-export const BLOCK_TEXTURE_ATLAS_COLUMNS = BLOCK_TEXTURE_TILE_COUNT;
-export const BLOCK_TEXTURE_ATLAS_ROWS = 1;
+export const BLOCK_TEXTURE_ATLAS_COLUMNS = 32;
+export const BLOCK_TEXTURE_ATLAS_ROWS = Math.ceil(BLOCK_TEXTURE_TILE_COUNT / BLOCK_TEXTURE_ATLAS_COLUMNS);
+export const BLOCK_TEXTURE_ATLAS_CSS_SIZE = `${BLOCK_TEXTURE_ATLAS_COLUMNS * 100}% ${BLOCK_TEXTURE_ATLAS_ROWS * 100}%`;
 
 export type BlockTextureBaseTileId = (typeof BLOCK_TEXTURE_TILE)[keyof typeof BLOCK_TEXTURE_TILE];
 export type BlockTextureTileId = number;
@@ -33,10 +39,24 @@ type MeshNumberBuffer = number[];
 type FaceNormal = readonly [number, number, number];
 type QuadCorner = readonly [number, number, number];
 
-export function getBlockTextureTileId(meshKey: number, normal: FaceNormal): BlockTextureTileId {
+// CPU reference for the fragment selector; mesh attributes still carry only the
+// base family so one greedy quad may cover arbitrarily many world-meter cells.
+export function getBlockTextureTileId(
+  meshKey: number,
+  normal: FaceNormal,
+  worldU: number,
+  worldV: number
+): BlockTextureTileId {
   const baseTile = getBlockTextureBaseTileId(meshKey, normal);
-  const variant = getBlockTextureVariant(meshKey);
+  const variant = getConnectedBlockTextureVariant(baseTile, worldU, worldV);
   return baseTile * BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE + variant;
+}
+
+export function getBlockTextureAtlasCssPosition(tileId: BlockTextureTileId): string {
+  const column = tileId % BLOCK_TEXTURE_ATLAS_COLUMNS;
+  const row = Math.floor(tileId / BLOCK_TEXTURE_ATLAS_COLUMNS);
+  // CSS percentages position over the image's remaining size, not its width.
+  return `${column / (BLOCK_TEXTURE_ATLAS_COLUMNS - 1) * 100}% ${row / (BLOCK_TEXTURE_ATLAS_ROWS - 1) * 100}%`;
 }
 
 export function getBlockTextureBaseTileId(meshKey: number, normal: FaceNormal): BlockTextureBaseTileId {
@@ -67,10 +87,6 @@ export function getBlockTextureBaseTileId(meshKey: number, normal: FaceNormal): 
   if (block === BLOCK.rubble) return BLOCK_TEXTURE_TILE.rubble;
 
   return BLOCK_TEXTURE_TILE.stone;
-}
-
-function getBlockTextureVariant(meshKey: number): number {
-  return getBlockColorVariantFromMeshKey(meshKey) % BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE;
 }
 
 export function appendBlockTextureQuadAttributes(

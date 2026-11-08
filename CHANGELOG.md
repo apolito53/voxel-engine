@@ -9,6 +9,20 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.24.0 - 2026-11-08
+
+### Changed
+
+- Replaced procedural terrain pixels with the selected stronger-noise Sunwashed
+  material set, retaining editable Pixel Workshop sources and all three study
+  directions for future biome work.
+- Added connected corner patterns with four interior alternatives, selected
+  from world coordinates without splitting greedy chunk or partial-terrain faces.
+- Packed the 32px material families into a two-dimensional atlas and updated
+  block previews to use its matching faces.
+- Kept terrain vertex colors neutral so authored material colors receive the
+  existing baked lighting, day/night, fog and Lamp rules without a second tint.
+
 ## 0.23.1 - 2026-11-08
 
 ### Fixed

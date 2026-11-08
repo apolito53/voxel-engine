@@ -22,14 +22,12 @@ export function createBlockMeshKey(block: number, worldX: number, worldY: number
   return block | (getBlockColorVariant(block, worldX, worldY, worldZ) << 8);
 }
 
-export function getMaterialBlockColor(meshKey: number, shade = 1): BlockColor {
-  const block = getBlockFromMeshKey(meshKey);
-  const definition = BLOCKS[block] ?? BLOCKS[BLOCK.air];
-  return [
-    clampColorChannel(definition.color[0] * shade),
-    clampColorChannel(definition.color[1] * shade),
-    clampColorChannel(definition.color[2] * shade)
-  ];
+export function getMaterialBlockColor(_meshKey: number, shade = 1): BlockColor {
+  // The authored atlas supplies material color. Full chunks, mesh workers and
+  // partial terrain share only neutral baked lighting, avoiding a second tint
+  // that would muddy dirt, stone or the grass-over-dirt side textures.
+  const light = clampColorChannel(shade);
+  return [light, light, light];
 }
 
 export function getBlockFromMeshKey(meshKey: number): number {

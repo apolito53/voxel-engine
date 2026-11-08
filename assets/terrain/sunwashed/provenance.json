@@ -1,0 +1,32 @@
+{
+  "studySource": "assets/terrain/studies-2026-11-08/studies.json",
+  "studySha256": "c2b52811d6fdf5b0472dd089803648301262fff7f0cc2a5999e42e48b2f5708d",
+  "acceptedFamilies": {
+    "grassTop": {
+      "material": "grass",
+      "sourceSha256": "aed7f52c9465f0894ed3b9b5b31683283915eb9aeb8a900914ae32abf44e0bd0",
+      "exportSha256": "aed7f52c9465f0894ed3b9b5b31683283915eb9aeb8a900914ae32abf44e0bd0",
+      "identical": true
+    },
+    "dirt": {
+      "material": "dirt",
+      "sourceSha256": "6f7c6d987feea6316661f8ef9ba0d26eecd1df623d274d5cf258a227c10cbcd0",
+      "exportSha256": "6f7c6d987feea6316661f8ef9ba0d26eecd1df623d274d5cf258a227c10cbcd0",
+      "identical": true
+    },
+    "stone": {
+      "material": "stone",
+      "sourceSha256": "dec10db8f8813ca3cc747309298bb002bdeb3d7e1c5e74ffe904662ac3982e97",
+      "exportSha256": "dec10db8f8813ca3cc747309298bb002bdeb3d7e1c5e74ffe904662ac3982e97",
+      "identical": true
+    },
+    "woodSide": {
+      "material": "bark",
+      "sourceSha256": "4fba03695edba04261cd3bd9d561ef97b5fedfe342a09a77720a1a285b6957f7",
+      "exportSha256": "4fba03695edba04261cd3bd9d561ef97b5fedfe342a09a77720a1a285b6957f7",
+      "identical": true
+    }
+  },
+  "preservedArchiveFiles": 82,
+  "archiveAggregateSha256": "b0806772cc8d9bd2f404efeef5977cb0a0e67943b014d3f70bf074a90a56c58c"
+}

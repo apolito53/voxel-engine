@@ -851,13 +851,50 @@ body.playing canvas {
   box-shadow: inset 0 0 0 2px rgba(241, 196, 83, 0.34);
 }
 
+.block-preview {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  flex: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+}
+
+.block-preview-face {
+  position: absolute;
+  width: 50%;
+  height: 50%;
+  background-image: var(--block-atlas);
+  background-repeat: no-repeat;
+  background-size: var(--block-atlas-size);
+  image-rendering: pixelated;
+  transform-origin: 0 0;
+}
+
+.block-preview-top {
+  top: 6.25%;
+  left: 50%;
+  background-position: var(--block-top-position);
+  transform: matrix(0.875, 0.4375, -0.875, 0.4375, 0, 0);
+}
+
+.block-preview-left {
+  top: 28.125%;
+  left: 6.25%;
+  background-position: var(--block-side-position);
+  filter: brightness(0.86);
+  transform: matrix(0.875, 0.4375, 0, 0.875, 0, 0);
+}
+
+.block-preview-right {
+  top: 50%;
+  left: 50%;
+  background-position: var(--block-side-position);
+  filter: brightness(0.7);
+  transform: matrix(0.875, -0.4375, 0, 0.875, 0, 0);
+}
+
 .builder-block-swatch {
-  width: 100%;
-  height: 100%;
-  border-radius: 4px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
-    inset 0 -12px 18px rgba(0, 0, 0, 0.22);
+  width: 90%;
 }
 
 .builder-action-grid {
@@ -965,12 +1002,8 @@ body.playing canvas {
 }
 
 .inventory-block-swatch {
-  width: 100%;
-  aspect-ratio: 1.85;
-  border-radius: 5px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.24),
-    inset 0 -16px 20px rgba(0, 0, 0, 0.22);
+  justify-self: center;
+  width: min(64px, 55%);
 }
 
 .inventory-block-name {
@@ -1043,10 +1076,7 @@ body.playing canvas {
 }
 
 .inventory-backpack-swatch {
-  width: 22px;
-  height: 13px;
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  width: 20px;
 }
 
 .inventory-backpack-label {
@@ -1602,12 +1632,7 @@ body.controls-hidden #hud {
 }
 
 .hotbar-slot-swatch {
-  width: 34px;
-  height: 20px;
-  border-radius: 4px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-    inset 0 -8px 12px rgba(0, 0, 0, 0.2);
+  width: 24px;
 }
 
 .hotbar-slot-label {
@@ -1935,7 +1960,7 @@ body.controls-hidden #hud {
   }
 
   .hotbar-slot-swatch {
-    width: 28px;
+    width: 22px;
   }
 
   .hotbar-slot-label {

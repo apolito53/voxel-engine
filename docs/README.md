@@ -9,6 +9,8 @@ This folder keeps the living design notes out of the project front door.
   decisions that are too detailed for the root codebase index.
 - [controls.md](controls.md): movement, item/block lanes, builder tools,
   settings, debug keys, and quality presets.
+- [terrain-art.md](terrain-art.md): selected Sunwashed Workshop materials,
+  connected patterns, atlas export, palette ownership and textured previews.
 - [destruction.md](destruction.md): partial-block damage, cores, debris VFX, and
   parked rubble mechanics.
 - [nova-companion.md](nova-companion.md): Nova Pilot, Nova Terminal, local

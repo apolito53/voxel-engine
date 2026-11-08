@@ -10,6 +10,24 @@ const MINIMAP_RANGE = 96;
 const MINIMAP_WORLD_PER_PIXEL = MINIMAP_RANGE / MINIMAP_SIZE;
 const MINIMAP_WORLD_PER_TEXEL = MINIMAP_RANGE / MINIMAP_TEXTURE_SIZE;
 
+// Block colors are linear for Three.js, but ImageData holds display-space
+// sRGB bytes. Convert once per material instead of once per minimap pixel.
+const MINIMAP_BLOCK_COLORS: Readonly<Record<number, readonly [number, number, number]>> = Object.fromEntries(
+  Object.entries(BLOCKS).map(([id, definition]) => {
+    const color = new THREE.Color(...definition.color).convertLinearToSRGB();
+    return [id, [color.r * 255, color.g * 255, color.b * 255] as const];
+  })
+);
+
+export function writeMinimapBlockPixel(data: Uint8ClampedArray, offset: number, block: number, y: number): void {
+  const shade = 0.58 + (y / WORLD_HEIGHT) * 0.42;
+  const color = MINIMAP_BLOCK_COLORS[block];
+  data[offset] = color[0] * shade;
+  data[offset + 1] = color[1] * shade;
+  data[offset + 2] = color[2] * shade;
+  data[offset + 3] = 255;
+}
+
 type MinimapOptions = {
   readonly canvas: HTMLCanvasElement;
   readonly camera: THREE.PerspectiveCamera;
@@ -125,12 +143,7 @@ export class MinimapRenderer {
           continue;
         }
 
-        const shade = 0.58 + (y / WORLD_HEIGHT) * 0.42;
-        const color = BLOCKS[block].color;
-        data[offset] = color[0] * 255 * shade;
-        data[offset + 1] = color[1] * 255 * shade;
-        data[offset + 2] = color[2] * 255 * shade;
-        data[offset + 3] = 255;
+        writeMinimapBlockPixel(data, offset, block, y);
       }
     }
 

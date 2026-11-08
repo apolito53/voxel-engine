@@ -79,11 +79,22 @@ import {
   readChunkBlockLightBuffers
 } from "../src/voxelBlockLight";
 import {
+  BLOCK_TEXTURE_ATLAS_COLUMNS,
+  BLOCK_TEXTURE_ATLAS_CSS_SIZE,
+  BLOCK_TEXTURE_ATLAS_ROWS,
+  BLOCK_TEXTURE_BASE_TILE_COUNT,
   BLOCK_TEXTURE_TILE,
+  BLOCK_TEXTURE_TILE_SIZE_PX,
+  BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE,
+  getBlockTextureAtlasCssPosition,
   getBlockTextureBaseTileId,
   getBlockTextureTileId
 } from "../src/blockTextureTiles";
+import { getConnectedBlockTextureVariant } from "../src/blockTextureSelection";
+import terrainArt from "../src/assets/terrain-art.json";
+import { BLOCK_TEXTURE_ART_PALETTE_SYMBOLS, decodeBlockTextureArt } from "../src/blockTextureArt";
 import { applyWorldBlockShaderPatches } from "../src/blockTextureAtlas";
+import { writeMinimapBlockPixel } from "../src/minimap";
 import {
   applyBuilderBrush,
   collectBuilderBrushCells,
@@ -3734,6 +3745,216 @@ test("block color variants are deterministic and stay tied to block identity", (
   );
 });
 
+test("block color material shading stays neutral while debris retains its material tint", () => {
+  for (const block of Object.values(BLOCK).filter((block) => block !== BLOCK.air)) {
+    for (let variant = 0; variant < BLOCK_COLOR_VARIANT_COUNT; variant += 1) {
+      assertDeepEqual(
+        getMaterialBlockColor(block | (variant << 8), 0.375),
+        [0.375, 0.375, 0.375],
+        "textured terrain should carry only baked lighting regardless of block or visual variant"
+      );
+    }
+  }
+  assertDeepEqual(getMaterialBlockColor(BLOCK.dirt, -1), [0, 0, 0], "neutral lighting should retain its lower clamp");
+  assertDeepEqual(getMaterialBlockColor(BLOCK.stone, 2), [1, 1, 1], "neutral lighting should retain its upper clamp");
+  const grassDebris = getTintedBlockColor(createBlockMeshKey(BLOCK.grass, 2, 3, 4), 0.75);
+  assert(grassDebris[1] > grassDebris[0] && grassDebris[1] > grassDebris[2], "untextured grass debris should remain green");
+});
+
+test("block color minimap writes display-space Sunwashed colors with height shading", () => {
+  const manifest = JSON.parse(readFileSync("assets/terrain/sunwashed/manifest.json", "utf8")) as {
+    representativeBlockColors: Record<string, string>;
+  };
+  for (const [name, block] of [["grass", BLOCK.grass], ["stone", BLOCK.stone]] as const) {
+    const hex = manifest.representativeBlockColors[name];
+    const channels = [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
+    const originalLinear = [...BLOCKS[block].color];
+    for (const y of [0, WORLD_HEIGHT / 2, WORLD_HEIGHT]) {
+      const shade = 0.58 + (y / WORLD_HEIGHT) * 0.42;
+      const expected = Array.from(new Uint8ClampedArray([...channels.map((channel) => channel * shade), 255]));
+      const pixels = new Uint8ClampedArray(8).fill(17);
+      writeMinimapBlockPixel(pixels, 2, block, y);
+      assertDeepEqual(Array.from(pixels.slice(2, 6)), expected, `${name} minimap pixel should use display RGB and the existing height shade`);
+      assertEqual(pixels[1], 17, "writing a minimap pixel should not alter preceding pixels");
+      assertEqual(pixels[6], 17, "writing a minimap pixel should not alter following pixels");
+    }
+    assertDeepEqual(BLOCKS[block].color, originalLinear, "minimap conversion must leave Three.js material colors linear");
+  }
+});
+
+test("block texture art covers every material with opaque authored pixel variants", () => {
+  const atlas = decodeBlockTextureArt();
+  assertEqual(terrainArt.tileSize, 32, "authored tiles should retain their 32px pixel scale");
+  assertEqual(Object.keys(terrainArt.tiles).length, BLOCK_TEXTURE_BASE_TILE_COUNT, "every base material needs authored art");
+  assertEqual(atlas.width, BLOCK_TEXTURE_ATLAS_COLUMNS * BLOCK_TEXTURE_TILE_SIZE_PX, "atlas width should match shader columns");
+  assertEqual(atlas.height, BLOCK_TEXTURE_ATLAS_ROWS * BLOCK_TEXTURE_TILE_SIZE_PX, "atlas height should match shader rows");
+  assertEqual(atlas.data.length, atlas.width * atlas.height * 4, "atlas should contain complete RGBA pixels");
+  for (let offset = 3; offset < atlas.data.length; offset += 4) {
+    assertEqual(atlas.data[offset], 255, "opaque terrain art must not introduce holes in the material");
+  }
+  for (const tileName of Object.keys(BLOCK_TEXTURE_TILE) as (keyof typeof BLOCK_TEXTURE_TILE)[]) {
+    const variants = terrainArt.tiles[tileName];
+    assertEqual(variants.length, BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE, `${tileName} should cover every shader variant`);
+    const distinctVariants = new Set(variants.map((rows) => rows.join("\n")));
+    assert(distinctVariants.size > 1, `${tileName} should provide authored breakup across repeated blocks`);
+  }
+});
+
+test("block texture art decoding preserves palette colors, row orientation and atlas order", () => {
+  const palette = Array.from({ length: BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE }, (_, index) => {
+    return `#${(0x123400 + index).toString(16).padStart(6, "0")}`;
+  });
+  const tiles = Object.fromEntries(Object.entries(BLOCK_TEXTURE_TILE).map(([name, baseTileId]) => [
+    name,
+    Array.from({ length: BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE }, (_, variant) => {
+      const symbol = BLOCK_TEXTURE_ART_PALETTE_SYMBOLS[variant];
+      const rows = Array.from({ length: BLOCK_TEXTURE_TILE_SIZE_PX }, () => symbol.repeat(BLOCK_TEXTURE_TILE_SIZE_PX));
+      rows[0] = "0" + rows[0].slice(1);
+      rows[1] = symbol + BLOCK_TEXTURE_ART_PALETTE_SYMBOLS[baseTileId] + rows[1].slice(2);
+      rows[rows.length - 1] = rows[rows.length - 1].slice(0, -1) + "1";
+      return rows;
+    })
+  ]));
+  const atlas = decodeBlockTextureArt({ tileSize: BLOCK_TEXTURE_TILE_SIZE_PX, palette, tiles });
+  for (let tileId = 0; tileId < BLOCK_TEXTURE_BASE_TILE_COUNT * BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE; tileId += 1) {
+    const originX = tileId % BLOCK_TEXTURE_ATLAS_COLUMNS * BLOCK_TEXTURE_TILE_SIZE_PX;
+    const originY = Math.floor(tileId / BLOCK_TEXTURE_ATLAS_COLUMNS) * BLOCK_TEXTURE_TILE_SIZE_PX;
+    const readPixel = (x: number, y: number): number[] => {
+      const offset = ((originY + y) * atlas.width + originX + x) * 4;
+      return Array.from(atlas.data.slice(offset, offset + 4));
+    };
+    assertDeepEqual(readPixel(0, 0), [0x12, 0x34, 0, 255], "first authored row should stay at the top of its tile");
+    assertDeepEqual(readPixel(1, 1), [0x12, 0x34, Math.floor(tileId / BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE), 255], "material order should continue across atlas rows");
+    assertDeepEqual(readPixel(2, 2), [0x12, 0x34, tileId % BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE, 255], "mask and alternative order should match shader tile IDs");
+    assertDeepEqual(readPixel(31, 31), [0x12, 0x34, 1, 255], "last authored pixel should stay inside its own tile");
+  }
+});
+
+test("block texture art rejects incomplete pixels and translucent palette entries", () => {
+  const createSource = () => ({
+    tileSize: BLOCK_TEXTURE_TILE_SIZE_PX,
+    palette: ["#123456"],
+    tiles: Object.fromEntries(Object.keys(BLOCK_TEXTURE_TILE).map((name) => [
+      name,
+      Array.from({ length: BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE }, () => {
+        return Array.from({ length: BLOCK_TEXTURE_TILE_SIZE_PX }, () => "0".repeat(BLOCK_TEXTURE_TILE_SIZE_PX));
+      })
+    ]))
+  });
+  const assertRejected = (edit: (source: ReturnType<typeof createSource>) => void, expectedMessage: string): void => {
+    const source = createSource();
+    edit(source);
+    let error: unknown;
+    try {
+      decodeBlockTextureArt(source);
+    } catch (caught) {
+      error = caught;
+    }
+    assert(error instanceof Error && error.message.includes(expectedMessage), `malformed art should reject with ${expectedMessage}`);
+  };
+  assertRejected((source) => { source.tileSize = 16; }, "32px");
+  assertRejected((source) => { source.palette[0] = "#12345600"; }, "opaque #RRGGBB");
+  assertRejected((source) => { delete source.tiles.lamp; }, "missing tile: lamp");
+  assertRejected((source) => { source.tiles.typo = source.tiles.stone; }, "unknown tile: typo");
+  assertRejected((source) => { source.palette = []; }, "invalid size");
+  assertRejected((source) => { source.palette = Array(BLOCK_TEXTURE_ART_PALETTE_SYMBOLS.length + 1).fill("#123456"); }, "invalid size");
+  assertRejected((source) => { source.tiles.stone.pop(); }, "64 variants");
+  assertRejected((source) => { source.tiles.stone[0].pop(); }, "invalid height");
+  assertRejected((source) => { source.tiles.stone[0][0] = "0"; }, "invalid width");
+  assertRejected((source) => { source.tiles.stone[0][0] = "1".repeat(32); }, "invalid palette index");
+});
+
+test("block texture connected corners agree across negative cells and chunk seams", () => {
+  for (let baseTile = 0; baseTile < BLOCK_TEXTURE_BASE_TILE_COUNT; baseTile += 1) {
+    const alternativesByMask = Array.from({ length: 16 }, () => new Set<number>());
+    for (let y = -33; y <= 33; y += 1) {
+      for (let x = -33; x <= 33; x += 1) {
+        const variant = getConnectedBlockTextureVariant(baseTile, x + 0.25, y + 0.75);
+        const mask = variant % 16;
+        const eastMask = getConnectedBlockTextureVariant(baseTile, x + 1.25, y + 0.75) % 16;
+        const northMask = getConnectedBlockTextureVariant(baseTile, x + 0.25, y + 1.75) % 16;
+        assert(variant >= 0 && variant < 64, "all selected variants must fit the authored mask/alternative slots");
+        assertEqual(variant, getConnectedBlockTextureVariant(baseTile, x + 0.99, y + 0.01), "a world-meter cell should keep its variant on every greedy or partial fragment");
+        assertEqual((mask >> 1) & 1, eastMask & 1, "east neighbors must share NE/NW corners, including at zero and ±chunk boundaries");
+        assertEqual((mask >> 2) & 1, (eastMask >> 3) & 1, "east neighbors must share SE/SW corners");
+        assertEqual(mask & 1, (northMask >> 3) & 1, "north neighbors must share image NW/SW corners because local v increases toward the image top");
+        assertEqual((mask >> 1) & 1, (northMask >> 2) & 1, "north neighbors must share image NE/SE corners");
+        alternativesByMask[mask].add(Math.floor(variant / 16));
+      }
+    }
+    for (const alternatives of alternativesByMask) {
+      assertEqual(alternatives.size, 4, "each corner mask should retain all four independently chosen interior alternatives");
+    }
+  }
+});
+
+test("block texture connected selection joins actual image borders in every compatible slot", () => {
+  for (const [name, variants] of Object.entries(terrainArt.tiles)) {
+    // These deliberately describe individual objects rather than a connected
+    // surface. Directional grass-over-earth caps connect horizontally only.
+    if (name === "woodTop" || name === "lamp") continue;
+    for (let first = 0; first < 64; first += 1) {
+      const firstMask = first % 16;
+      for (let second = 0; second < 64; second += 1) {
+        const secondMask = second % 16;
+        if (((firstMask >> 1) & 1) === (secondMask & 1) && ((firstMask >> 2) & 1) === ((secondMask >> 3) & 1)) {
+          for (let pixel = 0; pixel < 32; pixel += 1) {
+            assertEqual(variants[first][pixel][31], variants[second][pixel][0], `${name} E/W image pixels should join for every compatible mask and interior alternative`);
+          }
+        }
+        if (name === "grassSide" || name === "mossSide") continue;
+        if ((firstMask & 1) === ((secondMask >> 3) & 1) && ((firstMask >> 1) & 1) === ((secondMask >> 2) & 1)) {
+          assertEqual(variants[first][0], variants[second][31], `${name} world-north neighbors must join image top to image bottom, across all alternatives`);
+        }
+      }
+    }
+  }
+});
+
+test("block texture art retains the four accepted Sunwashed study sheets exactly", () => {
+  const atlas = decodeBlockTextureArt();
+  for (const [studyName, baseTile] of [
+    ["grass", BLOCK_TEXTURE_TILE.grassTop], ["dirt", BLOCK_TEXTURE_TILE.dirt],
+    ["stone", BLOCK_TEXTURE_TILE.stone], ["bark", BLOCK_TEXTURE_TILE.woodSide]
+  ] as const) {
+    const sheet = JSON.parse(readFileSync(`assets/terrain/studies-2026-11-08/sunwashed/${studyName}-sheet.pixel.json`, "utf8")) as {
+      width: number; height: number; layers: { pixels: number[] }[];
+    };
+    assertEqual(sheet.width, 256, "accepted native sheets should contain eight columns of 32px tiles");
+    assertEqual(sheet.height, 256, "accepted native sheets should contain eight rows of 32px tiles");
+    const pixels = sheet.layers[0].pixels;
+    for (let variant = 0; variant < 64; variant += 1) {
+      const tileId = baseTile * 64 + variant;
+      const atlasX = tileId % BLOCK_TEXTURE_ATLAS_COLUMNS * 32;
+      const atlasY = Math.floor(tileId / BLOCK_TEXTURE_ATLAS_COLUMNS) * 32;
+      for (let y = 0; y < 32; y += 1) {
+        for (let x = 0; x < 32; x += 1) {
+          const packed = pixels[(Math.floor(variant / 8) * 32 + y) * sheet.width + variant % 8 * 32 + x];
+          const offset = ((atlasY + y) * atlas.width + atlasX + x) * 4;
+          const decoded = (((atlas.data[offset] << 24) | (atlas.data[offset + 1] << 16) | (atlas.data[offset + 2] << 8) | atlas.data[offset + 3]) >>> 0);
+          assertEqual(decoded, packed, `${studyName} should preserve the accepted study pixels in mask/alternative order`);
+        }
+      }
+    }
+  }
+});
+
+test("block texture preview addresses both axes of the shared atlas", () => {
+  assertEqual(BLOCK_TEXTURE_ATLAS_CSS_SIZE, "3200% 2800%", "menu previews should keep 32px material pixels at the shared atlas grid scale");
+  for (let tile = 0; tile < BLOCK_TEXTURE_BASE_TILE_COUNT * BLOCK_TEXTURE_VARIANTS_PER_BASE_TILE; tile += 1) {
+    const [xPercent, yPercent] = getBlockTextureAtlasCssPosition(tile).split(" ").map(Number.parseFloat);
+    const x = (BLOCK_TEXTURE_ATLAS_COLUMNS - 1) * 32 * xPercent / 100;
+    const y = (BLOCK_TEXTURE_ATLAS_ROWS - 1) * 32 * yPercent / 100;
+    assertClose(x, tile % BLOCK_TEXTURE_ATLAS_COLUMNS * 32, 0.000001, "CSS percentage should address the same column as the decoder");
+    assertClose(y, Math.floor(tile / BLOCK_TEXTURE_ATLAS_COLUMNS) * 32, 0.000001, "CSS percentage should address the same top-down row as the decoder");
+  }
+  const main = readFileSync("src/main.ts", "utf8");
+  const css = readFileSync("src/style.css", "utf8");
+  assert(main.includes('setProperty("--block-atlas-size", BLOCK_TEXTURE_ATLAS_CSS_SIZE)'), "the live preview must use the tested two-axis scale");
+  assert(main.includes("return getBlockTextureAtlasCssPosition(tile);"), "all preview faces must use the tested two-axis position");
+  assert(css.includes("background-position: var(--block-top-position);") && css.includes("background-position: var(--block-side-position);"), "CSS must consume each complete x/y preview position");
+});
+
 test("block texture tile mapping keeps material faces distinct", () => {
   const grassKey = createBlockMeshKey(BLOCK.grass, 2, 5, 7);
   const woodKey = createBlockMeshKey(BLOCK.wood, 2, 5, 7);
@@ -3825,6 +4046,27 @@ test("world block shader damps specular through baked diffuse shade", () => {
     shader.fragmentShader.includes("floor(vMapUv)"),
     "shader texture variation should be derived from world-space meter cells"
   );
+  assert(
+    shader.fragmentShader.includes("voxelConnectedTextureVariant(blockTextureCell, blockTextureBaseTile)") &&
+      shader.fragmentShader.includes("uint voxelTextureCellHash(ivec2 cell, uint salt)"),
+    "the terrain fragment path must use the shared unsigned corner selector without sin rounding"
+  );
+  assert(
+    shader.fragmentShader.includes("uint nw = voxelTextureCellHash(cell + ivec2(0, 1), cornerSalt) & 1u;") &&
+      shader.fragmentShader.includes("uint ne = voxelTextureCellHash(cell + ivec2(1, 1), cornerSalt) & 1u;") &&
+      shader.fragmentShader.includes("uint se = voxelTextureCellHash(cell + ivec2(1, 0), cornerSalt) & 1u;") &&
+      shader.fragmentShader.includes("uint sw = voxelTextureCellHash(cell, cornerSalt) & 1u;"),
+    "shader corners must match the authored NW/NE/SE/SW image order while world v increases upward"
+  );
+  assert(
+    shader.fragmentShader.includes("blockTextureAtlasGrid.y - 1.0 - blockTextureRow") &&
+      shader.fragmentShader.includes("vec2(blockTextureColumn, blockTextureGpuRow) / blockTextureAtlasGrid") &&
+      shader.fragmentShader.includes("fract(vMapUv) * blockTextureScale"),
+    "multi-row atlas sampling must start at the canvas image top and preserve the local image orientation"
+  );
+  const atlasGrid = shader.uniforms.blockTextureAtlasGrid.value as THREE.Vector2;
+  assertDeepEqual(atlasGrid.toArray(), [32, 28], "the patched shader must address the complete atlas");
+  assertEqual(shader.uniforms.blockTextureVariantsPerBaseTile.value, 64, "shader family stride must include all corners and interior alternatives");
   assert(
     shader.fragmentShader.includes("voxelSealedLightMask"),
     "terrain shader should detect sealed baked-light faces"
@@ -4724,10 +4966,75 @@ test("block texture tile mapping varies repeated material surfaces", () => {
   const sampledTiles = new Set<number>();
 
   for (let x = 0; x < 24; x += 1) {
-    sampledTiles.add(getBlockTextureTileId(createBlockMeshKey(BLOCK.grass, x, 4, 0), [0, 1, 0]));
+    sampledTiles.add(getBlockTextureTileId(createBlockMeshKey(BLOCK.grass, x, 4, 0), [0, 1, 0], x, 0));
   }
 
   assert(sampledTiles.size > 1, "nearby repeated grass tops should sample multiple atlas variants");
+});
+
+test("block texture world UVs agree for chunks, worker jobs and partial terrain", () => {
+  for (const [cx, cz] of [[-1, -1], [0, 0], [1, 1]] as const) {
+    const chunk = new Chunk(cx, cz);
+    const localX = CHUNK_SIZE - 1;
+    const localZ = 0;
+    const y = 7;
+    const worldX = cx * CHUNK_SIZE + localX;
+    const worldZ = cz * CHUNK_SIZE + localZ;
+    chunk.setLocal(localX, y, localZ, BLOCK.stone);
+    const airNeighbor = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE).buffer;
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true });
+    const mesh = chunk.rebuildMesh({
+      isSolid(x: number, by: number, z: number): boolean {
+        return chunk.getLocal(Math.floor(x) - cx * CHUNK_SIZE, Math.floor(by), Math.floor(z) - cz * CHUNK_SIZE) !== BLOCK.air;
+      }
+    }, material);
+    const worker = buildChunkMeshJob({
+      requestId: 773, cx, cz, revision: 1,
+      blocks: chunk.blocks.buffer.slice(0),
+      neighbors: { negativeX: airNeighbor, positiveX: airNeighbor, negativeZ: airNeighbor, positiveZ: airNeighbor },
+      partialBlockMasks: {
+        current: null,
+        neighbors: { negativeX: null, positiveX: null, negativeZ: null, positiveZ: null }
+      },
+      blockLights: createChunkMeshBlockLightBuffers()
+    });
+    assertFloat32ArraysEqual(worker.positions, mesh.geometry.getAttribute("position").array as Float32Array, "worker and synchronous chunk paths should retain identical world vertices");
+    assertFloat32ArraysEqual(worker.uvs, mesh.geometry.getAttribute("uv").array as Float32Array, "worker and synchronous chunk paths should retain identical world UVs");
+    assertFloat32ArraysEqual(worker.textureTiles, mesh.geometry.getAttribute("blockTextureTile").array as Float32Array, "worker and synchronous chunk paths should carry only the same base family IDs");
+    const exactRemovedCell = encodeTestLatticeIndex(0, 1, 1);
+    const cell: PartialBlockCell = {
+      block: BLOCK.stone,
+      position: { x: worldX, y, z: worldZ },
+      damage: 1,
+      maxHealth: 27,
+      removedVisualCellIndexes: [exactRemovedCell],
+      cuts: [{
+        normal: { x: -1, y: 0, z: 0 },
+        localPoint: { x: 1 / 6, y: 0.5, z: 0.5 },
+        exactRemovedVisualCellIndexes: [exactRemovedCell],
+        radius: 0.12, depth: 0.12, seed: 2468
+      }]
+    };
+    const update = { key: createPartialBlockMeshRegionKey(cell.position), revision: 1, cells: [cell], contextCells: [cell] };
+    const partial = buildPartialBlockMeshGeometryData({ update, faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(update, () => false) });
+    for (const geometry of [worker, partial]) {
+      assert(geometry.positions.length > 0, "both full and carved material surfaces must be present");
+      for (let vertex = 0; vertex < geometry.positions.length / 3; vertex += 1) {
+        const px = geometry.positions[vertex * 3];
+        const py = geometry.positions[vertex * 3 + 1];
+        const pz = geometry.positions[vertex * 3 + 2];
+        const nx = Math.abs(geometry.normals[vertex * 3]);
+        const ny = Math.abs(geometry.normals[vertex * 3 + 1]);
+        const nz = Math.abs(geometry.normals[vertex * 3 + 2]);
+        const expected = ny >= nx && ny >= nz ? [px, pz] : nx >= nz ? [pz, py] : [px, py];
+        assertClose(geometry.uvs[vertex * 2], expected[0], 0.00001, "full and partial u must remain the same unrotated world-face coordinate");
+        assertClose(geometry.uvs[vertex * 2 + 1], expected[1], 0.00001, "full and partial v must remain the same upward world-face coordinate");
+        assertEqual(geometry.textureTiles[vertex], BLOCK_TEXTURE_TILE.stone, "texture alternatives must stay in the shader so carving cannot change the base family");
+      }
+    }
+    mesh.geometry.dispose();
+    material.dispose();
+  }
 });
 
 test("chunk greedy meshing ignores visual variants on flat terrain faces", () => {
@@ -4781,8 +5088,10 @@ test("chunk greedy meshing ignores visual variants on flat terrain faces", () =>
   assertEqual(
     matchingTopColors,
     4,
-    "chunk vertex colors should use the material base tint while shader-side texture variants provide visual noise"
+    "chunk vertex colors should use neutral lighting while shader-side texture variants provide material color"
   );
+  assertClose(expectedStoneTopColor[0], expectedStoneTopColor[1], 0.000001, "chunk material shade should be neutral");
+  assertClose(expectedStoneTopColor[1], expectedStoneTopColor[2], 0.000001, "chunk material shade should not double-tint art");
 
   mesh.geometry.dispose();
   material.dispose();
@@ -8051,6 +8360,8 @@ test("partial block exterior vertex colors match chunk material colors", () => {
     assertClose(geometry.colors[index] ?? 0, expectedColor[0], 0.000001, "partial red channel should match chunks");
     assertClose(geometry.colors[index + 1] ?? 0, expectedColor[1], 0.000001, "partial green channel should match chunks");
     assertClose(geometry.colors[index + 2] ?? 0, expectedColor[2], 0.000001, "partial blue channel should match chunks");
+    assertClose(geometry.colors[index] ?? 0, geometry.colors[index + 1] ?? 0, 0.000001, "partial lighting should stay neutral");
+    assertClose(geometry.colors[index + 1] ?? 0, geometry.colors[index + 2] ?? 0, 0.000001, "partial art should not be double-tinted");
   }
 });
 

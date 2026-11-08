@@ -1,0 +1,155 @@
+{
+  "format": "sunwashed-verification/1",
+  "tileSize": 32,
+  "variants": 64,
+  "atlas": {
+    "columns": 32,
+    "rows": 28,
+    "width": 1024,
+    "height": 896
+  },
+  "representativeBlockColors": {
+    "grass": "#949e60",
+    "dirt": "#b18e66",
+    "stone": "#cbc5ad",
+    "sand": "#dec791",
+    "ember": "#66513f",
+    "rubble": "#c1af91",
+    "wood": "#a28558",
+    "leaves": "#7d914c",
+    "moss": "#8ca154",
+    "bush": "#607540",
+    "lamp": "#dcbc7a"
+  },
+  "families": {
+    "grassTop": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "aed7f52c9465f0894ed3b9b5b31683283915eb9aeb8a900914ae32abf44e0bd0"
+    },
+    "grassSide": {
+      "mode": "horizontal",
+      "uniqueTiles": 64,
+      "compatiblePairs": 1024,
+      "edgePixels": 32768,
+      "sha256": "968f44758e75402de328eb4f9a4dd04891d9905174c39db776da67270bea4ebe"
+    },
+    "dirt": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "6f7c6d987feea6316661f8ef9ba0d26eecd1df623d274d5cf258a227c10cbcd0"
+    },
+    "stone": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "dec10db8f8813ca3cc747309298bb002bdeb3d7e1c5e74ffe904662ac3982e97"
+    },
+    "sand": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "640a69b0076803a5ccde50eb9fd5352f24290dbb3135a73b66ea4b31f98e5804"
+    },
+    "ember": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "5781e62b0d643bedd2f481c091f4223e9d749b7368c987209835124a7648bd5f"
+    },
+    "rubble": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "0436c982697cacc640591a05e6f2859e9e52d0da73af1800916ccf9c04cf3e6d"
+    },
+    "woodSide": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "4fba03695edba04261cd3bd9d561ef97b5fedfe342a09a77720a1a285b6957f7"
+    },
+    "woodTop": {
+      "mode": "object",
+      "uniqueTiles": 4,
+      "compatiblePairs": 0,
+      "edgePixels": 0,
+      "sha256": "09f60ff2694ab9b35d7934be46e31ea6647c8d0ac2aea6b0cd6b6709e0951b88"
+    },
+    "leaves": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "917d116e22b477dd1d0fab4e4f7e5b3cc551aa92c8e14772d5999d13d6db78c4"
+    },
+    "mossTop": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "b61f72a829d8ac83c5d8465c9a4a1a776d28befb14b232dd3c070a71a8bdea33"
+    },
+    "mossSide": {
+      "mode": "horizontal",
+      "uniqueTiles": 64,
+      "compatiblePairs": 1024,
+      "edgePixels": 32768,
+      "sha256": "79e40db2d5ba31800ec75d39ebc38f64f853bcc194a8f9d57eb1fa2732cdde38"
+    },
+    "bush": {
+      "mode": "connected",
+      "uniqueTiles": 64,
+      "compatiblePairs": 2048,
+      "edgePixels": 65536,
+      "sha256": "e9a8c2f2efd2c3d43076c3f7968307dd91a4038c9fea9a3639f4ee2e59ae39c7"
+    },
+    "lamp": {
+      "mode": "object",
+      "uniqueTiles": 4,
+      "compatiblePairs": 0,
+      "edgePixels": 0,
+      "sha256": "feed6ee14a4248755d2dd4fbacfb83d158fccb0ba3f0291f0b09007e03349a7c"
+    }
+  },
+  "acceptedStudies": {
+    "grassTop": {
+      "material": "grass",
+      "sourceSha256": "aed7f52c9465f0894ed3b9b5b31683283915eb9aeb8a900914ae32abf44e0bd0",
+      "exportSha256": "aed7f52c9465f0894ed3b9b5b31683283915eb9aeb8a900914ae32abf44e0bd0",
+      "identical": true
+    },
+    "dirt": {
+      "material": "dirt",
+      "sourceSha256": "6f7c6d987feea6316661f8ef9ba0d26eecd1df623d274d5cf258a227c10cbcd0",
+      "exportSha256": "6f7c6d987feea6316661f8ef9ba0d26eecd1df623d274d5cf258a227c10cbcd0",
+      "identical": true
+    },
+    "stone": {
+      "material": "stone",
+      "sourceSha256": "dec10db8f8813ca3cc747309298bb002bdeb3d7e1c5e74ffe904662ac3982e97",
+      "exportSha256": "dec10db8f8813ca3cc747309298bb002bdeb3d7e1c5e74ffe904662ac3982e97",
+      "identical": true
+    },
+    "woodSide": {
+      "material": "bark",
+      "sourceSha256": "4fba03695edba04261cd3bd9d561ef97b5fedfe342a09a77720a1a285b6957f7",
+      "exportSha256": "4fba03695edba04261cd3bd9d561ef97b5fedfe342a09a77720a1a285b6957f7",
+      "identical": true
+    }
+  },
+  "paletteColors": 50,
+  "totalTiles": 896,
+  "opaquePixels": 917504,
+  "compatiblePairs": 22528,
+  "edgePixels": 720896
+}

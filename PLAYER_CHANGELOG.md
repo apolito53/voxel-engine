@@ -1,5 +1,11 @@
 # Player release notes
 
+## 0.24.0 - 2026-11-08
+
+- The world has a new Sunwashed pixel-art look, with warm earth, olive grass, pale stone, richer foliage, and weathered wood.
+- Connected surface patterns and varied grain make broad stretches of terrain feel less repetitive.
+- Block previews in the hotbar, Inventory, Backpack, and Builder now show the same textures used in the world.
+
 ## 0.23.1 - 2026-11-08
 
 - Birds now travel between their own destinations through the surrounding world. Their old circular routes could make them appear to orbit where you entered the world.
