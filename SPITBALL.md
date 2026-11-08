@@ -193,7 +193,9 @@ Preferred format:
 
 ## Entities And AI
 
-- `[mechanic]` Computer-controlled enemies as the first real entity-AI target:
+- Friendly wanderers are the first entity-AI foundation, chosen for `v0.22.0`.
+  See [the NPC system](docs/friendly-npcs.md) for the shipped scope and limits.
+- `[mechanic]` Future computer-controlled enemies:
   perception, pathing around voxel terrain, simple attack decisions, and damage
   routing separate from terrain destruction.
 - `[tech]` AI navigation needs a cheap local representation first: chunk-aware
@@ -201,8 +203,8 @@ Preferred format:
   and graceful failure when terrain changes underneath the plan.
 - `[debug]` Spawnable enemy fixtures for Superflat Lab and automation scenarios
   before enemies are allowed into normal generated worlds.
-- `[maybe]` Friendly/neutral entities later, once hostile AI proves the entity
-  lifecycle, save rules, and damage model are not terrible.
+- `[maybe]` Richer friendly/neutral roles, creature behavior, and persistent
+  identities once the initial wandering and interaction loop earns them.
 
 ## Bots And Helpers
 

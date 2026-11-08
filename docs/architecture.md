@@ -348,6 +348,21 @@ Edited chunks are full snapshots rather than a final compact save format.
 Terrain-profile provenance prevents old edited chunks from bordering a new
 generator. Legacy 48m varied worlds retain their block/player lift migration.
 
+## Friendly NPCs
+
+The [friendly NPC system](friendly-npcs.md) is a small main-thread gameplay
+owner. Its pure navigation consumes `CollisionWorld` and an explicit loaded
+column check; its per-visit simulation owns roster, local roaming, perception,
+and greetings. Rendering and the interaction overlay have separate lifecycle
+ownership. `main.ts` adapts the active world and controls entry, pause, switch,
+exit, and disposal.
+
+Keep NPC queries local and bounded, including surviving partial boxes for
+support and body clearance. Missing chunks are a navigation boundary. NPCs
+cannot request generation or borrow debris/Rapier state as terrain truth.
+The first population is transient; persistence, combat, jobs, and long-range
+navigation remain outside this initial contract.
+
 ## Diagnostics And Testing
 
 F3 diagnostics expose frame buckets, browser RAF gaps, renderer pressure,

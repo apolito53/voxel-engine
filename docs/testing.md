@@ -25,6 +25,7 @@ Run those checks separately when the change calls for them.
 | Menus | `npm.cmd run test:menus` | Pause tabs, keyboard focus/disposal, setting location/bindings, deletion wording, release-note parsing. Add the affected setting/item group when behavior also changes. |
 | Builder and admin tools | `npm.cmd run test:builder` | Builder brushes, admin parsing/fixtures, target highlight. Terraformer belongs to partial terrain. |
 | Nova companion | `npm.cmd run test:companion` | Pilot reactions/offset, context journal, local chat, terminal routing. Add diagnostics when event contracts change. |
+| Friendly NPCs | `npm.cmd run test:npcs` | Ground navigation, terrain collision, player perception and conversation, and lifecycle. Add player and partial terrain for shared collision contracts. |
 | Audio | `npm.cmd run test:audio` | Persisted audio settings/volume normalization. Browser audio unlock, actual sound, and teardown need a relevant manual/browser check. |
 | Shared workers | `npm.cmd run test:workers` | WorkerPool priority, telemetry, dispatch, fallback, and revision guards. Add world, lighting, or partial terrain for the affected job payload/result consumer. |
 | Diagnostics and runtime helpers | `npm.cmd run test:diagnostics` | Combat/hitch logging, event bus, frame-loop pause/resume policy, timing/FPS helpers. |

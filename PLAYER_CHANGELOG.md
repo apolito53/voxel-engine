@@ -1,5 +1,11 @@
 # Player release notes
 
+## 0.22.0 - 2026-11-08
+
+- Meet friendly wanderers near where you enter a world. They stroll, take breaks, and turn to greet you when you approach.
+- Each wanderer has a name and their own look. Come close and press E to say hello.
+- Wanderers use the terrain around them, including carved ground, and pause with the game. This first population resets when you leave or change worlds.
+
 ## 0.21.1 - 2026-11-07
 
 - The pause menu now has a Debug tab for Core Aim Preview, Health Bars, and Cloud Shadow Guides. F6 still toggles Core Aim Preview while playing.

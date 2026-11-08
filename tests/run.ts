@@ -101,6 +101,19 @@ import {
 } from "../src/chunkJobs";
 import type { CollisionBounds, CollisionWorld } from "../src/collision";
 import {
+  FRIENDLY_NPC_MAX_MOVE,
+  findNpcStandPosition,
+  hasNpcLineOfSight,
+  isNpcBodyClear,
+  moveNpcOnGround
+} from "../src/friendlyNpcNavigation";
+import {
+  FRIENDLY_NPC_POPULATION,
+  FRIENDLY_NPC_SPEED,
+  FRIENDLY_NPC_TALK_REACH,
+  FriendlyNpcSimulation
+} from "../src/friendlyNpcs";
+import {
   PhysicsCoreAimPreview,
   isAimPreviewLatticeCellVisibleFromPoint,
   predictHitscanCoreTrajectory,
@@ -691,6 +704,304 @@ function createRemovedPartialColumns(columns: readonly { readonly x: number; rea
   }
   return removed;
 }
+
+function createFriendlyNpcTestWorld() {
+  const solidCells = new Set<string>();
+  const missingGroundColumns = new Set<string>();
+  const unloadedColumns = new Set<string>();
+  const partialCells = new Map<string, readonly CollisionBounds[]>();
+  const columnKey = (x: number, z: number): string => `${Math.floor(x)},${Math.floor(z)}`;
+  const cellKey = (x: number, y: number, z: number): string => `${x},${y},${z}`;
+
+  return {
+    solidCells,
+    missingGroundColumns,
+    unloadedColumns,
+    partialCells,
+    world: {
+      isSolid(x: number, y: number, z: number): boolean {
+        return (y === 0 && !missingGroundColumns.has(columnKey(x, z))) || solidCells.has(cellKey(x, y, z));
+      },
+      getCellCollisionBoxes(x: number, y: number, z: number): readonly CollisionBounds[] | null {
+        return partialCells.get(cellKey(x, y, z)) ?? null;
+      },
+      isColumnLoaded(x: number, z: number): boolean {
+        return !unloadedColumns.has(columnKey(x, z));
+      }
+    }
+  };
+}
+
+test("friendly npc stand positions respect partial support, side walls, and headroom", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  fixture.partialCells.set("0,0,0", [{ minX: 0, maxX: 1, minY: 0, maxY: 1 / 3, minZ: 0, maxZ: 1 }]);
+
+  const stand = findNpcStandPosition(fixture.world, 0.5, 0.5, 0, 2);
+  assert(stand, "a surviving partial slab should support an NPC");
+  assertClose(stand.y, 1 / 3, 0.00001, "feet should land on the real partial-block top");
+
+  fixture.solidCells.add("1,1,0");
+  assert(isNpcBodyClear(fixture.world, { x: 0.7, y: 1, z: 0.5 }), "a body clear of the wall should fit");
+  assert(!isNpcBodyClear(fixture.world, { x: 0.8, y: 1, z: 0.5 }), "the whole body must clear a side wall");
+
+  fixture.solidCells.add("0,2,0");
+  assertEqual(findNpcStandPosition(fixture.world, 0.5, 0.5, 0, 2), null, "low overhead terrain should prevent standing");
+});
+
+test("friendly npc ground movement follows partial steps without crossing obstacles or gaps", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const start = { x: 0.5, y: 1, z: 0.5 };
+  fixture.solidCells.add("1,1,0");
+  fixture.partialCells.set("1,1,0", [{ minX: 1, maxX: 2, minY: 1, maxY: 1 + 1 / 3, minZ: 0, maxZ: 1 }]);
+
+  const stepped = moveNpcOnGround(fixture.world, start, 1, 0);
+  assert(stepped, "a one-sub-block ledge should be traversable");
+  assertClose(stepped.x, 1.5, 0.00001, "a successful step should reach the requested destination");
+  assertClose(stepped.y, 1 + 1 / 3, 0.00001, "a successful step should follow the actual support top");
+  const returned = moveNpcOnGround(fixture.world, stepped, -1, 0);
+  assert(returned, "the NPC should also step back down from the partial ledge");
+  assertClose(returned.y, 1, 0.00001, "the NPC should settle onto the lower support surface");
+
+  fixture.partialCells.delete("1,1,0");
+  assertEqual(moveNpcOnGround(fixture.world, start, 1, 0), null, "a full-height wall must block the sweep");
+  fixture.solidCells.delete("1,1,0");
+  fixture.missingGroundColumns.add("1,0");
+  assertEqual(moveNpcOnGround(fixture.world, start, 2, 0), null, "a gap must block even when the far endpoint is supported");
+  fixture.missingGroundColumns.delete("1,0");
+  fixture.unloadedColumns.add("1,0");
+  assertEqual(moveNpcOnGround(fixture.world, start, 1, 0), null, "an unloaded neighbor must act as a boundary");
+});
+
+test("friendly npc sweeps under low partial beams and refuses steep drops", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const start = { x: 0.5, y: 1, z: 0.5 };
+  const end = { x: 1.8, y: 1, z: 0.5 };
+  fixture.solidCells.add("1,2,0");
+  fixture.partialCells.set("1,2,0", [{
+    minX: 1, maxX: 1 + 1 / 3, minY: 2 + 2 / 3, maxY: 3, minZ: 0, maxZ: 1 / 3
+  }]);
+  assert(isNpcBodyClear(fixture.world, start), "the starting body should fit before the beam");
+  assert(isNpcBodyClear(fixture.world, end), "the destination body should fit after the beam");
+  assertEqual(moveNpcOnGround(fixture.world, start, 1.3, 0), null, "the swept body must not tunnel through a partial low beam");
+
+  fixture.partialCells.delete("1,2,0");
+  fixture.solidCells.delete("1,2,0");
+  fixture.solidCells.add("0,1,0");
+  assertEqual(moveNpcOnGround(fixture.world, { x: 0.5, y: 2, z: 0.5 }, 1, 0), null, "a one-block drop must not be walked over");
+});
+
+test("friendly npc climbs and descends partial ledges in frame-sized movements", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  fixture.solidCells.add("1,1,0");
+  fixture.partialCells.set("1,1,0", [{ minX: 1, maxX: 2, minY: 1, maxY: 1 + 1 / 3, minZ: 0, maxZ: 1 }]);
+  let position = { x: 0.5, y: 1, z: 0.5 };
+  for (let step = 0; step < 60; step += 1) {
+    const next = moveNpcOnGround(fixture.world, position, 1 / 60, 0);
+    assert(next, `small forward move ${step + 1} should not stall on the ledge`);
+    position = next;
+  }
+  assertClose(position.x, 1.5, 0.00001, "small moves should reach the raised surface");
+  assertClose(position.y, 1 + 1 / 3, 0.00001, "the NPC should stand on the partial ledge");
+  for (let step = 0; step < 60; step += 1) {
+    const next = moveNpcOnGround(fixture.world, position, -1 / 60, 0);
+    assert(next, `small return move ${step + 1} should not stall on the ledge`);
+    position = next;
+  }
+  assertClose(position.x, 0.5, 0.00001, "small return moves should reach the lower surface");
+  assertClose(position.y, 1, 0.00001, "the NPC should settle onto the lower surface again");
+});
+
+test("friendly npc crosses a narrow partial ridge between footprint probes", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  fixture.solidCells.add("1,1,0");
+  fixture.partialCells.set("1,1,0", [{
+    minX: 1, maxX: 1 + 1 / 3, minY: 1, maxY: 1 + 1 / 3, minZ: 1 / 3, maxZ: 2 / 3
+  }]);
+  let position = { x: 0.5, y: 1, z: 0.5 };
+  let raised = false;
+  for (let step = 0; step < 78; step += 1) {
+    const next = moveNpcOnGround(fixture.world, position, 1 / 60, 0);
+    assert(next, `small move ${step + 1} should clear the narrow ridge`);
+    position = next;
+    raised ||= position.y > 1.2;
+  }
+  assert(raised, "the body should rise over the surviving ridge");
+  assertClose(position.x, 1.8, 0.00001, "the NPC should get all the way across the ridge");
+  assertClose(position.y, 1, 0.00001, "the NPC should return to the lower ground beyond it");
+});
+
+test("friendly npc movement rejects unsupported starts and unsafe deltas", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const start = { x: 0.5, y: 1, z: 0.5 };
+  assert(moveNpcOnGround(fixture.world, start, FRIENDLY_NPC_MAX_MOVE, 0), "the maximum bounded move should work on flat ground");
+  assertEqual(moveNpcOnGround(fixture.world, start, FRIENDLY_NPC_MAX_MOVE + 0.01, 0), null, "an oversized move should not tunnel through terrain");
+  assertEqual(moveNpcOnGround(fixture.world, start, Number.NaN, 0), null, "non-finite movement should be rejected");
+  fixture.missingGroundColumns.add("0,0");
+  assertEqual(moveNpcOnGround(fixture.world, start, 0, 0), null, "removing ground under an NPC must invalidate its support");
+});
+
+test("friendly npc line of sight respects full and carved terrain and loaded boundaries", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const from = { x: 0.5, y: 1.5, z: 0.5 };
+  const to = { x: 2.5, y: 1.5, z: 0.5 };
+  assert(hasNpcLineOfSight(fixture.world, from, to), "open loaded air should allow a conversation sight line");
+  fixture.solidCells.add("1,1,0");
+  assert(!hasNpcLineOfSight(fixture.world, from, to), "a full block should obstruct sight");
+  fixture.partialCells.set("1,1,0", [{ minX: 1, maxX: 2, minY: 1, maxY: 1 + 1 / 3, minZ: 0, maxZ: 1 }]);
+  assert(hasNpcLineOfSight(fixture.world, from, to), "a ray above surviving partial geometry should pass through the opening");
+  fixture.partialCells.set("1,1,0", [{ minX: 1, maxX: 2, minY: 1 + 1 / 3, maxY: 2, minZ: 0, maxZ: 1 }]);
+  assert(!hasNpcLineOfSight(fixture.world, from, to), "surviving geometry across the ray should block sight");
+  fixture.partialCells.delete("1,1,0");
+  fixture.solidCells.delete("1,1,0");
+  fixture.unloadedColumns.add("1,0");
+  assert(!hasNpcLineOfSight(fixture.world, from, to), "sight should not cross an unloaded seam");
+  assert(!hasNpcLineOfSight(fixture.world, from, { x: 10, y: 1.5, z: 0.5 }), "sight should be bounded to a local neighborhood");
+  fixture.unloadedColumns.clear();
+  fixture.unloadedColumns.add("0,4");
+  assert(
+    hasNpcLineOfSight(fixture.world, from, { x: 4.5, y: 1.5, z: 4.5 }),
+    "an unloaded column outside the actual diagonal sight line should not obstruct it"
+  );
+});
+
+test("friendly npc visits seed stable identities on loaded support and clear cleanly", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const simulation = new FriendlyNpcSimulation(123);
+  const origin = { x: 0.5, y: 1, z: 0.5 };
+  const first = simulation.seed(fixture.world, origin);
+  assertEqual(first.population.length, FRIENDLY_NPC_POPULATION, "a clear loaded visit should seed the small roster");
+  assertEqual(new Set(first.population.map((npc) => npc.id)).size, first.population.length, "each visitor should have a distinct stable identity");
+  for (const npc of first.population) {
+    assert(npc.name.length > 0 && npc.visible, "each seeded visitor should be named and visible");
+    assert(findNpcStandPosition(fixture.world, npc.position.x, npc.position.z, npc.position.y, npc.position.y), "each visitor should have real support");
+  }
+  const expectedPopulation = first.population.map((npc) => ({ id: npc.id, name: npc.name, position: { ...npc.position } }));
+  (first.population[0].position as { x: number }).x += 1000;
+  assertDeepEqual(
+    simulation.snapshot().population.map((npc) => ({ id: npc.id, name: npc.name, position: npc.position })),
+    expectedPopulation,
+    "editing a snapshot must not mutate the live visitors"
+  );
+  simulation.update(0.1, fixture.world, { x: 100, y: 2.5, z: 100 });
+  simulation.clear();
+  assertDeepEqual(simulation.snapshot(), { population: [], nearbyNpcId: null, message: null, elapsedSeconds: 0 }, "clear should remove all visit state");
+  const repeated = simulation.seed(fixture.world, origin);
+  assertDeepEqual(
+    repeated.population.map((npc) => ({ id: npc.id, name: npc.name, position: npc.position })),
+    expectedPopulation,
+    "the same visit seed should reconstruct stable identities and starting positions"
+  );
+
+  let loadedQueries = 0;
+  const absentWorld = { ...fixture.world, isColumnLoaded(): boolean { loadedQueries += 1; return false; } };
+  assertEqual(simulation.seed(absentWorld, origin).population.length, 0, "unloaded terrain should not create visitors or generate ground");
+  assert(loadedQueries < 200, "unsuccessful spawn discovery should stay bounded");
+});
+
+test("friendly npc visitors wander within their home neighborhood", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const simulation = new FriendlyNpcSimulation(127);
+  const initial = simulation.seed(fixture.world, { x: 0.5, y: 1, z: 0.5 });
+  const homes = new Map(initial.population.map((npc) => [npc.id, npc.position]));
+  let maximumRoam = 0;
+  for (let tick = 0; tick < 600; tick += 1) {
+    simulation.update(0.1, fixture.world, { x: 100, y: 2.5, z: 100 });
+    for (const npc of simulation.snapshot().population) {
+      const home = homes.get(npc.id);
+      assert(home && npc.visible, "visitors on unchanged loaded ground should remain present with stable identities");
+      const distance = Math.hypot(npc.position.x - home.x, npc.position.z - home.z);
+      maximumRoam = Math.max(maximumRoam, distance);
+      assert(distance <= 8.01, "wandering should remain within the home neighborhood");
+    }
+  }
+  assert(maximumRoam > 1, "visitors should actually wander, not remain frozen at their spawn points");
+});
+
+test("friendly npc notices and talks only to nearby visible people with clear sight", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const simulation = new FriendlyNpcSimulation(123);
+  const first = simulation.seed(fixture.world, { x: 0.5, y: 1, z: 0.5 }).population[0];
+  assert(first, "fixture should seed the first visitor");
+  const eye = { x: first.position.x - 2, y: first.position.y + 1.48, z: first.position.z };
+  simulation.update(0.1, fixture.world, eye);
+  const noticed = simulation.snapshot();
+  assertEqual(noticed.nearbyNpcId, first.id, "the closest visible person should be available to talk");
+  assertEqual(noticed.population[0].state, "noticing", "a nearby visitor should notice the player");
+  assertEqual(noticed.message?.kind, "greeting", "a close encounter should give a greeting");
+  const reply = simulation.talk(fixture.world, eye);
+  assert(reply && reply.npcId === first.id && reply.name === first.name && reply.kind === "talk" && reply.text.length > 0,
+    "talk should return the nearby person's named response");
+  const nextReply = simulation.talk(fixture.world, eye);
+  assert(nextReply && nextReply.text !== reply.text, "repeated conversation should cycle the person's responses");
+
+  const wall = `${Math.floor(first.position.x - 1)},${Math.floor(eye.y)},${Math.floor(first.position.z)}`;
+  fixture.solidCells.add(wall);
+  assertEqual(simulation.talk(fixture.world, eye), null, "a wall between the player and visitor must block conversation");
+  fixture.solidCells.delete(wall);
+  const supportColumn = `${Math.floor(first.position.x)},${Math.floor(first.position.z)}`;
+  fixture.missingGroundColumns.add(supportColumn);
+  assertEqual(simulation.talk(fixture.world, eye), null, "an interaction must recheck support even before the next update");
+  fixture.missingGroundColumns.delete(supportColumn);
+  assertEqual(simulation.talk(fixture.world, { ...eye, x: first.position.x - FRIENDLY_NPC_TALK_REACH - 0.2 }), null,
+    "a person beyond talking range must not answer");
+});
+
+test("friendly npc conversation selects the nearest person straddling partial support", () => {
+  const world = {
+    isColumnLoaded(): boolean { return true; },
+    isSolid(x: number, y: number): boolean { return y === 0 || (y === 1 && x >= -2); },
+    getCellCollisionBoxes(x: number, y: number, z: number): readonly CollisionBounds[] | null {
+      return y === 1 && x >= -2 ? [{
+        minX: x, maxX: x + 1, minY: 1, maxY: 1 + 1 / 3, minZ: z, maxZ: z + 1
+      }] : null;
+    }
+  };
+  const simulation = new FriendlyNpcSimulation(123);
+  const person = simulation.seed(world, { x: 0, y: 1, z: 0 }).population[0];
+  assert(person, "the mixed-height fixture should seed the first visitor");
+  assertClose(person.position.y, 1 + 1 / 3, 0.00001, "the visitor should straddle the raised support");
+  const eye = { x: person.position.x - 0.2, y: person.position.y + 1.49, z: person.position.z + 0.8 };
+  simulation.update(0.1, world, eye);
+  assertEqual(simulation.snapshot().nearbyNpcId, person.id, "the closest supported visitor should get the interaction prompt");
+  assertEqual(simulation.talk(world, eye)?.npcId, person.id, "conversation should not skip to a farther visitor on mixed-height ground");
+});
+
+test("friendly npc simulation clamps long frames and recovers after support changes", () => {
+  const fixture = createFriendlyNpcTestWorld();
+  const simulation = new FriendlyNpcSimulation(123);
+  const initial = simulation.seed(fixture.world, { x: 0.5, y: 1, z: 0.5 });
+  simulation.update(60, fixture.world, { x: 100, y: 2.5, z: 100 });
+  const afterLongFrame = simulation.snapshot();
+  assertClose(afterLongFrame.elapsedSeconds, 0.1, 0.00001, "a long frame should advance only the bounded simulation step");
+  for (let index = 0; index < initial.population.length; index += 1) {
+    const before = initial.population[index].position;
+    const after = afterLongFrame.population[index].position;
+    assert(Math.hypot(after.x - before.x, after.z - before.z) <= FRIENDLY_NPC_SPEED * 0.1 + 0.00001,
+      "a long frame should not teleport a visitor through terrain");
+  }
+  simulation.update(Number.NaN, fixture.world, { x: 100, y: 2.5, z: 100 });
+  simulation.update(-1, fixture.world, { x: 100, y: 2.5, z: 100 });
+  assertClose(simulation.snapshot().elapsedSeconds, 0.1, 0.00001, "invalid deltas should not advance simulation time");
+
+  const person = afterLongFrame.population[0];
+  const centerX = Math.floor(person.position.x);
+  const centerZ = Math.floor(person.position.z);
+  for (let x = centerX - 3; x <= centerX + 3; x += 1) {
+    for (let z = centerZ - 3; z <= centerZ + 3; z += 1) fixture.missingGroundColumns.add(`${x},${z}`);
+  }
+  simulation.update(0.1, fixture.world, { x: 100, y: 2.5, z: 100 });
+  let changed = simulation.snapshot().population.find((npc) => npc.id === person.id);
+  assert(changed && !changed.visible && changed.state === "waiting", "removing support must hide the affected visitor promptly");
+  for (let tick = 0; tick < 20; tick += 1) simulation.update(0.1, fixture.world, { x: 100, y: 2.5, z: 100 });
+  changed = simulation.snapshot().population.find((npc) => npc.id === person.id);
+  assert(changed && !changed.visible, "the visitor must remain hidden while local support is still absent");
+  fixture.missingGroundColumns.clear();
+  for (let tick = 0; tick < 11; tick += 1) simulation.update(0.1, fixture.world, { x: 100, y: 2.5, z: 100 });
+  changed = simulation.snapshot().population.find((npc) => npc.id === person.id);
+  assert(changed && changed.visible && changed.state !== "waiting", "the visitor should return after safe support is restored");
+  assert(findNpcStandPosition(fixture.world, changed.position.x, changed.position.z, changed.position.y, changed.position.y),
+    "a recovered visitor should be supported");
+});
 
 test("combat log caps entries and reports latest events first", () => {
   const combatLog = new CombatLog(2);

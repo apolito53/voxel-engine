@@ -5,6 +5,10 @@ promoted work, not every fun idea that crosses the room.
 
 ## Current Recommended Next Slice
 
+- Friendly NPC foundation is implemented in `v0.22.0`; see
+  [friendly NPCs](docs/friendly-npcs.md) for behavior and current limits.
+  Persistent identities, destinations across streamed terrain, and richer
+  interactions remain possible follow-ups, with no implementation chosen yet.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:

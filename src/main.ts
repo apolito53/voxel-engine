@@ -218,6 +218,8 @@ import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } fr
 import { NovaChatPanel } from "./novaChatPanel";
 import { NovaContextJournal } from "./novaContext";
 import { NOVA_PILOT_THROW_KEY, NOVA_PILOT_TOGGLE_KEY, NovaPilot } from "./novaPilot";
+import { FRIENDLY_NPC_TALK_KEY, FriendlyNpcController } from "./friendlyNpcController";
+import type { FriendlyNpcWorld } from "./friendlyNpcNavigation";
 import { NovaPilotReactions } from "./novaPilotReactions";
 import { shouldDeferPartialBlockMeshUpdate } from "./partialBlockMeshBudget";
 import { PartialBlockMeshField } from "./partialBlockMeshField";
@@ -904,6 +906,23 @@ const terrainAndRubbleCollisionWorld: CollisionWorld = {
 };
 const novaPilot = new NovaPilot();
 scene.add(novaPilot.object);
+const friendlyNpcs = new FriendlyNpcController(scene);
+const friendlyNpcWorld: FriendlyNpcWorld = {
+  isSolid: (x, y, z) => requireWorld().isSolid(x, y, z),
+  getCellCollisionBoxes: (x, y, z) => requireWorld().getCellCollisionBoxes(x, y, z),
+  isColumnLoaded: (x, z) => {
+    const activeWorld = requireWorld();
+    const { cx, cz } = activeWorld.toChunkCoords(x, z);
+    return Boolean(activeWorld.getChunk(cx, cz));
+  }
+};
+function seedFriendlyNpcs() {
+  if (!player || !world) return friendlyNpcs.snapshot();
+  camera.getWorldDirection(direction);
+  return friendlyNpcs.seed(friendlyNpcWorld, {
+    x: camera.position.x, y: player.getFeetY(), z: camera.position.z
+  }, direction);
+}
 const novaPilotReactions = new NovaPilotReactions({
   events: engineEvents,
   pilot: novaPilot,
@@ -985,6 +1004,14 @@ const codexPilot = new CodexPilot({
   getCloudShadowDebugSnapshot: () => cloudShadowDebug.snapshot(),
   setCloudShadowDebugEnabled: setCloudShadowGuidesEnabled,
   getSunGlareSnapshot: () => sunGlare.snapshot(),
+  getFriendlyNpcs: () => friendlyNpcs.snapshot(),
+  talkToNpc: () => inWorld && !worldTransitioning && player?.active && !document.hidden
+    ? friendlyNpcs.talk(friendlyNpcWorld, camera.position) : null,
+  respawnFriendlyNpcs: () => inWorld && !worldTransitioning ? seedFriendlyNpcs() : friendlyNpcs.snapshot(),
+  clearFriendlyNpcs: () => {
+    friendlyNpcs.clear();
+    return friendlyNpcs.snapshot();
+  },
   setSunGlare: (settings) => {
     if (settings.strength !== undefined) qualityController.setSunGlareStrength(settings.strength);
     if (settings.occlusion !== undefined) qualityController.setSunGlareOcclusionEnabled(settings.occlusion);
@@ -1242,6 +1269,7 @@ function wireMenuControls(): void {
   const activePlayer = requirePlayer();
 
   activePlayer.onPauseChange = (paused: boolean) => {
+    friendlyNpcs.setActive(inWorld && !paused && !worldTransitioning && !document.hidden);
     pauseMenu.classList.toggle("is-hidden", !inWorld || !paused);
     if (paused) {
       clearPointerHoldState();
@@ -1976,6 +2004,13 @@ document.addEventListener("keydown", (event) => {
 
   if (!inWorld) return;
 
+  if (event.code === FRIENDLY_NPC_TALK_KEY && !event.repeat && !worldTransitioning &&
+    requirePlayer().active && !document.hidden) {
+    event.preventDefault();
+    friendlyNpcs.talk(friendlyNpcWorld, camera.position);
+    return;
+  }
+
   if (!pauseMenu.classList.contains("is-hidden")) {
     if (event.code === "Escape") {
       event.preventDefault();
@@ -2078,6 +2113,7 @@ document.addEventListener("visibilitychange", () => {
   noteUserActivity();
   drainFrameClockAfterIdle();
   if (document.hidden) {
+    friendlyNpcs.setActive(false);
     clearPointerHoldState();
     void queueActivePlayerLocationSave(true);
     void queueActiveDayNightStateSave(true);
@@ -2099,6 +2135,7 @@ window.addEventListener("pageshow", () => {
   resumeAnimationLoopAfterIdle();
 }, eventListenerOptions);
 window.addEventListener("pagehide", () => {
+  friendlyNpcs.setActive(false);
   clearPointerHoldState();
   void queueActivePlayerLocationSave(true);
   void queueActiveDayNightStateSave(true);
@@ -2487,6 +2524,8 @@ function animate(): void {
     updateDayNightCycle(delta, frameStartedAt);
     camera.getWorldDirection(chunkStreamDirection);
     novaPilot.update(delta, camera.position, chunkStreamDirection, activeWorld);
+    friendlyNpcs.update(delta, friendlyNpcWorld, camera.position,
+      activePlayer.active && !worldTransitioning && !document.hidden);
     recordTimingSection("playerMs");
     updateChunkStreamFrustum();
     debugPlayerChunk = activeWorld.streamChunksAround(
@@ -5339,6 +5378,7 @@ async function createSuperflatWorld(): Promise<void> {
 async function loadWorld(worldId: string): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
+  friendlyNpcs.setActive(false);
 
   try {
     const registry = requireWorldRegistry();
@@ -5357,6 +5397,7 @@ async function loadWorld(worldId: string): Promise<void> {
     });
 
     // Loading from the home screen is the only place world slots swap into the active engine.
+    friendlyNpcs.clear();
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     applySavedInventoryState(savedWorld, activeWorldId);
     pauseTabs.select("settings-button");
@@ -5381,6 +5422,7 @@ async function loadWorld(worldId: string): Promise<void> {
     placePlayerAtSavedLocation(activePlayer, activeWorld, loadState);
     camera.getWorldDirection(direction);
     novaPilot.setActive(true, camera.position, direction, activeWorld);
+    seedFriendlyNpcs();
     lastSavedPlayerLocation = capturePlayerLocationSnapshot();
     nextPlayerLocationAutosaveAt = performance.now() + PLAYER_LOCATION_AUTOSAVE_MS;
     nextDayNightAutosaveAt = performance.now() + DAY_NIGHT_AUTOSAVE_MS;
@@ -5473,6 +5515,7 @@ async function confirmPendingWorldDeletion(): Promise<void> {
 async function exitToHome(): Promise<void> {
   if (worldTransitioning) return;
   worldTransitioning = true;
+  friendlyNpcs.clear();
   clearPointerHoldState();
 
   try {
@@ -5829,6 +5872,7 @@ function disposeRuntime(): void {
   novaPilotReactions.dispose();
   novaContext.dispose();
   novaPilot.dispose();
+  friendlyNpcs.dispose();
   testAvatar.dispose();
   targetBlockHighlighter.dispose();
   damageIndicators.dispose();

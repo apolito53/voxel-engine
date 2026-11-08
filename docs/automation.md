@@ -35,7 +35,20 @@ globalThis.__VOXEL_CODEX_PILOT__.cloudShadowGuides(false)
 globalThis.__VOXEL_CODEX_PILOT__.sunGlare({ strength: 100, occlusion: true })
 // Wait for a rendered frame before measuring the new setting.
 globalThis.__VOXEL_CODEX_PILOT__.sunGlare()
+
+globalThis.__VOXEL_CODEX_PILOT__.friendlyNpcs()
+globalThis.__VOXEL_CODEX_PILOT__.talkToNpc()
+globalThis.__VOXEL_CODEX_PILOT__.respawnFriendlyNpcs()
+globalThis.__VOXEL_CODEX_PILOT__.clearFriendlyNpcs()
 ```
+
+`friendlyNpcs()` returns copied population poses/states, visibility, current
+nearby interaction target/message, and active simulation time. `talkToNpc()`
+uses the same range, terrain sight, and active-play gate as `E`.
+`respawnFriendlyNpcs()` replaces the transient population near the current
+player pose in loaded terrain; `clearFriendlyNpcs()` removes it. These fixture
+controls change only NPC session state, never saved terrain or the NPC cap.
+See [friendly NPCs](friendly-npcs.md) for lifecycle and navigation limits.
 
 `cloudShadowGuides(enabled?)` controls the same saved debug preference as
 `Debug > Cloud Shadow Guides`. Its snapshot reports the

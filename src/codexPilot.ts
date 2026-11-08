@@ -7,6 +7,7 @@ import { PLAYER_HEIGHT } from "./playerMovement";
 import type { VoxelWorld } from "./world";
 import type { CloudShadowDebugSnapshot } from "./cloudShadowDebug";
 import type { SunGlareDebugSnapshot } from "./sunGlare";
+import type { FriendlyNpcMessage, FriendlyNpcSnapshot } from "./friendlyNpcs";
 
 export type CodexPilotSunGlareSettings = {
   readonly strength?: number;
@@ -102,6 +103,10 @@ export type CodexPilotApi = {
   cloudShadowGuides(enabled?: boolean): CloudShadowDebugSnapshot | null;
   /** Settings apply on the next frame; the snapshot always describes the last rendered frame. */
   sunGlare(settings?: CodexPilotSunGlareSettings): SunGlareDebugSnapshot | null;
+  friendlyNpcs(): FriendlyNpcSnapshot | null;
+  talkToNpc(): FriendlyNpcMessage | null;
+  respawnFriendlyNpcs(): FriendlyNpcSnapshot | null;
+  clearFriendlyNpcs(): FriendlyNpcSnapshot | null;
   startPass(label?: string): PerformanceHitchLogPass | null;
   run(command: string): AdminCommandResult;
   superflat(): Promise<CodexPilotSnapshot>;
@@ -131,6 +136,10 @@ export type CodexPilotHooks = {
   setCloudShadowDebugEnabled?(enabled: boolean): void;
   getSunGlareSnapshot?(): SunGlareDebugSnapshot;
   setSunGlare?(settings: CodexPilotSunGlareSettings): void;
+  getFriendlyNpcs?(): FriendlyNpcSnapshot;
+  talkToNpc?(): FriendlyNpcMessage | null;
+  respawnFriendlyNpcs?(): FriendlyNpcSnapshot;
+  clearFriendlyNpcs?(): FriendlyNpcSnapshot;
   setCoreAimPreviewEnabled(enabled: boolean): void;
   resumePlayer(): void;
   startHitchPass(label?: string): PerformanceHitchLogPass;
@@ -153,6 +162,19 @@ export class CodexPilot {
   get api(): CodexPilotApi {
     return {
       snapshot: () => this.snapshot(),
+      friendlyNpcs: () => this.hooks.getFriendlyNpcs?.() ?? null,
+      talkToNpc: () => {
+        this.hooks.noteActivity();
+        return this.hooks.talkToNpc?.() ?? null;
+      },
+      respawnFriendlyNpcs: () => {
+        this.hooks.noteActivity();
+        return this.hooks.respawnFriendlyNpcs?.() ?? null;
+      },
+      clearFriendlyNpcs: () => {
+        this.hooks.noteActivity();
+        return this.hooks.clearFriendlyNpcs?.() ?? null;
+      },
       cloudShadowGuides: (enabled) => {
         if (typeof enabled === "boolean") {
           this.hooks.setCloudShadowDebugEnabled?.(enabled);

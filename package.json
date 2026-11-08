@@ -1,6 +1,6 @@
 {
   "name": "voxel-sandbox-engine",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
     "test:menus": "npm run test:focused -- --group menus",
     "test:builder": "npm run test:focused -- --group builder",
     "test:companion": "npm run test:focused -- --group companion",
+    "test:npcs": "npm run test:focused -- --group npcs",
     "test:audio": "npm run test:focused -- --group audio",
     "test:workers": "npm run test:focused -- --group workers",
     "test:diagnostics": "npm run test:focused -- --group diagnostics",

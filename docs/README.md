@@ -13,6 +13,8 @@ This folder keeps the living design notes out of the project front door.
   parked rubble mechanics.
 - [nova-companion.md](nova-companion.md): Nova Pilot, Nova Terminal, local
   reactions, and future model-hook notes.
+- [friendly-npcs.md](friendly-npcs.md): friendly wanderers, bounded local
+  navigation, greetings, world lifecycle, and verification hooks.
 - [performance-hitch-logging.md](performance-hitch-logging.md): render horizon
   counters, worker-pool telemetry, local/remote hitch logging, persistent
   combat damage logs, debug HUD metrics, server markers, and visual recordings.

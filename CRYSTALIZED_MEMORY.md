@@ -9,6 +9,10 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   second consumer earns the cost. See the architecture's
   [design posture](docs/architecture.md#design-posture) and
   [bolt-on direction](docs/architecture.md#bolt-on-direction).
+- Friendly NPCs begin as a bounded, transient per-visit population. Navigation
+  reads loaded terrain and surviving partial collision boxes through a small
+  query boundary; missing chunks are impassable. Keep simulation, presentation,
+  and world lifecycle separate. See [friendly NPCs](docs/friendly-npcs.md).
 - Full voxels and sparse 3x3x3 partial-block lattices own durable terrain truth.
   Loose debris is presentation, so its quality budget must not change gameplay
   material or damage accounting. Automatic debris-to-rubble conversion remains

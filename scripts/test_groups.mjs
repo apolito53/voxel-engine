@@ -83,6 +83,10 @@ export const TEST_GROUPS = {
     description: "Nova Pilot, context, chat, and terminal routing",
     prefixes: ["nova "]
   },
+  npcs: {
+    description: "Friendly NPC movement, perception, interactions, and lifecycle",
+    prefixes: ["friendly npc "]
+  },
   audio: {
     description: "Persisted audio settings and volume normalization",
     prefixes: ["audio settings "]

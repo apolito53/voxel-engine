@@ -48,6 +48,8 @@ the root README.
 - `Esc` pauses and releases the mouse; press it again in the workspace to resume.
 - `I` opens Inventory from gameplay or another pause tab; press it again to resume.
   Typing in a menu input does not trigger this shortcut.
+- `E` talks to the nearest unobstructed friendly wanderer in reach when the
+  interaction hint appears. See [friendly NPCs](friendly-npcs.md).
 
 ## HUD And Debug Keys
 

@@ -1,0 +1,58 @@
+#friendly-npc-dialogue {
+  position: fixed;
+  z-index: 12;
+  left: 50%;
+  /* Leave the existing Nova reaction toast and hotbar their own lower band. */
+  bottom: 190px;
+  width: min(410px, calc(100vw - 48px));
+  box-sizing: border-box;
+  padding: 14px 18px;
+  border: 1px solid rgba(202, 224, 211, 0.34);
+  border-radius: 10px;
+  transform: translateX(-50%);
+  background: rgba(18, 31, 34, 0.94);
+  color: #edf3e8;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  font-size: 14px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+#friendly-npc-dialogue[hidden],
+#friendly-npc-dialogue [hidden] {
+  display: none;
+}
+
+.friendly-npc-speaker {
+  color: #f0d08c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#friendly-npc-dialogue p {
+  margin: 4px 0 0;
+}
+
+.friendly-npc-prompt {
+  color: #c2ded2;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+#friendly-npc-dialogue p + .friendly-npc-prompt:not([hidden]) {
+  margin-top: 8px;
+}
+
+@media (max-height: 500px) {
+  #friendly-npc-dialogue {
+    bottom: 170px;
+    padding: 9px 13px;
+  }
+}
+
+@media (max-width: 600px) {
+  #friendly-npc-dialogue {
+    top: 18px;
+    bottom: auto;
+  }
+}

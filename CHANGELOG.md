@@ -9,6 +9,30 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.22.0 - 2026-11-08
+
+### Added
+
+- Added a three-person friendly NPC foundation: Mira, Bram, and Fern have
+  distinct voxel rigs, local wandering/idle states, player attention, waving,
+  depth-tested name labels, and short authored greetings through `E`.
+- Added pure loaded-only terrain navigation with surviving partial-box support,
+  bounded swept motion, low-step/drop limits, and local route sampling. Unsafe
+  terrain edits hide affected characters while bounded nearby recovery retries.
+- Added explicit world entry/switch/exit, pause/hidden, and runtime-disposal
+  integration, plus NPC snapshot, talk, clear, and respawn pilot fixtures.
+  The initial population is transient; no save schema or combat changes.
+- Added the `npcs` test group and focused system/controls/automation routes.
+
+### Validation
+
+- Passed 12 NPC regressions, all 370 engine cases, seven selector checks,
+  TypeScript, source hygiene, documentation links, and the production build.
+- Chrome checked Superflat and varied-terrain spawning, movement/attention,
+  real `E` input, pointer lock, frozen pause state, world exit/direct switching,
+  clear/reseed, and idempotent runtime teardown/reload. Dialogue was visually
+  checked at desktop, 390x844, and 844x390 with Nova's toast visible.
+
 ## 0.21.1 - 2026-11-07
 
 ### Changed
