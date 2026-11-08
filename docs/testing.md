@@ -26,7 +26,7 @@ Run those checks separately when the change calls for them.
 | Builder and admin tools | `npm.cmd run test:builder` | Builder brushes, admin parsing/fixtures, target highlight. Terraformer belongs to partial terrain. |
 | Nova companion | `npm.cmd run test:companion` | Pilot reactions/offset, context journal, local chat, terminal routing. Add diagnostics when event contracts change. |
 | Friendly NPCs | `npm.cmd run test:npcs` | Opt-in preference, ground navigation, terrain collision, player perception and conversation, and lifecycle. Add player and partial terrain for shared collision contracts. |
-| Bird wildlife | `npm.cmd run test:wildlife` | High flock and solo flight, tree perches, terrain boundaries and obstacles, recycling, and lifecycle. Browser checks cover rendering and live-world integration. |
+| Bird wildlife | `npm.cmd run test:wildlife` | Independent destination routes, high flock and solo flight, tree perches, loaded-air recovery, terrain boundaries and obstacles, recycling, and lifecycle. Browser checks cover rendering and live-world integration. |
 | Audio | `npm.cmd run test:audio` | Persisted audio settings/volume normalization. Browser audio unlock, actual sound, and teardown need a relevant manual/browser check. |
 | Shared workers | `npm.cmd run test:workers` | WorkerPool priority, telemetry, dispatch, fallback, and revision guards. Add world, lighting, or partial terrain for the affected job payload/result consumer. |
 | Diagnostics and runtime helpers | `npm.cmd run test:diagnostics` | Combat/hitch logging, event bus, frame-loop pause/resume policy, timing/FPS helpers. |

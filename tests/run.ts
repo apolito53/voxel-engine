@@ -951,6 +951,215 @@ test("bird wildlife solo birds keep flying quickly over treeless ground", () => 
     "solo birds should sustain fast, independent flight and glide over treeless ground");
 });
 
+test("bird wildlife solo routes do not repeatedly circle a stationary player", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const initial = simulation.seed(fixture.world, { ...player, y: 1 });
+  const tracks = new Map(initial.birds.filter((bird) => bird.role === "solo").map((bird) => {
+    const dx = bird.position.x - player.x;
+    const dz = bird.position.z - player.z;
+    const radius = Math.hypot(dx, dz);
+    return [bird.id, { dx, dz, minRadius: radius, maxRadius: radius, winding: 0, distance: 0 }];
+  }));
+  for (let tick = 0; tick < 800; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    const frame = simulation.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "independent routes should retain the population cap");
+    for (const bird of frame.birds.filter((candidate) => candidate.role === "solo")) {
+      const track = tracks.get(bird.id);
+      assert(track && bird.visible, "solo birds in loaded open air should remain active with stable identity");
+      const dx = bird.position.x - player.x;
+      const dz = bird.position.z - player.z;
+      const radius = Math.hypot(dx, dz);
+      if (radius > 2 && Math.hypot(track.dx, track.dz) > 2) {
+        track.winding += Math.atan2(track.dx * dz - track.dz * dx, track.dx * dx + track.dz * dz);
+      }
+      track.distance += Math.hypot(dx - track.dx, dz - track.dz);
+      track.minRadius = Math.min(track.minRadius, radius);
+      track.maxRadius = Math.max(track.maxRadius, radius);
+      track.dx = dx;
+      track.dz = dz;
+    }
+  }
+  for (const track of tracks.values()) {
+    assert(track.distance > 50, "each solo bird should keep moving over treeless loaded terrain");
+    assert(track.maxRadius < 100, "resident birds should stay within a bounded neighborhood");
+    assert(Math.abs(track.winding) < 3 * Math.PI || track.maxRadius - track.minRadius > 8,
+      "a solo bird should not keep circling the player at nearly constant distance");
+  }
+});
+
+test("bird wildlife formations travel varied routes instead of repeating a fixed circle", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const initial = simulation.seed(fixture.world, { ...player, y: 1 });
+  const paths = new Map(initial.flocks.map((flock) => [flock.id, [] as { x: number; z: number }[]]));
+  for (let tick = 0; tick < 800; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    if (tick % 5 !== 0) continue;
+    for (const flock of simulation.snapshot().flocks) {
+      const path = paths.get(flock.id);
+      assert(path && flock.visible, "formations should stay active in loaded open air");
+      path.push({ x: flock.center.x, z: flock.center.z });
+    }
+  }
+  for (const path of paths.values()) {
+    assert(path.length > 100, "the route observation should cover sustained flight");
+    const center = path.reduce((sum, point) => ({ x: sum.x + point.x / path.length, z: sum.z + point.z / path.length }), { x: 0, z: 0 });
+    const radii = path.map((point) => Math.hypot(point.x - center.x, point.z - center.z));
+    const averageRadius = radii.reduce((sum, radius) => sum + radius, 0) / radii.length;
+    let winding = 0;
+    for (let index = 1; index < path.length; index += 1) {
+      const previous = { x: path[index - 1].x - center.x, z: path[index - 1].z - center.z };
+      const current = { x: path[index].x - center.x, z: path[index].z - center.z };
+      if (radii[index - 1] > 2 && radii[index] > 2) {
+        winding += Math.atan2(previous.x * current.z - previous.z * current.x, previous.x * current.x + previous.z * current.z);
+      }
+    }
+    assert(Math.abs(winding) < 3 * Math.PI || Math.max(...radii) - Math.min(...radii) > averageRadius * 0.45,
+      "a formation should not repeat the same circular track throughout a long visit");
+  }
+});
+
+test("bird wildlife routes ignore small later player movements within the same residency", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const still = new BirdWildlifeSimulation(631);
+  const moving = new BirdWildlifeSimulation(631);
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  still.seed(fixture.world, feet);
+  moving.seed(fixture.world, feet);
+  for (let tick = 0; tick < 300; tick += 1) {
+    still.update(0.1, fixture.world, { ...feet, y: 2.5 });
+    moving.update(0.1, fixture.world, {
+      x: feet.x + 3 * Math.sin(tick / 70), y: 2.5, z: feet.z + 3 * Math.cos(tick / 70)
+    });
+    const fixedBirds = still.snapshot().birds;
+    const shiftedBirds = moving.snapshot().birds;
+    assertEqual(fixedBirds.length, shiftedBirds.length, "both visits should retain the same bird population");
+    for (const bird of fixedBirds) {
+      const shifted = shiftedBirds.find((candidate) => candidate.id === bird.id);
+      assert(shifted && shifted.visible === bird.visible && shifted.state === bird.state, "small player movement should not replan a resident bird");
+      assertClose(Math.hypot(shifted.position.x - bird.position.x, shifted.position.y - bird.position.y,
+        shifted.position.z - bird.position.z), 0, 0.00001, "a resident route should stay in world space");
+    }
+  }
+});
+
+test("bird wildlife roaming stays active inside loaded terrain boundaries", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const isLoaded = (x: number, z: number): boolean => x >= -32 && x < 32 && z >= -32 && z < 32;
+  const world = {
+    ...fixture.world,
+    isColumnLoaded: isLoaded,
+    getColumnTopHeight(x: number, z: number): number {
+      assert(isLoaded(x, z), "roaming must not query terrain heights in unknown columns");
+      return 1;
+    },
+    getTreePerch(x: number, z: number): null {
+      assert(isLoaded(x, z), "perch discovery must not query unknown columns");
+      return null;
+    }
+  };
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const initial = simulation.seed(world, { ...player, y: 1 });
+  assert(initial.birds.some((bird) => bird.role === "solo" && bird.visible), "the bounded fixture should start with visible solo birds");
+  let activeFrames = 0;
+  for (let tick = 0; tick < 600; tick += 1) {
+    simulation.update(0.1, world, player);
+    const frame = simulation.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "streamed-edge routing must keep the population bounded");
+    const visible = frame.birds.filter((bird) => bird.visible);
+    if (visible.some((bird) => bird.role === "solo")) activeFrames += 1;
+    for (const bird of visible) {
+      assert(isBirdVolumeClear(world, bird.position), "a visible roaming bird must keep its full body in loaded clear air");
+    }
+  }
+  assert(activeFrames > 540, "treeless loaded terrain should support active roaming over a long visit");
+});
+
+test("bird wildlife formations recover when their initial placement is outside a loaded strip", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const isLoaded = (x: number, z: number): boolean => x >= -16 && x < 32 && z >= 0 && z < 16;
+  const world = {
+    ...fixture.world,
+    isColumnLoaded: isLoaded,
+    getColumnTopHeight(x: number, z: number): number {
+      assert(isLoaded(x, z), "recovery must not query an unloaded column");
+      return 1;
+    }
+  };
+  const simulation = new BirdWildlifeSimulation(631);
+  const playerFeet = { x: 8, y: 5, z: 8 };
+  const playerEye = { ...playerFeet, y: 6.5 };
+  const initial = simulation.seed(world, playerFeet, { x: 0, y: 0, z: -1 });
+  const visibleFrames = new Map(initial.flocks.map((flock) => [flock.id, 0]));
+  const firstVisibleAt = new Map(initial.flocks.map((flock) => [flock.id,
+    initial.birds.some((bird) => bird.flockId === flock.id && bird.visible && bird.opacity > 0.5) ? 0 : null as number | null]));
+  for (let tick = 0; tick < 800; tick += 1) {
+    simulation.update(0.1, world, playerEye);
+    const frame = simulation.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "loaded-strip recovery must remain population bounded");
+    for (const flock of frame.flocks) {
+      if (frame.birds.some((bird) => bird.flockId === flock.id && bird.visible && bird.opacity > 0.5)) {
+        visibleFrames.set(flock.id, (visibleFrames.get(flock.id) ?? 0) + 1);
+        if (firstVisibleAt.get(flock.id) === null) firstVisibleAt.set(flock.id, tick + 1);
+      }
+    }
+    for (const bird of frame.birds.filter((candidate) => candidate.visible)) {
+      assert(isBirdVolumeClear(world, bird.position), "a recovered visible bird must be in loaded clear air");
+    }
+  }
+  assertEqual(visibleFrames.size, BIRD_FLOCK_COUNT, "both formation identities should be retained");
+  assert([...firstVisibleAt.values()].every((tick) => tick !== null && tick <= 200),
+    "formations should find nearby loaded air within bounded retries");
+  assert([...visibleFrames.values()].every((frames) => frames >= 50),
+    "each initially unavailable formation should recover sustained flight in the loaded strip");
+});
+
+test("bird wildlife formations recover after their original air unloads", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  let allLoaded = true;
+  const isLoaded = (_x: number, z: number): boolean => allLoaded || z >= 0;
+  const world = {
+    ...fixture.world,
+    isColumnLoaded: isLoaded,
+    getColumnTopHeight(x: number, z: number): number {
+      assert(isLoaded(x, z), "recovery must not query a column that has unloaded");
+      return 1;
+    }
+  };
+  const simulation = new BirdWildlifeSimulation(631);
+  const playerFeet = { x: 2, y: 1, z: 2 };
+  const playerEye = { ...playerFeet, y: 2.5 };
+  const initial = simulation.seed(world, playerFeet, { x: 0, y: 0, z: -1 });
+  assert(initial.flocks.every((flock) => flock.visible && flock.center.z < 0),
+    "fixture should start both formations visibly in the soon-to-unload air");
+  allLoaded = false;
+  const visibleFrames = new Map(initial.flocks.map((flock) => [flock.id, 0]));
+  const firstVisibleAt = new Map(initial.flocks.map((flock) => [flock.id, null as number | null]));
+  for (let tick = 0; tick < 800; tick += 1) {
+    simulation.update(0.1, world, playerEye);
+    const frame = simulation.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "unload recovery must keep the population bounded");
+    for (const flock of frame.flocks) {
+      if (frame.birds.some((bird) => bird.flockId === flock.id && bird.visible && bird.opacity > 0.5)) {
+        visibleFrames.set(flock.id, (visibleFrames.get(flock.id) ?? 0) + 1);
+        if (firstVisibleAt.get(flock.id) === null) firstVisibleAt.set(flock.id, tick + 1);
+      }
+    }
+    for (const bird of frame.birds.filter((candidate) => candidate.visible)) {
+      assert(isBirdVolumeClear(world, bird.position), "visible birds must not remain inside unloaded air");
+    }
+  }
+  assert([...firstVisibleAt.values()].every((tick) => tick !== null && tick <= 200),
+    "both formations should reappear near the still-loaded player within bounded retries");
+  assert([...visibleFrames.values()].every((frames) => frames >= 50),
+    "recovered formations should stay visible instead of repeatedly resetting their fade");
+});
+
 test("bird wildlife keeps responding to a sampled terrain rise between probes", () => {
   const fixture = createBirdWildlifeTestWorld();
   const player = { x: 0.5, y: 2.5, z: 0.5 };

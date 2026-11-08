@@ -13,7 +13,6 @@ export const BIRDS_PER_FLOCK = 6;
 export const BIRD_POPULATION_CAP = BIRD_FLOCK_COUNT * BIRDS_PER_FLOCK + SOLO_BIRD_COUNT;
 export const BIRD_MAX_SPEED = 12;
 export const BIRD_FLOCK_ALTITUDE = 132;
-const FLOCK_ORBIT_RADIUS = 22;
 export const BIRD_RECYCLE_DISTANCE = 76;
 
 export type BirdWildlifePose = {
@@ -21,6 +20,8 @@ export type BirdWildlifePose = {
   readonly state: "flying" | "landing" | "perched" | "taking-off";
   readonly perch: BirdWildlifePosition | null;
   readonly foldedWings: boolean;
+  readonly flightTarget: BirdWildlifePosition;
+  readonly habitatCenter: BirdWildlifePosition;
   readonly id: number;
   readonly flockId: number;
   readonly position: BirdWildlifePosition;
@@ -38,6 +39,8 @@ export type BirdWildlifeFlockSnapshot = {
   readonly center: BirdWildlifePosition;
   readonly visible: boolean;
   readonly recycleCount: number;
+  readonly flightTarget: BirdWildlifePosition;
+  readonly habitatCenter: BirdWildlifePosition;
 };
 export type BirdWildlifeSnapshot = {
   readonly birds: readonly BirdWildlifePose[];
@@ -68,7 +71,13 @@ type FlockRecord = {
   anchor: MutablePosition;
   center: MutablePosition;
   phase: number;
-  direction: number;
+  routePosition: MutablePosition;
+  routeVelocity: MutablePosition;
+  routeTarget: MutablePosition;
+  routeStart: MutablePosition;
+  routeLeg: number;
+  routeSeconds: number;
+  routeRetrySeconds: number;
   recycleCount: number;
   heightProbeSeconds: number;
   terrainHeight: number;
@@ -101,7 +110,9 @@ export class BirdWildlifeSimulation {
     for (let id = 0; id < BIRD_FLOCK_COUNT; id += 1) {
       const flock: FlockRecord = {
         id, anchor: { ...playerFeet }, center: { ...playerFeet }, phase: id * 2.3,
-        direction: id === 0 ? 1 : -1, recycleCount: 0, heightProbeSeconds: 0, terrainHeight: 0,
+        routePosition: { ...playerFeet }, routeVelocity: { x: 0, y: 0, z: 0 },
+        routeTarget: { ...playerFeet }, routeStart: { ...playerFeet }, routeLeg: 0, routeSeconds: 0, routeRetrySeconds: 0,
+        recycleCount: 0, heightProbeSeconds: 0, terrainHeight: 0,
         placementPlayer: { ...playerFeet }
       };
       this.flocks.push(flock);
@@ -131,7 +142,8 @@ export class BirdWildlifeSimulation {
         flock.recycleCount += 1;
         this.placeFlock(world, flock, playerEye, true);
       }
-      flock.phase += delta * 0.43 * flock.direction;
+      flock.phase += delta * 0.6;
+      this.advanceFlockRoute(flock, world, delta);
       flock.heightProbeSeconds -= delta;
       if (flock.heightProbeSeconds <= 0) {
         flock.heightProbeSeconds = 0.6;
@@ -162,13 +174,15 @@ export class BirdWildlifeSimulation {
     return {
       birds: [...this.birds.map<BirdWildlifePose>((bird) => ({
         role: "flock", state: "flying", perch: null, foldedWings: false,
+        flightTarget: { ...this.flocks[bird.flockId].routeTarget }, habitatCenter: { ...this.flocks[bird.flockId].anchor },
         id: bird.id, flockId: bird.flockId, position: { ...bird.position }, velocity: { ...bird.velocity },
         yaw: bird.yaw, pitch: bird.pitch, bank: bird.bank, wingAngle: bird.wingAngle,
         flapping: bird.flapping, visible: bird.visible, opacity: bird.opacity
       })), ...this.solos.snapshot()],
       flocks: this.flocks.map((flock) => ({
         id: flock.id, center: { ...flock.center }, visible: this.birds.some((bird) => bird.flockId === flock.id && bird.visible),
-        recycleCount: flock.recycleCount
+        recycleCount: flock.recycleCount,
+        flightTarget: { ...flock.routeTarget }, habitatCenter: { ...flock.anchor }
       })),
       elapsedSeconds: this.elapsedSeconds,
       populationCap: BIRD_POPULATION_CAP
@@ -182,22 +196,31 @@ export class BirdWildlifeSimulation {
     const side = recycled ? (flock.id === 0 ? 21 : -24) : (flock.id === 0 ? 3 : -9);
     const centerX = player.x + this.forward.x * ahead * direction + this.forward.z * side;
     const centerZ = player.z + this.forward.z * ahead * direction - this.forward.x * side;
-    flock.phase = Math.atan2(this.forward.x, this.forward.z) + flock.id * 0.4;
+    flock.phase = flock.id * 0.4;
     flock.anchor = {
-      x: centerX - Math.sin(flock.phase) * FLOCK_ORBIT_RADIUS,
+      x: Math.floor(centerX / 16) * 16 + 8,
       y: BIRD_FLOCK_ALTITUDE + flock.id * 6,
-      z: centerZ - Math.cos(flock.phase) * FLOCK_ORBIT_RADIUS
+      z: Math.floor(centerZ / 16) * 16 + 8
     };
-    flock.center = { ...flock.anchor };
+    flock.routePosition = { x: centerX, y: flock.anchor.y, z: centerZ };
+    flock.center = { ...flock.routePosition };
     flock.placementPlayer = { ...player };
     flock.heightProbeSeconds = 0;
     const top = world.isColumnLoaded(centerX, centerZ) ? world.getColumnTopHeight(centerX, centerZ) : null;
     if (top !== null && Number.isFinite(top)) flock.anchor.y = Math.max(flock.anchor.y, top + 4.5);
     flock.terrainHeight = 0;
+    flock.routePosition.y = flock.anchor.y;
+    flock.routeLeg = 0;
+    flock.routeRetrySeconds = 0;
+    flock.routeVelocity = { x: this.forward.x * 9.5, y: 0, z: this.forward.z * 9.5 };
+    this.chooseFlockWaypoint(flock, world);
+    const routeDistance = Math.max(0.001, Math.hypot(flock.routeTarget.x - centerX, flock.routeTarget.z - centerZ));
+    flock.routeVelocity = { x: (flock.routeTarget.x - centerX) / routeDistance * 9.5, y: 0,
+      z: (flock.routeTarget.z - centerZ) / routeDistance * 9.5 };
     for (let member = 0; member < BIRDS_PER_FLOCK; member += 1) {
       const target = this.memberTarget(flock, member);
       const position = this.findSafePosition(world, target);
-      const yaw = flock.phase + flock.direction * Math.PI / 2;
+      const yaw = Math.atan2(flock.routeVelocity.x, flock.routeVelocity.z);
       this.birds.push({
         id: flock.id * BIRDS_PER_FLOCK + member, flockId: flock.id, member,
         position: position ?? target, velocity: { x: Math.sin(yaw) * 9.5, y: 0, z: Math.cos(yaw) * 9.5 },
@@ -227,11 +250,7 @@ export class BirdWildlifeSimulation {
     }
     bird.opacity = Math.min(1, bird.opacity + delta * 1.2);
     const target = this.memberTarget(flock, bird.member);
-    const tangent = {
-      x: Math.cos(flock.phase) * flock.direction * 9.5,
-      y: 0,
-      z: -Math.sin(flock.phase) * flock.direction * 9.5
-    };
+    const tangent = flock.routeVelocity;
     const desired = {
       x: tangent.x + (target.x - bird.position.x) * 0.9,
       y: (target.y - bird.position.y) * 1.1,
@@ -314,11 +333,103 @@ export class BirdWildlifeSimulation {
     return null;
   }
 
+  private advanceFlockRoute(flock: FlockRecord, world: BirdWildlifeWorld, delta: number): void {
+    flock.routeRetrySeconds = Math.max(0, flock.routeRetrySeconds - delta);
+    if (!isBirdVolumeClear(world, flock.routePosition)) {
+      flock.routeVelocity = { x: 0, y: 0, z: 0 };
+      if (flock.routeRetrySeconds > 0) return;
+      flock.routeRetrySeconds = 0.75;
+      this.recoverFlockRoute(flock, world);
+      return;
+    }
+    flock.routeSeconds += delta;
+    const dx = flock.routeTarget.x - flock.routePosition.x;
+    const dz = flock.routeTarget.z - flock.routePosition.z;
+    const passedGoal = dx * (flock.routeTarget.x - flock.routeStart.x) +
+      dz * (flock.routeTarget.z - flock.routeStart.z) <= 0;
+    if ((Math.hypot(dx, dz) < 4.5 || passedGoal || flock.routeSeconds > 7 ||
+      !world.isColumnLoaded(flock.routeTarget.x, flock.routeTarget.z)) && flock.routeRetrySeconds === 0) this.chooseFlockWaypoint(flock, world);
+    const targetX = flock.routeTarget.x - flock.routePosition.x;
+    const targetZ = flock.routeTarget.z - flock.routePosition.z;
+    const distance = Math.max(0.001, Math.hypot(targetX, targetZ));
+    const blend = 1 - Math.exp(-delta * 3.4);
+    const velocity = {
+      x: flock.routeVelocity.x + (targetX / distance * 9.5 - flock.routeVelocity.x) * blend,
+      y: 0,
+      z: flock.routeVelocity.z + (targetZ / distance * 9.5 - flock.routeVelocity.z) * blend
+    };
+    const speed = Math.hypot(velocity.x, velocity.z);
+    if (speed > 0.001) scale(velocity, 9.5 / speed);
+    const next = plus(flock.routePosition, velocity, delta);
+    if (!sweepBirdFlight(world, flock.routePosition, next)) {
+      if (flock.routeRetrySeconds === 0) {
+        this.chooseFlockWaypoint(flock, world);
+        flock.routeRetrySeconds = 0.4;
+      }
+      flock.routeVelocity = { x: 0, y: 0, z: 0 };
+      return;
+    }
+    flock.routePosition = next;
+    flock.routeVelocity = velocity;
+  }
+
+  private recoverFlockRoute(flock: FlockRecord, world: BirdWildlifeWorld): void {
+    // A lost column invalidates the invisible route leader too. Retry a few
+    // fixed world points; visible flockmates retain continuous swept movement,
+    // and hidden ones rejoin through their existing fade/recovery path.
+    const placementHabitat = {
+      x: Math.floor(flock.placementPlayer.x / 16) * 16 + 8,
+      y: flock.anchor.y,
+      z: Math.floor(flock.placementPlayer.z / 16) * 16 + 8
+    };
+    const bases = [flock.routeTarget, placementHabitat, flock.anchor];
+    for (const base of bases) {
+      for (const [dx, dz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]]) {
+        const candidate = { x: base.x + dx, y: flock.anchor.y, z: base.z + dz };
+        if ([[5, 0], [-5, 0], [0, 5], [0, -5]].some(([ox, oz]) => !world.isColumnLoaded(candidate.x + ox, candidate.z + oz))) continue;
+        if (!isBirdVolumeClear(world, candidate)) continue;
+        flock.routePosition = candidate;
+        flock.anchor = {
+          x: Math.floor(candidate.x / 16) * 16 + 8, y: flock.anchor.y,
+          z: Math.floor(candidate.z / 16) * 16 + 8
+        };
+        this.chooseFlockWaypoint(flock, world);
+        return;
+      }
+    }
+  }
+
+  private chooseFlockWaypoint(flock: FlockRecord, world: BirdWildlifeWorld): void {
+    flock.routeLeg += 1;
+    flock.routeSeconds = 0;
+    flock.routeStart = { ...flock.routePosition };
+    let fallback: MutablePosition | null = null;
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const salt = this.initialSeed + flock.id * 137 + flock.routeLeg * 977 + attempt * 71;
+      const x = flock.anchor.x + (routeNoise(flock.anchor, salt) - 0.5) * 56;
+      const z = flock.anchor.z + (routeNoise(flock.anchor, salt + 37) - 0.5) * 56;
+      const distance = Math.hypot(x - flock.routePosition.x, z - flock.routePosition.z);
+      if (distance < 18 || distance > 54 || !world.isColumnLoaded(x, z)) continue;
+      if ([[5, 0], [-5, 0], [0, 5], [0, -5]].some(([dx, dz]) => !world.isColumnLoaded(x + dx, z + dz))) continue;
+      const target = { x, y: flock.anchor.y, z };
+      if (!isBirdVolumeClear(world, target)) continue;
+      fallback = target;
+      const speed = Math.hypot(flock.routeVelocity.x, flock.routeVelocity.z);
+      const alignment = speed > 0.1 ? ((x - flock.routePosition.x) * flock.routeVelocity.x +
+        (z - flock.routePosition.z) * flock.routeVelocity.z) / distance / speed : 1;
+      if (alignment > -0.6 || attempt >= 10) {
+        flock.routeTarget = target;
+        return;
+      }
+    }
+    flock.routeTarget = fallback ?? { ...flock.anchor };
+  }
+
   private flockTarget(flock: FlockRecord): MutablePosition {
     return {
-      x: flock.anchor.x + Math.sin(flock.phase) * FLOCK_ORBIT_RADIUS,
+      x: flock.routePosition.x,
       y: Math.max(flock.anchor.y + Math.sin(flock.phase * 1.7) * 1.1, flock.terrainHeight),
-      z: flock.anchor.z + Math.cos(flock.phase) * FLOCK_ORBIT_RADIUS
+      z: flock.routePosition.z
     };
   }
 
@@ -328,7 +439,9 @@ export class BirdWildlifeSimulation {
     const side = member % 2 === 0 ? -1 : 1;
     const lateral = rank * side * 1.65;
     const trailing = rank * 1.3;
-    const yaw = flock.phase + flock.direction * Math.PI / 2;
+    const yaw = Math.hypot(flock.routeVelocity.x, flock.routeVelocity.z) > 0.1
+      ? Math.atan2(flock.routeVelocity.x, flock.routeVelocity.z)
+      : Math.atan2(flock.routeTarget.x - center.x, flock.routeTarget.z - center.z);
     return {
       x: center.x + Math.cos(yaw) * lateral - Math.sin(yaw) * trailing,
       y: center.y + Math.sin(member * 1.9 + flock.phase) * 0.45,
@@ -370,10 +483,6 @@ function finite(position: BirdWildlifePosition): boolean {
   return [position.x, position.y, position.z].every(Number.isFinite);
 }
 
-function distance3(a: BirdWildlifePosition, b: BirdWildlifePosition): number {
-  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
 function scale(vector: MutablePosition, factor: number): void {
   vector.x *= factor;
   vector.y *= factor;
@@ -382,4 +491,12 @@ function scale(vector: MutablePosition, factor: number): void {
 
 function clamp(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(high, value));
+}
+
+function routeNoise(home: MutablePosition, salt: number): number {
+  let value = Math.imul(Math.floor(home.x), 73856093) ^ Math.imul(Math.floor(home.z), 19349663) ^ Math.imul(salt, 83492791);
+  value ^= value >>> 16;
+  value = Math.imul(value, 2246822519);
+  value ^= value >>> 13;
+  return (value >>> 0) / 4294967296;
 }

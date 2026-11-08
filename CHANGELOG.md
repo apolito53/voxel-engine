@@ -9,6 +9,19 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.23.1 - 2026-11-08
+
+### Fixed
+
+- Replaced repeated entry-centered bird circles with independent world-space
+  habitats and destination routes. Flocks retain formation flight, while solo
+  birds travel between their own destinations and tree perches.
+- Kept observer movement separate from normal route planning; distant travel
+  remains a population-residency boundary. Routes stay within loaded terrain
+  and retain existing collision, altitude, speed, pause and disposal contracts.
+- Added bounded formation-route recovery when initial air is unavailable or
+  the leader's column unloads, plus regression coverage for both boundaries.
+
 ## 0.23.0 - 2026-11-08
 
 ### Added

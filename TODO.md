@@ -5,7 +5,8 @@ promoted work, not every fun idea that crosses the room.
 
 ## Current Recommended Next Slice
 
-- The first bird wildlife slice is implemented in `v0.23.0`; see
+- The first bird wildlife slice is implemented in `v0.23.0`, with independent
+  destination routes and streamed-air recovery corrected in `v0.23.1`; see
   [wildlife](docs/wildlife.md). Nesting, audio, and an ecosystem are
   possible later slices, with no implementation chosen yet.
 - Friendly NPC foundation is implemented in `v0.22.0`; see

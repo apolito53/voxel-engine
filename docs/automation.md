@@ -59,7 +59,8 @@ controls change only NPC session state, never saved terrain or the NPC cap.
 See [friendly NPCs](friendly-npcs.md) for lifecycle and navigation limits.
 
 `birds()` returns copied bird/flock poses, wing and flight state, visibility,
-active elapsed time, and the population cap. `respawnBirds()` replaces the
+world-space `flightTarget` and `habitatCenter`, active elapsed time, and the
+population cap. `respawnBirds()` replaces the
 transient flocks near the current player pose; `clearBirds()` removes them for
 the current visit. They leave terrain and the Friendly Wanderers preference
 alone. See [wildlife](wildlife.md) for the first slice and its limits.

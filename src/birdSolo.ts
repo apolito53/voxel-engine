@@ -37,6 +37,10 @@ type SoloRecord = {
   altitude: number;
   terrainAltitude: number;
   phase: number;
+  routeTarget: Position;
+  routeStart: Position;
+  routeLeg: number;
+  routeSeconds: number;
   yaw: number;
   pitch: number;
   bank: number;
@@ -66,6 +70,7 @@ export class SoloBirdSimulation {
       const bird: SoloRecord = {
         id: 12 + member, member, position: { ...player }, velocity: { x: 0, y: 0, z: 0 },
         home: { ...player }, placementPlayer: { ...player }, altitude: 0, terrainAltitude: 0, phase: 0,
+        routeTarget: { ...player }, routeStart: { ...player }, routeLeg: 0, routeSeconds: 0,
         yaw: 0, pitch: 0, bank: 0, state: "flying", perch: null, folded: false, landingFinal: false,
         takeoffTarget: null, visible: false, opacity: 1, recoverySeconds: 1,
         searchSeconds: 0.7 + member * 0.3, searchCursor: member * 211, perchCooldown: 0,
@@ -88,6 +93,7 @@ export class SoloBirdSimulation {
         bird.recoverySeconds -= delta;
         if (bird.recoverySeconds > 0) continue;
         bird.recoverySeconds = 1;
+        this.chooseWaypoint(bird, world);
         const position = this.safeFlightPosition(world, this.flightTarget(bird));
         if (!position) continue;
         bird.position = position;
@@ -146,6 +152,7 @@ export class SoloBirdSimulation {
         (bird.state === "taking-off" || (this.elapsedSeconds + bird.id) % 4 < 3);
       return {
         id: bird.id, flockId: -1, role: "solo", state: bird.state, foldedWings: bird.folded,
+        flightTarget: this.flightTarget(bird), habitatCenter: { ...bird.home, y: bird.altitude },
         perch: bird.perch ? { ...bird.perch } : null,
         position: { ...bird.position }, velocity: { ...bird.velocity },
         yaw: bird.yaw, pitch: bird.pitch, bank: bird.bank, visible: bird.visible, opacity: bird.opacity,
@@ -158,17 +165,27 @@ export class SoloBirdSimulation {
 
   private place(world: BirdWildlifeWorld, bird: SoloRecord, player: BirdWildlifePosition,
     forward: BirdWildlifePosition, recycled: boolean): void {
-    bird.home = { ...player };
+    bird.home = { x: Math.floor(player.x / 16) * 16 + 8, y: player.y, z: Math.floor(player.z / 16) * 16 + 8 };
     bird.placementPlayer = { ...player };
-    bird.phase = Math.atan2(forward.x, forward.z) + bird.member * 2.1;
-    const target = this.flightTarget(bird);
+    bird.phase = bird.member * 2.1;
+    const side = bird.member === 0 ? -5 : bird.member === 1 ? 6 : 2;
+    const ahead = 8 + bird.member * 3;
+    const target = {
+      x: player.x + forward.x * ahead + forward.z * side,
+      y: player.y,
+      z: player.z + forward.z * ahead - forward.x * side
+    };
     const top = world.isColumnLoaded(target.x, target.z) ? world.getColumnTopHeight(target.x, target.z) : null;
     bird.altitude = top !== null && Number.isFinite(top) ? top + 3.3 + bird.member * 0.5 : Math.max(4, player.y + 3);
     bird.terrainAltitude = 0;
     target.y = bird.altitude;
     const position = this.safeFlightPosition(world, target);
     bird.position = position ?? target;
-    bird.velocity = { x: Math.cos(bird.phase) * 11, y: 0, z: -Math.sin(bird.phase) * 11 };
+    bird.routeLeg = 0;
+    this.chooseWaypoint(bird, world);
+    const distance = Math.max(0.001, Math.hypot(bird.routeTarget.x - bird.position.x, bird.routeTarget.z - bird.position.z));
+    bird.velocity = { x: (bird.routeTarget.x - bird.position.x) / distance * 11, y: 0,
+      z: (bird.routeTarget.z - bird.position.z) / distance * 11 };
     bird.yaw = Math.atan2(bird.velocity.x, bird.velocity.z);
     bird.state = "flying";
     bird.perch = null;
@@ -184,7 +201,14 @@ export class SoloBirdSimulation {
   }
 
   private fly(bird: SoloRecord, world: BirdWildlifeWorld, delta: number): void {
-    bird.phase += delta * 11 / (14 + bird.member * 2);
+    bird.phase += delta * 0.8;
+    bird.routeSeconds += delta;
+    const goalX = bird.routeTarget.x - bird.position.x;
+    const goalZ = bird.routeTarget.z - bird.position.z;
+    const passedGoal = goalX * (bird.routeTarget.x - bird.routeStart.x) +
+      goalZ * (bird.routeTarget.z - bird.routeStart.z) <= 0;
+    if (Math.hypot(goalX, goalZ) < 3.5 || passedGoal || bird.routeSeconds > 6 ||
+      !world.isColumnLoaded(bird.routeTarget.x, bird.routeTarget.z)) this.chooseWaypoint(bird, world);
     const target = this.flightTarget(bird);
     bird.altitudeProbeSeconds -= delta;
     if (bird.altitudeProbeSeconds <= 0) {
@@ -195,10 +219,11 @@ export class SoloBirdSimulation {
       }
     }
     target.y = Math.max(target.y, bird.terrainAltitude);
+    const distance = Math.max(0.001, Math.hypot(target.x - bird.position.x, target.z - bird.position.z));
     const desired = {
-      x: Math.cos(bird.phase) * 11 + (target.x - bird.position.x) * 0.8,
+      x: (target.x - bird.position.x) / distance * 11,
       y: (target.y - bird.position.y) * 1.7,
-      z: -Math.sin(bird.phase) * 11 + (target.z - bird.position.z) * 0.8
+      z: (target.z - bird.position.z) / distance * 11
     };
     limit(desired, SOLO_BIRD_MAX_SPEED);
     const blend = 1 - Math.exp(-delta * 4);
@@ -229,14 +254,10 @@ export class SoloBirdSimulation {
       let x: number;
       let z: number;
       if (query < PERCH_QUERY_BUDGET / 2) {
-        // Sample the upcoming actual orbit as well as the home neighborhood;
-        // birds pass trees at radii 14–18m outside the original entry square.
-        const radius = Math.max(1, Math.hypot(bird.position.x - bird.home.x, bird.position.z - bird.home.z));
-        const phase = Math.atan2(bird.position.x - bird.home.x, bird.position.z - bird.home.z);
+        // Sample the upcoming transit, independently of the player's position.
         const ahead = query * 1.2 / (PERCH_QUERY_BUDGET / 2 - 1);
-        const predictedPhase = phase + ahead * Math.hypot(bird.velocity.x, bird.velocity.z) / radius;
-        x = Math.floor(bird.home.x + Math.sin(predictedPhase) * radius) + 0.5;
-        z = Math.floor(bird.home.z + Math.cos(predictedPhase) * radius) + 0.5;
+        x = Math.floor(bird.position.x + bird.velocity.x * ahead) + 0.5;
+        z = Math.floor(bird.position.z + bird.velocity.z * ahead) + 0.5;
       } else {
         const [dx, dz] = PERCH_SEARCH_OFFSETS[bird.searchCursor++ % PERCH_SEARCH_OFFSETS.length];
         x = Math.floor(bird.home.x) + dx + 0.5;
@@ -332,6 +353,7 @@ export class SoloBirdSimulation {
     bird.folded = false;
     bird.perch = null;
     bird.takeoffTarget = null;
+    this.chooseWaypoint(bird, world);
     bird.velocity = { x: Math.sin(bird.yaw) * 9, y: 2, z: Math.cos(bird.yaw) * 9 };
   }
 
@@ -365,12 +387,38 @@ export class SoloBirdSimulation {
   }
 
   private flightTarget(bird: SoloRecord): Position {
-    const radius = 14 + bird.member * 2;
     return {
-      x: bird.home.x + Math.sin(bird.phase) * radius,
-      y: bird.altitude + Math.sin(bird.phase * 1.7) * 1.1,
-      z: bird.home.z + Math.cos(bird.phase) * radius
+      x: bird.routeTarget.x,
+      y: Math.max(bird.altitude, bird.routeTarget.y) + Math.sin(bird.phase * 1.7) * 1.1,
+      z: bird.routeTarget.z
     };
+  }
+
+  private chooseWaypoint(bird: SoloRecord, world: BirdWildlifeWorld): void {
+    bird.routeLeg += 1;
+    bird.routeSeconds = 0;
+    bird.routeStart = { ...bird.position };
+    let fallback: Position | null = null;
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const salt = bird.id * 137 + bird.routeLeg * 977 + attempt * 71;
+      const x = bird.home.x + (routeNoise(bird.home, salt) - 0.5) * 48;
+      const z = bird.home.z + (routeNoise(bird.home, salt + 37) - 0.5) * 48;
+      const distance = Math.hypot(x - bird.position.x, z - bird.position.z);
+      if (distance < 12 || distance > 45 || !world.isColumnLoaded(x, z)) continue;
+      const top = world.getColumnTopHeight(x, z);
+      const target = { x, y: Math.max(bird.altitude, top !== null && Number.isFinite(top) ? top + 2.5 : 2), z };
+      if (!isBirdVolumeClear(world, target)) continue;
+      fallback = target;
+      const speed = Math.hypot(bird.velocity.x, bird.velocity.z);
+      const alignment = speed > 0.1 ? ((x - bird.position.x) * bird.velocity.x +
+        (z - bird.position.z) * bird.velocity.z) / distance / speed : 1;
+      if (alignment > -0.6 || attempt >= 10) {
+        bird.routeTarget = target;
+        return;
+      }
+    }
+    // Returning to a fixed habitat point is a safety fallback, not a player target.
+    bird.routeTarget = fallback ?? { x: bird.home.x, y: bird.altitude, z: bird.home.z };
   }
 
   private hide(bird: SoloRecord): void {
@@ -395,4 +443,12 @@ function limit(vector: Position, maximum: number): void {
   vector.x *= factor;
   vector.y *= factor;
   vector.z *= factor;
+}
+
+function routeNoise(home: Position, salt: number): number {
+  let value = Math.imul(Math.floor(home.x), 73856093) ^ Math.imul(Math.floor(home.z), 19349663) ^ Math.imul(salt, 83492791);
+  value ^= value >>> 16;
+  value = Math.imul(value, 2246822519);
+  value ^= value >>> 13;
+  return (value >>> 0) / 4294967296;
 }

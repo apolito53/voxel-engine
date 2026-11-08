@@ -21,6 +21,14 @@ atmospheric fade is independent of the short terrain fog wall so they remain
 visible overhead on low graphics presets. Near solo birds retain normal
 terrain fog. Neither role expands the terrain stream or camera range.
 
+Birds choose destinations within a fixed world-space habitat. Routes connect
+those destinations, with shared formation movement for flocks and separate
+paths for solo birds. Habitat and route targets do not follow normal player
+movement. Player travel only determines when distant populations can be
+replaced near newly explored terrain. The old repeating circles around the
+entry area were removed in `v0.23.1` because they looked like birds orbiting
+the player.
+
 [main.ts](../src/main.ts) adapts the loaded terrain, seeds birds after world
 hydration and player restoration, and clears them on world switch or exit.
 Simulation advances only during active visible play. Pause, hidden tabs, and
@@ -53,6 +61,12 @@ terrain are rechecked during play; birds that cannot safely occupy an area
 must recover without flying through solid geometry. Distant formations use
 their atmospheric haze and solo birds use terrain fog.
 
+A flock's invisible route leader also revalidates its air. An unavailable
+initial position or unloaded route retries fixed world points at a bounded
+cadence, then resumes from safe loaded space. Visible members retain swept
+movement; hidden members use the existing recovery fade. A very small loaded
+footprint can hold a formation until there is room for its next route leg.
+
 ## Verification
 
 Run `npm.cmd run test:wildlife` and typechecking. The
@@ -63,6 +77,7 @@ clear/reseed fixture controls for a browser pass.
 Browser checks cover recognizable faster flight, cloud-height formations,
 solo canopy approach/rest/takeoff, wing motion/gliding and banking,
 terrain and atmospheric fog integration, pause/resume, player travel, world switching, and
-teardown. Pure tests exercise deterministic bounds, obstacles, loaded edges,
-terrain edits, delta limits, and reset. This initial ambient layer does not
+teardown. Pure tests exercise deterministic bounds, varied routes and nearby
+player independence, obstacles, loaded edges and recovery, terrain edits,
+delta limits, and reset. This initial ambient layer does not
 establish a simulated ecosystem or migration behavior.

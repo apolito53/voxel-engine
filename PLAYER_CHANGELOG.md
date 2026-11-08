@@ -1,5 +1,9 @@
 # Player release notes
 
+## 0.23.1 - 2026-11-08
+
+- Birds now travel between their own destinations through the surrounding world. Their old circular routes could make them appear to orbit where you entered the world.
+
 ## 0.23.0 - 2026-11-08
 
 - Faster bird formations cruise high near the clouds, with flapping wings, glides, and banking turns.
