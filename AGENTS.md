@@ -72,10 +72,21 @@ coverage from instructions alone.
 
 - Documentation or routing changes: `node scripts/check_docs_links.mjs` and
   `git diff --check`.
-- Narrow pure-rule changes: relevant unit tests and `npm.cmd run typecheck`.
-- Shared gameplay or engine changes: `npm.cmd run validate`.
-- Worker, rendering, pointer-lock, lighting, or visual changes also need a real
-  browser smoke test. Use Chrome for pointer lock and first-person feel.
+- Behavior changes, including shared helpers: run the smallest useful tests for
+  the changed behavior, affected direct consumers, and shared contracts, plus
+  relevant lint or `npm.cmd run typecheck`. Use the same checks during iteration
+  and at ordinary commit or push. `npm.cmd run test` runs the full test suite
+  and does not filter tests by argument.
+- A planned milestone or release checkpoint or a broad, high-risk, or
+  shared-infrastructure change can justify `npm.cmd run validate`. Run checks
+  explicitly requested by the task. A build, deployment, ordinary commit, or
+  push alone does not require the full local suite; honor required delivery
+  builds, GitHub push/PR CI, and task-specific gates.
+- For layout, style, or text changes, visually check the affected surface;
+  run behavior tests only when behavior also changes. Smoke-test startup,
+  integration, or browser-only runtime boundaries in a real browser when
+  affected, including worker, rendering, lighting, or pointer-lock behavior.
+  Use Chrome for pointer lock and first-person feel.
 
 Use [CODEBASE_INDEX.md](CODEBASE_INDEX.md#validation) for the validation map.
 Do not search generated `node_modules/`, `dist/`, or `.test-dist/` during routine
