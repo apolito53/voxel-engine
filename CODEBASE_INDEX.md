@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-07 for `v0.19.3`.
+Last reviewed: 2026-11-07 for `v0.19.4`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -45,7 +45,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Chunk materials, atlas, voxel lighting | [src/blockTextureAtlas.ts](src/blockTextureAtlas.ts) | [src/blockColors.ts](src/blockColors.ts), [src/blockTextureTiles.ts](src/blockTextureTiles.ts), [src/voxelLighting.ts](src/voxelLighting.ts) |
 | Lamp block light and local light proxies | [src/voxelBlockLight.ts](src/voxelBlockLight.ts) | [src/blockLightJobs.ts](src/blockLightJobs.ts), [src/localLights.ts](src/localLights.ts), [src/localLightRenderer.ts](src/localLightRenderer.ts) |
 | Sky, elevated clouds, day/night, fog | [src/skybox.ts](src/skybox.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/dayNightCycle.ts](src/dayNightCycle.ts), [src/horizonMatte.ts](src/horizonMatte.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
-| Sun/cloud shadows and shadow camera | [src/shadows.ts](src/shadows.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/qualityController.ts](src/qualityController.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
+| Shared solar direction, sun/cloud shadows and shadow camera | [src/lighting.ts](src/lighting.ts) | [src/shadows.ts](src/shadows.ts), [src/cloudLayer.ts](src/cloudLayer.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Cloud-bank shadow debug guides | [src/cloudShadowDebug.ts](src/cloudShadowDebug.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/codexPilot.ts](src/codexPilot.ts), [docs/controls.md](docs/controls.md#settings) |
 | Partial terrain carving and geometry | [src/partialBlocks.ts](src/partialBlocks.ts) | [src/partialBlockMeshField.ts](src/partialBlockMeshField.ts), [src/partialBlockMeshWorker.ts](src/partialBlockMeshWorker.ts), [docs/destruction.md](docs/destruction.md) |
 | Player movement and partial collision | [src/player.ts](src/player.ts) | [src/collision.ts](src/collision.ts), [src/playerMovement.ts](src/playerMovement.ts), [docs/player-partial-collision-plan.md](docs/player-partial-collision-plan.md) |
@@ -124,9 +124,10 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
   light while a genuinely dirty cache rebuilds; do not flash zero-lit geometry.
 - The clear-distance slider, hidden stream horizon, chunk render radius, hard
   fog wall, and horizon matte have different jobs. Do not collapse their radii.
-- Cloud casting extends shadow depth only along the fixed sun direction; keep
-  the shadow plane texel grid and original terrain range intact. Fade cloud
-  coverage before the map edge and skip its caster when disabled or at night.
+- Sky disk, directional light, shadow basis, clouds and debug rays share the
+  live solar vector. Terrain depth fits finite rendered bounds; cloud depth
+  extends along that vector only within the elevation/horizon gate. Preserve
+  texel snapping, cloud edge fades and matching visible/depth horizon limits.
 - Debris presentation volume cannot exceed removed terrain volume. Normal
   runtime pressure cleanup prefers settled debris and protects fresh airborne
   bursts during their grace window.

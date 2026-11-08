@@ -69,7 +69,7 @@ import {
   type WorldRegistry
 } from "./chunkStorage";
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
-import { CLOUD_TOP_HEIGHT_METERS, CloudLayer } from "./cloudLayer";
+import { CLOUD_BASE_HEIGHT_METERS, CLOUD_TOP_HEIGHT_METERS, CloudLayer, getCloudViewDistance } from "./cloudLayer";
 import {
   CloudShadowDebug, readCloudShadowDebugPreference, writeCloudShadowDebugPreference
 } from "./cloudShadowDebug";
@@ -209,7 +209,7 @@ import {
   type InventoryLane,
   type InventoryState
 } from "./inventory";
-import { SUN_OFFSET } from "./lighting";
+import { SUN_OFFSET, getDirectSunHorizonFade, getSolarDirection } from "./lighting";
 import { LocalLightRenderer } from "./localLightRenderer";
 import { MinimapRenderer } from "./minimap";
 import { createNovaChatReply, createNovaTerminalRoute, NOVA_CHAT_TOGGLE_KEY } from "./novaChat";
@@ -364,6 +364,7 @@ import {
 import {
   createDirectionalShadowBasis,
   getCloudShadowCoverage,
+  getCloudShadowMinSunHeight,
   getDirectionalShadowDepthRange,
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
@@ -629,6 +630,8 @@ const WORLD_FOG_COLOR = 0xb6d8ee;
 let dayNightState: DayNightState = createDefaultDayNightState();
 let dayNightVisualState: DayNightVisualState = createDayNightVisualState(dayNightState);
 let dayNightDebugStats: DayNightDebugSnapshot = createDayNightDebugSnapshot(dayNightState, dayNightVisualState);
+const solarDirection = getSolarDirection(dayNightVisualState.timeOfDay);
+const solarOffset = solarDirection.clone().multiplyScalar(SUN_OFFSET.length());
 const sceneBackgroundColor = new THREE.Color(WORLD_FOG_COLOR);
 
 const scene = new THREE.Scene();
@@ -652,9 +655,9 @@ scene.add(sun);
 const skyLight = new THREE.HemisphereLight(0xb9d9ff, 0x394228, bootPreset.skyIntensity);
 scene.add(skyLight);
 
-const skybox = createSkybox(SUN_OFFSET, createProceduralSkyState(dayNightVisualState));
+const skybox = createSkybox(solarDirection, createProceduralSkyState(dayNightVisualState));
 scene.add(skybox.object);
-const cloudLayer = new CloudLayer(SUN_OFFSET, dayNightVisualState);
+const cloudLayer = new CloudLayer(solarDirection, dayNightVisualState);
 scene.add(cloudLayer.object);
 const cloudShadowDebug = new CloudShadowDebug(scene, cloudShadowGuidesOverlay);
 const horizonMatte = new HorizonMatte(WORLD_FOG_COLOR);
@@ -752,7 +755,9 @@ const chunkStreamFrustum = new THREE.Frustum();
 const chunkStreamProjection = new THREE.Matrix4();
 const toys: PhysicsToy[] = [];
 const gpuInfo = readGpuInfo(renderer);
-const shadowBasis = createDirectionalShadowBasis(SUN_OFFSET);
+const shadowBasis = createDirectionalShadowBasis(solarDirection);
+let cloudShadowMinSunHeight = 1;
+let cloudShadowCoverage = 0;
 const desiredShadowAnchor = new THREE.Vector3();
 const stableShadowAnchor = new THREE.Vector3();
 const physicsImpacts: PhysicsImpact[] = [];
@@ -1819,15 +1824,19 @@ function updateDayNightCycle(deltaSeconds: number, now: number): void {
 function applyDayNightVisuals(): void {
   dayNightVisualState = createDayNightVisualState(dayNightState);
   dayNightDebugStats = createDayNightDebugSnapshot(dayNightState, dayNightVisualState);
+  getSolarDirection(dayNightVisualState.timeOfDay, SUN_OFFSET, solarDirection);
+  solarOffset.copy(solarDirection).multiplyScalar(SUN_OFFSET.length());
+  createDirectionalShadowBasis(solarDirection, shadowBasis);
 
   copyRgbColor(sceneBackgroundColor, dayNightVisualState.fogColor);
   scene.background = sceneBackgroundColor;
   sceneFog.color.copy(sceneBackgroundColor);
-  skybox.setState(createProceduralSkyState(dayNightVisualState));
-  cloudLayer.setState(dayNightVisualState);
+  skybox.setState(createProceduralSkyState(dayNightVisualState), solarDirection);
+  cloudLayer.setState(dayNightVisualState, solarDirection);
   horizonMatte.setColor(sceneBackgroundColor);
 
-  sun.intensity = qualityController.preset.sunIntensity * dayNightVisualState.sunIntensityScale;
+  sun.intensity = qualityController.preset.sunIntensity * dayNightVisualState.sunIntensityScale *
+    getDirectSunHorizonFade(solarDirection);
   copyRgbColor(sun.color, dayNightVisualState.directionalLightColor);
   skyLight.intensity = qualityController.preset.skyIntensity * dayNightVisualState.skyIntensityScale;
   copyRgbColor(skyLight.color, dayNightVisualState.skyLightColor);
@@ -2654,7 +2663,7 @@ function animate(): void {
     cloudShadowDebug.update({
       camera, cloud: cloudLayer.getDebugState(), world, inWorld,
       shadows: preset.shadows, cloudShadows: preset.cloudShadows,
-      coverage: getCloudShadowCoverage(preset, dayNightVisualState),
+      coverage: cloudShadowCoverage, basis: shadowBasis, minSunHeight: cloudShadowMinSunHeight,
       anchor: stableShadowAnchor, lightPosition: sun.position,
       cameraSize: preset.shadowCameraSize,
       cameraNear: sun.shadow.camera.near, cameraFar: sun.shadow.camera.far,
@@ -5756,10 +5765,14 @@ function clearPhysicsCores(): void {
 
 function updateSunShadowAnchor(): void {
   const preset = qualityController.preset;
-  const cloudCoverage = inWorld ? getCloudShadowCoverage(preset, dayNightVisualState) : 0;
-  cloudLayer.setShadows(cloudCoverage, preset.shadowMapSize);
-  const depthRange = getDirectionalShadowDepthRange(preset, SUN_OFFSET,
-    cloudCoverage > 0 ? CLOUD_TOP_HEIGHT_METERS : null);
+  cloudShadowMinSunHeight = getCloudShadowMinSunHeight(preset.shadowCameraSize,
+    CLOUD_TOP_HEIGHT_METERS, getCloudViewDistance(preset), camera.position.y,
+    CLOUD_BASE_HEIGHT_METERS, getShadowTexelSize(preset) * 2);
+  cloudShadowCoverage = inWorld
+    ? getCloudShadowCoverage(preset, dayNightVisualState, solarDirection, cloudShadowMinSunHeight) : 0;
+  cloudLayer.setShadows(cloudShadowCoverage, preset.shadowMapSize);
+  const depthRange = getDirectionalShadowDepthRange(preset, solarOffset,
+    cloudShadowCoverage > 0 ? CLOUD_TOP_HEIGHT_METERS : null, cloudShadowMinSunHeight);
   if (sun.shadow.camera.far !== depthRange.cameraFar) {
     sun.shadow.camera.far = depthRange.cameraFar;
     sun.shadow.camera.updateProjectionMatrix();
@@ -5774,10 +5787,10 @@ function updateSunShadowAnchor(): void {
     )
     : stableShadowAnchor.copy(desiredShadowAnchor);
 
-  // Move the light and target together so the sun direction stays constant
-  // while the orthographic shadow projection remains stable around the player.
+  // Anchor translation and cloud depth extension preserve the exact live solar
+  // vector. Snap in its current light-space basis, never a cached noon basis.
   sunTarget.position.copy(anchor);
-  sun.position.copy(anchor).addScaledVector(SUN_OFFSET, depthRange.lightOffsetScale);
+  sun.position.copy(anchor).addScaledVector(solarOffset, depthRange.lightOffsetScale);
   sunTarget.updateMatrixWorld();
   sun.updateMatrixWorld();
 }

@@ -36,9 +36,10 @@ globalThis.__VOXEL_CODEX_PILOT__.cloudShadowGuides(false)
 `cloudShadowGuides(enabled?)` controls the same saved debug preference as
 `Settings > Experimental > Cloud Shadow Guides`. Its snapshot reports the
 active/inactive reason, nearby/selected bank counts, colors, verified terrain
-contacts, unloaded paths, and representative source/contact positions. Enabling
+contacts, unloaded paths, representative source/contact positions, shared solar
+and actual light-target directions, coverage, and minimum supported solar Y. Enabling
 it refreshes on the next frame; query again after that frame for contact data.
-The diagnostic respects the existing graphics/daylight gates and never changes
+The diagnostic respects the graphics/daylight/cloud-horizon gates and never changes
 quality or enables shadow casting itself. Use its coordinates to frame matching
 cloud/terrain views; the guides remain sparse local samples, not depth-map
 pixel ownership. See [settings](controls.md#settings) for the visual key/limits.

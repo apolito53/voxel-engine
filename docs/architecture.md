@@ -152,6 +152,7 @@ normal debris cleanup must not silently revive durable rubble piles.
 Terrain lighting has several layers with different costs:
 
 - baked face and sealed-cavity shading supplies the cheap ambient baseline;
+- the live DirectionalLight supplies solar direction and direct shadows;
 - procedural day/night uniforms alter outdoor exposure, fog, and sky;
 - Lamp material emission keeps every fixture visibly bright;
 - worker-derived integer block light illuminates terrain and partial cavities;
@@ -162,10 +163,17 @@ celestial disks, and stars. Its shared atmosphere shader also supplies the
 distant color for `cloudLayer.ts`; clouds do not consume terrain fog. The shared
 atmosphere converges to the actual world fog color at the true horizon, lifting
 directional twilight above that seam so the existing fog wall stays continuous.
-The sky
-dome writes at the clip-space far plane, independently of its small physical
-sphere radius. The directional terrain light/shadow rig retains its established
-fixed direction while the visual sun/moon follow the saved world clock.
+The sky dome writes at the clip-space far plane, independently of its small
+physical sphere radius. `lighting.ts` owns the established fixed-azimuth solar
+orbit: elevation follows the saved world clock, preserving the roughly
+40-degree noon calibration. `main.ts` computes one unit direction and supplies
+it to the visible sun/moon, actual DirectionalLight, cloud shading, current
+shadow basis, and debug guides. Anchor translation and depth extension never
+change that vector. Direct sunlight fades near the true horizon and is zero
+below it; the existing hemisphere/outdoor exposure handles night. Baked terrain
+face colors retain only neutral ambient, upward sky fill and underside darkness;
+sealed/cut shading, Lamp emission and block light keep their separate contracts.
+Clock updates do not schedule chunk or partial-terrain mesh jobs.
 
 `CloudLayer` owns render-only, opaque stepped voxel banks at a fixed world
 base of 144m, reaching at most 156m. A deterministic periodic 1024m field emits
@@ -178,7 +186,8 @@ The opaque material keeps correct face/terrain depth ordering from below,
 inside, or above banks, while the distant edge blends into the same sky haze.
 
 Cloud wind advances from clamped active, unpaused, visible frame deltas,
-independently of world time. Clock edits only recolor the layer; hidden frames,
+independently of world time. Clock edits change cloud lighting and shadow
+projection without changing its transforms or wind; hidden frames,
 pause, and existing idle hibernation do not accumulate catch-up drift. Cloud
 wind is transient presentation, reset on world entry/exit and excluded from
 saved-world metadata. The reused runtime owns cloud geometry, visible/depth
@@ -187,40 +196,60 @@ picking, or voxel-light role.
 
 Cloud shadows reuse the one existing directional sun map and the cloud mesh's
 real moving instance transforms. `shadows.ts` gates cloud depth coverage by
-the separately saved Cloud Shadows preference, global shadows, and daylight.
+the separately saved Cloud Shadows preference, global shadows, daylight, and
+the finite cloud horizon.
 Normal and higher default on; Potato/Low default off. The Custom checkbox
-preference survives global shadows being off. Off/night set `castShadow=false`,
+preference survives global shadows being off. Off/low-sun/night set `castShadow=false`,
 omitting the cloud depth draw without removing visible clouds or their wind.
-The owned `MeshDepthMaterial` preserves Three's standard instanced vertex path;
-daytime patch interiors use full depth coverage for pronounced shade, while
+The owned `MeshDepthMaterial` preserves Three's standard instanced projection
+and reads the resulting instance world position. Its distance discard shares
+the visible shader's cloud horizon and an explicit main-camera position uniform
+(the shadow camera's built-in position would be wrong). Invisible cloud copies
+beyond that horizon cannot cast. Daytime patch interiors use full depth
+coverage for pronounced shade, while
 stable ordered coverage softens daylight/edge fades through the existing PCF filter.
 Cloud depth coverage fades radially through the map's outer 35%, preventing a
 hard square footprint without changing terrain receiver shaders. Clouds do not
 receive shadows. Lamp emission, local PointLight spill, and block light remain
 independent of the directional map.
 
-The original sun light position is below the cloud layer. While clouds cast,
-`getDirectionalShadowDepthRange` moves that light farther along the same fixed
-sun direction until both cloud planes fit across every tilted orthographic
-corner. Increasing the far plane by that exact displacement preserves the
-original terrain range. Orthographic XY bounds, map resolution, shadow-anchor
-texel snapping, and terrain streaming stay unchanged; off/night restore the
-original light offset and far plane. This adds one instanced depth draw and
-some caster rasterization, with no second shadow map or streamed terrain.
+`getDirectionalShadowDepthRange` first fits the finite rendered terrain cylinder
+(`renderRadius + 2` chunk-edge/snap allowance, height `0..WORLD_HEIGHT`) using
+dot-product bounds along the current sun. Its near-side light extension keeps
+sunward hill casters ahead of the camera; its far fit keeps opposite receivers
+covered even on Custom Potato/Low with cloud casting off. This terrain fit stays
+finite at the horizon and preserves the original preset depth interval.
+
+While clouds cast, the helper extends the light farther along that same vector
+until both cloud planes fit across every tilted orthographic corner. Far grows
+by the exact added light displacement so terrain range is preserved. Before
+using that slanted-plane division, `getCloudShadowMinSunHeight` reserves the
+largest eye-to-cloud-plane height gap, perpendicular map-corner reach, and a
+small texel/snap margin inside the actual cloud-view sphere. The remaining
+horizontal reach sets a conservative minimum solar Y; coverage fades over the
+next `0.04` Y. On Normal at ground level this is about 15 degrees to 17.5
+degrees, with stricter bounds for short cloud horizons or high flight. Unsupported
+low sun uses the finite terrain-only fit and performs no cloud casts or guide
+queries, without clamping the solar vector. Orthographic XY bounds, map
+resolution, texel snapping in the current basis, and terrain streaming retain
+their existing roles. This adds one instanced depth draw and some caster
+rasterization, with no second shadow map or streamed terrain.
 
 `cloudShadowDebug.ts` owns the optional Cloud Shadow Guides diagnostic, separate
 from graphics-quality state. It identifies four-connected banks on the toroidal
 64x64 cloud field and reads `CloudLayer.getDebugState()` for the actual wind and
 visibility. Matching bank colors link exposed cloud edges, one representative
-fixed-sun connector, and sparse full/partial-terrain contact crosses. It uses
-the real snapped shadow anchor, fixed light basis, near/far range, radial fade,
-and daylight/shadow gates; the moving visual sun is not its projection source.
+live-sun connector, and sparse full/partial-terrain contact crosses. It uses
+the real snapped shadow anchor, current light basis, near/far range, radial fade,
+and the same daylight/elevation/shadow gates. Low sun outside the supported
+cloud horizon is reported separately from a genuinely below-horizon sun.
 
 Contact sampling is local and bounded to three banks / 128 cloud-column rays
 per refresh, with 96 additional terrain rays for fade/edge rings. Refreshes run
 at most four times per second during ordinary motion, with immediate rebuilds
-on enable, world switch, teleport, wrap, or shadow-range changes. First-hit
-queries reuse `VoxelWorld.raycastTerraformerTarget`, preserving partial geometry;
+on enable, world switch, teleport, wrap, substantial clock/direction jumps, or
+shadow-range changes. Small per-frame solar/depth updates retain the bounded
+cadence. First-hit queries reuse `VoxelWorld.raycastTerraformerTarget`, preserving partial geometry;
 chunk-grid traversal rejects paths through unloaded terrain below world height
 instead of treating missing chunks as proven clear sky. Void/missing/depth-clipped
 samples produce no fabricated ground contact. This is geometric sampling, not

@@ -71,8 +71,8 @@ promoted work, not every fun idea that crosses the room.
 - First slice shipped in `v0.14.0` and was corrected through `v0.15.3`:
   placeable `Lamp` blocks register as radius-selected Three.js point lights
   from exposed fixture surfaces, rebuild from loaded/edited chunks, use a
-  quality-tuned light radius, and coexist with the cheaper baked
-  sun/face-shading baseline.
+  quality-tuned light radius, and coexist with the cheaper baked neutral
+  face-shading baseline and live directional sunlight.
 - The `v0.17.0` data foundation now renders through cached worker-built 0..15
   Lamp block-light arrays on normal chunks, carved partial terrain, and flying
   instanced debris. Partial cavities preserve aperture direction and light
@@ -81,9 +81,10 @@ promoted work, not every fun idea that crosses the room.
   Potato uses none, while Low through Super Ultra use stable budgets from 4 to
   32. Overflow Lamps remain emissive and block-light-backed instead of going
   dark, and quality changes retain allocated high-water proxy objects for reuse.
-- Keep baked sun/face shading and individual runtime lights conceptually
-  separate. Existing `voxelLighting.ts` face shading can remain the cheap
-  ambient/sun baseline while block-light data becomes an additive local layer.
+- Keep baked ambient/sky/underside shading and individual runtime lights
+  conceptually separate. `voxelLighting.ts` supplies neutral readability;
+  the clock-driven DirectionalLight owns sunlight direction, while block light
+  remains an additive local layer.
 - Reopen this lane for a named visual or performance repro, or when gameplay
   needs colored/emissive blocks, dynamic projectile glows, tool/Nova light
   pulses, or illumination-aware mechanics. Sub-cell propagation through intact

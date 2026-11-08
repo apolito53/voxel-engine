@@ -1,66 +1,47 @@
 # Working Memory
 
-Current handoff: 2026-11-07, Cloud Shadow Guides for `v0.19.3`.
+Current handoff: 2026-11-07, unified clock-driven sunlight for `v0.19.4`.
 
-## Current State
+The implementation supplies one solar vector from `lighting.ts` to
+the visible sun/moon, real DirectionalLight, shadow basis, cloud shading, and
+Cloud Shadow Guides. It preserves the established fixed-azimuth orbit. Baked
+voxel colors retain neutral ambient/sky/underside readability; clock updates do
+not remesh terrain. Lamp, sealed-cavity, block-light, fog, wind, quality and
+worker contracts remain separate. Focused behavior lives in
+[lighting and sky](docs/architecture.md#lighting-and-sky).
 
-`Settings > Experimental > Cloud Shadow Guides` links nearby cloud banks to
-their terrain contacts using matching colored cloud edges, a representative
-fixed-sun ray, sparse contact crosses, and named labels/legend. Amber marks the
-actual map's full-coverage/fade boundary; white marks its outer edge. This
-independent debug preference defaults off and persists without changing quality,
-real shadow coverage, wind, or terrain receivers.
+Shadow near/far fits the finite existing rendered terrain even when clouds are
+off or the sun is shallow. Cloud fitting uses the real visible horizon, both
+cloud planes, actual camera height and snap margin; unsupported low sun fades
+out without altering the true vector. The depth pass clips using the same cloud
+horizon and explicit main-camera position. Guides share that projection/gate,
+report low sun separately from night, and expose solar/light directions plus
+coverage through [Codex Pilot](docs/automation.md#codex-pilot-bridge). Small solar
+updates retain the bounded contact cadence; substantial clock jumps refresh now.
 
-`src/cloudShadowDebug.ts` owns periodic connected-bank identities and the bounded
-diagnostic. It reads owned CloudLayer wind, uses actual shadow anchor/depth/radial
-coverage, and asks the existing partial-aware terrain picker for contacts.
-Unloaded spans reject uncertain contacts; void has no fabricated floor. Sampling
-is explicitly local rather than shadow-pixel ownership: at most three banks /
-128 contacts plus 96 ring queries per refresh, normally four refreshes/second.
-Buffers/topology/colors are reused; off/night/shadow gates skip queries and
-hide guides; world reset and disposal clear resources/state. Focused contracts
-are in [lighting and sky](docs/architecture.md#lighting-and-sky) and
-[settings](docs/controls.md#settings).
-
-The [Codex Pilot](docs/automation.md#codex-pilot-bridge) exposes
-`cloudShadowGuides(enabled?)` for inspection/control, with selected/relevant bank
-counts, colors, contact/source coordinates, unknown paths, and inactive reason.
-Changing it takes effect on the next frame.
-
-## Verification And Delivery
-
-Full local `validate` passes: all 340 engine robustness tests, typecheck,
+Full `validate` passes at `v0.19.4`: all 344 engine robustness tests, typecheck,
 107-file source hygiene, 17-file Markdown links, production build, and whitespace
-checks. Five new tests cover toroidal identities, fixed-sun projection, genuine
-partial-terrain contact/unloaded uncertainty, bounded cadence/buffer reuse/
-off/disposal behavior, and backward-safe debug persistence. Output is retained
-in ignored `logs/cloud-shadow-guides-{tests,validate}.log`. The existing temporary
-npm shim was reused because npm remains absent from PATH. Only package/root-lock
-version fields changed; dependencies and physics are untouched. The known vendor
-chunk-size warning remains.
+checks. Receipt: ignored `logs/unified-sun-validate.log`. A focused lighting run
+also passed 45 selected tests (`logs/unified-sun-focused-tests.log`). New regression
+coverage includes multi-time alignment, all-preset tilted cloud corners,
+high-flight horizon limits, shallow terrain near/far, neutral baked walls,
+matching depth/visible horizon uniforms, and guide gate/refresh behavior. The
+first full test attempt stopped after 219 passes at the already tracked Rapier
+borrow/assertion failure in the fast-falling rigid-debris collider test;
+evidence is retained in ignored `logs/unified-sun-tests.log`. The successful
+full rerun does not resolve that intermittent issue. Dependencies, physics,
+runner behavior, ports and services are unchanged; the existing temporary npm
+shim is reused.
 
-In-app browser review in the separate `Sky Review` world verified the setting,
-matching source edges/ray/terrain contacts, visible map-boundary guides, and
-night / Cloud Shadows Off / global shadows Off / debug Off gates. The saved
-preference survived reloads without changing Normal quality. The legend clears
-the minimap; saturated accents and fog-independent, depth-tested lines keep the
-guides readable at cloud height. Final material changes passed typecheck and
-production build after the full validation run. Captures are retained in ignored
-`logs/visual-runs/2026-11-07-cloud-shadow-guides/`; the review tab was left with
-guides enabled at frozen noon. This was visual/behavioral review, not a frame-rate
-benchmark or Chrome pointer-lock test.
+Anthony completed his own playtest on 2026-11-07, reported that the result
+looks good, and explicitly authorized pushing it. That supplies the visual
+acceptance for this implementation; no final automated browser check is claimed.
+The separate `Sun Sync Review` world belongs to this test; Anthony's saved
+`Default World` data was untouched.
 
-Implementation is complete for normal `main` delivery. Reserved Vite
-`127.0.0.1:5173` and collector `127.0.0.1:5174` still respond successfully;
-no services or ports changed. Git history and configured CI/deployment checks
-remain the delivery records.
-
-## Remaining Follow-up
-
-No new gameplay/sky tuning is selected. The
-[current gameplay shortlist](TODO.md#current-recommended-next-slice) remains
-equipment/pickup gameplay and sound work. Existing
-[local-logger gaps](TODO.md#development-follow-up-local-diagnostics) and
-[intermittent Rapier/CI validation failures](TODO.md#development-follow-up-ci-rigid-debris-validation)
-remain tracked once in TODO. No diagnostics transport, physics, dependencies,
-or test runner behavior changed here.
+Implementation and verification are complete for normal `main` delivery.
+Git history and configured CI/deployment results remain the publication records.
+No other sky or gameplay work is selected. Existing
+[local logger gaps](TODO.md#development-follow-up-local-diagnostics) and
+[intermittent Rapier/CI failures](TODO.md#development-follow-up-ci-rigid-debris-validation)
+remain tracked once in TODO.

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.19.4 - 2026-11-07
+
+### Fixed
+
+- The visible sun, directional terrain light and shadows, cloud face shading,
+  and Cloud Shadow Guides now share one clock-driven solar direction. Time of
+  Day changes move the actual shadow projection along the existing solar orbit.
+- Baked voxel face colors retain neutral ambient, sky fill, and dark undersides
+  while live sunlight owns directional shading, without remeshing terrain as
+  time advances. Lamp emission, block light, and sealed-cavity shading remain.
+- Shadow depth fits nearby terrain at shallow sun angles even with cloud
+  casting disabled. Cloud casting fades out when its slanted sources exceed the
+  finite cloud horizon; guides identify low sun separately from night. Visible
+  clouds and their depth pass now use the same main-camera horizon limit.
+
+### Validation
+
+- Added multi-time solar alignment, shallow-sun terrain depth, finite cloud
+  horizon, high-flight corner coverage, and guide refresh regression coverage.
+- Full local validation passes with all 344 engine robustness tests.
+
 ## 0.19.3 - 2026-11-07
 
 ### Added

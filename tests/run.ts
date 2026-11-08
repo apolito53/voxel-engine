@@ -334,6 +334,8 @@ import {
 import {
   createDirectionalShadowBasis,
   getCloudShadowCoverage,
+  getCloudShadowMinSunHeight,
+  CLOUD_SHADOW_SUN_HEIGHT_FADE,
   getDirectionalShadowDepthRange,
   getShadowTexelSize,
   snapShadowAnchorToTexelGrid
@@ -481,7 +483,7 @@ import {
   doesHitscanBeamTouchDebris
 } from "../src/hitscanDebris";
 import { getHitscanBoltLifetimeSeconds } from "../src/hitscanBoltTracer";
-import { SUN_OFFSET, getSunElevationDegrees } from "../src/lighting";
+import { SUN_OFFSET, getDirectSunHorizonFade, getSolarDirection, getSunElevationDegrees } from "../src/lighting";
 import {
   appendNovaChatMessage,
   createNovaChatReply,
@@ -567,6 +569,9 @@ import { WorkerPool, getDefaultWorkerPoolSize, normalizeWorkerPoolSize } from ".
 import {
   SKYBOX_LOWER_FOG_MASK_END_Y,
   SKYBOX_LOWER_FOG_MASK_START_Y,
+  createProceduralSkyState,
+  createSkybox,
+  getProceduralSkySunDirection,
   getSkyboxAlignedSunDirection
 } from "../src/skybox";
 import {
@@ -14087,6 +14092,56 @@ test("procedural sky sun direction lines up with the real directional light", ()
   );
 });
 
+test("sky disk, clouds, directional light and shadow basis share the unchanged clock-driven solar orbit", () => {
+  const initial = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
+  const direction = getSolarDirection(initial.timeOfDay);
+  const sky = createSkybox(direction, createProceduralSkyState(initial));
+  const clouds = new CloudLayer(direction, initial);
+  const sun = new THREE.DirectionalLight();
+  const anchor = new THREE.Vector3(123, 0, -456);
+  const basis = createDirectionalShadowBasis(direction);
+  const originalBasis = basis;
+  const noonHorizontal = new THREE.Vector3(SUN_OFFSET.x, 0, SUN_OFFSET.z).normalize();
+  for (const timeOfDay of [0, 0.24, 0.25, 0.27, 0.32, 0.42, 0.5, 0.68, 0.73, 0.75, 0.76, 0.99]) {
+    const visual = createDayNightVisualState(createDefaultDayNightState({ timeOfDay }));
+    getSolarDirection(timeOfDay, SUN_OFFSET, direction);
+    sky.setState(createProceduralSkyState(visual), direction);
+    clouds.setState(visual, direction);
+    createDirectionalShadowBasis(direction, basis);
+    const minHeight = getCloudShadowMinSunHeight(80, CLOUD_TOP_HEIGHT_METERS, getCloudViewDistance(QUALITY_PRESETS.normal));
+    const coverage = getCloudShadowCoverage(QUALITY_PRESETS.normal, visual, direction, minHeight);
+    const offset = direction.clone().multiplyScalar(SUN_OFFSET.length());
+    const range = getDirectionalShadowDepthRange(QUALITY_PRESETS.normal, offset,
+      coverage > 0 ? CLOUD_TOP_HEIGHT_METERS : null, minHeight);
+    sun.target.position.copy(anchor);
+    sun.position.copy(anchor).addScaledVector(offset, range.lightOffsetScale);
+    assertVectorNearlyEqual(sun.position.clone().sub(sun.target.position).normalize(), direction,
+      "moving/extended real light must preserve the visible solar vector");
+    assertVectorNearlyEqual(sky.object.material.uniforms.sunDirection.value, direction,
+      "sky disk must use the exact shared live direction");
+    assertVectorNearlyEqual(clouds.object.material.uniforms.sunDirection.value, direction,
+      "cloud face/atmosphere shading must use the same vector");
+    assertVectorNearlyEqual(sky.object.material.uniforms.moonDirection.value, direction.clone().negate(),
+      "moon remains opposite the preserved solar orbit");
+    assertVectorNearlyEqual(basis.forward, direction.clone().negate(), "shadow forward must track incoming sunlight");
+    assertEqual(basis, originalBasis, "solar updates reuse the existing basis vectors");
+    assertVectorNearlyEqual(getProceduralSkySunDirection(timeOfDay, SUN_OFFSET), direction,
+      "compatibility sky queries must share the solar direction owner");
+    assertVectorNearlyEqual(new THREE.Vector3(direction.x, 0, direction.z).normalize(), noonHorizontal,
+      "this fix must not invent a rotating-azimuth orbit");
+    assertClose(direction.length(), 1, 1e-8, "solar direction remains a unit vector");
+    const fade = getDirectSunHorizonFade(direction);
+    assert(Number.isFinite(fade) && fade >= 0 && fade <= 1, "direct sunlight stays finite at the horizon");
+    if (direction.y <= 0) {
+      assertEqual(fade, 0, "below-horizon light cannot illuminate terrain undersides");
+      assertEqual(clouds.object.material.uniforms.cloudSunIntensity.value, 0,
+        "night clouds must not receive a below-horizon sun highlight");
+    }
+  }
+  sky.dispose();
+  clouds.dispose();
+});
+
 test("cloud columns form a sparse seamless world field above the terrain volume", () => {
   let occupied = 0;
   const heights = new Set<number>();
@@ -14173,7 +14228,7 @@ test("cloud wind pauses with the runtime and stays independent of the world cloc
 
 test("cloud transforms preserve altitude, camera parallax, and placement during time jumps", () => {
   const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5, cycleEnabled: false }));
-  const layer = new CloudLayer(SUN_OFFSET, noon);
+  const layer = new CloudLayer(getSolarDirection(noon.timeOfDay), noon);
   const camera = new THREE.PerspectiveCamera();
   const paused = { active: true, unpaused: false, visible: true };
   const transforms = (): number[][] => {
@@ -14190,7 +14245,8 @@ test("cloud transforms preserve altitude, camera parallax, and placement during 
   layer.update(camera, 0, paused, QUALITY_PRESETS.normal);
   assertEqual(JSON.stringify(transforms()), JSON.stringify(initial), "walking and flying must not drag cloud geometry");
   camera.position.y = 240;
-  layer.setState(createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.75 })));
+  const sunset = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.75 }));
+  layer.setState(sunset, getSolarDirection(sunset.timeOfDay));
   layer.update(camera, 1, paused, QUALITY_PRESETS.normal);
   assertEqual(JSON.stringify(transforms()), JSON.stringify(initial), "clock changes and altitude must only recolor clouds");
   layer.update(camera, 0.1, { ...paused, unpaused: true }, QUALITY_PRESETS.normal);
@@ -14207,7 +14263,7 @@ test("cloud transforms preserve altitude, camera parallax, and placement during 
 });
 
 test("cloud recentering exchanges only invisible tiles and supports negative or distant teleports", () => {
-  const layer = new CloudLayer(SUN_OFFSET, createDayNightVisualState(createDefaultDayNightState()));
+  const layer = new CloudLayer(getSolarDirection(DAY_NIGHT_DEFAULT_TIME_OF_DAY), createDayNightVisualState(createDefaultDayNightState()));
   const camera = new THREE.PerspectiveCamera();
   const options = { active: true, unpaused: false, visible: true };
   const centers = (): THREE.Vector3[] => {
@@ -14264,18 +14320,21 @@ test("cloud casting follows daylight and quality while retaining cloud motion an
   const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
   const midnight = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0 }));
   const dawn = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.25 }));
-  const coverage = getCloudShadowCoverage(QUALITY_PRESETS.normal, noon);
+  const minHeight = getCloudShadowMinSunHeight(QUALITY_PRESETS.normal.shadowCameraSize,
+    CLOUD_TOP_HEIGHT_METERS, getCloudViewDistance(QUALITY_PRESETS.normal));
+  const noonDirection = getSolarDirection(noon.timeOfDay);
+  const coverage = getCloudShadowCoverage(QUALITY_PRESETS.normal, noon, noonDirection, minHeight);
   assert(coverage >= 0.99 && coverage <= 1, "noon cloud interiors should fully occlude direct sunlight");
-  assert(getCloudShadowCoverage(QUALITY_PRESETS.normal, dawn) < coverage,
+  assert(getCloudShadowCoverage(QUALITY_PRESETS.normal, dawn, getSolarDirection(dawn.timeOfDay), minHeight) < coverage,
     "dawn should fade cloud shade with the daylight");
-  assertEqual(getCloudShadowCoverage(QUALITY_PRESETS.normal, midnight), 0,
+  assertEqual(getCloudShadowCoverage(QUALITY_PRESETS.normal, midnight, getSolarDirection(midnight.timeOfDay), minHeight), 0,
     "night should omit cloud caster work entirely");
-  assertEqual(getCloudShadowCoverage({ ...QUALITY_PRESETS.normal, shadows: false }, noon), 0,
+  assertEqual(getCloudShadowCoverage({ ...QUALITY_PRESETS.normal, shadows: false }, noon, noonDirection, minHeight), 0,
     "global shadows off must override a checked cloud preference");
-  assertEqual(getCloudShadowCoverage({ ...QUALITY_PRESETS.normal, cloudShadows: false }, noon), 0,
+  assertEqual(getCloudShadowCoverage({ ...QUALITY_PRESETS.normal, cloudShadows: false }, noon, noonDirection, minHeight), 0,
     "the dedicated checkbox must remove cloud casting");
 
-  const layer = new CloudLayer(SUN_OFFSET, noon);
+  const layer = new CloudLayer(noonDirection, noon);
   const camera = new THREE.PerspectiveCamera();
   const running = { active: true, unpaused: true, visible: true };
   layer.update(camera, 0, running, QUALITY_PRESETS.normal);
@@ -14290,8 +14349,17 @@ test("cloud casting follows daylight and quality while retaining cloud motion an
     uniforms: {}, vertexShader: THREE.ShaderLib.depth.vertexShader, fragmentShader: THREE.ShaderLib.depth.fragmentShader
   };
   depthMaterial.onBeforeCompile(shader, {});
-  assertEqual(shader.vertexShader, THREE.ShaderLib.depth.vertexShader,
-    "the real depth pass must preserve Three's instanceMatrix and geometry projection");
+  for (const include of THREE.ShaderLib.depth.vertexShader.matchAll(/#include <[^>]+>/g)) {
+    assert(shader.vertexShader.includes(include[0]), "the depth pass retains Three's complete vertex/instance path");
+  }
+  assert(shader.vertexShader.includes("instanceMatrix * cloudWorldPosition"),
+    "horizon clipping must read each real moving cloud instance's world position");
+  assert(shader.fragmentShader.includes("length(vCloudShadowWorldPosition - cloudShadowViewPosition) >= cloudViewDistance"),
+    "invisible cloud geometry beyond the visible horizon must not cast shadows");
+  assert(shader.uniforms.cloudViewDistance === layer.object.material.uniforms.cloudViewDistance,
+    "visible and depth passes must share the same live horizon uniform");
+  assertVectorNearlyEqual(shader.uniforms.cloudShadowViewPosition.value, camera.position,
+    "shadow clipping uses the main render camera, not the shadow camera position");
   assertEqual(shader.uniforms.cloudShadowCoverage.value, coverage, "compiled depth uniforms must read live coverage");
   layer.setShadows(0, QUALITY_PRESETS.normal.shadowMapSize);
   assertEqual(layer.object.castShadow, false, "off must skip the cloud draw in the shadow pass");
@@ -14301,6 +14369,12 @@ test("cloud casting follows daylight and quality while retaining cloud motion an
   assert(secondMatrix.elements[12] !== firstMatrix.elements[12], "disabling casting must not freeze cloud wind");
   assertEqual(layer.object.customDepthMaterial, depthMaterial, "toggles must reuse their owned depth material");
   assertEqual(shader.uniforms.cloudShadowCoverage.value, 0, "toggling must update existing compiled uniforms");
+  camera.position.set(19, 700, -23);
+  layer.update(camera, 0, running, QUALITY_PRESETS.potato);
+  assertVectorNearlyEqual(shader.uniforms.cloudShadowViewPosition.value, camera.position,
+    "high flight updates the depth pass's main-camera clipping origin");
+  assertEqual(shader.uniforms.cloudViewDistance.value, getCloudViewDistance(QUALITY_PRESETS.potato),
+    "quality edits update both passes' independent cloud horizon together");
   layer.setShadows(coverage, QUALITY_PRESETS.normal.shadowMapSize);
   layer.reset();
   assertEqual(layer.object.castShadow, false, "world transitions must immediately clear the old caster");
@@ -14310,7 +14384,7 @@ test("cloud casting follows daylight and quality while retaining cloud motion an
 });
 
 test("cloud disposal releases owned resources once and removes the scene object", () => {
-  const layer = new CloudLayer(SUN_OFFSET, createDayNightVisualState(createDefaultDayNightState()));
+  const layer = new CloudLayer(getSolarDirection(DAY_NIGHT_DEFAULT_TIME_OF_DAY), createDayNightVisualState(createDefaultDayNightState()));
   const scene = new THREE.Scene();
   scene.add(layer.object);
   const disposed = { geometry: 0, material: 0, depth: 0, instances: 0 };
@@ -14328,7 +14402,7 @@ test("cloud disposal releases owned resources once and removes the scene object"
   assertEqual(layer.object.visible, false, "a disposed layer must never become visible again");
 });
 
-test("voxel face shading follows the real sun direction", () => {
+test("baked voxel face shading is azimuth-neutral while preserving sky and underside readability", () => {
   const top = getSunlitFaceShade([0, 1, 0]);
   const bottom = getSunlitFaceShade([0, -1, 0]);
   const sunwardEast = getSunlitFaceShade([1, 0, 0]);
@@ -14337,8 +14411,9 @@ test("voxel face shading follows the real sun direction", () => {
   const shadedSouth = getSunlitFaceShade([0, 0, 1]);
 
   assert(top > sunwardEast, "top faces should keep the strongest sky fill");
-  assert(sunwardEast > shadedWest, "east-facing walls should be brighter because the sun has positive X");
-  assert(sunwardNorth > shadedSouth, "north-facing walls should be brighter because the sun has negative Z");
+  assertEqual(sunwardEast, shadedWest, "baked wall colors must not claim a permanent eastward sun");
+  assertEqual(sunwardNorth, shadedSouth, "baked wall colors must not claim a permanent northward sun");
+  assertEqual(sunwardEast, sunwardNorth, "runtime directional lighting owns all horizontal sunlight");
   assert(shadedWest > bottom, "undersides should stay darker than walls");
   assert(top <= 1 && bottom >= 0.32, "face shading should remain inside the vertex-color safety range");
   assert(bottom < 0.42, "undersides should stay meaningfully dim to avoid baked light bleed under overhangs");
@@ -14404,47 +14479,169 @@ test("chunk sky exposure darkens sealed air pockets", () => {
   );
 });
 
-test("cloud shadow depth range contains the tilted cloud planes and preserves terrain coverage on every preset", () => {
-  const basis = createDirectionalShadowBasis(SUN_OFFSET);
-  const toSun = SUN_OFFSET.clone().normalize();
+test("moving shadow depth range fits every tilted cloud-plane corner and preserves terrain on every preset", () => {
   for (const preset of Object.values(QUALITY_PRESETS)) {
-    const anchor = snapShadowAnchorToTexelGrid(new THREE.Vector3(-1234.56, 0, 987.65), basis, getShadowTexelSize(preset));
-    const range = getDirectionalShadowDepthRange(preset, SUN_OFFSET, CLOUD_TOP_HEIGHT_METERS);
-    assert(range.lightOffsetScale > 1, `${preset.label} must put the real light ahead of cloud casters`);
-    assertClose(range.cameraFar - preset.shadowCameraFar, SUN_OFFSET.length() * (range.lightOffsetScale - 1),
-      1e-7, "far must increase by exactly the light's forward extension");
-    const camera = new THREE.OrthographicCamera(-preset.shadowCameraSize, preset.shadowCameraSize,
-      preset.shadowCameraSize, -preset.shadowCameraSize, 0.5, range.cameraFar);
-    camera.position.copy(anchor).addScaledVector(SUN_OFFSET, range.lightOffsetScale);
-    camera.lookAt(anchor);
-    camera.updateMatrixWorld();
+    const viewDistance = getCloudViewDistance(preset);
+    const minHeight = getCloudShadowMinSunHeight(preset.shadowCameraSize, CLOUD_TOP_HEIGHT_METERS, viewDistance);
+    const firstCastTime = 0.25 + Math.asin((minHeight + 0.000001) / getSolarDirection(0.5).y) / (Math.PI * 2);
+    for (const timeOfDay of [firstCastTime, 0.32, 0.42, 0.5, 0.68, 1 - firstCastTime]) {
+      const toSun = getSolarDirection(timeOfDay);
+      if (toSun.y <= minHeight) continue;
+      const offset = toSun.clone().multiplyScalar(SUN_OFFSET.length());
+      const basis = createDirectionalShadowBasis(toSun);
+      const anchor = snapShadowAnchorToTexelGrid(new THREE.Vector3(-1234.56, 0, 987.65), basis, getShadowTexelSize(preset));
+      const range = getDirectionalShadowDepthRange(preset, offset, CLOUD_TOP_HEIGHT_METERS, minHeight);
+      const terrainRange = getDirectionalShadowDepthRange(preset, offset, null, minHeight);
+      assert(range.lightOffsetScale > 1, `${preset.label} must put the real light ahead of cloud casters`);
+      assertClose(range.cameraFar - terrainRange.cameraFar,
+        SUN_OFFSET.length() * (range.lightOffsetScale - terrainRange.lightOffsetScale),
+        1e-7, "extra cloud depth preserves the complete finite terrain range");
+      const camera = new THREE.OrthographicCamera(-preset.shadowCameraSize, preset.shadowCameraSize,
+        preset.shadowCameraSize, -preset.shadowCameraSize, 0.5, range.cameraFar);
+      camera.position.copy(anchor).addScaledVector(offset, range.lightOffsetScale);
+      camera.lookAt(anchor);
+      camera.updateMatrixWorld();
+      for (const height of [CLOUD_BASE_HEIGHT_METERS, CLOUD_TOP_HEIGHT_METERS]) {
+        for (const u of [-preset.shadowCameraSize, preset.shadowCameraSize]) {
+          for (const v of [-preset.shadowCameraSize, preset.shadowCameraSize]) {
+            const point = anchor.clone().addScaledVector(basis.right, u).addScaledVector(basis.up, v);
+            point.addScaledVector(toSun, (height - point.y) / toSun.y);
+            const projected = point.clone().project(camera);
+            assert(Math.abs(projected.x) <= 1.000001 && Math.abs(projected.y) <= 1.000001 &&
+              Math.abs(projected.z) <= 1.000001,
+            `${preset.label} must contain cloud-plane intersections at every tilted frustum corner`);
+            assert(point.distanceTo(new THREE.Vector3(anchor.x, 0, anchor.z)) < viewDistance,
+              `${preset.label} supported cloud-plane corners must fit the finite visible cloud horizon`);
+          }
+        }
+      }
+      for (const x of [-20, 0, 20]) {
+        for (const z of [-20, 0, 20]) {
+          const ground = anchor.clone().add(new THREE.Vector3(x, -anchor.y, z)).project(camera);
+          assert(Math.abs(ground.x) <= 1 && Math.abs(ground.y) <= 1 && Math.abs(ground.z) <= 1,
+            `${preset.label} must retain ground receivers underneath the player`);
+        }
+      }
+      const oldFarReceiver = anchor.clone().addScaledVector(toSun, SUN_OFFSET.length() - preset.shadowCameraFar + 0.01);
+      assert(oldFarReceiver.project(camera).z <= 1, "the old far receiver must not be clipped by the lifted rig");
+      assert(range.cameraFar >= terrainRange.cameraFar && range.lightOffsetScale >= terrainRange.lightOffsetScale,
+        "clouds can extend, but never truncate, the terrain-only fit");
+      assertEqual(camera.left, -preset.shadowCameraSize, "clouds must not dilute horizontal shadow texels");
+      assertVectorNearlyEqual(camera.position.clone().sub(anchor).normalize(), toSun,
+        "cloud shadows must preserve the current clock-driven solar direction");
+      assertNearlyInteger(anchor.dot(basis.right) / getShadowTexelSize(preset), "moving-basis right texel coordinate");
+      assertNearlyInteger(anchor.dot(basis.up) / getShadowTexelSize(preset), "moving-basis up texel coordinate");
+    }
+  }
+});
+
+test("terrain-only shadow depth keeps near hills and opposite receivers at shallow sun on every preset", () => {
+  for (const preset of Object.values(QUALITY_PRESETS)) {
+    const horizontalRadius = (preset.renderRadius + 2) * CHUNK_SIZE;
+    for (const height of [0, 0.000001, 0.05, 0.2, 0.4, getSolarDirection(0.5).y]) {
+      const direction = SUN_OFFSET.clone().setY(0).normalize().multiplyScalar(Math.sqrt(1 - height ** 2)).setY(height);
+      const offset = direction.clone().multiplyScalar(SUN_OFFSET.length());
+      const range = getDirectionalShadowDepthRange(preset, offset, null);
+      const camera = new THREE.OrthographicCamera(-preset.shadowCameraSize, preset.shadowCameraSize,
+        preset.shadowCameraSize, -preset.shadowCameraSize, 0.5, range.cameraFar);
+      camera.position.copy(offset).multiplyScalar(range.lightOffsetScale);
+      camera.lookAt(new THREE.Vector3());
+      camera.updateMatrixWorld();
+      for (const x of [-horizontalRadius, -50, 0, 50, horizontalRadius]) {
+        for (const z of [-horizontalRadius, -50, 0, 50, horizontalRadius]) {
+          if (Math.hypot(x, z) > horizontalRadius) continue;
+          for (const y of [0, 50, WORLD_HEIGHT]) {
+            const projected = new THREE.Vector3(x, y, z).project(camera);
+            if (Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1) {
+              assert(Math.abs(projected.z) <= 1,
+                `${preset.label} terrain casters/receivers inside XY must fit near/far even with cloud casting off`);
+            }
+          }
+        }
+      }
+      assert(Number.isFinite(range.cameraFar) && range.cameraFar < 5000,
+        "terrain depth fitting must remain finite at and arbitrarily close to the horizon");
+      const oldFarReceiver = direction.clone().multiplyScalar(SUN_OFFSET.length() - preset.shadowCameraFar).project(camera);
+      assert(oldFarReceiver.z <= 1, "fitting must retain the original preset far domain");
+    }
+  }
+});
+
+test("cloud horizon gate stays finite, fades over its supported range, and skips rays near or below the horizon", () => {
+  let queries = 0;
+  const terrain = { getChunk: () => { queries += 1; return undefined; },
+    raycastTerraformerTarget: () => { queries += 1; return null; } };
+  const source = new THREE.Vector3(0, CLOUD_TOP_HEIGHT_METERS, 0);
+  const noonHeight = getSolarDirection(0.5).y;
+  const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
+  for (const preset of Object.values(QUALITY_PRESETS)) {
+    const minHeight = getCloudShadowMinSunHeight(preset.shadowCameraSize,
+      CLOUD_TOP_HEIGHT_METERS, getCloudViewDistance(preset));
+    const quality = { ...preset, shadows: true, cloudShadows: true };
+    for (const height of [-0.35, -1e-9, 0, 1e-12, 0.01, minHeight]) {
+      const direction = new THREE.Vector3(Math.sqrt(1 - height ** 2), height, 0);
+      assertEqual(getCloudShadowCoverage(quality, noon, direction, minHeight), 0,
+        "daytime exposure alone cannot enable casting outside the supported solar range");
+      const range = getDirectionalShadowDepthRange(preset,
+        direction.clone().multiplyScalar(SUN_OFFSET.length()), height < minHeight ? CLOUD_TOP_HEIGHT_METERS : null, minHeight);
+      const terrainRange = getDirectionalShadowDepthRange(preset,
+        direction.clone().multiplyScalar(SUN_OFFSET.length()), null, minHeight);
+      assertDeepEqual(range, terrainRange,
+        "inactive shallow/night rigs keep the finite terrain-only depth range");
+      assertEqual(projectCloudGuideToHeight(source, 0, direction.clone().negate(), minHeight), null,
+        "inactive projections must not divide by a near-horizontal sun");
+      assertEqual(traceCloudShadowContact(terrain, source, direction.clone().negate(), minHeight).kind, "miss",
+        "inactive rays must stop before terrain queries");
+    }
+    const coverageAt = (height: number): number => getCloudShadowCoverage(quality, noon,
+      new THREE.Vector3(Math.sqrt(1 - height ** 2), height, 0), minHeight);
+    assertClose(coverageAt(minHeight + CLOUD_SHADOW_SUN_HEIGHT_FADE / 2), 0.5, 1e-8,
+      "the short supported-elevation transition should fade smoothly");
+    assertEqual(coverageAt(minHeight + CLOUD_SHADOW_SUN_HEIGHT_FADE), 1,
+      "full coverage resumes just above the finite-horizon margin");
+    const offset = new THREE.Vector3(Math.sqrt(1 - (minHeight + 1e-8) ** 2), minHeight + 1e-8, 0)
+      .multiplyScalar(SUN_OFFSET.length());
+    const range = getDirectionalShadowDepthRange(preset, offset, CLOUD_TOP_HEIGHT_METERS, minHeight);
+    assert(Number.isFinite(range.cameraFar) && range.cameraFar < preset.shadowCameraFar + 1600,
+      "the first enabled low-sun rig must remain numerically bounded");
+    assert(minHeight + CLOUD_SHADOW_SUN_HEIGHT_FADE < noonHeight, "every preset retains a full daytime casting range");
+  }
+  assertEqual(queries, 0, "horizon/night helper gates must do zero terrain work");
+  const normalMin = getCloudShadowMinSunHeight(80, CLOUD_TOP_HEIGHT_METERS, 920);
+  const shortMin = getCloudShadowMinSunHeight(80, CLOUD_TOP_HEIGHT_METERS, 520);
+  assert(shortMin > normalMin, "a short cloud horizon must require a higher sun, without changing its vector");
+});
+
+test("cloud horizon fitting accounts for eye altitude and both cloud planes without moving the sun", () => {
+  const preset = QUALITY_PRESETS.normal;
+  const viewDistance = getCloudViewDistance(preset);
+  const margin = getShadowTexelSize(preset) * 2;
+  const atGround = getCloudShadowMinSunHeight(preset.shadowCameraSize, CLOUD_TOP_HEIGHT_METERS,
+    viewDistance, 0, CLOUD_BASE_HEIGHT_METERS, margin);
+  const high = getCloudShadowMinSunHeight(preset.shadowCameraSize, CLOUD_TOP_HEIGHT_METERS,
+    viewDistance, 700, CLOUD_BASE_HEIGHT_METERS, margin);
+  assert(high > atGround, "high flight must reserve the actual three-dimensional eye-to-cloud distance");
+  const visual = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
+  const lowDirection = new THREE.Vector3(Math.sqrt(1 - 0.3 ** 2), 0.3, 0);
+  assertEqual(getCloudShadowCoverage(preset, visual, lowDirection, high), 0,
+    "the high-flight low-sun regression must not claim cloud corners outside the real horizon");
+  for (const cameraHeight of [-100, 0, 40, 156, 700, 900, 1200]) {
+    const minHeight = getCloudShadowMinSunHeight(preset.shadowCameraSize, CLOUD_TOP_HEIGHT_METERS,
+      viewDistance, cameraHeight, CLOUD_BASE_HEIGHT_METERS, margin);
+    assert(Number.isFinite(minHeight), "even unreachable cloud ranges need a finite inactive gate");
+    if (minHeight >= getSolarDirection(0.5).y) continue;
+    const direction = new THREE.Vector3(Math.sqrt(1 - (minHeight + 1e-8) ** 2), minHeight + 1e-8, 0);
+    const basis = createDirectionalShadowBasis(direction);
     for (const height of [CLOUD_BASE_HEIGHT_METERS, CLOUD_TOP_HEIGHT_METERS]) {
       for (const u of [-preset.shadowCameraSize, preset.shadowCameraSize]) {
         for (const v of [-preset.shadowCameraSize, preset.shadowCameraSize]) {
-          const point = anchor.clone().addScaledVector(basis.right, u).addScaledVector(basis.up, v);
-          point.addScaledVector(toSun, (height - point.y) / toSun.y);
-          const projected = point.clone().project(camera);
-          assert(Math.abs(projected.x) <= 1.000001 && Math.abs(projected.y) <= 1.000001 &&
-            Math.abs(projected.z) <= 1.000001,
-          `${preset.label} must contain cloud-plane intersections at every tilted frustum corner`);
+          const corner = basis.right.clone().multiplyScalar(u).addScaledVector(basis.up, v);
+          corner.addScaledVector(direction, (height - corner.y) / direction.y);
+          assert(corner.distanceTo(new THREE.Vector3(0, cameraHeight, 0)) < viewDistance,
+            "all supported tilted cloud corners must remain inside the actual eye's visible sphere");
         }
       }
     }
-    for (const x of [-20, 0, 20]) {
-      for (const z of [-20, 0, 20]) {
-        const ground = anchor.clone().add(new THREE.Vector3(x, -anchor.y, z)).project(camera);
-        assert(Math.abs(ground.x) <= 1 && Math.abs(ground.y) <= 1 && Math.abs(ground.z) <= 1,
-          `${preset.label} must retain ground receivers underneath the player`);
-      }
-    }
-    const oldFarReceiver = anchor.clone().addScaledVector(toSun, SUN_OFFSET.length() - preset.shadowCameraFar + 0.01);
-    assert(oldFarReceiver.project(camera).z <= 1, "the old far receiver must not be clipped by the lifted rig");
-    const off = getDirectionalShadowDepthRange(preset, SUN_OFFSET, null);
-    assertDeepEqual(off, { lightOffsetScale: 1, cameraFar: preset.shadowCameraFar },
-      "turning clouds off must restore the original light position and far plane");
-    assertEqual(camera.left, -preset.shadowCameraSize, "clouds must not dilute horizontal shadow texels");
-    assertVectorNearlyEqual(camera.position.clone().sub(anchor).normalize(), toSun,
-      "cloud shadows must preserve the fixed sun direction");
   }
 });
 
@@ -14475,16 +14672,21 @@ test("cloud bank identities connect both periodic seams and stay stable across t
   assertEqual(getCloudBankId(ids, 3, 3, 8), 0, "clear sky has no bank");
 });
 
-test("cloud guide projection follows the fixed shadow sun and preserves the actual radial footprint", () => {
+test("cloud guide projection follows the moving solar vector and preserves the actual radial footprint", () => {
   const source = new THREE.Vector3(48, 152, -36);
-  const contact = projectCloudGuideToHeight(source, 30);
-  assertClose(contact.y, 30, 1e-8, "projection reaches the requested height");
-  assert(contact.x < source.x && contact.z > source.z, "cast direction must be away from the real sun");
-  assertClose(source.clone().sub(contact).normalize().dot(SUN_OFFSET.clone().normalize()), 1, 1e-8,
-    "rays must use fixed SUN_OFFSET rather than the moving visual disk");
-  const anchor = new THREE.Vector3(-15, 0, 21);
-  assertClose(getCloudShadowGuideRadius(source, anchor, 80), getCloudShadowGuideRadius(contact, anchor, 80), 1e-8,
-    "cloud and contact share the same light-space map radius at any terrain height");
+  for (const timeOfDay of [0.32, 0.42, 0.5, 0.68]) {
+    const direction = getSolarDirection(timeOfDay);
+    const basis = createDirectionalShadowBasis(direction);
+    const contact = projectCloudGuideToHeight(source, 30, basis.forward);
+    assert(contact, "supported daylight should project to terrain height");
+    assertClose(contact.y, 30, 1e-8, "projection reaches the requested height");
+    assert(contact.x < source.x && contact.z > source.z, "cast direction must be away from the real sun");
+    assertClose(source.clone().sub(contact).normalize().dot(direction), 1, 1e-8,
+      "guides and the visible disk must share the same clock-driven direction");
+    const anchor = new THREE.Vector3(-15, 0, 21);
+    assertClose(getCloudShadowGuideRadius(source, anchor, 80, basis), getCloudShadowGuideRadius(contact, anchor, 80, basis), 1e-8,
+      "cloud and contact share the same light-space map radius at any terrain height");
+  }
 });
 
 test("cloud guide terrain contacts honor partial surfaces and reject unknown earlier terrain", () => {
@@ -14502,8 +14704,10 @@ test("cloud guide terrain contacts honor partial surfaces and reject unknown ear
   partialWorld.addGeneratedChunk(0, 0, chunk.blocks.slice(), false, [partial]);
   partialWorld.addGeneratedChunk(0, -1, blocks.slice(), false);
   const target = new THREE.Vector3(5.5, 10 + 2 / 3, 5.5);
-  const source = projectCloudGuideToHeight(target, 20);
-  const result = traceCloudShadowContact(partialWorld, source);
+  const down = getSolarDirection(0.5).negate();
+  const source = projectCloudGuideToHeight(target, 20, down);
+  assert(source, "noon partial-terrain fixture needs a supported projection");
+  const result = traceCloudShadowContact(partialWorld, source, down);
   assertEqual(result.kind, "hit", "a loaded partial block must produce a verified contact");
   if (result.kind !== "hit") return;
   assertClose(result.point.y, target.y, 1e-6, "guide must land on surviving partial material, below the old cube top");
@@ -14511,16 +14715,18 @@ test("cloud guide terrain contacts honor partial surfaces and reject unknown ear
   const unknown = traceCloudShadowContact({
     getChunk: (cx, cz) => cz < 0 ? undefined : partialWorld.getChunk(cx, cz),
     raycastTerraformerTarget: (origin, direction, reach) => partialWorld.raycastTerraformerTarget(origin, direction, reach)
-  }, source);
+  }, source, down);
   assertEqual(unknown.kind, "unknown", "an unloaded span before a known hit cannot certify the first terrain contact");
   assertEqual(traceCloudShadowContact({
     getChunk: () => chunk, raycastTerraformerTarget: () => null
-  }, source).kind, "miss", "loaded void must omit contact without inventing a flat floor");
+  }, source, down).kind, "miss", "loaded void must omit contact without inventing a flat floor");
 });
 
 test("cloud shadow guides bound work, reuse buffers, follow wind and stop completely when gated or disposed", () => {
   const noon = createDayNightVisualState(createDefaultDayNightState({ timeOfDay: 0.5 }));
-  const layer = new CloudLayer(SUN_OFFSET, noon);
+  const direction = getSolarDirection(noon.timeOfDay);
+  const basis = createDirectionalShadowBasis(direction);
+  const layer = new CloudLayer(direction, noon);
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(-132, 71.8, 199);
   layer.setShadows(1, 2048);
@@ -14540,6 +14746,7 @@ test("cloud shadow guides bound work, reuse buffers, follow wind and stop comple
   const anchor = new THREE.Vector3(camera.position.x, 0, camera.position.z);
   const options: CloudShadowDebugUpdate = {
     camera, cloud: state, inWorld: true, shadows: true, cloudShadows: true, coverage: 1,
+    basis, minSunHeight: getCloudShadowMinSunHeight(preset.shadowCameraSize, CLOUD_TOP_HEIGHT_METERS, state.viewDistance),
     anchor, lightPosition: anchor.clone().addScaledVector(SUN_OFFSET, depth.lightOffsetScale),
     cameraSize: preset.shadowCameraSize, cameraNear: 0.5, cameraFar: depth.cameraFar, deltaSeconds: 0,
     world: {
@@ -14563,21 +14770,48 @@ test("cloud shadow guides bound work, reuse buffers, follow wind and stop comple
     "contacts must be useful and bounded");
   assert(queries <= CLOUD_SHADOW_DEBUG_MAX_CONTACTS + 96, "contacts and coverage rings have a fixed ray budget");
   assertEqual(guides.object.visible, true, "active guides should draw");
+  assertVectorNearlyEqual(new THREE.Vector3().copy(snapshot.sunDirection), direction,
+    "pilot inspection exposes the live sun vector");
+  assertVectorNearlyEqual(new THREE.Vector3().copy(snapshot.lightDirection), direction,
+    "pilot inspection exposes the actual light-target vector for alignment review");
   const geometry = (guides.object.children[0] as THREE.LineSegments).geometry;
   const position = geometry.getAttribute("position");
   const firstQueries = queries;
   guides.update({ ...options, deltaSeconds: 0.1 });
   assertEqual(queries, firstQueries, "steady frames must reuse cached terrain contacts");
+  const slowDirection = getSolarDirection(0.5001);
+  const slowOffset = slowDirection.clone().multiplyScalar(SUN_OFFSET.length());
+  const slowDepth = getDirectionalShadowDepthRange(preset, slowOffset, CLOUD_TOP_HEIGHT_METERS, options.minSunHeight);
+  guides.update({ ...options, basis: createDirectionalShadowBasis(slowDirection),
+    lightPosition: anchor.clone().addScaledVector(slowOffset, slowDepth.lightOffsetScale),
+    cameraFar: slowDepth.cameraFar });
+  assertEqual(queries, firstQueries, "tiny per-frame solar/far-plane changes must retain the bounded refresh cadence");
   guides.update({ ...options, deltaSeconds: 0.2 });
   assert(queries > firstQueries, "the bounded refresh cadence should resample moving clouds");
   assertEqual((guides.object.children[0] as THREE.LineSegments).geometry, geometry, "refresh reuses GPU geometry");
   assertEqual(geometry.getAttribute("position"), position, "refresh reuses existing typed buffer attributes");
+  const jumpDirection = getSolarDirection(0.33);
+  const jumpOffset = jumpDirection.clone().multiplyScalar(SUN_OFFSET.length());
+  const jumpDepth = getDirectionalShadowDepthRange(preset, jumpOffset, CLOUD_TOP_HEIGHT_METERS, options.minSunHeight);
+  const beforeJump = queries;
+  guides.update({ ...options, basis: createDirectionalShadowBasis(jumpDirection),
+    lightPosition: anchor.clone().addScaledVector(jumpOffset, jumpDepth.lightOffsetScale),
+    cameraFar: jumpDepth.cameraFar });
+  assert(queries > beforeJump, "a material clock jump must refresh stale contact geometry immediately");
+  assertVectorNearlyEqual(new THREE.Vector3().copy(guides.snapshot().sunDirection), jumpDirection,
+    "clock edits must immediately reach pilot inspection");
   for (const gate of [{ shadows: false }, { cloudShadows: false }, { coverage: 0 }, { inWorld: false }]) {
     const before = queries;
     guides.update({ ...options, ...gate });
     assertEqual(queries, before, "inactive guides must not query terrain");
     assertEqual(guides.object.visible, false, "inactive gates must hide old guides immediately");
+    if ("coverage" in gate) assertEqual(guides.snapshot().status, "low-sun",
+      "above-horizon unsupported casting must be reported as low sun, not night");
   }
+  const beforeNight = queries;
+  guides.update({ ...options, coverage: 0, basis: createDirectionalShadowBasis(getSolarDirection(0)) });
+  assertEqual(guides.snapshot().status, "night", "the genuinely below-horizon sun gets a distinct inactive status");
+  assertEqual(queries, beforeNight, "night transitions must skip every terrain query");
   guides.update(options);
   assertEqual(guides.snapshot().status, "active", "re-enabling casting should refresh immediately");
   guides.reset();

@@ -178,7 +178,7 @@ Pause menu `Settings` is split into three tabs.
 - Cloud Shadow Guides, an optional visual diagnostic for nearby cloud banks
 
 `Experimental > Cloud Shadow Guides` defaults off and saves separately from
-quality presets. Colored cloud edges, a representative fixed-sun ray, and
+quality presets. Colored cloud edges, a representative live-sun ray, and
 matching colored terrain-contact crosses identify each nearby bank; labels and
 a legend name the banks. Amber marks where cloud shadow coverage begins to
 fade, and white marks the existing directional map's outer edge. Contact colors
@@ -187,11 +187,11 @@ Cloud Shadows or change graphics quality, wind, or shadow strength.
 
 These are **sampled guides**, not a display of individual shadow pixels. They
 show up to three nearby banks and 128 contact samples, refreshed four times per
-second. Contacts follow actual full/partial terrain along the fixed directional
-sun, rather than projecting onto a flat floor. Missing terrain/chunks, void,
+second. Contacts follow actual full/partial terrain along the same moving
+direction as the visible sun and real light. Missing terrain/chunks, void,
 depth clipping, local sample limits, and unsampled cloud side faces can leave
 gaps; those gaps do not establish that no shadow exists. The legend reports
-unloaded paths and inactive global shadows, Cloud Shadows, or night. No guides
+unloaded paths and inactive global shadows, Cloud Shadows, low sun, or night. No guides
 draw or terrain queries run while the diagnostic is off.
 
 Quality slider or shadow-toggle edits switch the dropdown to `Custom` so built-in presets stay
@@ -227,16 +227,23 @@ clipping overhead clouds without loading or revealing additional terrain.
 Cloud Shadows defaults on for Normal and higher and off for Potato/Low. It
 reuses the existing sun shadow map, adds one instanced cloud depth draw while
 active, and fades its shade out before the nearby map boundary. Turning it off,
-setting Shadow Quality to Off, or reaching night skips that caster draw; visible
+setting Shadow Quality to Off, or reaching unsupported low sun/night skips that caster draw; visible
 clouds and their wind continue. Shadows affect direct sunlight rather than
 Lamp emission or the derived block-light field.
 Daytime patch interiors use full shadow coverage for darker shade, while
-daylight and coverage-edge fades preserve the soft boundary.
+daylight and coverage-edge fades preserve the soft boundary. Near the horizon,
+clouds would have to cast from beyond their visible range. Casting fades out
+over a short elevation band instead: on Normal from ground level it starts
+near 15 degrees and reaches full coverage near 17.5 degrees. Shorter cloud
+horizons or high flight can require a higher sun. The real sun vector and
+terrain lighting keep their true angle throughout; below the horizon direct
+sunlight fades away and the existing ambient night fill remains.
 The world clock
 shifts fog, background, horizon matte, outdoor terrain exposure, and sky/light
-colors together. The sun and moon visuals move through the sky, but the
-directional shadow anchor remains fixed in this first pass so terrain shading
-and chunk meshes do not remesh during the cycle.
+colors together. The sun/moon visuals, real directional light, shadow camera,
+cloud shading and debug rays share one clock-driven solar direction. Baked
+terrain colors retain neutral ambient, sky and underside readability, so the
+clock moves lighting and shadows without remeshing chunks or partial terrain.
 
 ## Quality Presets
 

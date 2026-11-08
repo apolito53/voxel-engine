@@ -4,8 +4,7 @@ import {
   CLOUD_TILE_CELLS, CLOUD_TILE_SIZE_METERS, CLOUD_TOP_HEIGHT_METERS,
   sampleCloudColumn, type CloudLayerDebugState, type CloudWindOffset
 } from "./cloudLayer";
-import { SUN_OFFSET } from "./lighting";
-import { CLOUD_SHADOW_FULL_RADIUS, createDirectionalShadowBasis } from "./shadows";
+import { CLOUD_SHADOW_FULL_RADIUS, CLOUD_SHADOW_MIN_SUN_HEIGHT, type DirectionalShadowBasis } from "./shadows";
 import { CHUNK_SIZE, WORLD_HEIGHT } from "./voxelConstants";
 import type { VoxelWorld } from "./world";
 
@@ -18,20 +17,23 @@ const MAX_SOURCE_CELLS = 256;
 const RING_SEGMENTS = 48;
 // Saturated accents stay visible against pale sky, white banks and sandy terrain.
 const BANK_COLORS = [0xff4770, 0xb2ff28, 0xff36d1, 0xffbc24, 0xb16aff, 0x22ead1, 0xff762b] as const;
-const BASIS = createDirectionalShadowBasis(SUN_OFFSET);
-const DOWN = BASIS.forward;
 type Point = Pick<THREE.Vector3, "x" | "y" | "z">;
 type Terrain = Pick<VoxelWorld, "getChunk" | "raycastTerraformerTarget">;
 type GuideCell = { x: number; z: number; id: number; top: number; bottom: number; radius: number };
 type GuideBank = { id: number; color: THREE.Color; cells: GuideCell[]; contacts: Contact[] };
 type Contact = { source: THREE.Vector3; point: THREE.Vector3; normal: THREE.Vector3; radius: number; bottom: number };
-export type CloudShadowGuideStatus = "off" | "outside-world" | "shadows-off" | "cloud-shadows-off" | "night" | "active";
+export type CloudShadowGuideStatus = "off" | "outside-world" | "shadows-off" | "cloud-shadows-off" |
+  "night" | "low-sun" | "active";
 export type CloudShadowDebugSnapshot = {
   readonly enabled: boolean;
   readonly status: CloudShadowGuideStatus;
   readonly sampledContacts: number;
   readonly unknownContacts: number;
   readonly relevantBanks: number;
+  readonly sunDirection: Point | null;
+  readonly lightDirection: Point | null;
+  readonly coverage: number;
+  readonly minSunHeight: number;
   readonly banks: readonly {
     readonly id: number;
     readonly color: string;
@@ -48,6 +50,8 @@ export type CloudShadowDebugUpdate = {
   readonly shadows: boolean;
   readonly cloudShadows: boolean;
   readonly coverage: number;
+  readonly basis: DirectionalShadowBasis;
+  readonly minSunHeight: number;
   readonly anchor: THREE.Vector3;
   readonly lightPosition: THREE.Vector3;
   readonly cameraSize: number;
@@ -101,18 +105,23 @@ export function getCloudBankId(ids: Uint16Array, x: number, z: number, size = CL
   return ids[modulo(x, size) + modulo(z, size) * size];
 }
 
-export function getCloudShadowGuideRadius(point: Point, anchor: Point, cameraSize: number): number {
+export function getCloudShadowGuideRadius(
+  point: Point, anchor: Point, cameraSize: number, basis: DirectionalShadowBasis
+): number {
   const x = point.x - anchor.x;
   const y = point.y - anchor.y;
   const z = point.z - anchor.z;
   return Math.hypot(
-    x * BASIS.right.x + y * BASIS.right.y + z * BASIS.right.z,
-    x * BASIS.up.x + y * BASIS.up.y + z * BASIS.up.z
+    x * basis.right.x + y * basis.right.y + z * basis.right.z,
+    x * basis.up.x + y * basis.up.y + z * basis.up.z
   ) / cameraSize;
 }
 
-export function projectCloudGuideToHeight(point: Point, height: number): THREE.Vector3 {
-  return new THREE.Vector3(point.x, point.y, point.z).addScaledVector(DOWN, (height - point.y) / DOWN.y);
+export function projectCloudGuideToHeight(
+  point: Point, height: number, down: THREE.Vector3, minSunHeight = CLOUD_SHADOW_MIN_SUN_HEIGHT
+): THREE.Vector3 | null {
+  if (!Number.isFinite(down.y) || -down.y <= minSunHeight) return null;
+  return new THREE.Vector3(point.x, point.y, point.z).addScaledVector(down, (height - point.y) / down.y);
 }
 
 export type CloudShadowContactResult =
@@ -121,21 +130,25 @@ export type CloudShadowContactResult =
 
 // Read only: the world's picker follows surviving partial-lattice geometry.
 // Reject paths crossing unloaded terrain, including before a later known hit.
-export function traceCloudShadowContact(world: Terrain, source: Point): CloudShadowContactResult {
-  const reach = Math.max(0, (source.y + 0.01) / -DOWN.y);
-  const hit = world.raycastTerraformerTarget(source, DOWN, reach);
-  const startDistance = Math.max(0, (source.y - WORLD_HEIGHT) / -DOWN.y);
+export function traceCloudShadowContact(
+  world: Terrain, source: Point, down: THREE.Vector3, minSunHeight = CLOUD_SHADOW_MIN_SUN_HEIGHT
+): CloudShadowContactResult {
+  if (!Number.isFinite(down.y) || -down.y <= minSunHeight) return { kind: "miss" };
+  const reach = Math.max(0, (source.y + 0.01) / -down.y);
+  if (!Number.isFinite(reach) || reach <= 0) return { kind: "miss" };
+  const hit = world.raycastTerraformerTarget(source, down, reach);
+  const startDistance = Math.max(0, (source.y - WORLD_HEIGHT) / -down.y);
   const endDistance = Math.min(reach, hit?.distance ?? reach);
-  const start = new THREE.Vector3(source.x, source.y, source.z).addScaledVector(DOWN, startDistance + 0.00001);
+  const start = new THREE.Vector3(source.x, source.y, source.z).addScaledVector(down, startDistance + 0.00001);
   let cx = Math.floor(start.x / CHUNK_SIZE);
   let cz = Math.floor(start.z / CHUNK_SIZE);
-  const stepX = Math.sign(DOWN.x);
-  const stepZ = Math.sign(DOWN.z);
+  const stepX = Math.sign(down.x);
+  const stepZ = Math.sign(down.z);
   const nextBoundary = (chunk: number, step: number): number => (chunk + (step > 0 ? 1 : 0)) * CHUNK_SIZE;
-  let nextX = startDistance + (nextBoundary(cx, stepX) - start.x) / DOWN.x;
-  let nextZ = startDistance + (nextBoundary(cz, stepZ) - start.z) / DOWN.z;
-  const deltaX = CHUNK_SIZE / Math.abs(DOWN.x);
-  const deltaZ = CHUNK_SIZE / Math.abs(DOWN.z);
+  let nextX = stepX ? startDistance + (nextBoundary(cx, stepX) - start.x) / down.x : Infinity;
+  let nextZ = stepZ ? startDistance + (nextBoundary(cz, stepZ) - start.z) / down.z : Infinity;
+  const deltaX = CHUNK_SIZE / Math.abs(down.x);
+  const deltaZ = CHUNK_SIZE / Math.abs(down.z);
   for (let distance = startDistance; distance <= endDistance;) {
     if (!world.getChunk(cx, cz)) return { kind: "unknown" };
     const next = Math.min(nextX, nextZ);
@@ -151,11 +164,11 @@ export function traceCloudShadowContact(world: Terrain, source: Point): CloudSha
 }
 
 export function getCloudShadowGuideStatus(options: Pick<CloudShadowDebugUpdate,
-  "inWorld" | "shadows" | "cloudShadows" | "coverage">): CloudShadowGuideStatus {
+  "inWorld" | "shadows" | "cloudShadows" | "coverage" | "basis">): CloudShadowGuideStatus {
   if (!options.inWorld) return "outside-world";
   if (!options.shadows) return "shadows-off";
   if (!options.cloudShadows) return "cloud-shadows-off";
-  if (options.coverage <= 0) return "night";
+  if (options.coverage <= 0) return options.basis.forward.y >= 0 ? "night" : "low-sun";
   return "active";
 }
 
@@ -176,6 +189,12 @@ export class CloudShadowDebug {
   private relevantBanks = 0;
   private readonly lastAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
   private readonly lastWind = new THREE.Vector2(Infinity, Infinity);
+  private readonly lastDirection = new THREE.Vector3(Infinity, Infinity, Infinity);
+  private readonly sunDirection = new THREE.Vector3();
+  private readonly lightDirection = new THREE.Vector3();
+  private coverage = 0;
+  private minSunHeight = 1;
+  private hasDirection = false;
   private lastSize = -1;
   private lastFar = -1;
   private lastWorld: Terrain | null = null;
@@ -203,6 +222,8 @@ export class CloudShadowDebug {
     this.status = this.enabled ? "outside-world" : "off";
     this.unknownContacts = 0;
     this.relevantBanks = 0;
+    this.hasDirection = false;
+    this.coverage = 0;
     this.labels = [];
     if (this.overlay) { this.overlay.hidden = true; this.overlay.replaceChildren(); }
   }
@@ -211,6 +232,9 @@ export class CloudShadowDebug {
     return {
       enabled: this.enabled, status: this.status, unknownContacts: this.unknownContacts,
       relevantBanks: this.relevantBanks,
+      sunDirection: this.hasDirection ? this.sunDirection.clone() : null,
+      lightDirection: this.hasDirection ? this.lightDirection.clone() : null,
+      coverage: this.coverage, minSunHeight: this.minSunHeight,
       sampledContacts: this.banks.reduce((sum, bank) => sum + bank.contacts.length, 0),
       banks: this.banks.map((bank) => ({
         id: bank.id, color: `#${bank.color.getHexString()}`, contacts: bank.contacts.length,
@@ -221,6 +245,11 @@ export class CloudShadowDebug {
 
   update(options: CloudShadowDebugUpdate): void {
     if (!this.enabled || this.disposed) return;
+    this.sunDirection.copy(options.basis.forward).negate();
+    this.lightDirection.copy(options.lightPosition).sub(options.anchor).normalize();
+    this.coverage = options.coverage;
+    this.minSunHeight = options.minSunHeight;
+    this.hasDirection = true;
     const status = getCloudShadowGuideStatus(options);
     const changed = status !== this.status;
     this.status = status;
@@ -234,8 +263,12 @@ export class CloudShadowDebug {
     const moved = this.lastAnchor.distanceToSquared(options.anchor) > 16 ** 2;
     const wrapped = Math.abs(wind.x - this.lastWind.x) > CLOUD_TILE_SIZE_METERS / 2 ||
       Math.abs(wind.z - this.lastWind.y) > CLOUD_TILE_SIZE_METERS / 2;
+    const turned = this.lastDirection.distanceToSquared(options.basis.forward) > 0.01 ** 2;
+    // A running clock changes the fitted far plane every frame. Small solar
+    // motion stays on the ordinary cadence; clock jumps/quality edits refresh now.
+    const rangeChanged = Math.abs(this.lastFar - options.cameraFar) > Math.max(4, options.cameraFar * 0.05);
     if (changed || moved || wrapped || this.lastWorld !== options.world ||
-      this.lastSize !== options.cameraSize || this.lastFar !== options.cameraFar ||
+      turned || this.lastSize !== options.cameraSize || rangeChanged ||
       this.elapsed >= CLOUD_SHADOW_DEBUG_REFRESH_SECONDS) {
       this.rebuild(options);
       this.lastWind.set(wind.x, wind.z);
@@ -244,6 +277,7 @@ export class CloudShadowDebug {
       this.lastAnchor.copy(options.anchor);
       this.lastSize = options.cameraSize;
       this.lastFar = options.cameraFar;
+      this.lastDirection.copy(options.basis.forward);
       this.lastWorld = options.world;
     }
     this.source.position.set(wind.x, 0, wind.z);
@@ -297,10 +331,10 @@ export class CloudShadowDebug {
       if (!cell) continue;
       queries += 1;
       const source = cloudCellCenter(cell, options.cloud.wind);
-      const result = traceCloudShadowContact(options.world, source);
+      const result = traceCloudShadowContact(options.world, source, options.basis.forward, options.minSunHeight);
       if (result.kind === "unknown") this.unknownContacts += 1;
       if (result.kind !== "hit" || !insideDepth(result.point, options)) continue;
-      const radius = getCloudShadowGuideRadius(result.point, options.anchor, options.cameraSize);
+      const radius = getCloudShadowGuideRadius(result.point, options.anchor, options.cameraSize, options.basis);
       if (radius >= 1) continue;
       const contact = { source, point: result.point, normal: result.normal, radius,
         bottom: CLOUD_BASE_HEIGHT_METERS + cell.bottom * CLOUD_STEP_HEIGHT_METERS };
@@ -349,10 +383,15 @@ export class CloudShadowDebug {
       for (let index = 0; index < RING_SEGMENTS; index += 1) {
         const angle = index * Math.PI * 2 / RING_SEGMENTS;
         const plane = options.anchor.clone()
-          .addScaledVector(BASIS.right, Math.cos(angle) * radius * options.cameraSize)
-          .addScaledVector(BASIS.up, Math.sin(angle) * radius * options.cameraSize);
-        const source = projectCloudGuideToHeight(plane, CLOUD_TOP_HEIGHT_METERS + 1);
-        const result = traceCloudShadowContact(options.world, source);
+          .addScaledVector(options.basis.right, Math.cos(angle) * radius * options.cameraSize)
+          .addScaledVector(options.basis.up, Math.sin(angle) * radius * options.cameraSize);
+        const source = projectCloudGuideToHeight(plane, CLOUD_TOP_HEIGHT_METERS + 1,
+          options.basis.forward, options.minSunHeight);
+        if (!source || source.distanceTo(options.camera.position) >= options.cloud.viewDistance) {
+          points.push(null);
+          continue;
+        }
+        const result = traceCloudShadowContact(options.world, source, options.basis.forward, options.minSunHeight);
         points.push(result.kind === "hit" && insideDepth(result.point, options)
           ? result.point.addScaledVector(result.normal, 0.09) : null);
       }
@@ -379,7 +418,8 @@ export class CloudShadowDebug {
     legend.append(title);
     const info = document.createElement("div");
     const inactive = { "shadows-off": "Inactive: Shadow Quality is Off.",
-      "cloud-shadows-off": "Inactive: Cloud Shadows is Off.", night: "Inactive: no daylight cloud casting." };
+      "cloud-shadows-off": "Inactive: Cloud Shadows is Off.", night: "Inactive: sun below the horizon.",
+      "low-sun": "Inactive: low sun puts cloud casters outside the supported cloud horizon." };
     info.textContent = this.status === "active"
       ? `Nearby banks ${this.banks.length}/${this.relevantBanks} · daylight ${Math.round(coverage * 100)}%` +
         ` · ${this.banks.reduce((sum, bank) => sum + bank.contacts.length, 0)} loaded-terrain contacts`
@@ -425,8 +465,11 @@ function selectCells(ids: Uint16Array, options: CloudShadowDebugUpdate): GuideCe
   const half = Math.min(LOCAL_HALF_SIZE, options.cameraSize);
   const corners: THREE.Vector3[] = [];
   for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
-    corners.push(projectCloudGuideToHeight(options.anchor.clone()
-      .addScaledVector(BASIS.right, sx * half).addScaledVector(BASIS.up, sy * half), CLOUD_TOP_HEIGHT_METERS));
+    const corner = projectCloudGuideToHeight(options.anchor.clone()
+      .addScaledVector(options.basis.right, sx * half).addScaledVector(options.basis.up, sy * half),
+    CLOUD_TOP_HEIGHT_METERS, options.basis.forward, options.minSunHeight);
+    if (!corner) return [];
+    corners.push(corner);
   }
   const wind = options.cloud.wind;
   const toCell = (coordinate: number, offset: number): number =>
@@ -442,7 +485,7 @@ function selectCells(ids: Uint16Array, options: CloudShadowDebugUpdate): GuideCe
     const column = sampleCloudColumn(x, z);
     const cell = { x, z, id, ...column, radius: 0 };
     const source = cloudCellCenter(cell, wind);
-    cell.radius = getCloudShadowGuideRadius(source, options.anchor, options.cameraSize);
+    cell.radius = getCloudShadowGuideRadius(source, options.anchor, options.cameraSize, options.basis);
     if (cell.radius >= 1 || !insideDepth(source, options) ||
       source.distanceTo(options.camera.position) >= options.cloud.viewDistance) continue;
     cells.push(cell);
@@ -457,8 +500,9 @@ function cloudCellCenter(cell: GuideCell, wind: CloudWindOffset): THREE.Vector3 
 }
 
 function insideDepth(point: Point, options: CloudShadowDebugUpdate): boolean {
-  const depth = (point.x - options.lightPosition.x) * DOWN.x +
-    (point.y - options.lightPosition.y) * DOWN.y + (point.z - options.lightPosition.z) * DOWN.z;
+  const down = options.basis.forward;
+  const depth = (point.x - options.lightPosition.x) * down.x +
+    (point.y - options.lightPosition.y) * down.y + (point.z - options.lightPosition.z) * down.z;
   return depth >= options.cameraNear && depth <= options.cameraFar;
 }
 

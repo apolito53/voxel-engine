@@ -2,7 +2,8 @@ import * as THREE from "three";
 
 import type { DayNightVisualState, RgbColorTuple } from "./dayNightCycle";
 import type { QualityPreset } from "./qualityPresets";
-import { SKY_ATMOSPHERE_GLSL, getProceduralSkySunDirection } from "./skybox";
+import { SKY_ATMOSPHERE_GLSL } from "./skybox";
+import { getDirectSunHorizonFade } from "./lighting";
 import { CLOUD_SHADOW_FULL_RADIUS } from "./shadows";
 
 export const CLOUD_BASE_HEIGHT_METERS = 144;
@@ -157,7 +158,8 @@ export class CloudLayer {
   private readonly matrix = new THREE.Matrix4();
   private readonly shadowUniforms = {
     cloudShadowCoverage: { value: 0 },
-    cloudShadowMapSize: { value: 1 }
+    cloudShadowMapSize: { value: 1 },
+    cloudShadowViewPosition: { value: new THREE.Vector3() }
   };
   private readonly uniforms = {
     skyTopColor: { value: new THREE.Color() },
@@ -170,10 +172,11 @@ export class CloudLayer {
     sunDiscIntensity: { value: 0 },
     cloudTopColor: { value: new THREE.Color() },
     cloudUndersideColor: { value: new THREE.Color() },
+    cloudSunIntensity: { value: 0 },
     cloudViewDistance: { value: CLOUD_MAX_VIEW_DISTANCE_METERS }
   };
 
-  constructor(private readonly sunOffset: THREE.Vector3, visual: DayNightVisualState) {
+  constructor(sunDirection: THREE.Vector3, visual: DayNightVisualState) {
     const material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
       vertexShader: `
@@ -191,6 +194,7 @@ export class CloudLayer {
         ${SKY_ATMOSPHERE_GLSL}
         uniform vec3 cloudTopColor;
         uniform vec3 cloudUndersideColor;
+        uniform float cloudSunIntensity;
         uniform float cloudViewDistance;
         varying vec3 vCloudNormal;
         varying vec3 vCloudWorldPosition;
@@ -201,7 +205,7 @@ export class CloudLayer {
           vec3 normal = normalize(vCloudNormal);
           float topLight = normal.y * 0.5 + 0.5;
           vec3 cloud = mix(cloudUndersideColor, cloudTopColor, topLight);
-          cloud *= 0.88 + max(dot(normal, sunDirection), 0.0) * 0.12;
+          cloud *= 0.88 + max(dot(normal, sunDirection), 0.0) * 0.12 * cloudSunIntensity;
           float haze = smoothstep(cloudViewDistance * 0.5, cloudViewDistance, distanceToCloud);
           vec3 sky = sampleSkyAtmosphere(normalize(viewOffset));
           gl_FragColor = vec4(mix(cloud, sky, haze), 1.0);
@@ -220,17 +224,18 @@ export class CloudLayer {
     this.object.visible = false;
     this.object.customDepthMaterial = this.createDepthMaterial();
     this.object.raycast = () => { /* Atmosphere never participates in world picking. */ };
-    this.setState(visual);
+    this.setState(visual, sunDirection);
   }
 
-  setState(visual: DayNightVisualState): void {
+  setState(visual: DayNightVisualState, sunDirection: THREE.Vector3): void {
     const palette = createCloudPalette(visual);
     this.uniforms.skyTopColor.value.setRGB(...visual.skyTopColor);
     this.uniforms.skyHorizonColor.value.setRGB(...visual.skyHorizonColor);
     this.uniforms.skyLowerColor.value.setRGB(...visual.skyLowerColor);
     this.uniforms.skyFogColor.value.setRGB(...visual.fogColor);
     this.uniforms.sunColor.value.setRGB(...visual.sunColor);
-    getProceduralSkySunDirection(visual.timeOfDay, this.sunOffset, this.uniforms.sunDirection.value);
+    this.uniforms.sunDirection.value.copy(sunDirection);
+    this.uniforms.cloudSunIntensity.value = visual.sunIntensityScale * getDirectSunHorizonFade(sunDirection);
     this.uniforms.twilightFactor.value = visual.twilightFactor;
     this.uniforms.sunDiscIntensity.value = visual.sunDiscIntensity;
     this.uniforms.cloudTopColor.value.setRGB(...palette.top);
@@ -276,6 +281,7 @@ export class CloudLayer {
     const anchorZ = getCloudTileAnchor(camera.position.z, wind.z);
     const viewDistance = getCloudViewDistance(quality);
     this.uniforms.cloudViewDistance.value = viewDistance;
+    this.shadowUniforms.cloudShadowViewPosition.value.copy(camera.position);
     let count = 0;
     for (let dz = -1; dz <= 1; dz += 1) {
       for (let dx = -1; dx <= 1; dx += 1) {
@@ -306,22 +312,40 @@ export class CloudLayer {
   }
 
   private createDepthMaterial(): THREE.MeshDepthMaterial {
-    // Reuse Three's depth vertex shader, including instanceMatrix, so moving
-    // cloud banks and their shadows always use exactly the same geometry.
+    // Retain Three's full depth/instance projection and add only the world
+    // position needed to match the visible cloud horizon from the main camera.
     const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.shadowUniforms);
+      shader.uniforms.cloudViewDistance = this.uniforms.cloudViewDistance;
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", `
+          #include <common>
+          varying vec3 vCloudShadowWorldPosition;
+        `)
+        .replace("#include <project_vertex>", `
+          #include <project_vertex>
+          vec4 cloudWorldPosition = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            cloudWorldPosition = instanceMatrix * cloudWorldPosition;
+          #endif
+          vCloudShadowWorldPosition = (modelMatrix * cloudWorldPosition).xyz;
+        `);
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `
           #include <common>
           uniform float cloudShadowCoverage;
           uniform float cloudShadowMapSize;
+          uniform float cloudViewDistance;
+          uniform vec3 cloudShadowViewPosition;
+          varying vec3 vCloudShadowWorldPosition;
           float cloudBayer2(vec2 p) {
             return 2.0 * p.x + 3.0 * p.y - 4.0 * p.x * p.y;
           }
         `)
         .replace("#include <clipping_planes_fragment>", `
           #include <clipping_planes_fragment>
+          if (length(vCloudShadowWorldPosition - cloudShadowViewPosition) >= cloudViewDistance) discard;
           vec2 cloudShadowUv = gl_FragCoord.xy / cloudShadowMapSize;
           float cloudRadius = length(cloudShadowUv * 2.0 - 1.0);
           float cloudEdgeFade = 1.0 - smoothstep(${CLOUD_SHADOW_FULL_RADIUS.toFixed(2)}, 1.0, cloudRadius);
@@ -334,7 +358,7 @@ export class CloudLayer {
     // Stable ordered shadow-texel coverage softens daylight and edge fades
     // through the existing PCF filter, without blending depth or a second map.
     // Its radial edge fade cannot reveal the map's hard square boundary.
-    material.customProgramCacheKey = () => "voxel-cloud-depth-v1";
+    material.customProgramCacheKey = () => "voxel-cloud-depth-v2";
     return material;
   }
 }

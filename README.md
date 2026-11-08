@@ -138,15 +138,20 @@ world clock recolors clouds without moving them; pause, hidden tabs, and the
 existing idle hibernation also pause their wind. Every graphics preset retains
 clouds, with a shorter independent cloud horizon on Potato and Low. Fog,
 background, horizon matte, and outdoor terrain exposure shift together as the
-world clock moves, while the directional shadow direction stays fixed for this
-first pass. Atmosphere clipping has a separate minimum camera range, so cloud
+world clock moves. The visible sun, real directional light, terrain/cloud
+shadows, cloud shading, and debug rays share that clock-driven direction;
+terrain meshes keep only neutral ambient/sky/underside shading. Atmosphere
+clipping has a separate minimum camera range, so cloud
 visibility never expands terrain streaming or changes the terrain fog wall.
 `Settings > Graphics > Cloud Shadows` adds pronounced moving daytime shade,
 with solid shadow cores and soft coverage edges, using the existing sun shadow
 map. It defaults on for Normal and higher and off on
 Potato/Low; switching it changes Custom settings. Shadow Quality must be above
 Off, and the saved cloud preference survives while global shadows are disabled.
-Night skips cloud casting. Its shadow coverage fades out around the existing
+Night and unsupported low-sun angles skip cloud casting; the transition accounts
+for the cloud horizon and camera altitude. Direct terrain sunlight keeps its
+true angle until the sun reaches the horizon, while ambient fill handles night.
+Its shadow coverage fades out around the existing
 nearby map footprint, with no extra map or terrain-streaming cost.
 The night exposure pass dims sky and hemisphere fill, but direct
 local Lamp spill remains intact so open and sealed Lamp-lit rooms read

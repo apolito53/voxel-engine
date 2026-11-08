@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 import type { DayNightVisualState, RgbColorTuple } from "./dayNightCycle";
+import { getSolarDirection } from "./lighting";
 
 const SKYBOX_RADIUS_METERS = 96;
 const SKYBOX_SEGMENTS = 64;
@@ -72,13 +73,13 @@ type SkyboxUniforms = {
 
 export type Skybox = {
   readonly object: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
-  setState(state: ProceduralSkyState): void;
+  setState(state: ProceduralSkyState, sunDirection: THREE.Vector3): void;
   update(camera: THREE.Camera): void;
   dispose(): void;
 };
 
 export function createSkybox(
-  sunOffset: THREE.Vector3,
+  sunDirection: THREE.Vector3,
   initialState: ProceduralSkyState
 ): Skybox {
   const geometry = new THREE.SphereGeometry(SKYBOX_RADIUS_METERS, SKYBOX_SEGMENTS, SKYBOX_RINGS);
@@ -89,8 +90,8 @@ export function createSkybox(
     skyFogColor: { value: colorFromTuple(initialState.fogColor) },
     sunColor: { value: colorFromTuple(initialState.sunColor) },
     moonColor: { value: colorFromTuple(initialState.moonColor) },
-    sunDirection: { value: getProceduralSkySunDirection(initialState.timeOfDay, sunOffset) },
-    moonDirection: { value: getProceduralSkyMoonDirection(initialState.timeOfDay, sunOffset) },
+    sunDirection: { value: sunDirection.clone() },
+    moonDirection: { value: sunDirection.clone().negate() },
     starIntensity: { value: initialState.starIntensity },
     twilightFactor: { value: initialState.twilightFactor },
     sunDiscIntensity: { value: initialState.sunDiscIntensity },
@@ -163,15 +164,15 @@ export function createSkybox(
 
   return {
     object,
-    setState(state: ProceduralSkyState): void {
+    setState(state: ProceduralSkyState, direction: THREE.Vector3): void {
       setColorUniform(uniforms.skyTopColor.value, state.topColor);
       setColorUniform(uniforms.skyHorizonColor.value, state.horizonColor);
       setColorUniform(uniforms.skyLowerColor.value, state.lowerColor);
       setColorUniform(uniforms.skyFogColor.value, state.fogColor);
       setColorUniform(uniforms.sunColor.value, state.sunColor);
       setColorUniform(uniforms.moonColor.value, state.moonColor);
-      uniforms.sunDirection.value.copy(getProceduralSkySunDirection(state.timeOfDay, sunOffset));
-      uniforms.moonDirection.value.copy(getProceduralSkyMoonDirection(state.timeOfDay, sunOffset));
+      uniforms.sunDirection.value.copy(direction);
+      uniforms.moonDirection.value.copy(direction).negate();
       uniforms.starIntensity.value = state.starIntensity;
       uniforms.twilightFactor.value = state.twilightFactor;
       uniforms.sunDiscIntensity.value = state.sunDiscIntensity;
@@ -209,22 +210,7 @@ export function getProceduralSkySunDirection(
   sunOffset: THREE.Vector3,
   target = new THREE.Vector3()
 ): THREE.Vector3 {
-  const noonDirection = sunOffset.clone().normalize();
-  const horizontal = new THREE.Vector3(noonDirection.x, 0, noonDirection.z);
-  if (horizontal.lengthSq() < 1e-6) {
-    horizontal.set(1, 0, 0);
-  } else {
-    horizontal.normalize();
-  }
-
-  const solarHeight = Math.sin((timeOfDay - 0.25) * Math.PI * 2);
-  const y = solarHeight >= 0
-    ? solarHeight * Math.max(0.2, noonDirection.y)
-    : solarHeight * 0.35;
-  const horizontalScale = Math.sqrt(Math.max(0.0001, 1 - y * y));
-  return target
-    .set(horizontal.x * horizontalScale, y, horizontal.z * horizontalScale)
-    .normalize();
+  return getSolarDirection(timeOfDay, sunOffset, target);
 }
 
 export function getProceduralSkyMoonDirection(

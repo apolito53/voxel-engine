@@ -27,13 +27,16 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   camera-range floor on all presets without increasing terrain streaming. See
   [lighting and sky](docs/architecture.md#lighting-and-sky).
 - Cloud shadows share the existing directional map. Their elevated casters
-  require lifting the light along its fixed direction and extending far by the
-  same displacement; check cloud-plane intersections at all tilted frustum
-  corners, not just light altitude or a center ray. Keep the shadow plane and
-  terrain range stable, fade cloud-only depth coverage before the map boundary,
-  and preserve Lamp emission/block light. See the same
+  require lifting the light along the live clock-driven solar direction and
+  extending far by the same displacement. The sky disk, real light, cloud
+  shading, shadow basis and guides must agree; never bake a permanent noon
+  direction into terrain colors. Fit terrain near/far from finite rendered
+  bounds, then check both cloud planes at every tilted frustum corner. Gate
+  cloud casting by its actual horizon and camera height before low sun makes
+  the projection unbounded; keep the true vector and clip cloud depth to the
+  visible main-camera horizon. Preserve Lamp emission/block light. See the same
   [lighting and sky contract](docs/architecture.md#lighting-and-sky).
-  Cloud-shadow debug guides share that fixed projection and owned wind; sampled
+  Cloud-shadow debug guides share that live projection, gate and owned wind; sampled
   terrain contacts must honor partial geometry and reject paths through unloaded
   terrain rather than inventing a flat footprint or claiming pixel ownership.
 - Partial-mesh draw caps and reduced rigid-debris solver cadence were tried
