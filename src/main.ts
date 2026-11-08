@@ -69,6 +69,7 @@ import {
   type WorldRegistry
 } from "./chunkStorage";
 import { parseChangelogEntries, type ChangelogEntry } from "./changelog";
+import { createMenuTabs, trapMenuFocus } from "./menuNavigation";
 import { CLOUD_BASE_HEIGHT_METERS, CLOUD_TOP_HEIGHT_METERS, CloudLayer, getCloudViewDistance } from "./cloudLayer";
 import {
   CloudShadowDebug, readCloudShadowDebugPreference, writeCloudShadowDebugPreference
@@ -519,29 +520,33 @@ const changelogCurrentVersion = requireElement<HTMLElement>("#changelog-current-
 const changelogList = requireElement<HTMLElement>("#changelog-list");
 const changelogCloseButton = requireElement<HTMLButtonElement>("#changelog-close-button");
 const pauseMenu = requireElement<HTMLElement>("#pause-menu");
+const pauseContent = requireElement<HTMLElement>(".pause-content");
 const resumeButton = requireElement<HTMLButtonElement>("#resume-button");
 const homeButton = requireElement<HTMLButtonElement>("#home-button");
-const inventoryButton = requireElement<HTMLButtonElement>("#inventory-button");
-const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
-const builderButton = requireElement<HTMLButtonElement>("#builder-button");
 const novaChatButton = requireElement<HTMLButtonElement>("#nova-chat-button");
 const pauseInventoryPanel = requireElement<HTMLElement>("#pause-inventory-panel");
-const pauseSettingsPanel = requireElement<HTMLElement>("#pause-settings-panel");
-const pauseBuilderPanel = requireElement<HTMLElement>("#pause-builder-panel");
-const inventoryItemsTab = requireElement<HTMLButtonElement>("#inventory-tab-items");
-const inventoryBlocksTab = requireElement<HTMLButtonElement>("#inventory-tab-blocks");
-const inventoryItemsPanel = requireElement<HTMLElement>("#inventory-items-panel");
-const inventoryBlocksPanel = requireElement<HTMLElement>("#inventory-blocks-panel");
 const inventoryItemList = requireElement<HTMLElement>("#inventory-item-list");
 const inventoryBlockList = requireElement<HTMLElement>("#inventory-block-list");
 const inventoryBackpackStatus = requireElement<HTMLElement>("#inventory-backpack-status");
 const inventoryBackpackGrid = requireElement<HTMLElement>("#inventory-backpack-grid");
-const settingsGraphicsTab = requireElement<HTMLButtonElement>("#settings-tab-graphics");
-const settingsGameplayTab = requireElement<HTMLButtonElement>("#settings-tab-gameplay");
-const settingsExperimentalTab = requireElement<HTMLButtonElement>("#settings-tab-experimental");
-const settingsGraphicsPanel = requireElement<HTMLElement>("#settings-graphics-panel");
-const settingsGameplayPanel = requireElement<HTMLElement>("#settings-gameplay-panel");
-const settingsExperimentalPanel = requireElement<HTMLElement>("#settings-experimental-panel");
+const pauseTabs = createMenuTabs(requireElement<HTMLElement>("#pause-tabs"), {
+  signal: mainAbortController.signal,
+  onSelect: (id) => {
+    pauseContent.scrollTop = 0;
+    if (id === "inventory-button") setInventoryCategory(inventoryState.activeLane);
+  }
+});
+const settingsTabList = requireElement<HTMLElement>("#settings-tabs");
+const settingsTabs = createMenuTabs(settingsTabList, {
+  signal: mainAbortController.signal,
+  onSelect: () => { pauseContent.scrollTop = 0; }
+});
+const inventoryTabs = createMenuTabs(requireElement<HTMLElement>("#inventory-tabs"), {
+  signal: mainAbortController.signal,
+  onSelect: () => { pauseContent.scrollTop = 0; }
+});
+let changelogReturnFocus: HTMLElement | null = null;
+let pauseScrollResetPending = false;
 const qualitySelect = requireElement<HTMLSelectElement>("#quality-select");
 const renderDistanceSlider = requireElement<HTMLInputElement>("#render-distance-slider");
 const renderDistanceValue = requireElement<HTMLElement>("#render-distance-value");
@@ -823,7 +828,6 @@ type PlayerCoreFiringSolution = {
 type TerraformerState = {
   readonly targetKey: string;
 };
-type SettingsCategory = "graphics" | "gameplay" | "experimental";
 type PendingPartialBlockMeshJob = {
   readonly id: number;
   readonly revision: number;
@@ -845,7 +849,6 @@ declare global {
     __VOXEL_COMBAT_LOG__?: CombatLog;
   }
 }
-type PauseSubmenu = "inventory" | "settings" | "builder";
 const physicsToyCollider = new PhysicsToyCollider();
 const physicsFragmentInstancer = new PhysicsFragmentInstancer(scene);
 const coreAimPreview = new PhysicsCoreAimPreview(scene);
@@ -1244,41 +1247,24 @@ function wireMenuControls(): void {
       clearPointerHoldState();
       void queueActivePlayerLocationSave(true);
       void queueActiveDayNightStateSave(true);
+      if (inWorld && pauseScrollResetPending) {
+        // Hidden menus have no layout box, so defer new-world scroll reset
+        // until the first visible pause rather than writing it during load.
+        pauseContent.scrollTop = 0;
+        settingsTabList.scrollTop = 0;
+        pauseScrollResetPending = false;
+      }
+      if (inWorld) pauseTabs.focusActive();
     }
-    if (!paused) closePauseSubmenus();
   };
 
   pauseMenu.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    if (event.target instanceof Element && event.target.closest("button, input, label, select, .settings-panel, .inventory-panel, .builder-panel")) return;
+    if (event.target !== pauseMenu) return;
     event.preventDefault();
     resumeFromPause();
   }, eventListenerOptions);
   resumeButton.addEventListener("click", resumeFromPause, eventListenerOptions);
-  inventoryButton.addEventListener("click", () => {
-    setInventoryPanelOpen(pauseInventoryPanel.hidden);
-  }, eventListenerOptions);
-  settingsButton.addEventListener("click", () => {
-    setSettingsPanelOpen(pauseSettingsPanel.hidden);
-  }, eventListenerOptions);
-  builderButton.addEventListener("click", () => {
-    setBuilderPanelOpen(pauseBuilderPanel.hidden);
-  }, eventListenerOptions);
-  settingsGraphicsTab.addEventListener("click", () => {
-    setSettingsCategory("graphics");
-  }, eventListenerOptions);
-  settingsGameplayTab.addEventListener("click", () => {
-    setSettingsCategory("gameplay");
-  }, eventListenerOptions);
-  settingsExperimentalTab.addEventListener("click", () => {
-    setSettingsCategory("experimental");
-  }, eventListenerOptions);
-  inventoryItemsTab.addEventListener("click", () => {
-    setInventoryCategory("items");
-  }, eventListenerOptions);
-  inventoryBlocksTab.addEventListener("click", () => {
-    setInventoryCategory("blocks");
-  }, eventListenerOptions);
   novaChatButton.addEventListener("click", () => {
     openNovaChat();
   }, eventListenerOptions);
@@ -1511,6 +1497,7 @@ function appendInlineChangelogMarkdown(container: HTMLElement, text: string): vo
 }
 
 function openChangelogDialog(): void {
+  changelogReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   changelogDialog.classList.remove("is-hidden");
   changelogDialog.setAttribute("aria-hidden", "false");
   changelogList.scrollTop = 0;
@@ -1520,6 +1507,8 @@ function openChangelogDialog(): void {
 function closeChangelogDialog(): void {
   changelogDialog.classList.add("is-hidden");
   changelogDialog.setAttribute("aria-hidden", "true");
+  if (changelogReturnFocus?.isConnected) changelogReturnFocus.focus({ preventScroll: true });
+  changelogReturnFocus = null;
 }
 
 function isChangelogDialogOpen(): boolean {
@@ -1530,7 +1519,6 @@ function resumeFromPause(): void {
   if (novaChatPanel.isOpen) {
     novaChatPanel.close();
   }
-  closePauseSubmenus();
   requirePlayer().resume();
 }
 
@@ -1542,7 +1530,6 @@ function openNovaChat(): void {
 function openNovaChatInputMode(): void {
   // Chat is an in-world overlay rather than a pause-menu panel. Suspend only
   // movement/look so the player can type, then restore pointer lock on close.
-  closePauseSubmenus();
   pauseMenu.classList.add("is-hidden");
   requirePlayer().suspendForTextInput();
 }
@@ -1553,13 +1540,8 @@ function closeNovaChatInputMode(): void {
   requirePlayer().resume();
 }
 
-function setInventoryPanelOpen(open: boolean): void {
-  if (open) setInventoryCategory(inventoryState.activeLane);
-  setPauseSubmenu(open ? "inventory" : null);
-}
-
 function toggleInventoryFromKeyboard(): void {
-  if (!pauseInventoryPanel.hidden) {
+  if (!pauseMenu.classList.contains("is-hidden") && !pauseInventoryPanel.hidden) {
     resumeFromPause();
     return;
   }
@@ -1570,73 +1552,12 @@ function toggleInventoryFromKeyboard(): void {
   } else {
     pauseMenu.classList.remove("is-hidden");
   }
-  setInventoryPanelOpen(true);
-}
-
-function setSettingsPanelOpen(open: boolean): void {
-  setPauseSubmenu(open ? "settings" : null);
-}
-
-function setBuilderPanelOpen(open: boolean): void {
-  setPauseSubmenu(open ? "builder" : null);
-}
-
-function closePauseSubmenus(): void {
-  setPauseSubmenu(null);
-}
-
-function setPauseSubmenu(submenu: PauseSubmenu | null): void {
-  const inventoryOpen = submenu === "inventory";
-  const settingsOpen = submenu === "settings";
-  const builderOpen = submenu === "builder";
-  pauseInventoryPanel.hidden = !inventoryOpen;
-  pauseSettingsPanel.hidden = !settingsOpen;
-  pauseBuilderPanel.hidden = !builderOpen;
-  inventoryButton.setAttribute("aria-expanded", String(inventoryOpen));
-  settingsButton.setAttribute("aria-expanded", String(settingsOpen));
-  builderButton.setAttribute("aria-expanded", String(builderOpen));
-  inventoryButton.classList.toggle("is-active", inventoryOpen);
-  settingsButton.classList.toggle("is-active", settingsOpen);
-  builderButton.classList.toggle("is-active", builderOpen);
-  inventoryButton.classList.toggle("is-hidden", settingsOpen || builderOpen);
-  settingsButton.classList.toggle("is-hidden", inventoryOpen || builderOpen);
-  builderButton.classList.toggle("is-hidden", inventoryOpen || settingsOpen);
-  inventoryButton.textContent = inventoryOpen ? "Back" : "Inventory";
-  settingsButton.textContent = settingsOpen ? "Back" : "Settings";
-  builderButton.textContent = builderOpen ? "Back" : "Builder";
-
-  // Treat pause submenus as focused modes: hide the main actions so destructive
-  // world exits are not sitting next to throwaway tuning or builder clicks.
-  const open = submenu !== null;
-  for (const action of document.querySelectorAll<HTMLElement>(".menu-main-action")) {
-    action.classList.toggle("is-hidden", open);
-  }
+  setInventoryCategory(inventoryState.activeLane);
+  pauseTabs.select("inventory-button", true);
 }
 
 function setInventoryCategory(category: InventoryLane): void {
-  const showItems = category === "items";
-  const showBlocks = category === "blocks";
-  inventoryItemsPanel.hidden = !showItems;
-  inventoryBlocksPanel.hidden = !showBlocks;
-  inventoryItemsTab.classList.toggle("is-active", showItems);
-  inventoryBlocksTab.classList.toggle("is-active", showBlocks);
-  inventoryItemsTab.setAttribute("aria-selected", String(showItems));
-  inventoryBlocksTab.setAttribute("aria-selected", String(showBlocks));
-}
-
-function setSettingsCategory(category: SettingsCategory): void {
-  const showGraphics = category === "graphics";
-  const showGameplay = category === "gameplay";
-  const showExperimental = category === "experimental";
-  settingsGraphicsPanel.hidden = !showGraphics;
-  settingsGameplayPanel.hidden = !showGameplay;
-  settingsExperimentalPanel.hidden = !showExperimental;
-  settingsGraphicsTab.classList.toggle("is-active", showGraphics);
-  settingsGameplayTab.classList.toggle("is-active", showGameplay);
-  settingsExperimentalTab.classList.toggle("is-active", showExperimental);
-  settingsGraphicsTab.setAttribute("aria-selected", String(showGraphics));
-  settingsGameplayTab.setAttribute("aria-selected", String(showGameplay));
-  settingsExperimentalTab.setAttribute("aria-selected", String(showExperimental));
+  inventoryTabs.select(`inventory-tab-${category}`);
 }
 
 function setHealthBarsEnabled(enabled: boolean): void {
@@ -1995,10 +1916,21 @@ window.addEventListener("resize", () => {
 document.addEventListener("keydown", (event) => {
   noteUserActivity();
   void gameAudio.unlockFromUserGesture();
+  // One physical Escape press handles one layer. Held-key repeats must not
+  // close notes and resume, or bounce between pause and play.
+  if (event.code === "Escape" && event.repeat) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
   if (event.code === "Escape" && isChangelogDialogOpen()) {
     event.preventDefault();
     event.stopImmediatePropagation();
     closeChangelogDialog();
+    return;
+  }
+  if (isChangelogDialogOpen()) {
+    trapMenuFocus(changelogDialog, event);
     return;
   }
 
@@ -2044,7 +1976,22 @@ document.addEventListener("keydown", (event) => {
 
   if (!inWorld) return;
 
+  if (!pauseMenu.classList.contains("is-hidden")) {
+    if (event.code === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      resumeFromPause();
+      return;
+    }
+    trapMenuFocus(pauseMenu, event);
+  }
+
   if (event.code === "KeyI" && !event.repeat) {
+    if (event.target instanceof Element) {
+      const editable = event.target.closest("textarea, select, [contenteditable]:not([contenteditable='false'])");
+      const input = event.target.closest("input");
+      if (editable || (input && !["range", "checkbox", "radio", "button", "submit", "reset"].includes(input.type))) return;
+    }
     event.preventDefault();
     event.stopImmediatePropagation();
     toggleInventoryFromKeyboard();
@@ -5412,6 +5359,9 @@ async function loadWorld(worldId: string): Promise<void> {
     // Loading from the home screen is the only place world slots swap into the active engine.
     await activeWorld.switchStorage(chunkStorage, scene, savedWorld.seed, savedWorld.terrainProfile);
     applySavedInventoryState(savedWorld, activeWorldId);
+    pauseTabs.select("settings-button");
+    settingsTabs.select("settings-tab-graphics");
+    pauseScrollResetPending = true;
     partialBlockMeshField.clear();
     clearPendingPartialBlockMeshJobs();
     renderedPartialBlockRevision = -1;

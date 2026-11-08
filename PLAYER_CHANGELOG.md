@@ -1,5 +1,11 @@
 # Player release notes
 
+## 0.21.0 - 2026-11-07
+
+- The pause menu has a roomier layout with Settings, Inventory, and Builder tabs. Resume stays within reach while you browse.
+- Settings are grouped into Graphics, World & Time, Tools & HUD, Audio, Physics, and Experimental, so sound, clock, tool, and debris controls are easier to find.
+- Navigate menu tabs with the arrow keys and Home/End. Press Esc to return to the world, or use I to jump straight to Inventory.
+
 ## 0.20.0 - 2026-11-07
 
 - Sunlight now adds a warm halo and soft glare that changes with the time of day. Terrain, buildings, and clouds can shade the sun and block the glare.

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { menuNavigationTests } from "./menuNavigation";
 import {
   BLOCK_DEBRIS_MAX_FRAGMENT_COUNT,
   BLOCK_DEBRIS_MAX_MATERIAL_UNITS_PER_FRAGMENT,
@@ -15149,6 +15150,8 @@ function createSunGlareTestHarness() {
     get readbacks() { return harness.readbacks; }, get countedDraws() { return harness.countedDraws; },
     get failAtDraw() { return harness.failAtDraw; }, set failAtDraw(value: number) { harness.failAtDraw = value; } };
 }
+
+tests.push(...menuNavigationTests);
 
 let passed = 0;
 for (const { name, run } of tests) {

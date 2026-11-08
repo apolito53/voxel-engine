@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-07 for `v0.20.0`.
+Last reviewed: 2026-11-07 for `v0.21.0`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -40,6 +40,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Task | Start here | Related owners or docs |
 | --- | --- | --- |
 | App lifecycle, render loop, input dispatch | [src/main.ts](src/main.ts) | [index.html](index.html), [src/style.css](src/style.css), [docs/architecture.md](docs/architecture.md) |
+| Pause workspace, menu tabs, keyboard focus | [src/menuNavigation.ts](src/menuNavigation.ts) | [index.html](index.html), [src/style.css](src/style.css), [src/main.ts](src/main.ts), [docs/controls.md](docs/controls.md#world-flow) |
 | World streaming, edits, chunk scheduling | [src/world.ts](src/world.ts) | [src/chunk.ts](src/chunk.ts), [src/chunkJobs.ts](src/chunkJobs.ts), [src/chunkProtocol.ts](src/chunkProtocol.ts) |
 | Terrain profiles, trees, world height | [src/terrain.ts](src/terrain.ts) | [src/voxelConstants.ts](src/voxelConstants.ts), [src/blocks.ts](src/blocks.ts), [src/chunkStorage.ts](src/chunkStorage.ts) |
 | Chunk materials, atlas, voxel lighting | [src/blockTextureAtlas.ts](src/blockTextureAtlas.ts) | [src/blockColors.ts](src/blockColors.ts), [src/blockTextureTiles.ts](src/blockTextureTiles.ts), [src/voxelLighting.ts](src/voxelLighting.ts) |
@@ -66,6 +67,9 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 
 - `main.ts` orchestrates systems and translates input into typed actions. Move
   reusable rules into focused modules instead of growing more inline policy.
+- `menuNavigation.ts` owns DOM tab selection, hidden panels, roving focus, and
+  menu focus containment. `main.ts` keeps pause/resume and shortcut policy;
+  preferences, inventory contents, and world saves retain their existing owners.
 - `VoxelWorld` owns durable terrain, streaming, chunk revisions, partial masks,
   block-light caches, and storage drains. Three.js upload remains main-thread
   work even when pure geometry construction happens in workers.

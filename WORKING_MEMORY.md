@@ -1,64 +1,61 @@
 # Working Memory
 
-Current handoff: 2026-11-07, camera sun glare for `v0.20.0`.
+Current handoff: 2026-11-07, pause workspace for `v0.21.0`.
 
-`sunGlare.ts` owns the warm camera halo/veil and the real-scene sun-disk
-occlusion query. It consumes the shared live solar direction, fades off-axis
-and at night, and warms around golden hour. Graphics settings expose Off–200%
-strength plus independent, default-on Glare Occlusion; built-ins use 100% on
-Normal and above, 65% Low, and Off on Potato. Older Custom settings inherit
-their actual base. Controls and lifecycle/cost contracts live in
-[lighting and sky](docs/architecture.md#lighting-and-sky), with an explicit
-[Codex Pilot diagnostic](docs/automation.md#codex-pilot-bridge).
+The menu now keeps Settings, Inventory, and Builder visible as primary tabs,
+with Resume in a pinned header and Nova Terminal, Exit to Home, and player
+release notes in a pinned footer. A responsive content area replaces the narrow
+submenu stack. Settings groups existing controls into Graphics, World & Time,
+Tools & HUD, Audio, Physics, and Experimental, with a desktop category rail,
+wrapped narrow-screen categories, and short section headings. The full mapping
+and keyboard behavior live in [controls](docs/controls.md#world-flow).
 
-The original direct scene color/antialiasing path stays intact. A tiny cropped
-camera uses the same world transform and actual visible materials/depth,
-including carved terrain, clouds, and solid objects. GPU disk reduction/history
-gives fractional exposure; fully blocked disks extinguish all glare. Transparent
-guides/glows/trails remain non-solid. Occlusion Off skips/releases query/history;
-glare Off releases all effect resources and restores the single scene draw.
-No world lighting, shadows, terrain, workers, physics, dependencies, services,
-or port assignments changed.
+`menuNavigation.ts` owns selected/hidden DOM tabs, roving focus, arrow/Home/End
+keys, and focus containment. `main.ts` retains runtime pause/resume and shortcut
+policy. The first pause in each loaded world opens Settings > Graphics; tab
+choices then last for the world session. I opens Inventory and closes it back
+to play, while actual text-entry controls keep their typing behavior. Escape
+closes release notes before resuming, and held-key repeats cannot peel through
+layers or oscillate pause/play. Inventory content, saved preferences, world
+storage, rendering, physics, dependencies, services, and port assignments keep
+their existing owners and behavior. Every preexisting pause control ID remains.
+New-world content/category scroll resets defer until the first visible pause;
+hidden menus have no layout box, so assigning scrollTop during load is ineffective.
 
-Full `validate` passes on the final runtime revision: all 352 engine robustness
-tests, typecheck, source hygiene (108 files), docs links (17 files), production
-build, and whitespace checks. The nine-test focused subset also passes,
-covering settings migration, multi-time projection/crop, render workload gates,
-state restoration/failure fallback, history invalidation, resize/context/disposal.
-Receipts: ignored `logs/sun-glare-validate.log` and
-`logs/sun-glare-focused-tests.log`. The renderer counters preserve the original
-main-scene baseline and accumulate supplemental work; fallback emits one bounded
-event through the existing local diagnostic collector.
+The final full `validate` passed all 358 engine robustness tests (352 existing
+plus six menu contracts), typecheck, source hygiene (109 files), documentation
+links (17 files), production build, and whitespace checks. The focused menu
+subset also passes. The exact final source passed on its first run, including
+the reviewed shortcut, focus-reveal, and visible-layout scroll-reset fixes.
+Ignored receipts are `logs/menu-overhaul-validate-final.log` and the earlier
+`logs/menu-overhaul-validate.log`. A prior menu gate reproduced the known
+fast-fall/Rapier failure and passed on one rerun; its original output is preserved
+in `logs/menu-overhaul-validate-rapier-fast-fall.log`. No physics change is implied.
 
-Two earlier validation attempts reproduced the known partial-height-rubble and
-fast-fall/Rapier WASM-borrow failures, retained in ignored
-`logs/sun-glare-validate-rapier-{failure,fast-fall}.log`. The passing final run
-does not resolve these [tracked intermittent physics failures](TODO.md#development-follow-up-ci-rigid-debris-validation).
+Live IAB review passed at 1280x720, 390x844, 844x390, and 390x390: no horizontal
+overflow, pinned header/footer, visible End/Home category focus, and no outer
+shell/page scroll. Release notes display player-facing v0.21.0 changes, contain
+Tab/Shift+Tab, close with Escape before the pause menu, and return trigger focus.
+Pause focus wraps between Resume and the footer. I works from sliders
+and respects text-entry/select controls. Inventory selection and Resume returned
+to play with actual IAB pointer lock. Exiting while Graphics was scrolled down,
+reloading the owned Sky Review world, and pausing restored Settings/Graphics
+with content and rail scroll both zero. Existing user maps were untouched.
+The final desktop capture is ignored
+`logs/visual-runs/2026-11-07-menu-overhaul/desktop-graphics-final.jpg`.
 
-Live browser checks in separate owned review worlds confirmed clear sun
-visibility 1, cloud/wall cover 0, partial wall-edge exposure about 0.451, off-axis
-and night gating, no-occlusion query release, and glare-Off resource release.
-The Graphics UI kept the disabled occlusion preference while strength was Off.
-Custom 125%/occlusion-Off persisted across reload; review preferences were then
-restored to Normal, 100%, occlusion On. The final runtime also passed the GPU
-partial-cover recheck and reported no browser errors. Captures and GPU/counter
-receipts are retained under ignored
-`logs/visual-runs/2026-11-07-sun-glare/`.
+Chrome was unavailable in the browser inventory, so a separate Chrome smoke
+was not performed. The Escape-repeat guard was source-reviewed; live held-key
+autorepeat could not be exercised through the available browser controls.
+Implementation, independent source review, and the available browser checks
+are complete. Git history and configured CI/deployment results remain the
+publication records.
 
-At one fixed IAB/NVIDIA view (1280x720, Normal-derived settings, pixel ratio 1.5),
-F3 recorded 9 draws with glare Off, 10 for simple glare, and 14 with occlusion.
-The latter reprocesses scene geometry; the small target only bounds pixel work.
-These are scene-specific workload checks, not a general frame-rate benchmark.
-The owned `Sky Review` tab was left above the clouds at frozen 17:31 with glare
-enabled; the occlusion wall is isolated in `Superflat Lab 4`. No existing user
-maps were edited.
-
-Implementation, source review, and visual verification are complete for normal
-`main` delivery. Git history and configured CI/deployment results remain the
-publication records. Existing local logger gaps remain tracked once in
+The prior sun-glare contracts and GPU receipts remain in
+[lighting and sky](docs/architecture.md#lighting-and-sky),
+[automation](docs/automation.md#codex-pilot-bridge), and ignored
+`logs/visual-runs/2026-11-07-sun-glare/`. Known intermittent fast-fall/Rapier and
+partial-height-rubble failures remain tracked in
+[TODO](TODO.md#development-follow-up-ci-rigid-debris-validation); a passing menu
+run does not resolve them. Existing local logger gaps remain tracked once in
 [TODO](TODO.md#development-follow-up-local-diagnostics).
-
-The existing start/pause Release Notes reader now uses the separate
-[player-facing changelog](PLAYER_CHANGELOG.md); keep it current for production
-releases. Typecheck, production build, documentation links, and a local browser
-check of the formatted start-menu notes passed for this change.

@@ -143,53 +143,71 @@
         </div>
       </div>
     </div>
-    <div id="pause-menu" class="is-hidden">
-      <div class="menu-panel">
-        <div class="menu-title-row">
-          <div class="menu-title">Voxel Sandbox Engine</div>
-          <button
-            class="app-version"
-            type="button"
-            data-app-version
-            aria-label="Open release notes"
-            aria-haspopup="dialog"
-            aria-controls="changelog-dialog"
-          ></button>
-        </div>
-        <div class="menu-actions">
-          <button id="resume-button" class="menu-button menu-main-action" type="button">Resume</button>
-          <button
-            id="inventory-button"
-            class="menu-button secondary"
-            type="button"
-            aria-expanded="false"
-            aria-controls="pause-inventory-panel"
-          >
-            Inventory
+    <div id="pause-menu" class="is-hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+      <div class="menu-panel pause-shell">
+        <header class="pause-header">
+          <div>
+            <div class="pause-eyebrow">
+              VOXEL SANDBOX ENGINE
+              <span>/ PAUSED</span>
+            </div>
+            <h1 id="pause-title">Make yourself at home.</h1>
+          </div>
+          <button id="resume-button" class="menu-button pause-resume" type="button">
+            Resume
+            <kbd>Esc</kbd>
           </button>
+        </header>
+        <div id="pause-tabs" class="pause-tabs" role="tablist" aria-label="Pause menu">
           <button
             id="settings-button"
-            class="menu-button secondary"
+            class="pause-tab is-active"
             type="button"
-            aria-expanded="false"
+            role="tab"
+            aria-selected="true"
             aria-controls="pause-settings-panel"
+            tabindex="0"
           >
             Settings
           </button>
           <button
-            id="builder-button"
-            class="menu-button secondary"
+            id="inventory-button"
+            class="pause-tab"
             type="button"
-            aria-expanded="false"
+            role="tab"
+            aria-selected="false"
+            aria-controls="pause-inventory-panel"
+            tabindex="-1"
+          >
+            Inventory
+            <kbd>I</kbd>
+          </button>
+          <button
+            id="builder-button"
+            class="pause-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
             aria-controls="pause-builder-panel"
+            tabindex="-1"
           >
             Builder
           </button>
-          <button id="nova-chat-button" class="menu-button secondary menu-main-action" type="button">
-            Nova Terminal
-          </button>
-          <div id="pause-settings-panel" class="settings-panel" aria-label="Engine settings" hidden>
-            <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+        </div>
+        <div class="pause-content">
+          <div
+            id="pause-settings-panel"
+            class="settings-panel pause-tab-panel"
+            role="tabpanel"
+            aria-labelledby="settings-button"
+          >
+            <div
+              id="settings-tabs"
+              class="settings-tabs settings-category-tabs"
+              role="tablist"
+              aria-label="Settings categories"
+              aria-orientation="vertical"
+            >
               <button
                 id="settings-tab-graphics"
                 class="settings-tab is-active"
@@ -197,8 +215,22 @@
                 role="tab"
                 aria-selected="true"
                 aria-controls="settings-graphics-panel"
+                tabindex="0"
               >
-                Graphics
+                <span>Graphics</span>
+                <small>Display &amp; lighting</small>
+              </button>
+              <button
+                id="settings-tab-world"
+                class="settings-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="settings-world-panel"
+                tabindex="-1"
+              >
+                <span>World &amp; Time</span>
+                <small>Sky &amp; day cycle</small>
               </button>
               <button
                 id="settings-tab-gameplay"
@@ -207,8 +239,34 @@
                 role="tab"
                 aria-selected="false"
                 aria-controls="settings-gameplay-panel"
+                tabindex="-1"
               >
-                Gameplay
+                <span>Tools &amp; HUD</span>
+                <small>Cores &amp; overlays</small>
+              </button>
+              <button
+                id="settings-tab-audio"
+                class="settings-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="settings-audio-panel"
+                tabindex="-1"
+              >
+                <span>Audio</span>
+                <small>Sound &amp; volume</small>
+              </button>
+              <button
+                id="settings-tab-physics"
+                class="settings-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="settings-physics-panel"
+                tabindex="-1"
+              >
+                <span>Physics</span>
+                <small>Debris &amp; cleanup</small>
               </button>
               <button
                 id="settings-tab-experimental"
@@ -217,502 +275,488 @@
                 role="tab"
                 aria-selected="false"
                 aria-controls="settings-experimental-panel"
+                tabindex="-1"
               >
-                Experimental
+                <span>Experimental</span>
+                <small>Debug &amp; stress tests</small>
               </button>
             </div>
-            <div
-              id="settings-graphics-panel"
-              class="settings-tab-panel"
-              role="tabpanel"
-              aria-labelledby="settings-tab-graphics"
-            >
-              <label class="settings-field" for="quality-select">
-                <span class="settings-label-row">
-                  <span class="settings-label">Quality Preset</span>
-                </span>
-                <select id="quality-select" class="menu-select" aria-label="Quality preset"></select>
-              </label>
-              <label class="settings-field" for="render-distance-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Fog Start Distance</span>
-                  <span id="render-distance-value" class="settings-value">6 clear chunks</span>
-                </span>
-                <input
-                  id="render-distance-slider"
-                  class="range-input"
-                  type="range"
-                  min="1"
-                  max="36"
-                  step="1"
-                  value="6"
-                />
-              </label>
-              <label class="settings-field" for="shadow-quality-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Shadow Quality</span>
-                  <span id="shadow-quality-value" class="settings-value">2048px</span>
-                </span>
-                <input
-                  id="shadow-quality-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="4"
-                  step="1"
-                  value="2"
-                />
-              </label>
-              <label class="settings-field" for="sun-glare-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Sun Glare</span>
-                  <span id="sun-glare-value" class="settings-value">100%</span>
-                </span>
-                <input id="sun-glare-slider" class="range-input" type="range" min="0" max="200" step="5" value="100" aria-describedby="sun-glare-hint" />
-                <span id="sun-glare-hint" class="settings-toggle-hint">Warm camera glow when looking toward the sun. Slide to zero to turn it off.</span>
-              </label>
-              <label class="settings-toggle" for="sun-glare-occlusion-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Glare Occlusion</span>
-                  <span id="sun-glare-occlusion-hint" class="settings-toggle-hint">Terrain, clouds, and solid objects block sun glare.</span>
-                </span>
-                <input id="sun-glare-occlusion-toggle" class="toggle-input" type="checkbox" checked aria-describedby="sun-glare-occlusion-hint" />
-              </label>
-              <label class="settings-field" for="block-light-min-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Minimum Light Level</span>
-                  <span id="block-light-min-value" class="settings-value">Level 1</span>
-                </span>
-                <input
-                  id="block-light-min-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="15"
-                  step="1"
-                  value="1"
-                />
-              </label>
-              <label class="settings-field" for="block-light-max-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Maximum Light Level</span>
-                  <span id="block-light-max-value" class="settings-value">Level 15</span>
-                </span>
-                <input
-                  id="block-light-max-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="15"
-                  step="1"
-                  value="15"
-                />
-              </label>
-              <label class="settings-toggle" for="cloud-shadows-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Cloud Shadows</span>
-                  <span id="cloud-shadows-hint" class="settings-toggle-hint">
-                    Moving daytime shade from clouds. Requires Shadow Quality above Off.
-                  </span>
-                </span>
-                <input id="cloud-shadows-toggle" class="toggle-input" type="checkbox" aria-describedby="cloud-shadows-hint" />
-              </label>
-              <label class="settings-toggle" for="debris-shadows-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Debris Shadows</span>
-                  <span class="settings-toggle-hint">
-                    Let loose fragments cast shadows. Very pretty, very expensive in break storms.
-                  </span>
-                </span>
-                <input id="debris-shadows-toggle" class="toggle-input" type="checkbox" />
-              </label>
-            </div>
-            <div
-              id="settings-gameplay-panel"
-              class="settings-tab-panel"
-              role="tabpanel"
-              aria-labelledby="settings-tab-gameplay"
-              hidden
-            >
-              <label class="settings-field" for="terraformer-size-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Terraformer Size</span>
-                  <span id="terraformer-size-value" class="settings-value">1 sub-cell</span>
-                </span>
-                <input
-                  id="terraformer-size-slider"
-                  class="range-input"
-                  type="range"
-                  min="1"
-                  max="4"
-                  step="1"
-                  value="1"
-                />
-              </label>
-              <label class="settings-toggle" for="day-night-cycle-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Day/Night Cycle</span>
-                  <span class="settings-toggle-hint">Advance world time while gameplay is active and visible</span>
-                </span>
-                <input
-                  id="day-night-cycle-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  checked
-                />
-              </label>
-              <label class="settings-field" for="time-of-day-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Time of Day</span>
-                  <span id="time-of-day-value" class="settings-value">10:05</span>
-                </span>
-                <input
-                  id="time-of-day-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="999"
-                  step="1"
-                  value="420"
-                />
-              </label>
-              <label class="settings-field" for="core-size-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Core Size</span>
-                  <span id="core-size-value" class="settings-value">30%</span>
-                </span>
-                <input
-                  id="core-size-slider"
-                  class="range-input"
-                  type="range"
-                  min="10"
-                  max="120"
-                  step="5"
-                  value="30"
-                />
-              </label>
-              <label class="settings-field" for="core-velocity-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Core Velocity</span>
-                  <span id="core-velocity-value" class="settings-value">140%</span>
-                </span>
-                <input
-                  id="core-velocity-slider"
-                  class="range-input"
-                  type="range"
-                  min="60"
-                  max="500"
-                  step="5"
-                  value="140"
-                />
-              </label>
-              <label class="settings-field" for="core-bounce-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Core Bounces</span>
-                  <span id="core-bounce-value" class="settings-value">1 bounce</span>
-                </span>
-                <input
-                  id="core-bounce-slider"
-                  class="range-input"
-                  type="range"
-                  min="1"
-                  max="12"
-                  step="1"
-                  value="1"
-                />
-              </label>
-              <label class="settings-field" for="core-color-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Core Color</span>
-                  <span id="core-color-value" class="settings-value">350°</span>
-                </span>
-                <input
-                  id="core-color-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="360"
-                  step="5"
-                  value="350"
-                />
-              </label>
-              <label class="settings-toggle" for="core-trail-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Core Trail</span>
-                  <span class="settings-toggle-hint">Leave a short colored streak behind thrown Physics Cores</span>
-                </span>
-                <input
-                  id="core-trail-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  checked
-                />
-              </label>
-              <label class="settings-toggle" for="core-aim-preview-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Core Aim Preview</span>
-                  <span class="settings-toggle-hint">Show projectile arcs or hitscan beams, impact spots, and predicted bite cells</span>
-                </span>
-                <input
-                  id="core-aim-preview-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                />
-              </label>
-              <label class="settings-toggle" for="health-bars-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Health Bars</span>
-                  <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
-                </span>
-                <input
-                  id="health-bars-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  checked
-                />
-              </label>
-              <label class="settings-toggle" for="control-hints-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Control Hints</span>
-                  <span class="settings-toggle-hint">Show the left-side quick controls while playing</span>
-                </span>
-                <input
-                  id="control-hints-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                />
-              </label>
-              <label class="settings-toggle" for="sound-enabled-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Sound</span>
-                  <span class="settings-toggle-hint">Enable procedural engine audio after the first click or key press</span>
-                </span>
-                <input
-                  id="sound-enabled-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  checked
-                />
-              </label>
-              <label class="settings-field" for="master-volume-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Master Volume</span>
-                  <span id="master-volume-value" class="settings-value">80%</span>
-                </span>
-                <input
-                  id="master-volume-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value="80"
-                />
-              </label>
-              <label class="settings-field" for="sfx-volume-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">SFX Volume</span>
-                  <span id="sfx-volume-value" class="settings-value">100%</span>
-                </span>
-                <input
-                  id="sfx-volume-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value="100"
-                />
-              </label>
-              <label class="settings-field" for="ui-volume-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">UI Volume</span>
-                  <span id="ui-volume-value" class="settings-value">90%</span>
-                </span>
-                <input
-                  id="ui-volume-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value="90"
-                />
-              </label>
-              <button
-                id="despawn-objects-button"
-                class="menu-button secondary settings-utility-button"
-                type="button"
+            <div class="settings-content">
+              <section
+                id="settings-graphics-panel"
+                class="settings-tab-panel"
+                role="tabpanel"
+                aria-labelledby="settings-tab-graphics"
+                tabindex="0"
               >
-                Despawn All Objects
-              </button>
-            </div>
-            <div
-              id="settings-experimental-panel"
-              class="settings-tab-panel"
-              role="tabpanel"
-              aria-labelledby="settings-tab-experimental"
-              hidden
-            >
-              <div class="experimental-warning" role="note">
-                <span class="experimental-warning-title">Experimental Settings</span>
-                <span class="experimental-warning-copy">
-                  These controls can absolutely body your framerate. If your computer spontaneously combusts, that's on you.
-                </span>
-              </div>
-              <label class="settings-toggle" for="cloud-shadow-guides-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Cloud Shadow Guides</span>
-                  <span id="cloud-shadow-guides-hint" class="settings-toggle-hint">
-                    Match nearby cloud banks to sampled terrain contacts by color and sun-ray guides.
-                    Requires daytime, Cloud Shadows, and Shadow Quality above Off. Debug only; defaults off.
-                  </span>
-                </span>
-                <input
-                  id="cloud-shadow-guides-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  aria-describedby="cloud-shadow-guides-hint"
-                />
-              </label>
-              <label class="settings-field" for="cycle-length-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Cycle Length</span>
-                  <span id="cycle-length-value" class="settings-value">20 min</span>
-                </span>
-                <span class="settings-field-hint">
-                  Full midnight-to-midnight duration for the procedural sky.
-                </span>
-                <input
-                  id="cycle-length-slider"
-                  class="range-input"
-                  type="range"
-                  min="5"
-                  max="60"
-                  step="1"
-                  value="20"
-                />
-              </label>
-              <div class="budget-control" aria-labelledby="physics-budget-label">
-                <div class="budget-copy">
-                  <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
-                  <span id="physics-budget-value" class="budget-value">192 bodies</span>
+                <div class="workspace-heading">
+                  <h2>Graphics</h2>
+                  <p>Tune the view, from the horizon to the light.</p>
                 </div>
-                <div class="stepper-controls" aria-label="Physics object budget controls">
-                  <button
-                    id="physics-budget-decrease"
-                    class="stepper-button"
-                    type="button"
-                    aria-label="Decrease physics object budget"
-                  >
-                    -
-                  </button>
-                  <button
-                    id="physics-budget-increase"
-                    class="stepper-button"
-                    type="button"
-                    aria-label="Increase physics object budget"
-                  >
-                    +
-                  </button>
-                </div>
-                <input
-                  id="physics-budget-slider"
-                  class="range-input budget-slider"
-                  type="range"
-                  min="32"
-                  max="4096"
-                  step="16"
-                  value="192"
-                  aria-label="Physics object budget"
-                />
-              </div>
-              <label class="settings-field" for="debris-count-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Break Burst Shards</span>
-                  <span id="debris-count-value" class="settings-value">108 max shards/block</span>
-                </span>
-                <span class="settings-field-hint">
-                  Per-break spawn ceiling. Higher values make each destroyed block spray denser, smaller pieces.
-                </span>
-                <input
-                  id="debris-count-slider"
-                  class="range-input"
-                  type="range"
-                  min="1"
-                  max="27"
-                  step="1"
-                  value="7"
-                />
-              </label>
-              <label class="settings-field" for="ground-debris-budget-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Active Ground Debris Cap</span>
-                  <span id="ground-debris-budget-value" class="settings-value">128 shards</span>
-                </span>
-                <span class="settings-field-hint">
-                  Post-impact CPU cap for loose shards that stay active after the burst exists.
-                </span>
-                <input
-                  id="ground-debris-budget-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="768"
-                  step="16"
-                  value="128"
-                />
-              </label>
-              <label class="settings-field" for="ground-debris-lifetime-slider">
-                <span class="settings-label-row">
-                  <span class="settings-label">Ground Debris Lifetime</span>
-                  <span id="ground-debris-lifetime-value" class="settings-value">12s</span>
-                </span>
-                <input
-                  id="ground-debris-lifetime-slider"
-                  class="range-input"
-                  type="range"
-                  min="0"
-                  max="60"
-                  step="1"
-                  value="12"
-                />
-              </label>
-              <label class="settings-toggle" for="ground-debris-lifetime-forever-toggle">
-                <span class="settings-toggle-copy">
-                  <span class="settings-toggle-title">Keep Ground Debris Forever</span>
-                  <span class="settings-toggle-hint">Disable the grounded-shard cleanup timer</span>
-                </span>
-                <input
-                  id="ground-debris-lifetime-forever-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                />
-              </label>
-              <label
-                id="super-ultra-toggle-row"
-                class="danger-toggle"
-                for="super-ultra-toggle"
-                aria-hidden="true"
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Display</h3>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="quality-select">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Quality Preset</span>
+                      </span>
+                      <select id="quality-select" class="menu-select" aria-label="Quality preset"></select>
+                    </label>
+                    <label class="settings-field" for="render-distance-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Fog Start Distance</span>
+                        <span id="render-distance-value" class="settings-value">6 clear chunks</span>
+                      </span>
+                      <input id="render-distance-slider" class="range-input" type="range" min="1" max="36" step="1" value="6" />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Sun &amp; shadows</h3>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="shadow-quality-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Shadow Quality</span>
+                        <span id="shadow-quality-value" class="settings-value">2048px</span>
+                      </span>
+                      <input id="shadow-quality-slider" class="range-input" type="range" min="0" max="4" step="1" value="2" />
+                    </label>
+                    <label class="settings-field" for="sun-glare-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Sun Glare</span>
+                        <span id="sun-glare-value" class="settings-value">100%</span>
+                      </span>
+                      <input
+                        id="sun-glare-slider"
+                        class="range-input"
+                        type="range"
+                        min="0"
+                        max="200"
+                        step="5"
+                        value="100"
+                        aria-describedby="sun-glare-hint"
+                      />
+                      <span id="sun-glare-hint" class="settings-toggle-hint">
+                        Warm camera glow when looking toward the sun. Slide to zero to turn it off.
+                      </span>
+                    </label>
+                    <label class="settings-toggle" for="sun-glare-occlusion-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Glare Occlusion</span>
+                        <span id="sun-glare-occlusion-hint" class="settings-toggle-hint">
+                          Terrain, clouds, and solid objects block sun glare.
+                        </span>
+                      </span>
+                      <input
+                        id="sun-glare-occlusion-toggle"
+                        class="toggle-input"
+                        type="checkbox"
+                        checked
+                        aria-describedby="sun-glare-occlusion-hint"
+                      />
+                    </label>
+                    <label class="settings-toggle" for="cloud-shadows-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Cloud Shadows</span>
+                        <span id="cloud-shadows-hint" class="settings-toggle-hint">
+                          Moving daytime shade from clouds. Requires Shadow Quality above Off.
+                        </span>
+                      </span>
+                      <input id="cloud-shadows-toggle" class="toggle-input" type="checkbox" aria-describedby="cloud-shadows-hint" />
+                    </label>
+                    <label class="settings-toggle" for="debris-shadows-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Debris Shadows</span>
+                        <span class="settings-toggle-hint">
+                          Let loose fragments cast shadows. Very pretty, very expensive in break storms.
+                        </span>
+                      </span>
+                      <input id="debris-shadows-toggle" class="toggle-input" type="checkbox" />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Block light</h3>
+                  <p class="settings-section-copy">Clamp the visible light range without changing Lamp light in the world.</p>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="block-light-min-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Minimum Light Level</span>
+                        <span id="block-light-min-value" class="settings-value">Level 1</span>
+                      </span>
+                      <input id="block-light-min-slider" class="range-input" type="range" min="0" max="15" step="1" value="1" />
+                    </label>
+                    <label class="settings-field" for="block-light-max-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Maximum Light Level</span>
+                        <span id="block-light-max-value" class="settings-value">Level 15</span>
+                      </span>
+                      <input id="block-light-max-slider" class="range-input" type="range" min="0" max="15" step="1" value="15" />
+                    </label>
+                  </div>
+                </section>
+              </section>
+              <section
+                id="settings-world-panel"
+                class="settings-tab-panel"
+                role="tabpanel"
+                aria-labelledby="settings-tab-world"
+                tabindex="0"
                 hidden
               >
-                <span class="danger-copy">
-                  <span class="danger-title">Allow Super Ultra Mode</span>
-                  <span id="super-ultra-warning" class="danger-warning">
-                    Unlocks the 12x distance preset. Might turn your computer into a toaster.
+                <div class="workspace-heading">
+                  <h2>World &amp; Time</h2>
+                  <p>Set the mood. The clock is saved separately for each world.</p>
+                </div>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">World clock</h3>
+                  <div class="settings-fields">
+                    <label class="settings-toggle" for="day-night-cycle-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Day/Night Cycle</span>
+                        <span class="settings-toggle-hint">Advance world time while gameplay is active and visible</span>
+                      </span>
+                      <input id="day-night-cycle-toggle" class="toggle-input" type="checkbox" checked />
+                    </label>
+                    <label class="settings-field" for="time-of-day-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Time of Day</span>
+                        <span id="time-of-day-value" class="settings-value">10:05</span>
+                      </span>
+                      <input id="time-of-day-slider" class="range-input" type="range" min="0" max="999" step="1" value="420" />
+                    </label>
+                    <label class="settings-field" for="cycle-length-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Cycle Length</span>
+                        <span id="cycle-length-value" class="settings-value">20 min</span>
+                      </span>
+                      <span class="settings-field-hint">Full midnight-to-midnight duration for the procedural sky.</span>
+                      <input id="cycle-length-slider" class="range-input" type="range" min="5" max="60" step="1" value="20" />
+                    </label>
+                  </div>
+                </section>
+              </section>
+              <section
+                id="settings-gameplay-panel"
+                class="settings-tab-panel"
+                role="tabpanel"
+                aria-labelledby="settings-tab-gameplay"
+                tabindex="0"
+                hidden
+              >
+                <div class="workspace-heading">
+                  <h2>Tools &amp; HUD</h2>
+                  <p>Shape your tools and choose what stays on screen.</p>
+                </div>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Terraformer</h3>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="terraformer-size-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Terraformer Size</span>
+                        <span id="terraformer-size-value" class="settings-value">1 sub-cell</span>
+                      </span>
+                      <input id="terraformer-size-slider" class="range-input" type="range" min="1" max="4" step="1" value="1" />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Physics &amp; hitscan cores</h3>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="core-size-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Core Size</span>
+                        <span id="core-size-value" class="settings-value">30%</span>
+                      </span>
+                      <input id="core-size-slider" class="range-input" type="range" min="10" max="120" step="5" value="30" />
+                    </label>
+                    <label class="settings-field" for="core-velocity-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Core Velocity</span>
+                        <span id="core-velocity-value" class="settings-value">140%</span>
+                      </span>
+                      <input id="core-velocity-slider" class="range-input" type="range" min="60" max="500" step="5" value="140" />
+                    </label>
+                    <label class="settings-field" for="core-bounce-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Core Bounces</span>
+                        <span id="core-bounce-value" class="settings-value">1 bounce</span>
+                      </span>
+                      <input id="core-bounce-slider" class="range-input" type="range" min="1" max="12" step="1" value="1" />
+                    </label>
+                    <label class="settings-field" for="core-color-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Core Color</span>
+                        <span id="core-color-value" class="settings-value">350°</span>
+                      </span>
+                      <input id="core-color-slider" class="range-input" type="range" min="0" max="360" step="5" value="350" />
+                    </label>
+                    <label class="settings-toggle" for="core-trail-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Core Trail</span>
+                        <span class="settings-toggle-hint">Leave a short colored streak behind thrown Physics Cores</span>
+                      </span>
+                      <input id="core-trail-toggle" class="toggle-input" type="checkbox" checked />
+                    </label>
+                    <label class="settings-toggle" for="core-aim-preview-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Core Aim Preview</span>
+                        <span class="settings-toggle-hint">
+                          Show projectile arcs or hitscan beams, impact spots, and predicted bite cells
+                        </span>
+                      </span>
+                      <input id="core-aim-preview-toggle" class="toggle-input" type="checkbox" />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Heads-up display</h3>
+                  <div class="settings-fields">
+                    <label class="settings-toggle" for="health-bars-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Health Bars</span>
+                        <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
+                      </span>
+                      <input id="health-bars-toggle" class="toggle-input" type="checkbox" checked />
+                    </label>
+                    <label class="settings-toggle" for="control-hints-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Control Hints</span>
+                        <span class="settings-toggle-hint">Show the left-side quick controls while playing</span>
+                      </span>
+                      <input id="control-hints-toggle" class="toggle-input" type="checkbox" />
+                    </label>
+                  </div>
+                </section>
+              </section>
+              <section
+                id="settings-audio-panel"
+                class="settings-tab-panel"
+                role="tabpanel"
+                aria-labelledby="settings-tab-audio"
+                tabindex="0"
+                hidden
+              >
+                <div class="workspace-heading">
+                  <h2>Audio</h2>
+                  <p>Procedural sound for movement, tools, and the world.</p>
+                </div>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Sound</h3>
+                  <div class="settings-fields">
+                    <label class="settings-toggle" for="sound-enabled-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Sound</span>
+                        <span class="settings-toggle-hint">Enable procedural engine audio after the first click or key press</span>
+                      </span>
+                      <input id="sound-enabled-toggle" class="toggle-input" type="checkbox" checked />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Volume</h3>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="master-volume-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Master Volume</span>
+                        <span id="master-volume-value" class="settings-value">80%</span>
+                      </span>
+                      <input id="master-volume-slider" class="range-input" type="range" min="0" max="100" step="1" value="80" />
+                    </label>
+                    <label class="settings-field" for="sfx-volume-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">SFX Volume</span>
+                        <span id="sfx-volume-value" class="settings-value">100%</span>
+                      </span>
+                      <input id="sfx-volume-slider" class="range-input" type="range" min="0" max="100" step="1" value="100" />
+                    </label>
+                    <label class="settings-field" for="ui-volume-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">UI Volume</span>
+                        <span id="ui-volume-value" class="settings-value">90%</span>
+                      </span>
+                      <input id="ui-volume-slider" class="range-input" type="range" min="0" max="100" step="1" value="90" />
+                    </label>
+                  </div>
+                </section>
+              </section>
+              <section
+                id="settings-physics-panel"
+                class="settings-tab-panel"
+                role="tabpanel"
+                aria-labelledby="settings-tab-physics"
+                tabindex="0"
+                hidden
+              >
+                <div class="workspace-heading">
+                  <h2>Physics</h2>
+                  <p>Control the amount of active debris and how long it stays.</p>
+                </div>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Simulation budget</h3>
+                  <p class="settings-section-copy">Higher limits can cost more CPU time in a busy scene.</p>
+                  <div class="budget-control" aria-labelledby="physics-budget-label">
+                    <div class="budget-copy">
+                      <span id="physics-budget-label" class="budget-title">Physics Object Budget</span>
+                      <span id="physics-budget-value" class="budget-value">192 bodies</span>
+                    </div>
+                    <div class="stepper-controls" aria-label="Physics object budget controls">
+                      <button
+                        id="physics-budget-decrease"
+                        class="stepper-button"
+                        type="button"
+                        aria-label="Decrease physics object budget"
+                      >
+                        -
+                      </button>
+                      <button
+                        id="physics-budget-increase"
+                        class="stepper-button"
+                        type="button"
+                        aria-label="Increase physics object budget"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <input
+                      id="physics-budget-slider"
+                      class="range-input budget-slider"
+                      type="range"
+                      min="32"
+                      max="4096"
+                      step="16"
+                      value="192"
+                      aria-label="Physics object budget"
+                    />
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Destruction &amp; cleanup</h3>
+                  <div class="settings-fields">
+                    <label class="settings-field" for="debris-count-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Break Burst Shards</span>
+                        <span id="debris-count-value" class="settings-value">108 max shards/block</span>
+                      </span>
+                      <span class="settings-field-hint">
+                        Per-break spawn ceiling. Higher values make each destroyed block spray denser, smaller pieces.
+                      </span>
+                      <input id="debris-count-slider" class="range-input" type="range" min="1" max="27" step="1" value="7" />
+                    </label>
+                    <label class="settings-field" for="ground-debris-budget-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Active Ground Debris Cap</span>
+                        <span id="ground-debris-budget-value" class="settings-value">128 shards</span>
+                      </span>
+                      <span class="settings-field-hint">Post-impact CPU cap for loose shards that stay active after the burst exists.</span>
+                      <input id="ground-debris-budget-slider" class="range-input" type="range" min="0" max="768" step="16" value="128" />
+                    </label>
+                    <label class="settings-field" for="ground-debris-lifetime-slider">
+                      <span class="settings-label-row">
+                        <span class="settings-label">Ground Debris Lifetime</span>
+                        <span id="ground-debris-lifetime-value" class="settings-value">12s</span>
+                      </span>
+                      <input id="ground-debris-lifetime-slider" class="range-input" type="range" min="0" max="60" step="1" value="12" />
+                    </label>
+                    <label class="settings-toggle" for="ground-debris-lifetime-forever-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Keep Ground Debris Forever</span>
+                        <span class="settings-toggle-hint">Disable the grounded-shard cleanup timer</span>
+                      </span>
+                      <input id="ground-debris-lifetime-forever-toggle" class="toggle-input" type="checkbox" />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section settings-cleanup">
+                  <h3 class="settings-section-title">Clear the scene</h3>
+                  <p class="settings-section-copy">Remove all thrown cores, loose debris, and rubble cover.</p>
+                  <button
+                    id="despawn-objects-button"
+                    class="menu-button secondary settings-utility-button"
+                    type="button"
+                  >
+                    Despawn All Objects
+                  </button>
+                </section>
+              </section>
+              <section
+                id="settings-experimental-panel"
+                class="settings-tab-panel"
+                role="tabpanel"
+                aria-labelledby="settings-tab-experimental"
+                tabindex="0"
+                hidden
+              >
+                <div class="workspace-heading">
+                  <h2>Experimental</h2>
+                  <p>Optional diagnostics and the settings with sharp edges.</p>
+                </div>
+                <div class="experimental-warning" role="note">
+                  <span class="experimental-warning-title">Here be frame drops</span>
+                  <span class="experimental-warning-copy">
+                    Debug views and stress-test quality can be expensive. Keep an eye on F3 when experimenting.
                   </span>
-                </span>
-                <input
-                  id="super-ultra-toggle"
-                  class="toggle-input"
-                  type="checkbox"
-                  aria-describedby="super-ultra-warning"
-                />
-              </label>
+                </div>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Visual diagnostics</h3>
+                  <div class="settings-fields">
+                    <label class="settings-toggle" for="cloud-shadow-guides-toggle">
+                      <span class="settings-toggle-copy">
+                        <span class="settings-toggle-title">Cloud Shadow Guides</span>
+                        <span id="cloud-shadow-guides-hint" class="settings-toggle-hint">
+                          Match nearby cloud banks to sampled terrain contacts by color and sun-ray guides. Requires daytime, Cloud Shadows, and Shadow Quality above Off. Debug only; defaults off.
+                        </span>
+                      </span>
+                      <input
+                        id="cloud-shadow-guides-toggle"
+                        class="toggle-input"
+                        type="checkbox"
+                        aria-describedby="cloud-shadow-guides-hint"
+                      />
+                    </label>
+                  </div>
+                </section>
+                <section class="settings-section">
+                  <h3 class="settings-section-title">Stress-test quality</h3>
+                  <p class="settings-section-copy">Select the Ultra graphics preset to unlock the Super Ultra opt-in.</p>
+                  <div class="settings-fields">
+                    <label
+                      id="super-ultra-toggle-row"
+                      class="danger-toggle"
+                      for="super-ultra-toggle"
+                      aria-hidden="true"
+                      hidden
+                    >
+                      <span class="danger-copy">
+                        <span class="danger-title">Allow Super Ultra Mode</span>
+                        <span id="super-ultra-warning" class="danger-warning">
+                          Unlocks the 12x distance preset. Might turn your computer into a toaster.
+                        </span>
+                      </span>
+                      <input id="super-ultra-toggle" class="toggle-input" type="checkbox" aria-describedby="super-ultra-warning" />
+                    </label>
+                  </div>
+                </section>
+              </section>
             </div>
           </div>
-          <div id="pause-inventory-panel" class="inventory-panel" aria-label="Inventory" hidden>
-            <div class="settings-tabs inventory-tabs" role="tablist" aria-label="Inventory catalog categories">
+          <div
+            id="pause-inventory-panel"
+            class="inventory-panel pause-tab-panel"
+            role="tabpanel"
+            aria-labelledby="inventory-button"
+            hidden
+          >
+            <div class="workspace-heading">
+              <h2>Inventory</h2>
+              <p>Pick an unlimited creative item to equip it and return to the world.</p>
+            </div>
+            <div
+              id="inventory-tabs"
+              class="settings-tabs inventory-tabs"
+              role="tablist"
+              aria-label="Inventory catalog categories"
+            >
               <button
                 id="inventory-tab-items"
                 class="settings-tab is-active"
@@ -720,6 +764,7 @@
                 role="tab"
                 aria-selected="true"
                 aria-controls="inventory-items-panel"
+                tabindex="0"
               >
                 Items
               </button>
@@ -730,6 +775,7 @@
                 role="tab"
                 aria-selected="false"
                 aria-controls="inventory-blocks-panel"
+                tabindex="-1"
               >
                 Blocks
               </button>
@@ -737,18 +783,16 @@
             <div
               id="inventory-items-panel"
               class="inventory-tab-panel"
+              tabindex="0"
               role="tabpanel"
               aria-labelledby="inventory-tab-items"
             >
-              <div
-                id="inventory-item-list"
-                class="inventory-item-grid"
-                aria-label="Creative item catalog"
-              ></div>
+              <div id="inventory-item-list" class="inventory-item-grid" aria-label="Creative item catalog"></div>
             </div>
             <div
               id="inventory-blocks-panel"
               class="inventory-tab-panel"
+              tabindex="0"
               role="tabpanel"
               aria-labelledby="inventory-tab-blocks"
               hidden
@@ -760,54 +804,71 @@
                 <span id="inventory-backpack-title" class="inventory-backpack-title">Backpack</span>
                 <span id="inventory-backpack-status" class="inventory-backpack-status">Empty | 18 slots</span>
               </div>
-              <div
-                id="inventory-backpack-grid"
-                class="inventory-backpack-grid"
-                role="list"
-                aria-label="Backpack slots"
-              ></div>
+              <p class="settings-section-copy">Your saved finite supplies. Creative catalog items do not use Backpack slots.</p>
+              <div id="inventory-backpack-grid" class="inventory-backpack-grid" role="list" aria-label="Backpack slots"></div>
             </section>
           </div>
-          <div id="pause-builder-panel" class="builder-panel" aria-label="Builder tools" hidden>
-            <div class="builder-status-row">
-              <button id="builder-mode-toggle-button" class="menu-button secondary" type="button">
-                Blocks
-              </button>
-              <div class="builder-selected-block">
-                <span class="builder-selected-label">Block</span>
-                <span id="builder-selected-block-value" class="builder-selected-value">Grass</span>
+          <div
+            id="pause-builder-panel"
+            class="builder-panel pause-tab-panel"
+            role="tabpanel"
+            aria-labelledby="builder-button"
+            hidden
+          >
+            <div class="workspace-heading">
+              <h2>Builder</h2>
+              <p>Build at the current target or drop in a quick test fixture.</p>
+            </div>
+            <section class="settings-section">
+              <h3 class="settings-section-title">Material &amp; brush</h3>
+              <div class="builder-status-row">
+                <button id="builder-mode-toggle-button" class="menu-button secondary" type="button">Blocks</button>
+                <div class="builder-selected-block">
+                  <span class="builder-selected-label">Block</span>
+                  <span id="builder-selected-block-value" class="builder-selected-value">Grass</span>
+                </div>
               </div>
-            </div>
-            <div class="builder-inventory-hint">Choose block material from Inventory > Blocks.</div>
-            <div id="builder-block-palette" class="builder-block-palette" aria-label="Block palette" hidden></div>
-            <label class="settings-field" for="builder-brush-size-slider">
-              <span class="settings-label-row">
-                <span class="settings-label">Brush Size</span>
-                <span id="builder-brush-size-value" class="settings-value">1x1x1</span>
-              </span>
-              <input
-                id="builder-brush-size-slider"
-                class="range-input"
-                type="range"
-                min="1"
-                max="7"
-                step="2"
-                value="1"
-              />
-            </label>
-            <div class="builder-action-grid">
-              <button id="builder-place-brush-button" class="menu-button secondary" type="button">Place Brush</button>
-              <button id="builder-erase-brush-button" class="menu-button secondary" type="button">Erase Brush</button>
-              <button id="builder-spawn-target-button" class="menu-button secondary" type="button">Spawn Target</button>
-              <button id="builder-spawn-wall-button" class="menu-button secondary" type="button">Spawn Wall</button>
-              <button id="builder-spawn-platform-button" class="menu-button secondary" type="button">Spawn Platform</button>
-              <button id="builder-spawn-pillar-button" class="menu-button secondary" type="button">Spawn Pillar</button>
-            </div>
+              <div class="builder-inventory-hint">Choose block material from Inventory > Blocks.</div>
+              <div id="builder-block-palette" class="builder-block-palette" aria-label="Block palette" hidden></div>
+              <label class="settings-field" for="builder-brush-size-slider">
+                <span class="settings-label-row">
+                  <span class="settings-label">Brush Size</span>
+                  <span id="builder-brush-size-value" class="settings-value">1x1x1</span>
+                </span>
+                <input id="builder-brush-size-slider" class="range-input" type="range" min="1" max="7" step="2" value="1" />
+              </label>
+              <div class="builder-action-grid">
+                <button id="builder-place-brush-button" class="menu-button secondary" type="button">Place Brush</button>
+                <button id="builder-erase-brush-button" class="menu-button secondary" type="button">Erase Brush</button>
+              </div>
+            </section>
+            <section class="settings-section">
+              <h3 class="settings-section-title">Quick fixtures</h3>
+              <div class="builder-action-grid">
+                <button id="builder-spawn-target-button" class="menu-button secondary" type="button">Spawn Target</button>
+                <button id="builder-spawn-wall-button" class="menu-button secondary" type="button">Spawn Wall</button>
+                <button id="builder-spawn-platform-button" class="menu-button secondary" type="button">Spawn Platform</button>
+                <button id="builder-spawn-pillar-button" class="menu-button secondary" type="button">Spawn Pillar</button>
+              </div>
+            </section>
           </div>
-          <button id="home-button" class="menu-button danger menu-exit-button menu-main-action" type="button">
-            Exit to Home
-          </button>
         </div>
+        <footer class="pause-footer">
+          <div class="pause-footer-actions">
+            <button id="nova-chat-button" class="menu-button secondary" type="button">Nova Terminal</button>
+            <button id="home-button" class="menu-button secondary menu-exit-button" type="button">Exit to Home</button>
+          </div>
+          <button
+            class="app-version pause-release-notes"
+            type="button"
+            data-app-version
+            aria-label="Open release notes"
+            aria-haspopup="dialog"
+            aria-controls="changelog-dialog"
+          >
+
+          </button>
+        </footer>
       </div>
     </div>
     <div

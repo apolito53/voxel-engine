@@ -13,9 +13,19 @@ the root README.
 - Loading a world restores the last saved player feet position, look direction,
   world time of day, active inventory lane, and independent item/block
   selections.
-- `Resume` captures the mouse after pausing.
+- `Resume` returns to play and requests mouse capture after pausing.
 - `Exit to Home` returns to the world list. Switch worlds from the home screen,
   not the pause menu.
+- The pause workspace keeps `Settings`, `Inventory`, and `Builder` available
+  across the top, with `Resume`, `Nova Terminal`, `Exit to Home`, and the release
+  notes always reachable. Its content scrolls independently of the header.
+- The first pause in a world opens `Settings > Graphics`. The workspace remembers
+  your selected tab and settings category until you load another world.
+- `Esc` returns to play from the workspace. With release notes open, it closes
+  the notes first and returns keyboard focus to the version link.
+- Use `Tab` to move through controls. In a horizontal tab group, `Left`/`Right`
+  changes tabs; the settings category rail uses `Up`/`Down`. `Home`/`End` jumps
+  to the first/last tab. Selecting a new category starts its content at the top.
 
 ## Movement
 
@@ -35,14 +45,15 @@ the root README.
 - `Shift` sprints on the ground or uses the stronger flight speed boost. Active
   sprint/boost widens FOV and adds peripheral speed lines.
 - `F` toggles flight mode.
-- `Esc` pauses and releases the mouse.
-- `I` opens Inventory from gameplay; press it again to resume.
+- `Esc` pauses and releases the mouse; press it again in the workspace to resume.
+- `I` opens Inventory from gameplay or another pause tab; press it again to resume.
+  Typing in a menu input does not trigger this shortcut.
 
 ## HUD And Debug Keys
 
 - The bottom hotbar shows the selected lane and active item/block slot.
 - Quick controls are hidden by default. Enable `Control Hints` in
-  `Settings > Gameplay` to show the left-aligned hint stack.
+  `Settings > Tools & HUD` to show the left-aligned hint stack.
 - The debug overlay starts hidden on every page load.
 - `F3` toggles the grouped debug overlay. Its section menu can hide panels, and
   each visible panel can collapse in place. It shows Perf, Player, World,
@@ -136,7 +147,10 @@ Nova Terminal exposes matching admin commands:
 
 ## Settings
 
-Pause menu `Settings` is split into three tabs.
+Pause menu `Settings` has six categories. Desktop uses a category rail beside
+the settings; narrow screens wrap the categories above the controls. Related
+controls have short section headings, and independent setting cards share two
+columns where there is enough room.
 
 `Graphics` owns:
 
@@ -156,31 +170,42 @@ Pause menu `Settings` is split into three tabs.
   0..15 Lamp light field
 - Debris Shadows toggle for loose-fragment shadow casting
 
-`Gameplay` owns:
+`World & Time` owns the per-world clock:
+
+- Day/Night Cycle toggle
+- Time of Day slider
+- Cycle Length, which changes the default 20-minute day/night cycle from 5 to
+  60 minutes
+
+`Tools & HUD` owns:
 
 - Projectile core size
 - Projectile core velocity
 - Projectile core bounce count
 - Terraformer size
-- Day/Night Cycle toggle
-- Time of Day slider
 - Projectile/hitscan core color
 - Projectile core trail toggle
 - Core Aim Preview toggle
 - Health Bars toggle
+- Control Hints toggle
+
+`Audio` owns:
+
 - Sound toggle
 - Master/SFX/UI volume sliders
-- Despawn All Objects
 
-`Experimental` owns the controls most likely to create CPU/GPU stress:
+`Physics` owns the simulation and debris limits:
 
 - Physics Object Budget
 - Break Burst Shards, the per-block spawn ceiling for the initial destruction spray
 - Active Ground Debris Cap, the post-impact cap for loose shard bodies kept
   around after they touch support or sleep past the short burst grace
 - Ground Debris Lifetime
-- Cycle Length, which changes the default 20-minute day/night cycle from 5 to
-  60 minutes
+- Keep Ground Debris Forever, which disables the grounded-shard cleanup timer
+- Despawn All Objects, in a separate scene-cleanup section
+
+`Experimental` keeps opt-in diagnostics and stress-test quality together:
+
 - Allow Super Ultra Mode
 - Cloud Shadow Guides, an optional visual diagnostic for nearby cloud banks
 
@@ -202,12 +227,12 @@ unloaded paths and inactive global shadows, Cloud Shadows, low sun, or night. No
 draw or terrain queries run while the diagnostic is off.
 
 Quality slider or shadow-toggle edits switch the dropdown to `Custom` so built-in presets stay
-clean. `Gameplay > Health Bars` toggles block/rubble damage bars and clears any
-visible bars when turned off. `Gameplay > Sound` mutes or enables the procedural
+clean. `Tools & HUD > Health Bars` toggles block/rubble damage bars and clears any
+visible bars when turned off. `Audio > Sound` mutes or enables the procedural
 Web Audio layer, with separate master, SFX, and UI volume sliders persisted in
 local storage. Default audio levels favor audible terrain, movement, and UI
 feedback while keeping core launch sounds from dominating the mix. The
-`Gameplay > Despawn All Objects` button performs the drastic full cleanup:
+`Physics > Despawn All Objects` button performs the drastic full cleanup:
 physics cores, loose debris VFX, and any existing rubble cover.
 The fog start distance is the clear chunk radius. Far terrain hits a short,
 dense fog wall over the preset's falloff band, while the engine streams a hidden

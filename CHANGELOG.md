@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.21.0 - 2026-11-07
+
+### Changed
+
+- Replaced the narrow pause-menu submenu stack with a wider workspace and
+  persistent Settings, Inventory, and Builder tabs. Header/Resume and the
+  terminal, home, and release-notes footer stay visible while content scrolls.
+- Split settings into Graphics, World & Time, Tools & HUD, Audio, Physics, and
+  Experimental categories, with section headings and responsive setting cards.
+  Existing controls retain their IDs, preference owners, values, and bindings.
+- Grouped Builder brush actions and quick fixtures; clarified the unlimited
+  creative catalog and finite saved Backpack in Inventory.
+- Added roving keyboard tab focus, arrow/Home/End navigation, menu focus
+  containment, release-notes focus return, and Esc-to-resume. The Inventory
+  shortcut ignores editable menu controls, and only the true backdrop resumes
+  from a pointer click.
+
+### Validation
+
+- Added focused tab-state, keyboard, disabled-choice, disposal, and complete
+  setting-location/binding/accessibility contracts alongside the engine suite.
+
 ## 0.20.0 - 2026-11-07
 
 ### Added

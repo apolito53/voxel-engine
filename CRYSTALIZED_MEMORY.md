@@ -20,6 +20,10 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   explicit gameplay decision before introducing resource consumption. Persist
   stable item IDs and preserve older world saves. See
   [inventory and persistence](docs/architecture.md#items-inventory-and-persistence).
+- Menu navigation is presentation state, not saved world data. Keep tab/focus
+  behavior in `menuNavigation.ts`, pause/shortcut policy in `main.ts`, and
+  controls bound to their existing preference/inventory owners. See
+  [the pause workspace controls](docs/controls.md#world-flow).
 - Sky atmosphere, elevated clouds, and terrain visibility have independent
   distance roles. Clouds occupy fixed world elevation and use elapsed active
   play time for wind; saved clock edits only affect their lighting. Preserve

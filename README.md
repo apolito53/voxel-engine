@@ -83,7 +83,7 @@ ignored by git.
 
 ## Core Controls
 
-- `WASD` move, `Mouse` look, `Esc` pause/release mouse
+- `WASD` move, `Mouse` look, `Esc` pause/release mouse or resume from the menu
 - `I` opens or closes Inventory
 - `Space` jump/fly up, `C` crouch/fly down, `Shift` sprint or flight boost
 - Low damaged-terrain ledges step up automatically with a short vertical ease,
@@ -107,11 +107,12 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
-Gameplay settings include Terraformer size, Day/Night Cycle, Time of Day,
-Physics Core size, velocity, terrain-damaging bounce count, color, and trail
-controls, plus a first-pass procedural sound layer with Sound, Master Volume,
-SFX Volume, and UI Volume controls. Experimental settings include the Cycle
-Length slider for stretching or compressing the default 20-minute sky cycle.
+The pause workspace has persistent Settings, Inventory, and Builder tabs.
+Settings groups controls into Graphics, World & Time, Tools & HUD, Audio,
+Physics, and Experimental, with Resume always at the top. World & Time owns
+the day/night clock and cycle length; Tools & HUD holds Terraformer and core
+tuning; Audio holds Sound and Master/SFX/UI volume; Physics holds debris budgets
+and scene cleanup. Arrow keys and Home/End navigate the tab groups.
 `Experimental > Cloud Shadow Guides` matches nearby cloud edges, representative
 sun rays, and sampled terrain contacts by bank color. It defaults off; the
 on-screen legend distinguishes local samples, map fade/edge guides, and inactive
@@ -256,8 +257,8 @@ Backpack slot.
 
 The bottom hotbar shows only the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu `Inventory` panel selects items and
-blocks, while `Settings > Gameplay` can show or hide the quick-control hints and
-tune audio. Debug and control overlays start hidden by default.
+blocks. `Settings > Tools & HUD` can show or hide the quick-control hints, and
+`Settings > Audio` tunes sound. Debug and control overlays start hidden by default.
 
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).
