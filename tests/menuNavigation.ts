@@ -132,7 +132,7 @@ export const menuNavigationTests = [
     }
   },
   {
-    name: "pause menu keeps every setting in one labeled category and preserves control contracts",
+    name: "pause menu keeps settings and debug controls in their labeled panels",
     run: () => {
       const html = readFileSync("index.html", "utf8");
       const main = readFileSync("src/main.ts", "utf8");
@@ -141,15 +141,16 @@ export const menuNavigationTests = [
       const expected: Record<string, string[]> = {
         graphics: ["quality-select", "render-distance-slider", "shadow-quality-slider", "sun-glare-slider", "sun-glare-occlusion-toggle", "cloud-shadows-toggle", "debris-shadows-toggle", "block-light-min-slider", "block-light-max-slider"],
         world: ["day-night-cycle-toggle", "time-of-day-slider", "cycle-length-slider"],
-        gameplay: ["terraformer-size-slider", "core-size-slider", "core-velocity-slider", "core-bounce-slider", "core-color-slider", "core-trail-toggle", "core-aim-preview-toggle", "health-bars-toggle", "control-hints-toggle"],
+        gameplay: ["terraformer-size-slider", "core-size-slider", "core-velocity-slider", "core-bounce-slider", "core-color-slider", "core-trail-toggle", "control-hints-toggle"],
         audio: ["sound-enabled-toggle", "master-volume-slider", "sfx-volume-slider", "ui-volume-slider"],
         physics: ["physics-budget-decrease", "physics-budget-increase", "physics-budget-slider", "debris-count-slider", "ground-debris-budget-slider", "ground-debris-lifetime-slider", "ground-debris-lifetime-forever-toggle", "despawn-objects-button"],
-        experimental: ["cloud-shadow-guides-toggle", "super-ultra-toggle"]
+        experimental: ["super-ultra-toggle"]
       };
       const categories = Object.keys(expected);
       for (const [index, category] of categories.entries()) {
         const start = html.indexOf(`id="settings-${category}-panel"`);
         const end = index + 1 < categories.length ? html.indexOf(`id="settings-${categories[index + 1]}-panel"`) : html.indexOf('id="pause-inventory-panel"');
+        assert.ok(start >= 0 && end > start, `${category} panel has ordered boundaries`);
         const panel = html.slice(start, end);
         assert.match(panel, new RegExp(`aria-labelledby="settings-tab-${category}"`));
         for (const control of expected[category]) {
@@ -159,6 +160,39 @@ export const menuNavigationTests = [
           if (input) assert.equal(panel.includes(`for="${control}"`) || input.includes('aria-label="'), true, `${control} needs a label`);
         }
       }
+      const tabListStart = html.indexOf('id="pause-tabs"');
+      const tabListEnd = html.indexOf('<div class="pause-content">');
+      assert.ok(tabListStart >= 0 && tabListEnd > tabListStart, "primary tab list has ordered boundaries");
+      const tabList = html.slice(tabListStart, tabListEnd);
+      assert.deepEqual(
+        [...tabList.matchAll(/<button\s+id="([^"]+)"[\s\S]*?<\/button>/g)].map((match) => match[1]),
+        ["settings-button", "inventory-button", "builder-button", "debug-button"]
+      );
+      const debugTab = tabList.match(/<button\s+id="debug-button"[\s\S]*?<\/button>/)?.[0] ?? "";
+      assert.match(debugTab, /role="tab"/);
+      assert.match(debugTab, /aria-controls="pause-debug-panel"/);
+      assert.match(debugTab, /aria-selected="false"/);
+      assert.match(debugTab, /tabindex="-1"/);
+      const debugStart = html.indexOf('id="pause-debug-panel"');
+      const debugEnd = html.indexOf('<footer class="pause-footer">');
+      const settingsStart = html.indexOf('id="pause-settings-panel"');
+      const settingsEnd = html.indexOf('id="pause-inventory-panel"');
+      assert.ok(debugStart >= 0 && debugEnd > debugStart, "Debug panel has ordered boundaries");
+      assert.ok(settingsStart >= 0 && settingsEnd > settingsStart, "Settings panel has ordered boundaries");
+      const debug = html.slice(debugStart, debugEnd);
+      const settings = html.slice(settingsStart, settingsEnd);
+      const debugPanelTag = html.match(/<div\s+id="pause-debug-panel"[^>]*>/)?.[0] ?? "";
+      assert.match(debugPanelTag, /role="tabpanel"/);
+      assert.match(debugPanelTag, /aria-labelledby="debug-button"/);
+      assert.match(debugPanelTag, /\bhidden\b/);
+      for (const control of ["core-aim-preview-toggle", "health-bars-toggle", "cloud-shadow-guides-toggle"]) {
+        assert.equal(allIds.filter((id) => id === control).length, 1, `${control} occurs exactly once`);
+        assert.equal(debug.includes(`id="${control}"`), true, `${control} belongs in Debug`);
+        assert.equal(settings.includes(`id="${control}"`), false, `${control} is absent from Settings`);
+        assert.equal(debug.includes(`for="${control}"`), true, `${control} keeps its label`);
+        assert.equal(main.includes(`"#${control}"`), true, `${control} keeps its owning runtime binding`);
+      }
+      assert.match(debug, /Shortcut: F6\./);
       assert.equal((html.match(/data-app-version/g) ?? []).length, 2, "home and pause keep the release-notes entry point");
     }
   }

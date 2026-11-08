@@ -193,6 +193,17 @@
           >
             Builder
           </button>
+          <button
+            id="debug-button"
+            class="pause-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="pause-debug-panel"
+            tabindex="-1"
+          >
+            Debug
+          </button>
         </div>
         <div class="pause-content">
           <div
@@ -242,7 +253,7 @@
                 tabindex="-1"
               >
                 <span>Tools &amp; HUD</span>
-                <small>Cores &amp; overlays</small>
+                <small>Cores &amp; hints</small>
               </button>
               <button
                 id="settings-tab-audio"
@@ -278,7 +289,7 @@
                 tabindex="-1"
               >
                 <span>Experimental</span>
-                <small>Debug &amp; stress tests</small>
+                <small>Stress-test quality</small>
               </button>
             </div>
             <div class="settings-content">
@@ -498,27 +509,11 @@
                       </span>
                       <input id="core-trail-toggle" class="toggle-input" type="checkbox" checked />
                     </label>
-                    <label class="settings-toggle" for="core-aim-preview-toggle">
-                      <span class="settings-toggle-copy">
-                        <span class="settings-toggle-title">Core Aim Preview</span>
-                        <span class="settings-toggle-hint">
-                          Show projectile arcs or hitscan beams, impact spots, and predicted bite cells
-                        </span>
-                      </span>
-                      <input id="core-aim-preview-toggle" class="toggle-input" type="checkbox" />
-                    </label>
                   </div>
                 </section>
                 <section class="settings-section">
                   <h3 class="settings-section-title">Heads-up display</h3>
                   <div class="settings-fields">
-                    <label class="settings-toggle" for="health-bars-toggle">
-                      <span class="settings-toggle-copy">
-                        <span class="settings-toggle-title">Health Bars</span>
-                        <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
-                      </span>
-                      <input id="health-bars-toggle" class="toggle-input" type="checkbox" checked />
-                    </label>
                     <label class="settings-toggle" for="control-hints-toggle">
                       <span class="settings-toggle-copy">
                         <span class="settings-toggle-title">Control Hints</span>
@@ -689,33 +684,14 @@
               >
                 <div class="workspace-heading">
                   <h2>Experimental</h2>
-                  <p>Optional diagnostics and the settings with sharp edges.</p>
+                  <p>Opt in to quality settings with sharp edges.</p>
                 </div>
                 <div class="experimental-warning" role="note">
                   <span class="experimental-warning-title">Here be frame drops</span>
                   <span class="experimental-warning-copy">
-                    Debug views and stress-test quality can be expensive. Keep an eye on F3 when experimenting.
+                    Stress-test quality can be expensive. Keep an eye on F3 when experimenting.
                   </span>
                 </div>
-                <section class="settings-section">
-                  <h3 class="settings-section-title">Visual diagnostics</h3>
-                  <div class="settings-fields">
-                    <label class="settings-toggle" for="cloud-shadow-guides-toggle">
-                      <span class="settings-toggle-copy">
-                        <span class="settings-toggle-title">Cloud Shadow Guides</span>
-                        <span id="cloud-shadow-guides-hint" class="settings-toggle-hint">
-                          Match nearby cloud banks to sampled terrain contacts by color and sun-ray guides. Requires daytime, Cloud Shadows, and Shadow Quality above Off. Debug only; defaults off.
-                        </span>
-                      </span>
-                      <input
-                        id="cloud-shadow-guides-toggle"
-                        class="toggle-input"
-                        type="checkbox"
-                        aria-describedby="cloud-shadow-guides-hint"
-                      />
-                    </label>
-                  </div>
-                </section>
                 <section class="settings-section">
                   <h3 class="settings-section-title">Stress-test quality</h3>
                   <p class="settings-section-copy">Select the Ultra graphics preset to unlock the Super Ultra opt-in.</p>
@@ -849,6 +825,53 @@
                 <button id="builder-spawn-wall-button" class="menu-button secondary" type="button">Spawn Wall</button>
                 <button id="builder-spawn-platform-button" class="menu-button secondary" type="button">Spawn Platform</button>
                 <button id="builder-spawn-pillar-button" class="menu-button secondary" type="button">Spawn Pillar</button>
+              </div>
+            </section>
+          </div>
+          <div
+            id="pause-debug-panel"
+            class="debug-panel pause-tab-panel"
+            role="tabpanel"
+            aria-labelledby="debug-button"
+            hidden
+          >
+            <div class="workspace-heading">
+              <h2>Debug</h2>
+              <p>Visual guides for inspecting the world and your tools.</p>
+            </div>
+            <section class="settings-section">
+              <h3 class="settings-section-title">Visual diagnostics</h3>
+              <div class="settings-fields">
+                <label class="settings-toggle" for="core-aim-preview-toggle">
+                  <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Core Aim Preview</span>
+                    <span class="settings-toggle-hint">
+                      Show projectile arcs or hitscan beams, impact spots, and predicted bite cells. Shortcut: F6.
+                    </span>
+                  </span>
+                  <input id="core-aim-preview-toggle" class="toggle-input" type="checkbox" />
+                </label>
+                <label class="settings-toggle" for="health-bars-toggle">
+                  <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Health Bars</span>
+                    <span class="settings-toggle-hint">Show damage bars over blocks and rubble</span>
+                  </span>
+                  <input id="health-bars-toggle" class="toggle-input" type="checkbox" checked />
+                </label>
+                <label class="settings-toggle" for="cloud-shadow-guides-toggle">
+                  <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Cloud Shadow Guides</span>
+                    <span id="cloud-shadow-guides-hint" class="settings-toggle-hint">
+                      Match nearby cloud banks to sampled terrain contacts by color and sun-ray guides. Requires daytime, Cloud Shadows, and Shadow Quality above Off. Debug only; defaults off.
+                    </span>
+                  </span>
+                  <input
+                    id="cloud-shadow-guides-toggle"
+                    class="toggle-input"
+                    type="checkbox"
+                    aria-describedby="cloud-shadow-guides-hint"
+                  />
+                </label>
               </div>
             </section>
           </div>

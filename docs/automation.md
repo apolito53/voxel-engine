@@ -38,7 +38,7 @@ globalThis.__VOXEL_CODEX_PILOT__.sunGlare()
 ```
 
 `cloudShadowGuides(enabled?)` controls the same saved debug preference as
-`Settings > Experimental > Cloud Shadow Guides`. Its snapshot reports the
+`Debug > Cloud Shadow Guides`. Its snapshot reports the
 active/inactive reason, nearby/selected bank counts, colors, verified terrain
 contacts, unloaded paths, representative source/contact positions, shared solar
 and actual light-target directions, coverage, and minimum supported solar Y. Enabling

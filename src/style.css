@@ -275,7 +275,8 @@ body.playing canvas {
 }
 
 .pause-content > .inventory-panel,
-.pause-content > .builder-panel {
+.pause-content > .builder-panel,
+.pause-content > .debug-panel {
   box-sizing: border-box;
   gap: 18px;
   padding: 24px;
@@ -368,7 +369,8 @@ body.playing canvas {
   .pause-header h1 { font-size: 19px; }
   .pause-header .pause-resume { flex-basis: 92px; gap: 6px; }
   .pause-tabs { gap: 0; padding: 0 10px; }
-  .pause-tab { flex: 1; min-width: 0; padding-inline: 6px; font-size: 13px; }
+  .pause-tab { flex: 1; gap: 4px; min-width: 0; padding-inline: 3px; font-size: 12px; }
+  .pause-tab kbd { padding: 1px 3px; }
   .pause-content > .settings-panel { grid-template-columns: minmax(0, 1fr); background: none; }
   .settings-category-tabs.settings-tabs {
     position: static;
@@ -382,7 +384,8 @@ body.playing canvas {
   .settings-category-tabs .settings-tab { min-height: 44px; padding: 7px 10px; }
   .settings-content { padding: 18px 14px; }
   .pause-content > .inventory-panel,
-  .pause-content > .builder-panel { padding: 18px 14px; }
+  .pause-content > .builder-panel,
+  .pause-content > .debug-panel { padding: 18px 14px; }
   .pause-footer { padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
   .pause-footer-actions { gap: 6px; }
   .pause-footer .menu-button { padding-inline: 9px; font-size: 11px; }
@@ -552,7 +555,8 @@ body.playing canvas {
 
 .settings-panel,
 .builder-panel,
-.inventory-panel {
+.inventory-panel,
+.debug-panel {
   display: grid;
   gap: 10px;
 }
@@ -560,6 +564,7 @@ body.playing canvas {
 .settings-panel[hidden],
 .builder-panel[hidden],
 .inventory-panel[hidden],
+.debug-panel[hidden],
 .inventory-tab-panel[hidden] {
   display: none;
 }

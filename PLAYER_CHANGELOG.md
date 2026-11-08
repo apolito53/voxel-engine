@@ -1,5 +1,9 @@
 # Player release notes
 
+## 0.21.1 - 2026-11-07
+
+- The pause menu now has a Debug tab for Core Aim Preview, Health Bars, and Cloud Shadow Guides. F6 still toggles Core Aim Preview while playing.
+
 ## 0.21.0 - 2026-11-07
 
 - The pause menu has a roomier layout with Settings, Inventory, and Builder tabs. Resume stays within reach while you browse.

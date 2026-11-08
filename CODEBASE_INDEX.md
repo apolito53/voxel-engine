@@ -1,6 +1,6 @@
 # Codebase Index
 
-Last reviewed: 2026-11-07 for `v0.21.0`.
+Last reviewed: 2026-11-07 for `v0.21.1`.
 
 This file is the fast routing map. It answers where to begin, who owns a
 behavior, and which invariants are easy to break. Read
@@ -48,7 +48,7 @@ For project workflow, start with [AGENTS.md](AGENTS.md). Read the current
 | Sky, elevated clouds, day/night, fog | [src/skybox.ts](src/skybox.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/dayNightCycle.ts](src/dayNightCycle.ts), [src/horizonMatte.ts](src/horizonMatte.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Shared solar direction, sun/cloud shadows and shadow camera | [src/lighting.ts](src/lighting.ts) | [src/shadows.ts](src/shadows.ts), [src/cloudLayer.ts](src/cloudLayer.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
 | Camera sun glare, disk occlusion and optical composite | [src/sunGlare.ts](src/sunGlare.ts) | [src/qualitySettings.ts](src/qualitySettings.ts), [src/codexPilot.ts](src/codexPilot.ts), [docs/architecture.md](docs/architecture.md#lighting-and-sky) |
-| Cloud-bank shadow debug guides | [src/cloudShadowDebug.ts](src/cloudShadowDebug.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/codexPilot.ts](src/codexPilot.ts), [docs/controls.md](docs/controls.md#settings) |
+| Cloud-bank shadow debug guides | [src/cloudShadowDebug.ts](src/cloudShadowDebug.ts) | [src/cloudLayer.ts](src/cloudLayer.ts), [src/codexPilot.ts](src/codexPilot.ts), [docs/controls.md](docs/controls.md#debug) |
 | Partial terrain carving and geometry | [src/partialBlocks.ts](src/partialBlocks.ts) | [src/partialBlockMeshField.ts](src/partialBlockMeshField.ts), [src/partialBlockMeshWorker.ts](src/partialBlockMeshWorker.ts), [docs/destruction.md](docs/destruction.md) |
 | Player movement and partial collision | [src/player.ts](src/player.ts) | [src/collision.ts](src/collision.ts), [src/playerMovement.ts](src/playerMovement.ts), [docs/player-partial-collision-plan.md](docs/player-partial-collision-plan.md) |
 | Projectile cores, contacts, fragments | [src/physics.ts](src/physics.ts) | [src/physicsCoreLaunch.ts](src/physicsCoreLaunch.ts), [src/coreAimPreview.ts](src/coreAimPreview.ts), [src/hitscanCore.ts](src/hitscanCore.ts) |

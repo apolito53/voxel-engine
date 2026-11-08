@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.21.1 - 2026-11-07
+
+### Changed
+
+- Added a Debug pause tab for Core Aim Preview, Health Bars, and Cloud Shadow
+  Guides. Their existing preference bindings, defaults, and F6 shortcut remain.
+- Kept Control Hints and core tuning in Tools & HUD; Experimental now describes
+  its remaining Super Ultra stress-test quality setting.
+
+### Validation
+
+- Updated the pause-menu ownership contract to check each debug control occurs
+  once in Debug, stays out of Settings, and retains its label and runtime binding.
+
 ## 0.21.0 - 2026-11-07
 
 ### Changed

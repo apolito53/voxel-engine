@@ -107,16 +107,17 @@ ignored by git.
 - `N` toggles Nova Pilot; `B` asks Nova to throw a physics core
 - `X` despawns active physics cores
 
-The pause workspace has persistent Settings, Inventory, and Builder tabs.
+The pause workspace has persistent Settings, Inventory, Builder, and Debug tabs.
 Settings groups controls into Graphics, World & Time, Tools & HUD, Audio,
 Physics, and Experimental, with Resume always at the top. World & Time owns
 the day/night clock and cycle length; Tools & HUD holds Terraformer and core
 tuning; Audio holds Sound and Master/SFX/UI volume; Physics holds debris budgets
-and scene cleanup. Arrow keys and Home/End navigate the tab groups.
-`Experimental > Cloud Shadow Guides` matches nearby cloud edges, representative
+and scene cleanup. Debug holds Core Aim Preview, Health Bars, and Cloud Shadow
+Guides. Arrow keys and Home/End navigate the tab groups.
+`Debug > Cloud Shadow Guides` matches nearby cloud edges, representative
 sun rays, and sampled terrain contacts by bank color. It defaults off; the
 on-screen legend distinguishes local samples, map fade/edge guides, and inactive
-shadow/night settings. See [the settings guide](docs/controls.md#settings).
+shadow/night settings. See [the debug guide](docs/controls.md#debug).
 Audio defaults are intentionally forward in the mix so terrain, movement, and
 UI cues are audible without pushing the OS volume to nonsense territory.
 Browser audio unlocks after the first normal click or key press.
@@ -258,7 +259,7 @@ Backpack slot.
 The bottom hotbar shows only the active Items or Blocks lane plus the current
 semi/full-auto click mode. The pause-menu `Inventory` panel selects items and
 blocks. `Settings > Tools & HUD` can show or hide the quick-control hints, and
-`Settings > Audio` tunes sound. Debug and control overlays start hidden by default.
+`Settings > Audio` tunes sound. The F3 debug overlay and control hints start hidden by default.
 
 For the full control map, builder tools, settings tabs, and quality presets, see
 [docs/controls.md](docs/controls.md).

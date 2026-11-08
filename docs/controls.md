@@ -16,7 +16,7 @@ the root README.
 - `Resume` returns to play and requests mouse capture after pausing.
 - `Exit to Home` returns to the world list. Switch worlds from the home screen,
   not the pause menu.
-- The pause workspace keeps `Settings`, `Inventory`, and `Builder` available
+- The pause workspace keeps `Settings`, `Inventory`, `Builder`, and `Debug` available
   across the top, with `Resume`, `Nova Terminal`, `Exit to Home`, and the release
   notes always reachable. Its content scrolls independently of the header.
 - The first pause in a world opens `Settings > Graphics`. The workspace remembers
@@ -145,6 +145,32 @@ Nova Terminal exposes matching admin commands:
 - `spawn pillar [block] [height]`
 - `spawn platform [block] [size]`
 
+## Debug
+
+The pause menu's `Debug` tab holds visual diagnostics:
+
+- Core Aim Preview shows the predicted core path and impact; `F6` also toggles it.
+- Health Bars shows damage bars over blocks and rubble, and clears visible bars
+  when turned off.
+- Cloud Shadow Guides is an optional visual diagnostic for nearby cloud banks.
+
+`Debug > Cloud Shadow Guides` defaults off and saves separately from quality
+presets. Colored cloud edges, a representative live-sun ray, and matching
+colored terrain-contact crosses identify each nearby bank; labels and a legend
+name the banks. Amber marks where cloud shadow coverage begins to fade, and
+white marks the existing directional map's outer edge. Contact colors dim
+through that same fade region. Turning this debug view on does not enable Cloud
+Shadows or change graphics quality, wind, or shadow strength.
+
+These are **sampled guides**, not a display of individual shadow pixels. They
+show up to three nearby banks and 128 contact samples, refreshed four times per
+second. Contacts follow actual full/partial terrain along the same moving
+direction as the visible sun and real light. Missing terrain/chunks, void,
+depth clipping, local sample limits, and unsampled cloud side faces can leave
+gaps; those gaps do not establish that no shadow exists. The legend reports
+unloaded paths and inactive global shadows, Cloud Shadows, low sun, or night. No guides
+draw or terrain queries run while the diagnostic is off.
+
 ## Settings
 
 Pause menu `Settings` has six categories. Desktop uses a category rail beside
@@ -185,8 +211,6 @@ columns where there is enough room.
 - Terraformer size
 - Projectile/hitscan core color
 - Projectile core trail toggle
-- Core Aim Preview toggle
-- Health Bars toggle
 - Control Hints toggle
 
 `Audio` owns:
@@ -204,31 +228,12 @@ columns where there is enough room.
 - Keep Ground Debris Forever, which disables the grounded-shard cleanup timer
 - Despawn All Objects, in a separate scene-cleanup section
 
-`Experimental` keeps opt-in diagnostics and stress-test quality together:
+`Experimental` holds opt-in stress-test quality:
 
 - Allow Super Ultra Mode
-- Cloud Shadow Guides, an optional visual diagnostic for nearby cloud banks
-
-`Experimental > Cloud Shadow Guides` defaults off and saves separately from
-quality presets. Colored cloud edges, a representative live-sun ray, and
-matching colored terrain-contact crosses identify each nearby bank; labels and
-a legend name the banks. Amber marks where cloud shadow coverage begins to
-fade, and white marks the existing directional map's outer edge. Contact colors
-dim through that same fade region. Turning this debug view on does not enable
-Cloud Shadows or change graphics quality, wind, or shadow strength.
-
-These are **sampled guides**, not a display of individual shadow pixels. They
-show up to three nearby banks and 128 contact samples, refreshed four times per
-second. Contacts follow actual full/partial terrain along the same moving
-direction as the visible sun and real light. Missing terrain/chunks, void,
-depth clipping, local sample limits, and unsampled cloud side faces can leave
-gaps; those gaps do not establish that no shadow exists. The legend reports
-unloaded paths and inactive global shadows, Cloud Shadows, low sun, or night. No guides
-draw or terrain queries run while the diagnostic is off.
 
 Quality slider or shadow-toggle edits switch the dropdown to `Custom` so built-in presets stay
-clean. `Tools & HUD > Health Bars` toggles block/rubble damage bars and clears any
-visible bars when turned off. `Audio > Sound` mutes or enables the procedural
+clean. `Audio > Sound` mutes or enables the procedural
 Web Audio layer, with separate master, SFX, and UI volume sliders persisted in
 local storage. Default audio levels favor audible terrain, movement, and UI
 feedback while keeping core launch sounds from dominating the mix. The
