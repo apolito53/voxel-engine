@@ -9337,6 +9337,7 @@ test("partial block field renders faceted custom terrain cells", () => {
   assert(regionMesh, "partial block field should create a mesh for the dirty region");
   assert(regionMesh.castShadow && regionMesh.receiveShadow,
     "surviving terrain should cast its carved silhouette and receive shadows from neighboring blocks");
+  assertEqual(regionMesh.material.shadowSide, THREE.BackSide, "partial terrain should write far-side shadow depth like full chunks");
   const positionAttribute = regionMesh.geometry.getAttribute("position");
   const uvAttribute = regionMesh.geometry.getAttribute("uv");
   const textureTileAttribute = regionMesh.geometry.getAttribute("blockTextureTile");
@@ -10010,6 +10011,10 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   const regionMesh = field.getRegionMesh(regionKey);
   assert(regionMesh, "partial support-surface test should create a regional mesh");
   const positions = regionMesh.geometry.getAttribute("position");
+  const normals = regionMesh.geometry.getAttribute("normal");
+  const underside = Array.from({ length: normals.count }, (_, i) => i).filter((i) => normals.getY(i) === -1);
+  assertEqual(underside.length, 4, "a suspended support surface needs a bottom face to cast overhead shadows");
+  assert(underside.every((i) => positions.getY(i) === cell.position.y), "the underside should follow the base of the patch");
   const textureTiles = regionMesh.geometry.getAttribute("blockTextureTile");
   const bounds = new THREE.Box3().setFromBufferAttribute(positions);
   const baseTiles = new Set<number>();
@@ -10023,6 +10028,10 @@ test("partial block field renders broken cells as wrinkled support surfaces", ()
   assert(baseTiles.has(BLOCK_TEXTURE_TILE.grassSide), "grass partial side skirts should keep grass-side texture tiles");
   assert(bounds.min.y >= 5, "partial support surfaces should stay inside their source cell base");
   assert(bounds.max.y > 5.25 && bounds.max.y < 6, "surface samples should create a partial-height walkable patch");
+
+  field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, (_cell, normal) => normal.y >= 0);
+  const supportedPositions = regionMesh.geometry.getAttribute("position");
+  assertEqual(supportedPositions.count, positions.count - 4, "solid support should hide only the bottom quad");
 
   field.dispose();
 });

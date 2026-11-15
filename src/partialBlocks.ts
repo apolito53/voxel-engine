@@ -353,6 +353,9 @@ export function buildPartialBlockMeshGeometryData({
   for (const cell of update.cells) {
     if (isPartialBlockSurfaceCell(cell)) {
       addPartialBlockSurfaceGeometry(geometryData, cell, surfaceCells, lighting);
+      if (isFaceVisible(cell, PARTIAL_BLOCK_BOTTOM_FACE.normal)) {
+        addFlatFaceGeometry(geometryData, cell, PARTIAL_BLOCK_BOTTOM_FACE, lighting);
+      }
     } else {
       addPartialBlockCellGeometry(geometryData, cell, isFaceVisible, lighting);
     }
@@ -2328,6 +2331,13 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+const PARTIAL_BLOCK_BOTTOM_FACE: PartialBlockFace = {
+  normal: { x: 0, y: -1, z: 0 },
+  localOrigin: { x: 0, y: 0, z: 0 },
+  tangent: { x: 1, y: 0, z: 0 },
+  bitangent: { x: 0, y: 0, z: 1 }
+};
+
 // Flat macro quads follow tangent then bitangent, so their cross product must face out.
 const PARTIAL_BLOCK_FACES: readonly PartialBlockFace[] = [
   {
@@ -2348,12 +2358,7 @@ const PARTIAL_BLOCK_FACES: readonly PartialBlockFace[] = [
     tangent: { x: 1, y: 0, z: 0 },
     bitangent: { x: 0, y: 0, z: -1 }
   },
-  {
-    normal: { x: 0, y: -1, z: 0 },
-    localOrigin: { x: 0, y: 0, z: 0 },
-    tangent: { x: 1, y: 0, z: 0 },
-    bitangent: { x: 0, y: 0, z: 1 }
-  },
+  PARTIAL_BLOCK_BOTTOM_FACE,
   {
     normal: { x: 0, y: 0, z: 1 },
     localOrigin: { x: 1, y: 0, z: 1 },

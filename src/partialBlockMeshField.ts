@@ -57,6 +57,9 @@ export class PartialBlockMeshField {
       metalness: 0,
       side: THREE.DoubleSide
     });
+    // Write the far side into the sun map, as full chunks do. Writing the
+    // visible surface's own depth produces stripes on sunlit cut floors.
+    this.material.shadowSide ??= THREE.BackSide;
     this.ownsMaterial = !material;
     // The public `mesh` stays a single render owner. Individual dirty regions
     // are swapped below it so worker-built terrain can upload one small buffer

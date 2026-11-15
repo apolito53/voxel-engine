@@ -14,6 +14,7 @@
 ### Fixed
 
 - Partial terrain casts its surviving geometry into the directional shadow map after the full chunk mesh hands off a damaged block.
+- Used the far side of the terrain for shadow depth to prevent striped self-shadows on cut floors. Older partial-height patches now have a bottom face when their underside is exposed.
 - Corrected the four vertical faces on the flat partial mesh used before the first lattice cell breaks. Their winding now agrees with their outward shading normals.
 
 ## 0.24.1 - 2026-11-15
