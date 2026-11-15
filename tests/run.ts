@@ -4384,7 +4384,19 @@ test("block texture leaf shadow resources follow the shared material lifetime", 
     const second = new THREE.Mesh(new THREE.BufferGeometry(), material);
     configureWorldBlockMesh(first);
     configureWorldBlockMesh(second);
+    assertEqual(material.shadowSide, THREE.FrontSide, "the first opaque terrain face must block sunlight at wall contacts");
     assert(first.customDepthMaterial instanceof THREE.MeshDepthMaterial, "terrain meshes must receive a cutout-aware sun shadow material");
+    const sunDepthShader = {
+      uniforms: {},
+      vertexShader: THREE.ShaderLib.depth.vertexShader,
+      fragmentShader: THREE.ShaderLib.depth.fragmentShader
+    };
+    first.customDepthMaterial.onBeforeCompile(sunDepthShader, {});
+    const slope = sunDepthShader.fragmentShader.indexOf("fwidth(voxelSunDepth)");
+    assert(slope >= 0 && slope < sunDepthShader.fragmentShader.indexOf("diffuseColor.a *= voxelLeafCutoutAlpha"),
+      "sun depth derivatives must run before the per-pixel leaf discard");
+    assert(sunDepthShader.fragmentShader.includes("packDepthToRGBA( fragCoordZ + voxelSunDepthBias )"),
+      "the color depth sampled by the PCF filter must include the terrain slope allowance");
     assert(first.customDistanceMaterial instanceof THREE.MeshDistanceMaterial, "terrain meshes must receive a cutout-aware distance material");
     assertEqual(first.customDepthMaterial, second.customDepthMaterial, "chunk meshes should share owned shadow materials rather than allocating per chunk");
     assertEqual(first.customDistanceMaterial, second.customDistanceMaterial, "distance materials should share the same ownership");
@@ -4396,7 +4408,7 @@ test("block texture leaf shadow resources follow the shared material lifetime", 
     assert(partialMesh, "partial leaf geometry must retain a render owner");
     assertEqual(partialMesh.customDepthMaterial, first.customDepthMaterial, "partial leaf surfaces must keep the same cutout depth contract");
     assertEqual(partialMesh.castShadow, true, "damaged foliage must retain the partial terrain shadow caster and use the cutout depth material");
-    assertEqual(partialMesh.material.shadowSide, THREE.BackSide, "damaged foliage must preserve the carved-floor back-face shadow rule");
+    assertEqual(partialMesh.material.shadowSide, THREE.FrontSide, "damaged foliage should write its first surviving surface into the sun map");
     const disposed = { visible: 0, atlas: 0, depth: 0, distance: 0 };
     material.addEventListener("dispose", () => { disposed.visible += 1; });
     material.map?.addEventListener("dispose", () => { disposed.atlas += 1; });
@@ -9833,7 +9845,7 @@ test("partial block field renders faceted custom terrain cells", () => {
   assert(regionMesh, "partial block field should create a mesh for the dirty region");
   assert(regionMesh.castShadow && regionMesh.receiveShadow,
     "surviving terrain should cast its carved silhouette and receive shadows from neighboring blocks");
-  assertEqual(regionMesh.material.shadowSide, THREE.BackSide, "partial terrain should write far-side shadow depth like full chunks");
+  assertEqual(regionMesh.material.shadowSide, THREE.BackSide, "a plain fallback material without slope correction should keep its back-face depth pass");
   const positionAttribute = regionMesh.geometry.getAttribute("position");
   const uvAttribute = regionMesh.geometry.getAttribute("uv");
   const textureTileAttribute = regionMesh.geometry.getAttribute("blockTextureTile");

@@ -160,8 +160,11 @@ Terrain lighting has several layers with different costs:
 
 Full chunks and partial terrain regions both cast and receive sun shadows.
 The same region mesh that draws a carved ledge supplies its shadow silhouette.
-Both use back faces for shadow depth so sun-facing floors avoid self-shadow
-stripes. A saved partial-height surface emits its base when the underside is exposed.
+The terrain shadow pass records the first sun-facing surface. Using the far
+face let filtered sunlight appear along the foot of solid walls. The packed
+depth includes the local depth slope across the PCF filter footprint so lit
+floors and sloping cuts avoid self-shadow stripes. A saved partial-height
+surface emits its base when the underside is exposed.
 Even damage below the first removed lattice cell uses the partial mesh, so its
 flat face winding must agree with the outward normals for two-sided lighting.
 

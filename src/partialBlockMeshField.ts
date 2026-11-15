@@ -58,8 +58,8 @@ export class PartialBlockMeshField {
       metalness: 0,
       side: THREE.DoubleSide
     });
-    // Write the far side into the sun map, as full chunks do. Writing the
-    // visible surface's own depth produces stripes on sunlit cut floors.
+    // Plain materials have no slope-corrected depth shader. Keep their
+    // back-face fallback while honoring the terrain material's caster side.
     this.material.shadowSide ??= THREE.BackSide;
     this.ownsMaterial = !material;
     // The public `mesh` stays a single render owner. Individual dirty regions

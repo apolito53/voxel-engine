@@ -1,5 +1,9 @@
 # Player release notes
 
+## 0.25.2 - 2026-11-15
+
+- Sun shadows now meet the foot of solid walls and chipped ledges without leaving a bright outline on the ground.
+
 ## 0.25.1 - 2026-11-15
 
 - Bird formations arrive from the distance, fly across the sky overhead, and leave again. Their old short routes could still look like they were orbiting you.

@@ -1,42 +1,25 @@
 # Working Memory
 
-Current handoff: 2026-11-15, `v0.25.1` sky bird flyovers. Implementation uses
-managed `voxel-friendly-npcs/voxel-engine`, branch `codex/bird-wildlife`;
-normal delivery is `main`. Reconciled with the delivered v0.25.0 foliage and
-v0.24.2 partial-terrain sunlight fixes; canonical local work remains untouched.
+## Sunlight at terrain contacts
 
-Anthony's orbit recording showed high flocks repeatedly turning through a small
-area. His ground-level spawning report was separate: the old 13/22m horizontal
-spawn put formations almost straight above the camera. A matched 75-degree
-camera test reproduced zero ground visibility versus sustained cloud-height
-visibility. Short habitat-waypoint routes did not deliver across-sky behavior.
+The outdoor sand-step recording exposed a pale line along the base of intact
+and carved walls. A matched Chrome pit reproduced it with an 8192px shadow map.
+Even zero receiver bias left a visible line. Full and partial terrain now
+write the first sun-facing surface to the map. A slope allowance in the packed
+directional depth keeps the filter from striping lit floors. See
+[lighting and sky](docs/architecture.md#lighting-and-sky).
 
-[Wildlife](docs/wildlife.md) now owns fixed one-way sky passes: invisible ingress
-around 420m, one overhead crossing, natural departure, then a quiet interval.
-The second slot starts 22s later. Alpha reaches zero beyond 380m; re-placement
-occurs only while invisible. Following a flock keeps it flying straight beyond
-its nominal endpoint until it fades. High silhouettes are enlarged for ground
-readability. Cruise 19m/s, cap 24, buildup 6m/s² are retained. The scaled wing
-envelope stays above the finite world ceiling, so high flocks never query or
-stream terrain. Solos retain loaded-air collision, 30m/s cap, tree visits,
-recovery, and pause/disposal. Copied pass diagnostics live in the
-[pilot bridge](docs/automation.md#codex-pilot-bridge).
+Release v0.25.2 uses the existing terrain geometry, shadow pass and leaf-cutout
+predicate. Chrome fixtures covered intact steps, carved sand, a thin shelf with
+an opening, legacy height patches, and leaf shadows across 1024, 2048 and 8192px
+settings. A low-sun 1024px control also distinguished shallow patch shadows
+from filtering at the edge of the finite floor. The 195 focused world,
+lighting, partial-terrain and worker cases, typecheck and production build passed.
+The controlled captures use disposable scenes and a matched camera.
+Evidence is in the shadow-contact worktree under
+`logs/visual-runs/2026-11-15-sun-contact/`.
 
-Verification: native wildlife 31/31, TypeScript, 121-file source hygiene,
-21-file docs links, production build, and whitespace checks passed. Ground
-projection and sky-query parity both failed on the prior source. Independent
-review covered repeated invisible-only resets, following observers, teleports,
-frame rates, unloaded sky, actual silhouettes, and retained solos. Chrome
-checked a fixed ground pose on Normal and Potato, without tracking the flock
-or flying upward. A grounded canvas recording uploaded to the local 5174
-collector; local graphics preferences were restored. Evidence is untracked in
-`logs/visual-runs/2026-11-15-bird-flyovers/` and the recording's dated directory.
-
-Leaves retain collision, support, IDs and saved terrain while passing light;
-full and partial cutouts share their shadow predicate. See
-[leaf cutouts](docs/terrain-art.md#leaf-cutouts). Sunwashed art remains preserved.
-The canonical foliage logging-delivery probe gap remains recorded in TODO;
-this worktree's successful video upload does not prove that separate route.
-The TODO Rapier watchlist is unchanged; no full local suite or physics changes
-are part of this task. The old untracked `logs/bird-routes-delivery.txt` receipt
-is preserved and excluded.
+The [leaf material](docs/terrain-art.md#leaf-cutouts) and
+[sky bird flyovers](docs/wildlife.md) have their own guides. The
+[sealed-room ambient comparison](TODO.md#completed-foundation-individual-light-sources)
+remains open.

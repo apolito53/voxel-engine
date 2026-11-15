@@ -9,6 +9,14 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.25.2 - 2026-11-15
+
+### Fixed
+
+- Removed the bright sunlight seam where intact or carved terrain meets the ground.
+  Terrain writes its sun-facing surface into the directional shadow map and
+  accounts for the depth slope across the shadow filter to keep lit floors clear.
+
 ## 0.25.1 - 2026-11-15
 
 ### Changed

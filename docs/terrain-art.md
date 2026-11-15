@@ -95,9 +95,10 @@ material's real depth.
 [blockTextureAtlas.ts](../src/blockTextureAtlas.ts) owns the shared shader
 patch and attaches matching depth/distance materials to terrain meshes. Those
 materials share the visible material's lifecycle. Full and damaged terrain
-both cast shadows, using the back-face shadow rule established by the v0.24.2
-carved-terrain fixes. Damaged leaves use the same cutouts in visible rendering,
-shadow depth and glare occlusion.
+both cast from their sun-facing surfaces using the
+[terrain shadow depth calculation](architecture.md#lighting-and-sky).
+Damaged leaves use the same cutouts in visible rendering, shadow depth and
+glare occlusion.
 
 Leaves remain solid gameplay blocks. Their separate rendering/light rule
 retains surfaces behind the gaps, lets the existing sky-connectivity flood

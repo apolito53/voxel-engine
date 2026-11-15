@@ -53,14 +53,27 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     alphaTest: LEAF_ALPHA_TEST,
     roughness: 0.92,
     metalness: 0,
+    shadowSide: THREE.FrontSide,
     side: options.side ?? THREE.FrontSide
   });
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, alphaTest: LEAF_ALPHA_TEST });
   const distance = new THREE.MeshDistanceMaterial({ alphaTest: LEAF_ALPHA_TEST });
-  for (const shadowMaterial of [depth, distance]) {
-    shadowMaterial.onBeforeCompile = applyWorldBlockCutoutShaderPatches;
-    shadowMaterial.customProgramCacheKey = () => "voxel-leaf-cutout-shadow-v1";
-  }
+  depth.onBeforeCompile = (shader) => {
+    applyWorldBlockCutoutShaderPatches(shader);
+    // PCFSoft compares neighboring texels to the receiver's depth. Cover the
+    // depth change across that footprint so a sunlit slope doesn't shadow itself.
+    // Derivatives must run before any leaf pixels diverge at the alpha discard.
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <clipping_planes_fragment>", [
+        "float voxelSunDepth = 0.5 * vHighPrecisionZW.x / vHighPrecisionZW.y + 0.5;",
+        "float voxelSunDepthBias = 2.0 * fwidth(voxelSunDepth);",
+        "#include <clipping_planes_fragment>"
+      ].join("\n"))
+      .replace("packDepthToRGBA( fragCoordZ )", "packDepthToRGBA( fragCoordZ + voxelSunDepthBias )");
+  };
+  depth.customProgramCacheKey = () => "voxel-terrain-sun-depth-v2";
+  distance.onBeforeCompile = applyWorldBlockCutoutShaderPatches;
+  distance.customProgramCacheKey = () => "voxel-leaf-cutout-shadow-v1";
   worldBlockShadowMaterials.set(material, { depth, distance });
   const fogCameraPosition = new THREE.Vector3();
   const dayNightTint = new THREE.Color(1, 1, 1);
