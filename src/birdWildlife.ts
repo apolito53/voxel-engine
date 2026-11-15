@@ -7,11 +7,13 @@ import {
 import { SOLO_BIRD_COUNT, SoloBirdSimulation } from "./birdSolo";
 
 export type { BirdTreePerch, BirdWildlifePosition, BirdWildlifeWorld } from "./birdWildlifeCollision";
-export { SOLO_BIRD_COUNT, SOLO_BIRD_MAX_SPEED, SOLO_BIRD_PERCH_BODY_HEIGHT } from "./birdSolo";
+export { SOLO_BIRD_ACCELERATION, SOLO_BIRD_COUNT, SOLO_BIRD_CRUISE_SPEED, SOLO_BIRD_MAX_SPEED, SOLO_BIRD_PERCH_BODY_HEIGHT } from "./birdSolo";
 export const BIRD_FLOCK_COUNT = 2;
 export const BIRDS_PER_FLOCK = 6;
 export const BIRD_POPULATION_CAP = BIRD_FLOCK_COUNT * BIRDS_PER_FLOCK + SOLO_BIRD_COUNT;
-export const BIRD_MAX_SPEED = 12;
+export const BIRD_MAX_SPEED = 24;
+export const BIRD_CRUISE_SPEED = 19;
+export const BIRD_ACCELERATION = 6;
 export const BIRD_FLOCK_ALTITUDE = 132;
 export const BIRD_RECYCLE_DISTANCE = 76;
 
@@ -73,6 +75,7 @@ type FlockRecord = {
   phase: number;
   routePosition: MutablePosition;
   routeVelocity: MutablePosition;
+  routeSpeed: number;
   routeTarget: MutablePosition;
   routeStart: MutablePosition;
   routeLeg: number;
@@ -110,7 +113,7 @@ export class BirdWildlifeSimulation {
     for (let id = 0; id < BIRD_FLOCK_COUNT; id += 1) {
       const flock: FlockRecord = {
         id, anchor: { ...playerFeet }, center: { ...playerFeet }, phase: id * 2.3,
-        routePosition: { ...playerFeet }, routeVelocity: { x: 0, y: 0, z: 0 },
+        routePosition: { ...playerFeet }, routeVelocity: { x: 0, y: 0, z: 0 }, routeSpeed: 0,
         routeTarget: { ...playerFeet }, routeStart: { ...playerFeet }, routeLeg: 0, routeSeconds: 0, routeRetrySeconds: 0,
         recycleCount: 0, heightProbeSeconds: 0, terrainHeight: 0,
         placementPlayer: { ...playerFeet }
@@ -212,18 +215,17 @@ export class BirdWildlifeSimulation {
     flock.routePosition.y = flock.anchor.y;
     flock.routeLeg = 0;
     flock.routeRetrySeconds = 0;
-    flock.routeVelocity = { x: this.forward.x * 9.5, y: 0, z: this.forward.z * 9.5 };
+    flock.routeVelocity = { x: this.forward.x, y: 0, z: this.forward.z };
     this.chooseFlockWaypoint(flock, world);
-    const routeDistance = Math.max(0.001, Math.hypot(flock.routeTarget.x - centerX, flock.routeTarget.z - centerZ));
-    flock.routeVelocity = { x: (flock.routeTarget.x - centerX) / routeDistance * 9.5, y: 0,
-      z: (flock.routeTarget.z - centerZ) / routeDistance * 9.5 };
+    flock.routeVelocity = { x: 0, y: 0, z: 0 };
+    flock.routeSpeed = 0;
     for (let member = 0; member < BIRDS_PER_FLOCK; member += 1) {
       const target = this.memberTarget(flock, member);
       const position = this.findSafePosition(world, target);
-      const yaw = Math.atan2(flock.routeVelocity.x, flock.routeVelocity.z);
+      const yaw = Math.atan2(flock.routeTarget.x - centerX, flock.routeTarget.z - centerZ);
       this.birds.push({
         id: flock.id * BIRDS_PER_FLOCK + member, flockId: flock.id, member,
-        position: position ?? target, velocity: { x: Math.sin(yaw) * 9.5, y: 0, z: Math.cos(yaw) * 9.5 },
+        position: position ?? target, velocity: { x: 0, y: 0, z: 0 },
         yaw, pitch: 0, bank: 0, wingAngle: 0, flapping: true,
         visible: position !== null, opacity: recycled ? 0 : 1,
         recoverySeconds: 0.8 + this.random() * 0.5, stuckSeconds: 0
@@ -272,14 +274,18 @@ export class BirdWildlifeSimulation {
     }
     const speed = Math.hypot(desired.x, desired.y, desired.z);
     if (speed > BIRD_MAX_SPEED) scale(desired, BIRD_MAX_SPEED / speed);
-    const blend = 1 - Math.exp(-delta * 2.8);
+    const blend = 1 - Math.exp(-delta * 5.6);
     const velocity = {
       x: bird.velocity.x + (desired.x - bird.velocity.x) * blend,
       y: bird.velocity.y + (desired.y - bird.velocity.y) * blend,
       z: bird.velocity.z + (desired.z - bird.velocity.z) * blend
     };
-    const safeVelocity = this.avoidTerrain(world, bird.position, velocity, delta);
+    const speedLimit = Math.min(BIRD_MAX_SPEED, Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z) + BIRD_ACCELERATION * delta);
+    const velocitySpeed = Math.hypot(velocity.x, velocity.y, velocity.z);
+    if (velocitySpeed > speedLimit) scale(velocity, speedLimit / velocitySpeed);
+    const safeVelocity = this.avoidTerrain(world, bird.position, velocity, delta, speedLimit);
     if (!safeVelocity) {
+      bird.velocity = { x: 0, y: 0, z: 0 };
       bird.stuckSeconds += delta;
       if (bird.stuckSeconds > 0.6) this.hideBird(bird);
       return;
@@ -300,7 +306,7 @@ export class BirdWildlifeSimulation {
   }
 
   private avoidTerrain(world: BirdWildlifeWorld, position: BirdWildlifePosition,
-    velocity: MutablePosition, delta: number): MutablePosition | null {
+    velocity: MutablePosition, delta: number, speedLimit: number): MutablePosition | null {
     const aheadSeconds = Math.min(0.6, 3.5 / Math.max(1, Math.hypot(velocity.x, velocity.y, velocity.z)));
     if (sweepBirdFlight(world, position, plus(position, velocity, aheadSeconds)) &&
       sweepBirdFlight(world, position, plus(position, velocity, delta))) return velocity;
@@ -311,7 +317,7 @@ export class BirdWildlifeSimulation {
         z: velocity.z * Math.cos(angle) + velocity.x * Math.sin(angle)
       };
       const speed = Math.hypot(candidate.x, candidate.y, candidate.z);
-      if (speed > BIRD_MAX_SPEED) scale(candidate, BIRD_MAX_SPEED / speed);
+      if (speed > speedLimit) scale(candidate, speedLimit / speed);
       const candidateSeconds = Math.min(0.5, 3.5 / Math.max(1, Math.hypot(candidate.x, candidate.y, candidate.z)));
       if (sweepBirdFlight(world, position, plus(position, candidate, candidateSeconds)) &&
         sweepBirdFlight(world, position, plus(position, candidate, delta))) return candidate;
@@ -337,6 +343,7 @@ export class BirdWildlifeSimulation {
     flock.routeRetrySeconds = Math.max(0, flock.routeRetrySeconds - delta);
     if (!isBirdVolumeClear(world, flock.routePosition)) {
       flock.routeVelocity = { x: 0, y: 0, z: 0 };
+      flock.routeSpeed = 0;
       if (flock.routeRetrySeconds > 0) return;
       flock.routeRetrySeconds = 0.75;
       this.recoverFlockRoute(flock, world);
@@ -352,14 +359,15 @@ export class BirdWildlifeSimulation {
     const targetX = flock.routeTarget.x - flock.routePosition.x;
     const targetZ = flock.routeTarget.z - flock.routePosition.z;
     const distance = Math.max(0.001, Math.hypot(targetX, targetZ));
-    const blend = 1 - Math.exp(-delta * 3.4);
+    flock.routeSpeed = Math.min(BIRD_CRUISE_SPEED, flock.routeSpeed + BIRD_ACCELERATION * delta);
+    const blend = 1 - Math.exp(-delta * 6.8);
     const velocity = {
-      x: flock.routeVelocity.x + (targetX / distance * 9.5 - flock.routeVelocity.x) * blend,
+      x: flock.routeVelocity.x + (targetX / distance * flock.routeSpeed - flock.routeVelocity.x) * blend,
       y: 0,
-      z: flock.routeVelocity.z + (targetZ / distance * 9.5 - flock.routeVelocity.z) * blend
+      z: flock.routeVelocity.z + (targetZ / distance * flock.routeSpeed - flock.routeVelocity.z) * blend
     };
     const speed = Math.hypot(velocity.x, velocity.z);
-    if (speed > 0.001) scale(velocity, 9.5 / speed);
+    if (speed > 0.001) scale(velocity, flock.routeSpeed / speed);
     const next = plus(flock.routePosition, velocity, delta);
     if (!sweepBirdFlight(world, flock.routePosition, next)) {
       if (flock.routeRetrySeconds === 0) {
@@ -367,6 +375,7 @@ export class BirdWildlifeSimulation {
         flock.routeRetrySeconds = 0.4;
       }
       flock.routeVelocity = { x: 0, y: 0, z: 0 };
+      flock.routeSpeed = 0;
       return;
     }
     flock.routePosition = next;
@@ -465,6 +474,7 @@ export class BirdWildlifeSimulation {
     bird.opacity = 0;
     bird.recoverySeconds = 0.8;
     bird.stuckSeconds = 0;
+    bird.velocity = { x: 0, y: 0, z: 0 };
   }
 
   private random(): number {

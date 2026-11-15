@@ -1,43 +1,38 @@
 # Working Memory
 
-Current handoff: 2026-11-08, v0.24.0 Sunwashed art. Implementation is complete
-and validated in `C:/Users/apoli/.codex/worktrees/voxel-sunwashed/voxel-engine`,
-branch `codex/sunwashed-art`, based on main `c7bca00`. Delivery to main and its
-remote CI/deployment checks are the remaining closeout steps.
+Current handoff: 2026-11-15, `v0.24.1` bird acceleration and speed tuning.
+Implementation uses managed `voxel-friendly-npcs/voxel-engine`, branch
+`codex/bird-wildlife`, based on main `4c0fc2a`. Delivery branch is `main`.
+The completed Sunwashed art from `v0.24.0` is retained; its editable sources,
+three study directions, exports, and connected surface contracts remain in
+[terrain art](docs/terrain-art.md).
 
-Anthony selected Sunwashed with the stronger noise pass. The complete
-[editable Sunwashed set](docs/terrain-art.md) contains 14 face families with
-64 variants each (896 32px tiles) in a 1024×896 atlas. Grass, dirt, stone and
-bark preserve the selected study pixels exactly. Shared-corner CPU/GLSL hashes
-keep connected surfaces stable across negative coordinates, chunks and edits
-without splitting greedy meshes. Vegetation side caps connect horizontally;
-wood end grain and Lamps retain intentional object motifs.
+[Wildlife](docs/wildlife.md) owns two high formations of six and three lower
+solo birds. Cruise targets doubled to 19/22m/s and hard caps to 24/30m/s for
+formations/solos respectively. Positive speed changes build at 6/8m/s², starting
+from rest after placement, recycle and hidden recovery. Tree approach/descent
+stay controlled; vertical takeoff accelerates before joining normal flight.
+Actual turns/avoidance can reduce speed. Keep the independent world habitats
+and destinations introduced in `v0.23.1`; nearby player motion is not a target.
 
-All three [study directions](assets/terrain/studies-2026-11-08/README.md), their
-native Workshop files, PNGs, original/moderate comparison passes and the older
-Moss & Ember source remain preserved. Biome implementation is still future work.
-The active exporter is scripts/export_sunwashed_art.mjs; the old Moss exporter
-must not overwrite the current layout.
+Loaded-only collision, partial terrain truth, cloud altitude, bounded population,
+perch support, pause/visibility gates and renderer disposal remain in their
+existing owners. Friendly Wanderers remains an opt-in Debug experiment, default
+off; Anthony has not settled its role. See [NPCs](docs/friendly-npcs.md).
 
-Terrain hue comes from the atlas with neutral baked vertex light. Matching
-linear colors cover untextured debris, marks and poofs; minimap colors convert
-to display sRGB once per block. Hotbar and menu cubes crop the same 2D atlas.
-The latest bird wildlife and opt-in NPC work through v0.23.1 are retained. Birds use independent world routes rather than
-entry-centered orbits; see [wildlife](docs/wildlife.md) for their route contracts.
+Verification: wildlife 26/26, TypeScript, 120-file source hygiene, 21-file docs
+links, production build, and whitespace checks passed. New cases measure
+actual speed across frame rates, hidden recovery, takeoff, and a short blocked
+hold. The terrain-height-cache case now warms up flight before isolating its
+existing climb assertion. No full local suite was needed for this focused task.
+Receipts live in ignored `logs/bird-acceleration-*` and
+`logs/visual-runs/2026-11-15-bird-acceleration/`. Chrome sampling confirmed zero
+initial speed and gradual actual velocity growth. Independent matched runs
+measured average physical travel at 19.15m/s for formations (previous 9.80) and
+18.14m/s for solos (previous 10.32), with every solo ID still perching across
+three natural forests. These bounded checks do not establish an ecosystem.
 
-Verified: full native test gate (405/405 engine cases, 7 selector regressions,
-TypeScript, 120-file source hygiene, 21-file docs links), production build and
-whitespace checks. Existing vendor/app chunk-size advisory remains. The known
-Rapier flake did not reproduce in this final run; its watchlist stays in TODO.
-Independent audits passed all relevant family edges, CPU-selected neighbor
-joins, atlas orientation/crops, native/PNG/runtime pixel equality and archive
-preservation. Chrome checked actual varied terrain, repeated material walls,
-vertical bark/caps, carved stone, day/night Lamp emission and spill, desktop
-Inventory/Builder and 390px Inventory, plus textured hotbar. No shader/console
-errors observed. A user in-world acceptance playtest is not yet recorded.
-
-Ignored screenshots: logs/visual-runs/2026-11-08-sunwashed-release/. Final test
-receipt: logs/sunwashed-reconciled-validation.log. Review server is reserved at5185 and
-uses the existing5174 collector; existing5173 service is preserved. The
-canonical pending art patch/file hashes are backed up under its ignored
-logs/visual-runs/2026-11-08-art-implementation/ before synchronization.
+The known Rapier-flake watchlist remains in TODO; this task changes no physics.
+Use focused wildlife checks for iteration; configured push CI retains the full
+validation gate. The old untracked `logs/bird-routes-delivery.txt` receipt is
+preserved and excluded from this change.

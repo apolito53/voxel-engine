@@ -15,9 +15,14 @@ instanced bird geometry, materials, pose upload, and disposal. The population
 is capped at two flocks of six plus three solo birds. It does not add terrain
 streaming, persistence, combat, nesting, or bird audio.
 
-Formations fly around 130–140m, just below the cloud base at 144m, cruising
-around 9.5m/s with a 12m/s cap. Solo birds can reach 15m/s. The formations'
-atmospheric fade is independent of the short terrain fog wall so they remain
+Formations fly around 130–140m, just below the cloud base at 144m, with a
+19m/s cruise target and 24m/s cap. Solo birds target 22m/s with a 30m/s cap.
+These targets and caps doubled in `v0.24.1`. Flight builds speed gradually
+after placement, recovery, and takeoff; controlled tree approach and descent
+remain slower. Turning and obstacle avoidance can reduce actual speed.
+Positive speed changes are bounded to 6m/s² for formations and 8m/s² for solos,
+including avoidance movement. The formations' atmospheric fade is independent
+of the short terrain fog wall so they remain
 visible overhead on low graphics presets. Near solo birds retain normal
 terrain fog. Neither role expands the terrain stream or camera range.
 

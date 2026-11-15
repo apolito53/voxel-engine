@@ -9,6 +9,15 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.24.1 - 2026-11-15
+
+### Changed
+
+- Added gradual bird flight acceleration and doubled the flight caps to 24m/s
+  for formations and 30m/s for solo birds, with faster cruise targets.
+- Preserved the speed buildup after tree takeoff, hidden recovery, and brief
+  obstruction holds; avoidance candidates obey the same acceleration bounds.
+
 ## 0.24.0 - 2026-11-08
 
 ### Changed

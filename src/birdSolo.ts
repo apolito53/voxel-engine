@@ -13,7 +13,9 @@ import type { BirdWildlifePose } from "./birdWildlife";
 
 export { SOLO_BIRD_PERCH_BODY_HEIGHT } from "./birdWildlifeCollision";
 export const SOLO_BIRD_COUNT = 3;
-export const SOLO_BIRD_MAX_SPEED = 15;
+export const SOLO_BIRD_MAX_SPEED = 30;
+export const SOLO_BIRD_CRUISE_SPEED = 22;
+export const SOLO_BIRD_ACCELERATION = 8;
 const PERCH_QUERY_BUDGET = 24;
 const PERCH_SEARCH_OFFSETS: readonly (readonly [number, number])[] = (() => {
   const offsets: [number, number][] = [];
@@ -102,6 +104,7 @@ export class SoloBirdSimulation {
         bird.state = "flying";
         bird.folded = false;
         bird.perch = null;
+        bird.velocity = { x: 0, y: 0, z: 0 };
         bird.perchCooldown = 2;
       }
       const clear = bird.folded ? isBirdLandingVolumeClear(world, bird.position, bird.yaw)
@@ -183,10 +186,8 @@ export class SoloBirdSimulation {
     bird.position = position ?? target;
     bird.routeLeg = 0;
     this.chooseWaypoint(bird, world);
-    const distance = Math.max(0.001, Math.hypot(bird.routeTarget.x - bird.position.x, bird.routeTarget.z - bird.position.z));
-    bird.velocity = { x: (bird.routeTarget.x - bird.position.x) / distance * 11, y: 0,
-      z: (bird.routeTarget.z - bird.position.z) / distance * 11 };
-    bird.yaw = Math.atan2(bird.velocity.x, bird.velocity.z);
+    bird.velocity = { x: 0, y: 0, z: 0 };
+    bird.yaw = Math.atan2(bird.routeTarget.x - bird.position.x, bird.routeTarget.z - bird.position.z);
     bird.state = "flying";
     bird.perch = null;
     bird.folded = false;
@@ -221,18 +222,20 @@ export class SoloBirdSimulation {
     target.y = Math.max(target.y, bird.terrainAltitude);
     const distance = Math.max(0.001, Math.hypot(target.x - bird.position.x, target.z - bird.position.z));
     const desired = {
-      x: (target.x - bird.position.x) / distance * 11,
+      x: (target.x - bird.position.x) / distance * SOLO_BIRD_CRUISE_SPEED,
       y: (target.y - bird.position.y) * 1.7,
-      z: (target.z - bird.position.z) / distance * 11
+      z: (target.z - bird.position.z) / distance * SOLO_BIRD_CRUISE_SPEED
     };
     limit(desired, SOLO_BIRD_MAX_SPEED);
-    const blend = 1 - Math.exp(-delta * 4);
+    const blend = 1 - Math.exp(-delta * 8);
     const velocity = {
       x: bird.velocity.x + (desired.x - bird.velocity.x) * blend,
       y: bird.velocity.y + (desired.y - bird.velocity.y) * blend,
       z: bird.velocity.z + (desired.z - bird.velocity.z) * blend
     };
-    const safe = this.avoid(world, bird.position, velocity, delta);
+    const speedLimit = Math.min(SOLO_BIRD_MAX_SPEED, Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z) + SOLO_BIRD_ACCELERATION * delta);
+    limit(velocity, speedLimit);
+    const safe = this.avoid(world, bird.position, velocity, delta, speedLimit);
     if (!safe) {
       this.hide(bird);
       return;
@@ -286,7 +289,8 @@ export class SoloBirdSimulation {
     }
     const target = { x: perch.x, y: perch.y + (bird.landingFinal ? SOLO_BIRD_PERCH_BODY_HEIGHT : 2.4), z: perch.z };
     const distance = Math.hypot(target.x - bird.position.x, target.y - bird.position.y, target.z - bird.position.z);
-    const speed = bird.landingFinal ? 2.4 : 9;
+    const speed = Math.min(bird.landingFinal ? 2.4 : 9,
+      Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z) + SOLO_BIRD_ACCELERATION * delta);
     const fraction = distance > 0 ? Math.min(1, speed * delta / distance) : 1;
     const next = {
       x: bird.position.x + (target.x - bird.position.x) * fraction,
@@ -319,6 +323,7 @@ export class SoloBirdSimulation {
     bird.perchCooldown = 8;
     bird.pitch = 0;
     bird.bank = 0;
+    bird.velocity = { x: 0, y: 0, z: 0 };
   }
 
   private lift(bird: SoloRecord, world: BirdWildlifeWorld, delta: number): void {
@@ -328,7 +333,8 @@ export class SoloBirdSimulation {
       return;
     }
     if (bird.folded && isBirdVolumeClear(world, bird.position)) bird.folded = false;
-    const next = { ...bird.position, y: Math.min(target.y, bird.position.y + delta * 4.5) };
+    const liftSpeed = Math.min(4.5, Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z) + SOLO_BIRD_ACCELERATION * delta);
+    const next = { ...bird.position, y: Math.min(target.y, bird.position.y + delta * liftSpeed) };
     const clear = bird.folded ? sweepBirdLanding(world, bird.position, next, bird.yaw) : sweepBirdFlight(world, bird.position, next);
     if (!clear) {
       this.hide(bird);
@@ -354,17 +360,16 @@ export class SoloBirdSimulation {
     bird.perch = null;
     bird.takeoffTarget = null;
     this.chooseWaypoint(bird, world);
-    bird.velocity = { x: Math.sin(bird.yaw) * 9, y: 2, z: Math.cos(bird.yaw) * 9 };
   }
 
-  private avoid(world: BirdWildlifeWorld, position: Position, velocity: Position, delta: number): Position | null {
+  private avoid(world: BirdWildlifeWorld, position: Position, velocity: Position, delta: number, speedLimit: number): Position | null {
     for (const [angle, rise] of [[0, 0], [0, 5], [0.8, 2], [-0.8, 2], [1.6, 1], [-1.6, 1], [Math.PI, 3]] as const) {
       const candidate = {
         x: velocity.x * Math.cos(angle) - velocity.z * Math.sin(angle),
         y: rise === 0 ? velocity.y : Math.max(velocity.y, rise),
         z: velocity.z * Math.cos(angle) + velocity.x * Math.sin(angle)
       };
-      limit(candidate, SOLO_BIRD_MAX_SPEED);
+      limit(candidate, speedLimit);
       const ahead = Math.min(0.4, 3.5 / Math.max(1, Math.hypot(candidate.x, candidate.y, candidate.z)));
       if (sweepBirdFlight(world, position, plus(position, candidate, ahead)) &&
         sweepBirdFlight(world, position, plus(position, candidate, delta))) return candidate;
@@ -429,6 +434,7 @@ export class SoloBirdSimulation {
     bird.perch = null;
     bird.folded = false;
     bird.takeoffTarget = null;
+    bird.velocity = { x: 0, y: 0, z: 0 };
   }
 }
 

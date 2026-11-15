@@ -1,5 +1,9 @@
 # Player release notes
 
+## 0.24.1 - 2026-11-15
+
+- Birds build up speed smoothly as they fly, with faster cruising and double their previous top speeds.
+
 ## 0.24.0 - 2026-11-08
 
 - The world has a new Sunwashed pixel-art look, with warm earth, olive grass, pale stone, richer foliage, and weathered wood.

@@ -131,16 +131,21 @@ import {
   writeFriendlyNpcPreference
 } from "../src/friendlyNpcPreference";
 import {
+  BIRD_ACCELERATION,
+  BIRD_CRUISE_SPEED,
   BIRD_FLOCK_COUNT,
   BIRD_MAX_SPEED,
   BIRD_POPULATION_CAP,
   BIRD_RECYCLE_DISTANCE,
   BIRDS_PER_FLOCK,
   SOLO_BIRD_COUNT,
+  SOLO_BIRD_ACCELERATION,
+  SOLO_BIRD_CRUISE_SPEED,
   SOLO_BIRD_MAX_SPEED,
   BirdWildlifeSimulation
 } from "../src/birdWildlife";
 import {
+  BIRD_CLEARANCE_RADIUS,
   BIRD_MAX_SWEEP_DISTANCE,
   SOLO_BIRD_PERCH_BODY_HEIGHT,
   isBirdLandingVolumeClear,
@@ -962,6 +967,145 @@ test("bird wildlife solo birds keep flying quickly over treeless ground", () => 
     "solo birds should sustain fast, independent flight and glide over treeless ground");
 });
 
+test("bird wildlife builds actual flight speed gradually toward doubled cruise across frame rates", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  assertEqual(BIRD_MAX_SPEED, 24, "formation caps should double from 12m/s");
+  assertEqual(SOLO_BIRD_MAX_SPEED, 30, "solo caps should double from 15m/s");
+  for (const delta of [1 / 30, 1 / 60, 1 / 144, 0.1]) {
+    const simulation = new BirdWildlifeSimulation(631);
+    let previous = simulation.seed(fixture.world, { ...player, y: 1 });
+    assert(previous.birds.every((bird) => Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z) === 0),
+      "newly placed birds should begin at rest rather than already at cruise speed");
+    const totals = { flock: 0, solo: 0 };
+    const samples = { flock: 0, solo: 0 };
+    const peaks = { flock: 0, solo: 0 };
+    for (let tick = 0; tick < Math.round(20 / delta); tick += 1) {
+      simulation.update(delta, fixture.world, player);
+      const frame = simulation.snapshot();
+      for (const bird of frame.birds) {
+        const before = previous.birds.find((candidate) => candidate.id === bird.id);
+        assert(before && bird.visible, "open-air acceleration should preserve each visible bird");
+        const speed = Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z);
+        const oldSpeed = Math.hypot(before.velocity.x, before.velocity.y, before.velocity.z);
+        const acceleration = bird.role === "flock" ? BIRD_ACCELERATION : SOLO_BIRD_ACCELERATION;
+        const cap = bird.role === "flock" ? BIRD_MAX_SPEED : SOLO_BIRD_MAX_SPEED;
+        assert(speed <= cap + 0.00001, "the doubled cap must bound actual visible velocity");
+        assert(speed <= oldSpeed + acceleration * delta + 0.00001,
+          "steering and avoidance must not bypass the gradual speed increase");
+        if ((tick + 1) * delta <= 0.5 + 0.00001) {
+          assert(speed <= acceleration * 0.5 + 0.00001, "the opening half-second should visibly build speed");
+        }
+        if (tick * delta >= 5) {
+          totals[bird.role] += speed;
+          samples[bird.role] += 1;
+          peaks[bird.role] = Math.max(peaks[bird.role], speed);
+        }
+      }
+      previous = frame;
+    }
+    assert(totals.flock / samples.flock >= BIRD_CRUISE_SPEED * 0.75 && peaks.flock >= BIRD_CRUISE_SPEED,
+      "formations should actually travel at the faster cruise rather than only publish a larger cap");
+    assert(totals.solo / samples.solo >= SOLO_BIRD_CRUISE_SPEED * 0.75 && peaks.solo >= SOLO_BIRD_CRUISE_SPEED * 0.95,
+      "solo birds should sustain substantially faster travel while retaining room to turn");
+  }
+});
+
+test("bird wildlife resumes gradual physical movement after a short blocked hold", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  let loadedColumns: Set<string> | null = null;
+  const world = {
+    ...fixture.world,
+    isColumnLoaded(x: number, z: number): boolean {
+      return loadedColumns === null || loadedColumns.has(`${Math.floor(x)},${Math.floor(z)}`);
+    }
+  };
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  const simulation = new BirdWildlifeSimulation(631);
+  simulation.seed(world, { ...player, y: 1 });
+  const delta = 1 / 60;
+  for (let tick = 0; tick < 240; tick += 1) simulation.update(delta, world, player);
+  let previous = simulation.snapshot().birds.find((bird) => bird.role === "flock");
+  assert(previous && previous.visible, "the held formation member should begin in clear flight");
+  const id = previous.id;
+  loadedColumns = new Set<string>();
+  for (let x = Math.floor(previous.position.x - BIRD_CLEARANCE_RADIUS + 0.0001);
+    x <= Math.floor(previous.position.x + BIRD_CLEARANCE_RADIUS - 0.0001); x += 1) {
+    for (let z = Math.floor(previous.position.z - BIRD_CLEARANCE_RADIUS + 0.0001);
+      z <= Math.floor(previous.position.z + BIRD_CLEARANCE_RADIUS - 0.0001); z += 1) loadedColumns.add(`${x},${z}`);
+  }
+  let physicalSpeed = Math.hypot(previous.velocity.x, previous.velocity.y, previous.velocity.z);
+  let sawStop = false;
+  let resumedSpeed = 0;
+  for (let tick = 0; tick < 72; tick += 1) {
+    if (tick === 12) loadedColumns = null;
+    simulation.update(delta, world, player);
+    const bird = simulation.snapshot().birds.find((candidate) => candidate.id === id);
+    assert(bird && bird.visible, "a short hold should preserve a visible, terrain-clear member");
+    const nextSpeed = Math.hypot(bird.position.x - previous.position.x,
+      bird.position.y - previous.position.y, bird.position.z - previous.position.z) / delta;
+    assertClose(Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z), nextSpeed, 0.00001,
+      "snapshot velocity should describe actual visible movement, including blocked frames");
+    assert(nextSpeed <= physicalSpeed + BIRD_ACCELERATION * delta + 0.00001,
+      "restored air must not resume a stored cruise-speed displacement from rest");
+    sawStop ||= tick < 12 && nextSpeed < 0.00001;
+    if (tick >= 12) resumedSpeed = Math.max(resumedSpeed, nextSpeed);
+    physicalSpeed = nextSpeed;
+    previous = bird;
+  }
+  assert(sawStop && resumedSpeed > 3, "the member should stop and then build visible movement again");
+});
+
+test("bird wildlife restarts acceleration after hidden recovery and a tree takeoff", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const player = { x: 0.5, y: 2.5, z: 0.5 };
+  simulation.seed(fixture.world, { ...player, y: 1 });
+  for (let tick = 0; tick < 40; tick += 1) simulation.update(0.1, fixture.world, player);
+  const flying = simulation.snapshot().birds.find((bird) => bird.role === "solo");
+  assert(flying && Math.hypot(flying.velocity.x, flying.velocity.y, flying.velocity.z) > 10, "the recovery fixture should begin with a fast bird");
+  fixture.solidCells.add(`${Math.floor(flying.position.x)},${Math.floor(flying.position.y)},${Math.floor(flying.position.z)}`);
+  simulation.update(0.1, fixture.world, player);
+  assert(!simulation.snapshot().birds.find((bird) => bird.id === flying.id)?.visible, "the intersecting edit should hide the bird");
+  fixture.solidCells.clear();
+  let recovered = false;
+  for (let tick = 0; tick < 30; tick += 1) {
+    simulation.update(0.1, fixture.world, player);
+    const bird = simulation.snapshot().birds.find((candidate) => candidate.id === flying.id);
+    if (!bird?.visible) continue;
+    assert(Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z) <= SOLO_BIRD_ACCELERATION * 0.1 + 0.00001,
+      "a returning bird must restart its ramp instead of reusing the pre-hide velocity");
+    recovered = true;
+    break;
+  }
+  assert(recovered, "the hidden bird should find clear air again");
+
+  const canopy = createBirdCanopyTestWorld();
+  const perched = new BirdWildlifeSimulation(631);
+  let previous = perched.seed(canopy.world, { ...player, y: 1 });
+  const departed = new Set<number>();
+  let sawLift = false;
+  let sawFlight = false;
+  for (let tick = 0; tick < 1200 && !sawFlight; tick += 1) {
+    perched.update(1 / 60, canopy.world, player);
+    const frame = perched.snapshot();
+    for (const bird of frame.birds.filter((candidate) => candidate.role === "solo")) {
+      const before = previous.birds.find((candidate) => candidate.id === bird.id);
+      assert(before, "takeoff should retain the bird's identity");
+      if (before.state === "perched" && bird.state === "taking-off") departed.add(bird.id);
+      if (!departed.has(bird.id) || !bird.visible) continue;
+      const speed = Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z);
+      const oldSpeed = Math.hypot(before.velocity.x, before.velocity.y, before.velocity.z);
+      assert(speed <= oldSpeed + SOLO_BIRD_ACCELERATION / 60 + 0.00001,
+        "vertical lift and departure into normal flight should build without a launch-speed snap");
+      sawLift ||= bird.state === "taking-off" && speed > 0;
+      sawFlight ||= bird.state === "flying";
+    }
+    previous = frame;
+  }
+  assert(sawLift && sawFlight, "a supported bird should visibly accelerate through lift and resume independent flight");
+});
+
 test("bird wildlife solo routes do not repeatedly circle a stationary player", () => {
   const fixture = createBirdWildlifeTestWorld();
   const simulation = new BirdWildlifeSimulation(631);
@@ -1181,6 +1325,11 @@ test("bird wildlife keeps responding to a sampled terrain rise between probes", 
   const seed = { ...player, y: 1 };
   raised.seed(risingWorld, seed);
   flat.seed(fixture.world, seed);
+  // Establish flight before isolating the height cache from the spawn ramp.
+  for (let tick = 0; tick < 30; tick += 1) {
+    raised.update(0.1, risingWorld, player);
+    flat.update(0.1, fixture.world, player);
+  }
   top = 30;
   for (let tick = 0; tick < 5; tick += 1) {
     raised.update(0.1, risingWorld, player);

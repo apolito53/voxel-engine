@@ -20,7 +20,9 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
 - Ambient birds use world-space habitats and destination routes. Repeated
   circles around entry coordinates looked like player-orbiting companions;
   player position should control distant residency, not normal flight targets.
-  See the same [wildlife guide](docs/wildlife.md).
+  Acceleration bounds must apply to actual movement after stops and recovery,
+  including obstacle-avoidance candidates. See the same
+  [wildlife guide](docs/wildlife.md).
 - Full voxels and sparse 3x3x3 partial-block lattices own durable terrain truth.
   Loose debris is presentation, so its quality budget must not change gameplay
   material or damage accounting. Automatic debris-to-rubble conversion remains
