@@ -383,11 +383,13 @@ initial contract. The preference is browser state, not world metadata.
 ## Bird Wildlife
 
 [Bird wildlife](wildlife.md) keeps bounded pure flock/flight state separate from
-instanced scene presentation. Loaded column/top-surface queries guide nearby
-flight; surviving full/partial terrain boxes govern collision and tree-perch
-support. Cloud-height formations use independent atmospheric haze while low
-solo birds retain terrain fog. Birds do not
-request chunks, attach themselves to the camera/sky, or expand the view range.
+instanced scene presentation. Low solo birds use loaded column/top-surface
+queries, surviving full/partial terrain collision, and tree-perch support.
+High formations stay above the finite world ceiling and cross the sky on fixed
+world-space passes, independent of terrain streaming. Their ingress/exit alpha
+reaches zero before re-placement; sky haze remains separate from the terrain
+fog used by solos. Birds do not request chunks, attach themselves to the camera
+or sky, or expand the view range.
 The main runtime owns world entry, pause, switch/exit, and disposal. This is a
 transient ambient population, with no save or terrain mutations.
 

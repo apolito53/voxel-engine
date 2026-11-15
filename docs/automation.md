@@ -65,6 +65,12 @@ transient flocks near the current player pose; `clearBirds()` removes them for
 the current visit. They leave terrain and the Friendly Wanderers preference
 alone. See [wildlife](wildlife.md) for the first slice and its limits.
 
+Each high flock also exposes a copied `pass` with state, start, closest point,
+end, direction, distance travelled, length, next-pass wait, and pass index.
+For sky passes, `flightTarget` is the nominal exit and `habitatCenter` is the
+closest point. Watch a grounded fixed camera through ingress and exit rather
+than aiming at a flock or flying up to it; the latter can hide view-angle bugs.
+
 `cloudShadowGuides(enabled?)` controls the same saved debug preference as
 `Debug > Cloud Shadow Guides`. Its snapshot reports the
 active/inactive reason, nearby/selected bank counts, colors, verified terrain

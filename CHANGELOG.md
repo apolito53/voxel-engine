@@ -9,6 +9,18 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.25.1 - 2026-11-15
+
+### Changed
+
+- Replaced cloud-height flock patrols with staggered one-way world-space passes,
+  invisible ingress/exit, and quiet intervals. Active passes keep their fixed
+  direction through player movement and continue until fully out of view.
+- Decoupled high sky passes from terrain streaming above the finite build
+  ceiling. Low solo birds retain loaded terrain collision and tree perches.
+- Added true alpha fade at the sky boundary and enlarged only high-flock
+  silhouettes for ground-level readability, retaining cruise and acceleration.
+
 ## 0.25.0 - 2026-11-15
 
 ### Changed

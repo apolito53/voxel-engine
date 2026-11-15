@@ -17,9 +17,12 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   `v0.23.0`; its eventual role is undecided. Birds are the first default ambient
   wildlife. Keep their loaded-only flight state and instanced presentation
   independent of the human conversation system. See [wildlife](docs/wildlife.md).
-- Ambient birds use world-space habitats and destination routes. Repeated
-  circles around entry coordinates looked like player-orbiting companions;
-  player position should control distant residency, not normal flight targets.
+- High bird formations use one-way world-space sky passes with invisible
+  ingress/exit and staggered intervals. Short habitat routes still looked like
+  orbiting at higher speed; arrivals should be visible from a grounded camera.
+  Sky passes stay above the finite world ceiling without terrain streaming.
+  Solo birds retain loaded-terrain habitats and tree visits. Player movement
+  should control distant residency, not steer active flight toward the player.
   Acceleration bounds must apply to actual movement after stops and recovery,
   including obstacle-avoidance candidates. See the same
   [wildlife guide](docs/wildlife.md).

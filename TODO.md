@@ -5,9 +5,8 @@ promoted work, not every fun idea that crosses the room.
 
 ## Current Recommended Next Slice
 
-- The first bird wildlife slice is implemented in `v0.23.0`, with independent
-  destination routes and streamed-air recovery corrected in `v0.23.1`, and
-  gradual acceleration with doubled speed caps in `v0.24.1`; see
+- Bird wildlife is implemented, with one-way high sky passes in `v0.25.1`,
+  gradual acceleration, and lower solo birds that visit trees; see
   [wildlife](docs/wildlife.md). Nesting, audio, and an ecosystem are
   possible later slices, with no implementation chosen yet.
 - Friendly NPC foundation is implemented in `v0.22.0`; see

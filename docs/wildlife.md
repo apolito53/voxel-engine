@@ -26,13 +26,24 @@ of the short terrain fog wall so they remain
 visible overhead on low graphics presets. Near solo birds retain normal
 terrain fog. Neither role expands the terrain stream or camera range.
 
-Birds choose destinations within a fixed world-space habitat. Routes connect
-those destinations, with shared formation movement for flocks and separate
-paths for solo birds. Habitat and route targets do not follow normal player
-movement. Player travel only determines when distant populations can be
-replaced near newly explored terrain. The old repeating circles around the
-entry area were removed in `v0.23.1` because they looked like birds orbiting
-the player.
+High flocks make one-way passes through the sky. Each pass fixes its ingress,
+direction, closest point, and exit in world space. Birds arrive from beyond
+view, cross overhead, and continue out of view before a quiet interval and
+another pass. The first approaches from the initial view direction; the second
+is staggered. Player movement does not steer an active pass. The old short
+habitat routes still read as orbiting at the faster flight speed, so these
+formations now travel across the sky instead of turning back locally.
+
+Initial ingress is about 420m away, fading into view between 380m and 300m.
+The second formation starts 22 seconds later. Later passes vary their bearing
+only while hidden, with roughly 14–30 seconds of quiet between visits from a
+slot. Sky birds render at 1.65 times the lower birds' scale so individual wing
+silhouettes remain legible in a grounded view.
+
+Solo birds retain their own destination routes within fixed world habitats,
+including tree visits. Nearby player movement does not retarget their flight;
+distant travel determines when lower populations can be replaced near newly
+explored terrain.
 
 [main.ts](../src/main.ts) adapts the loaded terrain, seeds birds after world
 hydration and player restoration, and clears them on world switch or exit.
@@ -42,11 +53,18 @@ its owned resources on runtime disposal.
 
 ## Terrain Boundary
 
-The world seam combines collision boxes, a loaded-column predicate, and a
-cheap column-top surface query. The surface query returns `null` for a loaded
-void column; missing chunks remain a separate boundary. Full and surviving
-partial collision boxes own obstacle truth. NPC flight cannot generate chunks
-or use debris as durable terrain.
+The lower-bird world seam combines collision boxes, a loaded-column predicate,
+and a cheap column-top surface query. The surface query returns `null` for a
+loaded void column; missing chunks remain a separate boundary. Full and
+surviving partial collision boxes own obstacle truth. Solo flight cannot
+generate chunks or use debris as durable terrain.
+
+High formations stay entirely above the finite terrain ceiling. Their sky
+passes do not query or require the terrain columns underneath them, allowing
+ingress beyond the terrain stream without requesting chunks or changing view
+distance. The rendered birds still use scene depth, so terrain and clouds can
+occlude them naturally. Their maintained altitude must stay above the world
+height and full animated wing clearance.
 
 [birdWildlifeCollision.ts](../src/birdWildlifeCollision.ts) separates the
 extended-wing flight clearance from compact landing/rest/takeoff clearance.
@@ -66,11 +84,11 @@ terrain are rechecked during play; birds that cannot safely occupy an area
 must recover without flying through solid geometry. Distant formations use
 their atmospheric haze and solo birds use terrain fog.
 
-A flock's invisible route leader also revalidates its air. An unavailable
-initial position or unloaded route retries fixed world points at a bounded
-cadence, then resumes from safe loaded space. Visible members retain swept
-movement; hidden members use the existing recovery fade. A very small loaded
-footprint can hold a formation until there is room for its next route leg.
+Sky ingress and exit use actual alpha fading to zero. A pass continues straight
+while its birds remain visible to the current observer, even beyond its nominal
+exit. A new pass starts only during an invisible interval; looking around or
+moving nearby cannot turn an existing flock toward the player. Low birds keep
+their loaded-air recovery and swept collision boundary.
 
 ## Verification
 

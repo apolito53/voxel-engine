@@ -143,7 +143,7 @@ import {
   BIRD_FLOCK_COUNT,
   BIRD_MAX_SPEED,
   BIRD_POPULATION_CAP,
-  BIRD_RECYCLE_DISTANCE,
+  BIRD_SKY_RENDER_SCALE,
   BIRDS_PER_FLOCK,
   SOLO_BIRD_COUNT,
   SOLO_BIRD_ACCELERATION,
@@ -162,6 +162,7 @@ import {
   sweepBirdFlight
 } from "../src/birdWildlifeCollision";
 import { BirdWildlifeRenderer } from "../src/birdWildlifeRenderer";
+import { SoloBirdSimulation } from "../src/birdSolo";
 import { findBirdTreePerch } from "../src/birdTreePerches";
 import {
   PhysicsCoreAimPreview,
@@ -815,6 +816,213 @@ function createBirdCanopyTestWorld() {
   };
 }
 
+test("bird wildlife sky formations enter a grounded horizontal view on Normal and Potato", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  const eye = { ...feet, y: 2.5 };
+  const aspect = 16 / 9;
+  const verticalTangent = Math.tan(THREE.MathUtils.degToRad(BASE_CAMERA_FOV / 2));
+  const visibleFrames = { normal: 0, potato: 0 };
+  simulation.seed(fixture.world, feet, { x: 0, y: 0, z: -1 });
+  for (let tick = 0; tick < 700; tick += 1) {
+    simulation.update(0.1, fixture.world, eye);
+    const sky = simulation.snapshot().birds.filter((bird) => bird.role === "flock" && bird.visible && bird.opacity >= 0.5);
+    for (const presetId of ["normal", "potato"] as const) {
+      const cameraFar = QUALITY_PRESETS[presetId].cameraFar;
+      if (sky.some((bird) => {
+        const dx = bird.position.x - eye.x;
+        const dy = bird.position.y - eye.y;
+        const forward = eye.z - bird.position.z;
+        const distance = Math.hypot(dx, dy, forward);
+        return forward > 0 && distance < Math.min(cameraFar, 300) &&
+          Math.abs(dx / (forward * verticalTangent * aspect)) < 1 && Math.abs(dy / (forward * verticalTangent)) < 1;
+      })) visibleFrames[presetId] += 1;
+    }
+  }
+  assert(visibleFrames.normal >= 20 && visibleFrames.potato >= 20,
+    "a level grounded camera should have a sustained on-screen opportunity to see a nearby formation at both quality levels");
+});
+
+test("bird wildlife sky passes add no terrain queries beyond the solo birds", () => {
+  function instrumentedWorld() {
+    const fixture = createBirdWildlifeTestWorld();
+    const calls = { loaded: 0, solid: 0, boxes: 0, top: 0, perch: 0 };
+    return {
+      calls,
+      world: {
+        ...fixture.world,
+        isColumnLoaded(x: number, z: number): boolean { calls.loaded += 1; return fixture.world.isColumnLoaded(x, z); },
+        isSolid(x: number, y: number, z: number): boolean { calls.solid += 1; return fixture.world.isSolid(x, y, z); },
+        getCellCollisionBoxes(x: number, y: number, z: number): readonly CollisionBounds[] | null {
+          calls.boxes += 1;
+          return fixture.world.getCellCollisionBoxes(x, y, z);
+        },
+        getColumnTopHeight(x: number, z: number): number | null { calls.top += 1; return fixture.world.getColumnTopHeight(x, z); },
+        getTreePerch(): null { calls.perch += 1; return null; }
+      }
+    };
+  }
+  const combinedWorld = instrumentedWorld();
+  const soloWorld = instrumentedWorld();
+  const wildlife = new BirdWildlifeSimulation(631);
+  const solos = new SoloBirdSimulation();
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  const eye = { ...feet, y: 2.5 };
+  const forward = { x: 0, y: 0, z: -1 };
+  wildlife.seed(combinedWorld.world, feet, forward);
+  solos.seed(soloWorld.world, feet, forward);
+  for (let tick = 0; tick < 700; tick += 1) {
+    wildlife.update(0.1, combinedWorld.world, eye);
+    solos.update(0.1, soloWorld.world, eye, forward);
+  }
+  assertDeepEqual(combinedWorld.calls, soloWorld.calls,
+    "formations above the world ceiling should not add loaded-column, height, collision, or perch queries");
+});
+
+test("bird wildlife sky passes travel straight and reset only after fading out", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  const eye = { ...feet, y: 2.5 };
+  let previous = simulation.seed(fixture.world, feet, { x: 0, y: 0, z: -1 });
+  assertEqual(previous.flocks.length, BIRD_FLOCK_COUNT, "both sky formations should have pass state");
+  assertEqual(previous.flocks[0].pass.state, "flying", "the first pass should begin immediately");
+  assertEqual(previous.flocks[1].pass.state, "waiting", "the second pass should begin after the stagger");
+  const visibleFrames = new Map(previous.flocks.map((flock) => [flock.id, 0]));
+  const startedAt = new Map<number, number>();
+  const waitedAt = new Map<number, number>();
+  let sawRepeat = false;
+  for (let tick = 0; tick < 1600; tick += 1) {
+    simulation.update(0.1, fixture.world, eye);
+    const frame = simulation.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "pass scheduling must keep the population bounded");
+    for (const flock of frame.flocks) {
+      const before = previous.flocks.find((candidate) => candidate.id === flock.id);
+      assert(before, "flock identity should survive a pass");
+      const pass = flock.pass;
+      const members = frame.birds.filter((bird) => bird.role === "flock" && bird.flockId === flock.id);
+      const earlier = previous.birds.filter((bird) => bird.role === "flock" && bird.flockId === flock.id);
+      assertEqual(members.length, BIRDS_PER_FLOCK, "each pass should retain its bounded formation");
+      if (pass.state === "flying") {
+        if (!startedAt.has(flock.id)) startedAt.set(flock.id, (tick + 1) * 0.1);
+        assert(pass.start.y - BIRD_CLEARANCE_RADIUS * BIRD_SKY_RENDER_SCALE > WORLD_HEIGHT,
+          "the complete enlarged formation should remain above the terrain ceiling");
+        assertClose(Math.hypot(pass.direction.x, pass.direction.z), 1, 0.00001, "the pass direction should be normalized");
+        assert(pass.length > 700 && pass.length < 1000, "a sky pass should extend well beyond the viewer on both sides");
+        assert(Number.isFinite(pass.distanceTravelled) && pass.distanceTravelled >= 0, "pass progress should stay finite and nonnegative");
+        if (before.pass.state === "flying" && before.pass.index === pass.index) {
+          assertDeepEqual([pass.start, pass.closestPoint, pass.end, pass.direction],
+            [before.pass.start, before.pass.closestPoint, before.pass.end, before.pass.direction], "a visible pass should keep its world-space line");
+          assert(pass.distanceTravelled + 0.00001 >= before.pass.distanceTravelled, "a pass should not reverse or turn back");
+          for (const bird of members) {
+            const old = earlier.find((candidate) => candidate.id === bird.id);
+            if (!old || bird.opacity < 0.2 || old.opacity < 0.2) continue;
+            const along = (bird.position.x - old.position.x) * pass.direction.x + (bird.position.z - old.position.z) * pass.direction.z;
+            assert(along >= -0.05, "a visible formation member should not make a U-turn during its pass");
+          }
+        }
+        if (before.pass.state === "waiting" && waitedAt.has(flock.id)) {
+          const seconds = (tick + 1) * 0.1 - (waitedAt.get(flock.id) ?? 0);
+          assert(seconds >= 13.5 && seconds <= 30.5, "a repeat pass should respect the quiet interval");
+          sawRepeat = true;
+          waitedAt.delete(flock.id);
+        }
+      } else {
+        assert(pass.secondsUntilNext >= 0, "waiting time should never be negative");
+        assert(members.every((bird) => bird.opacity === 0), "waiting formations should be fully faded out");
+        if (before.pass.state === "flying") waitedAt.set(flock.id, (tick + 1) * 0.1);
+      }
+      if (pass.index !== before.pass.index) {
+        assert(earlier.every((bird) => bird.opacity === 0) && members.every((bird) => bird.opacity === 0),
+          "a new pass must not relocate a visible formation");
+      }
+      if (members.some((bird) => bird.visible && bird.opacity > 0.5)) visibleFrames.set(flock.id, (visibleFrames.get(flock.id) ?? 0) + 1);
+      for (const bird of members) {
+        const distance = Math.hypot(bird.position.x - eye.x, bird.position.y - eye.y, bird.position.z - eye.z);
+        if (distance >= 380) assertEqual(bird.opacity, 0, "birds beyond the sky fade range should have zero alpha");
+      }
+    }
+    previous = frame;
+  }
+  assert([...visibleFrames.values()].every((count) => count >= 10), "each staggered pass should become visible for sustained flight");
+  const secondStart = startedAt.get(previous.flocks[1].id);
+  assert(secondStart !== undefined && secondStart >= 17.5 && secondStart <= 24.5, "the second formation should start after the intended stagger");
+  assert(sawRepeat, "a complete observation should include an offscreen repeat pass");
+});
+
+test("bird wildlife sky paths stay fixed through nearby movement and different player heights", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const ground = new BirdWildlifeSimulation(631);
+  const elevated = new BirdWildlifeSimulation(631);
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  const forward = { x: 0, y: 0, z: -1 };
+  ground.seed(fixture.world, feet, forward);
+  elevated.seed(fixture.world, feet, forward);
+  for (let tick = 0; tick < 300; tick += 1) {
+    ground.update(0.1, fixture.world, { ...feet, y: 2.5 });
+    elevated.update(0.1, fixture.world, { x: feet.x + 3 * Math.sin(tick / 70), y: 90, z: feet.z + 3 * Math.cos(tick / 70) });
+    const groundFrame = ground.snapshot();
+    const elevatedFrame = elevated.snapshot();
+    const firstGround = groundFrame.flocks[0];
+    const firstElevated = elevatedFrame.flocks[0];
+    assertDeepEqual([firstGround.pass.index, firstGround.pass.start, firstGround.pass.closestPoint, firstGround.pass.end],
+      [firstElevated.pass.index, firstElevated.pass.start, firstElevated.pass.closestPoint, firstElevated.pass.end],
+      "ordinary observer movement and height must not move an in-progress sky line");
+    for (const bird of groundFrame.birds.filter((candidate) => candidate.role === "flock" && candidate.flockId === firstGround.id)) {
+      const other = elevatedFrame.birds.find((candidate) => candidate.id === bird.id);
+      assert(other, "the compared sky formation should retain its identities");
+      assertClose(Math.hypot(other.position.x - bird.position.x, other.position.y - bird.position.y, other.position.z - bird.position.z),
+        0, 0.00001, "player height and small movement should not physically retarget an active formation");
+    }
+  }
+});
+
+test("bird wildlife preserves visible sky paths and resets invisible ones after teleports", () => {
+  const fixture = createBirdWildlifeTestWorld();
+  const simulation = new BirdWildlifeSimulation(631);
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  const eye = { ...feet, y: 2.5 };
+  simulation.seed(fixture.world, feet, { x: 0, y: 0, z: -1 });
+  let nearBird = simulation.snapshot().birds.find((bird) => bird.role === "flock" && bird.opacity > 0.5 &&
+    Math.hypot(bird.position.x - eye.x, bird.position.y - eye.y, bird.position.z - eye.z) < 200);
+  for (let tick = 0; tick < 400 && !nearBird; tick += 1) {
+    simulation.update(0.1, fixture.world, eye);
+    nearBird = simulation.snapshot().birds.find((bird) => bird.role === "flock" && bird.opacity > 0.5 &&
+      Math.hypot(bird.position.x - eye.x, bird.position.y - eye.y, bird.position.z - eye.z) < 200);
+  }
+  assert(nearBird, "fixture should teleport while a formation is actually nearby and visible");
+  const before = simulation.snapshot();
+  const nearDestination = { x: eye.x + 120, y: eye.y, z: eye.z };
+  simulation.update(0.1, fixture.world, nearDestination);
+  const nearAfter = simulation.snapshot();
+  const beforeFlock = before.flocks.find((flock) => flock.id === nearBird.flockId);
+  const afterFlock = nearAfter.flocks.find((flock) => flock.id === nearBird.flockId);
+  const afterBird = nearAfter.birds.find((bird) => bird.id === nearBird.id);
+  assert(beforeFlock && afterFlock && afterBird && afterBird.opacity > 0, "the near teleported observer should still see the same formation");
+  assertDeepEqual([afterFlock.pass.index, afterFlock.pass.start, afterFlock.pass.end, afterFlock.pass.direction],
+    [beforeFlock.pass.index, beforeFlock.pass.start, beforeFlock.pass.end, beforeFlock.pass.direction],
+    "a teleport must not move or replace a formation still visible to the new observer");
+  assert(Math.hypot(afterBird.position.x - nearBird.position.x, afterBird.position.y - nearBird.position.y,
+    afterBird.position.z - nearBird.position.z) <= BIRD_MAX_SPEED * 0.1 + 0.00001,
+    "a visible formation should continue moving normally through the observer teleport");
+  const destination = { x: nearDestination.x + 1000, y: eye.y, z: eye.z };
+  simulation.update(0.1, fixture.world, destination);
+  const after = simulation.snapshot();
+  assertEqual(after.birds.length, BIRD_POPULATION_CAP, "teleport reset must not grow the population");
+  assert(after.birds.filter((bird) => bird.role === "flock").every((bird) => bird.opacity === 0),
+    "sky birds outside the far observer's fade range should have zero alpha immediately");
+  assert(after.flocks.every((flock) => flock.pass.state === "waiting"), "invisible teleported formations should restart from a quiet interval");
+  let resumed = false;
+  for (let tick = 0; tick < 700; tick += 1) {
+    simulation.update(0.1, fixture.world, destination);
+    const frame = simulation.snapshot();
+    resumed ||= frame.birds.some((bird) => bird.role === "flock" && bird.visible && bird.opacity > 0.5);
+    if (resumed) break;
+  }
+  assert(resumed, "a teleported observer should eventually see a new offscreen-origin pass");
+});
+
 test("bird wildlife collision sweeps full and partial terrain and respects loaded boundaries", () => {
   const fixture = createBirdWildlifeTestWorld();
   const from = { x: 0, y: 6.5, z: 0.5 };
@@ -916,9 +1124,11 @@ test("bird wildlife seeds bounded deterministic flocks without inventing loaded 
   for (const flock of first.flocks) {
     assertEqual(first.birds.filter((bird) => bird.flockId === flock.id).length, BIRDS_PER_FLOCK, "flock membership should stay bounded");
   }
-  for (const bird of first.birds) {
-    assert(bird.visible && isBirdVolumeClear(fixture.world, bird.position), "each visible seeded bird should have safe flight clearance");
+  for (const bird of first.birds.filter((candidate) => candidate.role === "solo")) {
+    assert(bird.visible && isBirdVolumeClear(fixture.world, bird.position), "each seeded solo bird should have safe loaded flight clearance");
   }
+  assert(first.birds.filter((bird) => bird.role === "flock").every((bird) => bird.opacity === 0),
+    "sky formations should start outside their fade range");
   const expected = simulation.snapshot();
   (first.birds[0].position as { x: number }).x += 1000;
   (first.flocks[0].center as { x: number }).x += 1000;
@@ -932,11 +1142,11 @@ test("bird wildlife seeds bounded deterministic flocks without inventing loaded 
   let queries = 0;
   const unloaded = { ...fixture.world, isColumnLoaded(): boolean { queries += 1; return false; } };
   const absent = simulation.seed(unloaded, origin);
-  assert(absent.birds.every((bird) => !bird.visible), "birds must not spawn visibly into unloaded air");
+  assert(absent.birds.filter((bird) => bird.role === "solo").every((bird) => !bird.visible), "solo birds must not spawn visibly into unloaded air");
   assert(absent.birds.length <= BIRD_POPULATION_CAP && queries < 200, "failed loaded-terrain discovery should remain bounded");
   const loadedVoid = { ...fixture.world, isSolid: (): boolean => false, getColumnTopHeight: (): number | null => null };
-  assertEqual(simulation.seed(loadedVoid, origin).birds.filter((bird) => bird.visible).length, BIRD_POPULATION_CAP,
-    "loaded empty columns should remain usable sky rather than fabricated solid ground");
+  assertEqual(simulation.seed(loadedVoid, origin).birds.filter((bird) => bird.role === "solo" && bird.visible).length, SOLO_BIRD_COUNT,
+    "loaded empty columns should remain usable solo flight space rather than fabricated solid ground");
 });
 
 test("bird wildlife solo birds keep flying quickly over treeless ground", () => {
@@ -987,12 +1197,14 @@ test("bird wildlife builds actual flight speed gradually toward doubled cruise a
     const totals = { flock: 0, solo: 0 };
     const samples = { flock: 0, solo: 0 };
     const peaks = { flock: 0, solo: 0 };
-    for (let tick = 0; tick < Math.round(20 / delta); tick += 1) {
+    for (let tick = 0; tick < Math.round(40 / delta); tick += 1) {
       simulation.update(delta, fixture.world, player);
       const frame = simulation.snapshot();
       for (const bird of frame.birds) {
         const before = previous.birds.find((candidate) => candidate.id === bird.id);
-        assert(before && bird.visible, "open-air acceleration should preserve each visible bird");
+        assert(before, "open-air acceleration should preserve each bird identity");
+        if (bird.role === "solo") assert(bird.visible, "open-air solo birds should remain visible");
+        if (bird.role === "flock" && frame.flocks.find((flock) => flock.id === bird.flockId)?.pass.state === "waiting") continue;
         const speed = Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z);
         const oldSpeed = Math.hypot(before.velocity.x, before.velocity.y, before.velocity.z);
         const acceleration = bird.role === "flock" ? BIRD_ACCELERATION : SOLO_BIRD_ACCELERATION;
@@ -1018,49 +1230,46 @@ test("bird wildlife builds actual flight speed gradually toward doubled cruise a
   }
 });
 
-test("bird wildlife resumes gradual physical movement after a short blocked hold", () => {
+test("bird wildlife solo obstacle avoidance preserves the physical acceleration bound", () => {
   const fixture = createBirdWildlifeTestWorld();
-  let loadedColumns: Set<string> | null = null;
-  const world = {
-    ...fixture.world,
-    isColumnLoaded(x: number, z: number): boolean {
-      return loadedColumns === null || loadedColumns.has(`${Math.floor(x)},${Math.floor(z)}`);
-    }
-  };
   const player = { x: 0.5, y: 2.5, z: 0.5 };
   const simulation = new BirdWildlifeSimulation(631);
-  simulation.seed(world, { ...player, y: 1 });
+  simulation.seed(fixture.world, { ...player, y: 1 });
   const delta = 1 / 60;
-  for (let tick = 0; tick < 240; tick += 1) simulation.update(delta, world, player);
-  let previous = simulation.snapshot().birds.find((bird) => bird.role === "flock");
-  assert(previous && previous.visible, "the held formation member should begin in clear flight");
+  for (let tick = 0; tick < 240; tick += 1) simulation.update(delta, fixture.world, player);
+  let previous = simulation.snapshot().birds.find((bird) => bird.role === "solo");
+  assert(previous && previous.visible, "the solo bird should begin in clear flight");
   const id = previous.id;
-  loadedColumns = new Set<string>();
-  for (let x = Math.floor(previous.position.x - BIRD_CLEARANCE_RADIUS + 0.0001);
-    x <= Math.floor(previous.position.x + BIRD_CLEARANCE_RADIUS - 0.0001); x += 1) {
-    for (let z = Math.floor(previous.position.z - BIRD_CLEARANCE_RADIUS + 0.0001);
-      z <= Math.floor(previous.position.z + BIRD_CLEARANCE_RADIUS - 0.0001); z += 1) loadedColumns.add(`${x},${z}`);
+  const speed = Math.hypot(previous.velocity.x, previous.velocity.y, previous.velocity.z);
+  assert(speed > 10, "the fixture should begin at flight speed");
+  const ahead = {
+    x: previous.position.x + previous.velocity.x / speed * 2.5,
+    y: previous.position.y + previous.velocity.y / speed * 2.5,
+    z: previous.position.z + previous.velocity.z / speed * 2.5
+  };
+  for (let y = Math.floor(ahead.y) - 1; y <= Math.floor(ahead.y) + 1; y += 1) {
+    fixture.solidCells.add(`${Math.floor(ahead.x)},${y},${Math.floor(ahead.z)}`);
   }
+  assert(isBirdVolumeClear(fixture.world, previous.position), "the obstacle should not initially embed the bird");
+  assert(!sweepBirdFlight(fixture.world, previous.position, ahead), "the obstacle should block the existing flight direction");
   let physicalSpeed = Math.hypot(previous.velocity.x, previous.velocity.y, previous.velocity.z);
-  let sawStop = false;
-  let resumedSpeed = 0;
-  for (let tick = 0; tick < 72; tick += 1) {
-    if (tick === 12) loadedColumns = null;
-    simulation.update(delta, world, player);
+  let changedDirection = false;
+  for (let tick = 0; tick < 60; tick += 1) {
+    simulation.update(delta, fixture.world, player);
     const bird = simulation.snapshot().birds.find((candidate) => candidate.id === id);
-    assert(bird && bird.visible, "a short hold should preserve a visible, terrain-clear member");
+    assert(bird && bird.visible && isBirdVolumeClear(fixture.world, bird.position), "a visible solo bird should avoid the obstacle");
     const nextSpeed = Math.hypot(bird.position.x - previous.position.x,
       bird.position.y - previous.position.y, bird.position.z - previous.position.z) / delta;
     assertClose(Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z), nextSpeed, 0.00001,
-      "snapshot velocity should describe actual visible movement, including blocked frames");
-    assert(nextSpeed <= physicalSpeed + BIRD_ACCELERATION * delta + 0.00001,
-      "restored air must not resume a stored cruise-speed displacement from rest");
-    sawStop ||= tick < 12 && nextSpeed < 0.00001;
-    if (tick >= 12) resumedSpeed = Math.max(resumedSpeed, nextSpeed);
+      "snapshot velocity should describe actual visible movement during avoidance");
+    assert(nextSpeed <= physicalSpeed + SOLO_BIRD_ACCELERATION * delta + 0.00001,
+      "obstacle avoidance must not bypass the physical acceleration bound");
+    const cross = previous.velocity.x * bird.velocity.z - previous.velocity.z * bird.velocity.x;
+    changedDirection ||= Math.abs(cross) > 0.05 * Math.max(1, physicalSpeed * nextSpeed);
     physicalSpeed = nextSpeed;
     previous = bird;
   }
-  assert(sawStop && resumedSpeed > 3, "the member should stop and then build visible movement again");
+  assert(changedDirection, "the bird should visibly change course around its blocked path");
 });
 
 test("bird wildlife restarts acceleration after hidden recovery and a tree takeoff", () => {
@@ -1152,37 +1361,17 @@ test("bird wildlife solo routes do not repeatedly circle a stationary player", (
   }
 });
 
-test("bird wildlife formations travel varied routes instead of repeating a fixed circle", () => {
+test("bird wildlife sky pass snapshots do not expose mutable route state", () => {
   const fixture = createBirdWildlifeTestWorld();
   const simulation = new BirdWildlifeSimulation(631);
-  const player = { x: 0.5, y: 2.5, z: 0.5 };
-  const initial = simulation.seed(fixture.world, { ...player, y: 1 });
-  const paths = new Map(initial.flocks.map((flock) => [flock.id, [] as { x: number; z: number }[]]));
-  for (let tick = 0; tick < 800; tick += 1) {
-    simulation.update(0.1, fixture.world, player);
-    if (tick % 5 !== 0) continue;
-    for (const flock of simulation.snapshot().flocks) {
-      const path = paths.get(flock.id);
-      assert(path && flock.visible, "formations should stay active in loaded open air");
-      path.push({ x: flock.center.x, z: flock.center.z });
-    }
-  }
-  for (const path of paths.values()) {
-    assert(path.length > 100, "the route observation should cover sustained flight");
-    const center = path.reduce((sum, point) => ({ x: sum.x + point.x / path.length, z: sum.z + point.z / path.length }), { x: 0, z: 0 });
-    const radii = path.map((point) => Math.hypot(point.x - center.x, point.z - center.z));
-    const averageRadius = radii.reduce((sum, radius) => sum + radius, 0) / radii.length;
-    let winding = 0;
-    for (let index = 1; index < path.length; index += 1) {
-      const previous = { x: path[index - 1].x - center.x, z: path[index - 1].z - center.z };
-      const current = { x: path[index].x - center.x, z: path[index].z - center.z };
-      if (radii[index - 1] > 2 && radii[index] > 2) {
-        winding += Math.atan2(previous.x * current.z - previous.z * current.x, previous.x * current.x + previous.z * current.z);
-      }
-    }
-    assert(Math.abs(winding) < 3 * Math.PI || Math.max(...radii) - Math.min(...radii) > averageRadius * 0.45,
-      "a formation should not repeat the same circular track throughout a long visit");
-  }
+  const first = simulation.seed(fixture.world, { x: 0.5, y: 1, z: 0.5 });
+  const expected = simulation.snapshot();
+  const pass = first.flocks[0].pass;
+  (pass.start as { x: number }).x += 1000;
+  (pass.closestPoint as { y: number }).y += 1000;
+  (pass.end as { z: number }).z += 1000;
+  (pass.direction as { x: number }).x += 1000;
+  assertDeepEqual(simulation.snapshot(), expected, "editing pass geometry in a snapshot must not change live flight");
 });
 
 test("bird wildlife routes ignore small later player movements within the same residency", () => {
@@ -1197,12 +1386,13 @@ test("bird wildlife routes ignore small later player movements within the same r
     moving.update(0.1, fixture.world, {
       x: feet.x + 3 * Math.sin(tick / 70), y: 2.5, z: feet.z + 3 * Math.cos(tick / 70)
     });
-    const fixedBirds = still.snapshot().birds;
-    const shiftedBirds = moving.snapshot().birds;
+    const fixedBirds = still.snapshot().birds.filter((bird) => bird.role === "solo" || bird.flockId === 0);
+    const shiftedBirds = moving.snapshot().birds.filter((bird) => bird.role === "solo" || bird.flockId === 0);
     assertEqual(fixedBirds.length, shiftedBirds.length, "both visits should retain the same bird population");
     for (const bird of fixedBirds) {
       const shifted = shiftedBirds.find((candidate) => candidate.id === bird.id);
-      assert(shifted && shifted.visible === bird.visible && shifted.state === bird.state, "small player movement should not replan a resident bird");
+      assert(shifted && shifted.state === bird.state, "small player movement should not replan a resident bird");
+      if (bird.role === "solo") assertEqual(shifted.visible, bird.visible, "solo visibility should remain tied to the same loaded terrain");
       assertClose(Math.hypot(shifted.position.x - bird.position.x, shifted.position.y - bird.position.y,
         shifted.position.z - bird.position.z), 0, 0.00001, "a resident route should stay in world space");
     }
@@ -1233,8 +1423,8 @@ test("bird wildlife roaming stays active inside loaded terrain boundaries", () =
     simulation.update(0.1, world, player);
     const frame = simulation.snapshot();
     assert(frame.birds.length <= BIRD_POPULATION_CAP, "streamed-edge routing must keep the population bounded");
-    const visible = frame.birds.filter((bird) => bird.visible);
-    if (visible.some((bird) => bird.role === "solo")) activeFrames += 1;
+    const visible = frame.birds.filter((bird) => bird.role === "solo" && bird.visible);
+    if (visible.length > 0) activeFrames += 1;
     for (const bird of visible) {
       assert(isBirdVolumeClear(world, bird.position), "a visible roaming bird must keep its full body in loaded clear air");
     }
@@ -1242,7 +1432,7 @@ test("bird wildlife roaming stays active inside loaded terrain boundaries", () =
   assert(activeFrames > 540, "treeless loaded terrain should support active roaming over a long visit");
 });
 
-test("bird wildlife formations recover when their initial placement is outside a loaded strip", () => {
+test("bird wildlife sky passes remain independent of a narrow loaded terrain strip", () => {
   const fixture = createBirdWildlifeTestWorld();
   const isLoaded = (x: number, z: number): boolean => x >= -16 && x < 32 && z >= 0 && z < 16;
   const world = {
@@ -1254,34 +1444,28 @@ test("bird wildlife formations recover when their initial placement is outside a
     }
   };
   const simulation = new BirdWildlifeSimulation(631);
+  const openSky = new BirdWildlifeSimulation(631);
   const playerFeet = { x: 8, y: 5, z: 8 };
   const playerEye = { ...playerFeet, y: 6.5 };
-  const initial = simulation.seed(world, playerFeet, { x: 0, y: 0, z: -1 });
-  const visibleFrames = new Map(initial.flocks.map((flock) => [flock.id, 0]));
-  const firstVisibleAt = new Map(initial.flocks.map((flock) => [flock.id,
-    initial.birds.some((bird) => bird.flockId === flock.id && bird.visible && bird.opacity > 0.5) ? 0 : null as number | null]));
+  const forward = { x: 0, y: 0, z: -1 };
+  simulation.seed(world, playerFeet, forward);
+  openSky.seed(fixture.world, playerFeet, forward);
+  let visibleFrames = 0;
   for (let tick = 0; tick < 800; tick += 1) {
     simulation.update(0.1, world, playerEye);
+    openSky.update(0.1, fixture.world, playerEye);
     const frame = simulation.snapshot();
-    assert(frame.birds.length <= BIRD_POPULATION_CAP, "loaded-strip recovery must remain population bounded");
-    for (const flock of frame.flocks) {
-      if (frame.birds.some((bird) => bird.flockId === flock.id && bird.visible && bird.opacity > 0.5)) {
-        visibleFrames.set(flock.id, (visibleFrames.get(flock.id) ?? 0) + 1);
-        if (firstVisibleAt.get(flock.id) === null) firstVisibleAt.set(flock.id, tick + 1);
-      }
-    }
-    for (const bird of frame.birds.filter((candidate) => candidate.visible)) {
-      assert(isBirdVolumeClear(world, bird.position), "a recovered visible bird must be in loaded clear air");
-    }
+    const reference = openSky.snapshot();
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "a small terrain stream must not grow the population");
+    assertDeepEqual(frame.flocks, reference.flocks, "sky passes should not depend on terrain strip availability");
+    assertDeepEqual(frame.birds.filter((bird) => bird.role === "flock"), reference.birds.filter((bird) => bird.role === "flock"),
+      "sky positions and fade should match even when only a narrow strip is loaded");
+    if (frame.birds.some((bird) => bird.role === "flock" && bird.opacity > 0.5)) visibleFrames += 1;
   }
-  assertEqual(visibleFrames.size, BIRD_FLOCK_COUNT, "both formation identities should be retained");
-  assert([...firstVisibleAt.values()].every((tick) => tick !== null && tick <= 200),
-    "formations should find nearby loaded air within bounded retries");
-  assert([...visibleFrames.values()].every((frames) => frames >= 50),
-    "each initially unavailable formation should recover sustained flight in the loaded strip");
+  assert(visibleFrames >= 50, "sky formations should visibly cross despite the small terrain stream");
 });
 
-test("bird wildlife formations recover after their original air unloads", () => {
+test("bird wildlife visible sky passes continue unchanged when terrain unloads", () => {
   const fixture = createBirdWildlifeTestWorld();
   let allLoaded = true;
   const isLoaded = (_x: number, z: number): boolean => allLoaded || z >= 0;
@@ -1294,32 +1478,32 @@ test("bird wildlife formations recover after their original air unloads", () => 
     }
   };
   const simulation = new BirdWildlifeSimulation(631);
+  const reference = new BirdWildlifeSimulation(631);
   const playerFeet = { x: 2, y: 1, z: 2 };
   const playerEye = { ...playerFeet, y: 2.5 };
-  const initial = simulation.seed(world, playerFeet, { x: 0, y: 0, z: -1 });
-  assert(initial.flocks.every((flock) => flock.visible && flock.center.z < 0),
-    "fixture should start both formations visibly in the soon-to-unload air");
-  allLoaded = false;
-  const visibleFrames = new Map(initial.flocks.map((flock) => [flock.id, 0]));
-  const firstVisibleAt = new Map(initial.flocks.map((flock) => [flock.id, null as number | null]));
-  for (let tick = 0; tick < 800; tick += 1) {
+  const forward = { x: 0, y: 0, z: -1 };
+  simulation.seed(world, playerFeet, forward);
+  reference.seed(fixture.world, playerFeet, forward);
+  let seen = false;
+  for (let tick = 0; tick < 350 && !seen; tick += 1) {
     simulation.update(0.1, world, playerEye);
-    const frame = simulation.snapshot();
-    assert(frame.birds.length <= BIRD_POPULATION_CAP, "unload recovery must keep the population bounded");
-    for (const flock of frame.flocks) {
-      if (frame.birds.some((bird) => bird.flockId === flock.id && bird.visible && bird.opacity > 0.5)) {
-        visibleFrames.set(flock.id, (visibleFrames.get(flock.id) ?? 0) + 1);
-        if (firstVisibleAt.get(flock.id) === null) firstVisibleAt.set(flock.id, tick + 1);
-      }
-    }
-    for (const bird of frame.birds.filter((candidate) => candidate.visible)) {
-      assert(isBirdVolumeClear(world, bird.position), "visible birds must not remain inside unloaded air");
-    }
+    reference.update(0.1, fixture.world, playerEye);
+    seen = simulation.snapshot().birds.some((bird) => bird.role === "flock" && bird.opacity > 0.5);
   }
-  assert([...firstVisibleAt.values()].every((tick) => tick !== null && tick <= 200),
-    "both formations should reappear near the still-loaded player within bounded retries");
-  assert([...visibleFrames.values()].every((frames) => frames >= 50),
-    "recovered formations should stay visible instead of repeatedly resetting their fade");
+  assert(seen, "the fixture should unload terrain during a visible sky pass");
+  allLoaded = false;
+  let visibleFrames = 0;
+  for (let tick = 0; tick < 100; tick += 1) {
+    simulation.update(0.1, world, playerEye);
+    reference.update(0.1, fixture.world, playerEye);
+    const frame = simulation.snapshot();
+    const control = reference.snapshot();
+    assertDeepEqual(frame.flocks, control.flocks, "unloading terrain should not relocate or pause a sky pass");
+    assertDeepEqual(frame.birds.filter((bird) => bird.role === "flock"), control.birds.filter((bird) => bird.role === "flock"),
+      "unloading terrain should not alter sky positions or cause a fade reset");
+    if (frame.birds.some((bird) => bird.role === "flock" && bird.opacity > 0.5)) visibleFrames += 1;
+  }
+  assert(visibleFrames >= 20, "the visible formation should continue across the unload transition");
 });
 
 test("bird wildlife keeps responding to a sampled terrain rise between probes", () => {
@@ -1549,8 +1733,8 @@ test("bird wildlife flies coherently with flap, glide, and banking within speed 
       const before = previous.birds.find((candidate) => candidate.id === bird.id);
       const start = initial.birds.find((candidate) => candidate.id === bird.id);
       const flock = frame.flocks.find((candidate) => candidate.id === bird.flockId);
-      assert(bird.visible && flock && before && start, "open-air flock members should stay visible with stable identities");
-      assert(isBirdVolumeClear(fixture.world, bird.position), "the complete animated bird should stay clear of terrain");
+      assert(flock && before && start, "sky pass members should retain their identities");
+      if (flock.pass.state !== "flying") continue;
       const speed = Math.hypot(bird.velocity.x, bird.velocity.y, bird.velocity.z);
       assert(speed <= BIRD_MAX_SPEED + 0.00001, "flock speed should remain bounded");
       if (tick >= 10) { speedTotal += speed; speedSamples += 1; }
@@ -1559,10 +1743,12 @@ test("bird wildlife flies coherently with flap, glide, and banking within speed 
       assert(Math.hypot(bird.position.x - flock.center.x, bird.position.y - flock.center.y, bird.position.z - flock.center.z) < 15,
         "birds should remain with their own flock");
       maxTravel = Math.max(maxTravel, Math.hypot(bird.position.x - start.position.x, bird.position.y - start.position.y, bird.position.z - start.position.z));
-      sawFlap ||= bird.flapping;
-      sawGlide ||= !bird.flapping;
-      sawBank ||= Math.abs(bird.bank) > 0.02;
-      wingAngles.add(Math.round(bird.wingAngle * 100));
+      if (bird.visible) {
+        sawFlap ||= bird.flapping;
+        sawGlide ||= !bird.flapping;
+        sawBank ||= Math.abs(bird.bank) > 0.02;
+        wingAngles.add(Math.round(bird.wingAngle * 100));
+      }
     }
     previous = frame;
   }
@@ -1606,7 +1792,7 @@ test("bird wildlife hides after terrain edits and recovers only in safe air", ()
   assert(recovered && recovered.visible && isBirdVolumeClear(fixture.world, recovered.position), "a hidden bird should recover in safe loaded air");
 });
 
-test("bird wildlife recycles bounded flocks around a teleport and waits for streamed air", () => {
+test("bird wildlife solo birds recycle around a teleport and wait for streamed air", () => {
   const fixture = createBirdWildlifeTestWorld();
   const simulation = new BirdWildlifeSimulation(631);
   simulation.seed(fixture.world, { x: 0.5, y: 1, z: 0.5 });
@@ -1614,23 +1800,22 @@ test("bird wildlife recycles bounded flocks around a teleport and waits for stre
   simulation.update(0.1, fixture.world, destination);
   const recycled = simulation.snapshot();
   assertEqual(recycled.birds.length, BIRD_POPULATION_CAP, "teleport recycling must not grow the population");
-  for (const flock of recycled.flocks) {
-    assertEqual(flock.recycleCount, 1, "each distant flock should recycle once");
-    assert(Math.hypot(flock.center.x - destination.x, flock.center.z - destination.z) < BIRD_RECYCLE_DISTANCE,
-      "recycled cloud-height flocks should be horizontally local to the new player position");
-  }
-  assert(recycled.birds.every((bird) => !bird.visible || (bird.opacity >= 0 && bird.opacity < 1)), "recycled visible birds should fade in");
+  const soloBirds = recycled.birds.filter((bird) => bird.role === "solo");
+  assertEqual(soloBirds.length, SOLO_BIRD_COUNT, "teleport should retain the solo population");
+  assert(soloBirds.every((bird) => Math.hypot(bird.position.x - destination.x, bird.position.z - destination.z) < 80),
+    "recycled solo birds should remain local to the new player position");
+  assert(soloBirds.every((bird) => !bird.visible || (bird.opacity >= 0 && bird.opacity < 1)), "recycled visible solo birds should fade in");
 
   let loaded = false;
   const streaming = { ...fixture.world, isColumnLoaded(): boolean { return loaded; } };
   const pending = simulation.seed(streaming, { x: 0.5, y: 1, z: 0.5 });
-  assert(pending.birds.every((bird) => !bird.visible), "unloaded spawn candidates should stay hidden");
+  assert(pending.birds.filter((bird) => bird.role === "solo").every((bird) => !bird.visible), "unloaded solo spawn candidates should stay hidden");
   for (let tick = 0; tick < 20; tick += 1) simulation.update(0.1, streaming, { x: 0.5, y: 2.5, z: 0.5 });
-  assert(simulation.snapshot().birds.every((bird) => !bird.visible), "birds should keep waiting while the terrain remains unloaded");
+  assert(simulation.snapshot().birds.filter((bird) => bird.role === "solo").every((bird) => !bird.visible), "solo birds should keep waiting while terrain remains unloaded");
   loaded = true;
   for (let tick = 0; tick < 20; tick += 1) simulation.update(0.1, streaming, { x: 0.5, y: 2.5, z: 0.5 });
-  assert(simulation.snapshot().birds.every((bird) => bird.visible && isBirdVolumeClear(streaming, bird.position)),
-    "birds should recover only after their air is loaded and clear");
+  assert(simulation.snapshot().birds.filter((bird) => bird.role === "solo").every((bird) => bird.visible && isBirdVolumeClear(streaming, bird.position)),
+    "solo birds should recover only after their air is loaded and clear");
 });
 
 test("bird wildlife does not recycle continuously above a high roof", () => {
@@ -1645,43 +1830,70 @@ test("bird wildlife does not recycle continuously above a high roof", () => {
   for (let tick = 0; tick < 120; tick += 1) simulation.update(1 / 60, highRoof, { x: 0, y: 3, z: 0 });
   const frame = simulation.snapshot();
   assert(frame.flocks.every((flock) => flock.recycleCount <= 1), "a stationary player below a high roof must not trigger re-placement every frame");
-  assert(frame.birds.some((bird) => bird.visible && bird.opacity > 0.8), "visible birds should complete their fade instead of being reset indefinitely");
+  assert(frame.flocks[0].pass.distanceTravelled > 0, "the first high pass should continue advancing above the roof");
+  let sawSky = false;
+  for (let tick = 0; tick < 350 && !sawSky; tick += 1) {
+    simulation.update(0.1, highRoof, { x: 0, y: 3, z: 0 });
+    sawSky = simulation.snapshot().birds.some((bird) => bird.role === "flock" && bird.opacity > 0.8);
+  }
+  assert(sawSky, "the sky formation should complete its fade instead of resetting indefinitely");
 });
 
-test("bird wildlife remains visible around a player traveling steadily forward", () => {
+test("bird wildlife keeps a followed sky pass until it has actually faded", () => {
   const fixture = createBirdWildlifeTestWorld();
   const simulation = new BirdWildlifeSimulation(631);
-  simulation.seed(fixture.world, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 });
-  let sawRecycledFlockNearOrAhead = false;
-  for (let tick = 0; tick < 600; tick += 1) {
-    const player = { x: 0, y: 2.5, z: tick * 0.6 };
-    simulation.update(0.1, fixture.world, player);
-    const frame = simulation.snapshot();
-    assert(frame.birds.length <= BIRD_POPULATION_CAP, "travel recycling must keep the population bounded");
-    sawRecycledFlockNearOrAhead ||= frame.flocks.some((flock) => flock.visible && flock.recycleCount > 0 && flock.center.z >= player.z - 5);
+  const feet = { x: 0.5, y: 1, z: 0.5 };
+  const eye = { ...feet, y: 2.5 };
+  simulation.seed(fixture.world, feet, { x: 0, y: 0, z: -1 });
+  let first = simulation.snapshot().flocks[0];
+  for (let tick = 0; tick < 350 && !first.visible; tick += 1) {
+    simulation.update(0.1, fixture.world, eye);
+    first = simulation.snapshot().flocks[0];
   }
-  assert(sawRecycledFlockNearOrAhead, "recycled flocks should sometimes appear to the side or ahead during sustained forward travel");
+  assert(first.visible, "the fixture should begin following a visible formation");
+  const index = first.pass.index;
+  const start = first.pass.start;
+  const end = first.pass.end;
+  let follower = eye;
+  let passedNominalEnd = false;
+  for (let tick = 0; tick < 650; tick += 1) {
+    const center = simulation.snapshot().flocks[0].center;
+    follower = { x: center.x, y: eye.y, z: center.z };
+    simulation.update(0.1, fixture.world, follower);
+    const frame = simulation.snapshot();
+    const flock = frame.flocks[0];
+    assert(frame.birds.length <= BIRD_POPULATION_CAP, "following a pass must keep the population bounded");
+    assert(flock.pass.state === "flying" && flock.pass.index === index && flock.visible,
+      "an observed formation must not reset just because it reaches its nominal endpoint");
+    assertDeepEqual([flock.pass.start, flock.pass.end], [start, end], "a followed pass should keep its original world line");
+    passedNominalEnd ||= flock.pass.distanceTravelled > flock.pass.length + 10;
+  }
+  assert(passedNominalEnd, "the fixture should follow the formation beyond its nominal endpoint");
+  let retired = false;
+  for (let tick = 0; tick < 400 && !retired; tick += 1) {
+    simulation.update(0.1, fixture.world, follower);
+    const frame = simulation.snapshot();
+    if (frame.flocks[0].pass.state === "waiting") {
+      assert(frame.birds.filter((bird) => bird.flockId === 0).every((bird) => bird.opacity === 0),
+        "a departing formation should be fully faded before retirement");
+      retired = true;
+    }
+  }
+  assert(retired, "a formation should eventually retire once the observer stops following");
 });
 
-test("bird wildlife follows a turned traveler's heading at ordinary and high refresh", () => {
+test("bird wildlife sky progress remains consistent at ordinary and high refresh", () => {
   const fixture = createBirdWildlifeTestWorld();
+  const progress: number[] = [];
   for (const refreshRate of [60, 144]) {
     const simulation = new BirdWildlifeSimulation(631);
     simulation.seed(fixture.world, { x: 0, y: 1.3, z: 0 }, { x: 0, y: 0, z: -1 });
-    let aheadOffset: number | null = null;
-    for (let tick = 1; tick <= refreshRate * 35; tick += 1) {
-      const player = { x: 4 * tick / refreshRate, y: 3, z: 0 };
-      simulation.update(1 / refreshRate, fixture.world, player);
-      const flock = simulation.snapshot().flocks.find((candidate) => candidate.id === 0);
-      if (flock && flock.recycleCount > 0) {
-        assert(flock.visible, `the first recycled flock should be visible at ${refreshRate} Hz`);
-        aheadOffset = flock.center.x - player.x;
-        break;
-      }
-    }
-    assert(aheadOffset !== null && aheadOffset > 5,
-      `the first recycled flock should appear ahead of eastward travel at ${refreshRate} Hz`);
+    for (let tick = 0; tick < refreshRate * 30; tick += 1) simulation.update(1 / refreshRate, fixture.world, { x: 0, y: 3, z: 0 });
+    const flock = simulation.snapshot().flocks[0];
+    assert(flock.visible && flock.pass.state === "flying", `the first sky pass should be visible at ${refreshRate} Hz`);
+    progress.push(flock.pass.distanceTravelled);
   }
+  assertClose(progress[0], progress[1], 0.5, "sky pass progress should be stable across ordinary and high refresh rates");
 });
 
 test("bird wildlife presentation pauses and releases its scene resources", () => {

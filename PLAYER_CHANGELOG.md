@@ -1,5 +1,10 @@
 # Player release notes
 
+## 0.25.1 - 2026-11-15
+
+- Bird formations arrive from the distance, fly across the sky overhead, and leave again. Their old short routes could still look like they were orbiting you.
+- You can see the flocks approaching from the ground. Sky birds have clearer silhouettes, while lower birds keep their tree visits.
+
 ## 0.25.0 - 2026-11-15
 
 - Leaf blocks now have irregular gaps that let you see through the foliage and let sunlight filter through their shadows.

@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import {
   BIRD_POPULATION_CAP,
+  BIRD_PASS_FADE_END,
+  BIRD_SKY_RENDER_SCALE,
   BirdWildlifeSimulation,
   type BirdWildlifePose,
   type BirdWildlifePosition,
@@ -73,11 +75,14 @@ birdWorldPosition = instanceMatrix * birdWorldPosition;
 vBirdWorldPosition = (modelMatrix * birdWorldPosition).xyz;`);
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", "#include <common>\nvarying float vBirdOpacity;\nvarying float vBirdSky;\nvarying vec3 vBirdWorldPosition;")
-        .replace("#include <color_fragment>", "#include <color_fragment>\ndiffuseColor.a *= vBirdOpacity;")
+        .replace("#include <color_fragment>", `#include <color_fragment>
+if (vBirdSky > 0.5 && length(vBirdWorldPosition - cameraPosition) >= ${BIRD_PASS_FADE_END.toFixed(1)}) discard;
+diffuseColor.a *= vBirdOpacity;
+if (diffuseColor.a <= 0.0) discard;`)
         .replace("#include <fog_fragment>", `#ifdef USE_FOG
 float birdFogFactor;
 if (vBirdSky > 0.5) {
-  birdFogFactor = smoothstep(180.0, 360.0, length(vBirdWorldPosition - cameraPosition));
+  birdFogFactor = smoothstep(180.0, 520.0, length(vBirdWorldPosition - cameraPosition));
 } else {
   #ifdef FOG_EXP2
   birdFogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
@@ -88,7 +93,7 @@ if (vBirdSky > 0.5) {
 gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, birdFogFactor);
 #endif`);
     };
-    this.material.customProgramCacheKey = () => "bird-wildlife-opacity-sky-v2";
+    this.material.customProgramCacheKey = () => "bird-wildlife-sky-pass-v3";
     this.mesh = new THREE.InstancedMesh(this.geometry, this.material, BIRD_POPULATION_CAP * PARTS_PER_BIRD);
     this.mesh.name = "Bird bodies, faces, tails and articulated wings";
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -145,7 +150,8 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, birdFogFactor);
       this.position.set(bird.position.x, bird.position.y, bird.position.z);
       this.euler.set(bird.pitch, bird.yaw, bird.bank, "YXZ");
       this.quaternion.setFromEuler(this.euler);
-      this.partScale.set(1, 1, 1);
+      const renderScale = bird.role === "flock" ? BIRD_SKY_RENDER_SCALE : 1;
+      this.partScale.setScalar(renderScale);
       this.birdMatrix.compose(this.position, this.quaternion, this.partScale);
       for (const part of BODY_PARTS) instance = this.writePart(instance, bird, part, this.birdMatrix);
       if (bird.foldedWings) {
