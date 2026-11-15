@@ -35,6 +35,14 @@ shadowing and generated trees; the final shader reload reported no errors.
 Screenshots are untracked in
 `logs/visual-runs/2026-11-15-natural-leaf-gaps/`.
 
+Delivery of implementation `b3878e2` reached production Ready, with v0.25.3
+and the new shader verified over HTTP. Its [full CI run](https://github.com/apolito53/voxel-engine/actions/runs/43683470249)
+failed on both attempts at the known fast-falling-debris collider assertion,
+with a Rapier WASM trap/recovery error. The isolated falling-debris case passed
+locally; the physics source was unchanged. Both failure excerpts are preserved
+with the visual evidence. This matches the existing CI watchlist in TODO;
+the underlying intermittent physics issue remains unresolved.
+
 Canonical review is reserved on 5173. The existing 5174 collector's browser
 delivery gap remains recorded in [TODO](TODO.md); no performance conclusions
 were drawn from missing diagnostic logs. Further foliage art and biome work

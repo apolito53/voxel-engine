@@ -253,6 +253,11 @@ follow-ups do not change the gameplay priorities above.
 
 ## Development Follow-up: CI Rigid-Debris Validation
 
+Latest matching repro: the [2026-11-15 leaf-gap delivery check](https://github.com/apolito53/voxel-engine/actions/runs/43683470249)
+failed both attempts at the fast-fall collider assertion with the Rapier WASM
+trap/recovery error. The isolated case passed locally; physics source was
+unchanged. Excerpts are retained under `logs/visual-runs/2026-11-15-natural-leaf-gaps/`.
+
 On 2026-11-07, the [full validation CI run](https://github.com/apolito53/voxel-engine/actions/runs/42355936159)
 failed twice on Ubuntu / Node `22.23.4` before docs checks or the build.
 The first attempt stopped at the fast-falling terrain-collider assertion; the
