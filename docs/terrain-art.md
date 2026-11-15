@@ -92,6 +92,12 @@ the entire canopy. The same discard rule must run in the visible material and
 directional shadow depth material; the sun-glare query uses the visible
 material's real depth.
 
+The v0.25.3 mask replaces the first pass's repeated diamond/plus stamps with
+continuous noise at different scales. This varies gap outlines, sizes and local
+density across block boundaries. Integer hash/interpolation rules keep the CPU
+reference and shader consistent, including negative coordinates. The pattern
+depends on world position and face depth, with no time or camera input.
+
 [blockTextureAtlas.ts](../src/blockTextureAtlas.ts) owns the shared shader
 patch and attaches matching depth/distance materials to terrain meshes. Those
 materials share the visible material's lifecycle. Full and damaged terrain

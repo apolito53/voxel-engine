@@ -9,6 +9,14 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.25.3 - 2026-11-15
+
+### Changed
+
+- Replaced the leaf mask's fixed 4px diamond stamps with irregular,
+  world-stable gap shapes and varied local density. Visible foliage, sun glare
+  and full/partial shadow depth retain the same shared cutout predicate.
+
 ## 0.25.2 - 2026-11-15
 
 ### Fixed

@@ -1,5 +1,9 @@
 # Player release notes
 
+## 0.25.3 - 2026-11-15
+
+- Gaps in leaves now form uneven, varied patches instead of a repeating grid of plus-shaped holes. Their shapes and shadows stay steady as you move.
+
 ## 0.25.2 - 2026-11-15
 
 - Sun shadows now meet the foot of solid walls and chipped ledges without leaving a bright outline on the ground.

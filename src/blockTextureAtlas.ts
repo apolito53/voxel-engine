@@ -71,9 +71,9 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
       ].join("\n"))
       .replace("packDepthToRGBA( fragCoordZ )", "packDepthToRGBA( fragCoordZ + voxelSunDepthBias )");
   };
-  depth.customProgramCacheKey = () => "voxel-terrain-sun-depth-v2";
+  depth.customProgramCacheKey = () => "voxel-terrain-sun-depth-v3-organic";
   distance.onBeforeCompile = applyWorldBlockCutoutShaderPatches;
-  distance.customProgramCacheKey = () => "voxel-leaf-cutout-shadow-v1";
+  distance.customProgramCacheKey = () => "voxel-leaf-cutout-shadow-v2-organic";
   worldBlockShadowMaterials.set(material, { depth, distance });
   const fogCameraPosition = new THREE.Vector3();
   const dayNightTint = new THREE.Color(1, 1, 1);
@@ -89,7 +89,7 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v13-leaf-cutout";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v14-organic-leaf-cutout";
   return material;
 }
 

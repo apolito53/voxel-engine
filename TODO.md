@@ -17,7 +17,8 @@ promoted work, not every fun idea that crosses the room.
 - Sunwashed's stronger-noise material set and connected tiling are implemented
   in `v0.24.0`; see [the art workflow](docs/terrain-art.md). All three study sets
   and earlier comparison passes are retained for future biome work.
-- Leaf cutouts and light transmission are implemented in `v0.25.0`; see
+- Leaf cutouts and light transmission are implemented in `v0.25.0`, with
+  irregular gap shapes replacing the plus-sign pattern in `v0.25.3`; see
   [the foliage contract](docs/terrain-art.md#leaf-cutouts). Further foliage art
   and biome work remain open directions without a chosen next implementation.
 - Stop polishing debris unless logs or playtesting show a blocking regression.

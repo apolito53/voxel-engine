@@ -65,6 +65,10 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
   solidity. Keep collision, perching and saved block IDs intact; full and
   damaged leaf geometry must share light transmission and cutout rules. See
   [leaf cutouts](docs/terrain-art.md#leaf-cutouts).
+- Random placement of identical hole shapes still reads as a pattern. Anthony
+  identified the first leaf mask's repeated plus signs on 2026-11-15; vary gap
+  outlines, scale and local density as well as placement, while keeping the
+  world-space mask stable during movement. See the same leaf-cutout contract.
 - Sky atmosphere, elevated clouds, and terrain visibility have independent
   distance roles. Clouds occupy fixed world elevation and use elapsed active
   play time for wind; saved clock edits only affect their lighting. Preserve

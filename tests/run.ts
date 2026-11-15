@@ -4336,6 +4336,8 @@ test("block texture leaf cutouts stay binary and stagger successive foliage laye
           const nextLayer = point.map((value, axis) => value + normal[axis]) as [number, number, number];
           const alpha = getLeafCutoutAlpha(point, normal);
           assert(alpha === 0 || alpha === 1, "leaf pixels should use opaque-or-discarded alpha, without blending");
+          const insidePixel = point.map((value, axis) => value + (normal[axis] ? 0 : 0.25 / 32)) as [number, number, number];
+          assertEqual(alpha, getLeafCutoutAlpha(insidePixel, normal), "the static mask must remain fixed inside each 32px material pixel, including negative world coordinates");
           assertEqual(alpha, getLeafCutoutAlpha(point, normal.map((value) => -value) as [number, number, number]), "opposed faces on the same plane must agree, including negative coordinates");
           holes += 1 - alpha;
           if (alpha !== getLeafCutoutAlpha(nextLayer, normal)) changedLayerPixels += 1;
@@ -4343,6 +4345,70 @@ test("block texture leaf cutouts stay binary and stagger successive foliage laye
       }
       assert(holes > 200 && holes < 550, "each leaf face should contain irregular holes while retaining substantial foliage coverage");
       assert(changedLayerPixels > 200, "neighboring leaf planes must use distinct holes so a dense canopy does not become aligned empty tunnels");
+    }
+  }
+});
+
+test("block texture leaf gaps vary in shape without stamped plus signs or lattice rows", () => {
+  const size = 128;
+  const periods = [4, 5, 13];
+  const phases = periods.map((period) => ({
+    x: Array.from({ length: period }, () => ({ open: 0, total: 0 })),
+    y: Array.from({ length: period }, () => ({ open: 0, total: 0 }))
+  }));
+  let openPixels = 0;
+  let plusCenters = 0;
+  let smallGaps = 0;
+  let mediumGaps = 0;
+  let largeGaps = 0;
+  for (const plane of [-17, 0, 16]) {
+    const open = Array.from({ length: size * size }, (_, index) => getLeafCutoutAlpha([
+      (index % size - size / 2 + 0.5) / 32,
+      plane,
+      (Math.floor(index / size) - size / 2 + 0.5) / 32
+    ], [0, 1, 0]) === 0);
+    const visited = new Uint8Array(open.length);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const index = y * size + x;
+        if (open[index]) openPixels += 1;
+        for (const [periodIndex, period] of periods.entries()) {
+          for (const phase of [phases[periodIndex].x[x % period], phases[periodIndex].y[y % period]]) {
+            phase.total += 1;
+            if (open[index]) phase.open += 1;
+          }
+        }
+        if (!open[index]) continue;
+        if (x > 0 && y > 0 && x < size - 1 && y < size - 1 &&
+          open[index - 1] && open[index + 1] && open[index - size] && open[index + size] &&
+          !open[index - size - 1] && !open[index - size + 1] && !open[index + size - 1] && !open[index + size + 1]) plusCenters += 1;
+        if (visited[index]) continue;
+        const queue = [index];
+        visited[index] = 1;
+        for (let cursor = 0; cursor < queue.length; cursor += 1) {
+          const cell = queue[cursor];
+          const cx = cell % size;
+          const cy = Math.floor(cell / size);
+          for (const neighbor of [cx > 0 ? cell - 1 : -1, cx < size - 1 ? cell + 1 : -1, cy > 0 ? cell - size : -1, cy < size - 1 ? cell + size : -1]) {
+            if (neighbor < 0 || !open[neighbor] || visited[neighbor]) continue;
+            visited[neighbor] = 1;
+            queue.push(neighbor);
+          }
+        }
+        if (queue.length <= 4) smallGaps += 1;
+        else if (queue.length <= 32) mediumGaps += 1;
+        else largeGaps += 1;
+      }
+    }
+  }
+  const openness = openPixels / (size * size * 3);
+  assert(openness > 0.34 && openness < 0.42, "organic gaps should preserve approximately the established single-layer openness");
+  assert(plusCenters / openPixels < 0.01, "little punched plus signs must remain occasional accidents rather than the repeated hole motif");
+  assert(smallGaps > 50 && mediumGaps > 25 && largeGaps > 25, "foliage should mix sparse pinholes, uneven small gaps and broad clusters");
+  for (const phase of phases) {
+    for (const bins of [phase.x, phase.y]) {
+      const rates = bins.map((bin) => bin.open / bin.total);
+      assert(Math.max(...rates) - Math.min(...rates) < 0.08, "pixel coverage must not lock into repeated horizontal or vertical lattice rows");
     }
   }
 });
