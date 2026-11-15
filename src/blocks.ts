@@ -56,3 +56,9 @@ export const PLACEABLE_BLOCKS: readonly BlockId[] = [
   BLOCK.bush,
   BLOCK.lamp
 ];
+
+// Visual/light occlusion is separate from gameplay solidity. Leaves retain
+// their cube collision, support, ID and HP while their cutouts reveal neighbors.
+export function isBlockOpaque(block: number): boolean {
+  return block !== BLOCK.leaves && (BLOCKS[block]?.solid ?? true);
+}

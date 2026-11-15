@@ -7,7 +7,7 @@ export const BLOCK_TEXTURE_INTERIOR_ALTERNATIVE_COUNT = 4;
 // and shifts avoid GPU-dependent sin/fract rounding, including at negative UVs.
 // World UVs already use Float32 mesh coordinates; integers within that range
 // are converted to the same signed 32-bit cell before hashing on either path.
-function hashTextureCell(x: number, y: number, salt: number): number {
+export function hashTextureCell(x: number, y: number, salt: number): number {
   let hash = Math.imul(x, 0x1f123bb5) ^ Math.imul(y, 0x5f356495) ^ Math.imul(salt, 0x9e3779b9);
   hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
   hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);

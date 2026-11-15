@@ -1,5 +1,10 @@
 # Player release notes
 
+## 0.25.0 - 2026-11-15
+
+- Leaf blocks now have irregular gaps that let you see through the foliage and let sunlight filter through their shadows.
+- Sky and Lamp light can pass through leaves, including damaged leaves. Leaves still support you and can be built with as before.
+
 ## 0.24.2 - 2026-11-15
 
 - Chipped ledges now cast sun shadows that follow the pieces left standing. A light hit also keeps the sunlit and shaded sides of a block facing the right way.

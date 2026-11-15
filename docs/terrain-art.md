@@ -1,7 +1,7 @@
 # Terrain Art
 
 Sunwashed with the stronger noise pass is the selected terrain art in v0.24.0.
-The complete set has 14 face families, each containing 64 opaque 32×32 tiles:
+The complete source set has 14 face families, each containing 64 opaque 32×32 tiles:
 16 shared-corner patterns with four interior alternatives. The retained
 [Sunwashed, Wildwood and Mineral Frontier studies](../assets/terrain/studies-2026-11-08/README.md)
 remain available for future biome work, with their original comparison passes.
@@ -82,6 +82,30 @@ upward, so the top image corners use world cell `y + 1`. Nearest filtering,
 no mipmaps and a half-texel inset preserve pixels without adjacent-tile bleed.
 Keep this orientation consistent with UI crops and exporter row order.
 
+## Leaf cutouts
+
+Since v0.25.0, [leafCutout.ts](../src/leafCutout.ts) applies a stable, clustered pixel cutout over the
+authored Sunwashed color. The editable sheets, RGB atlas and retained studies
+remain intact. The gaps use world-space face coordinates and vary between
+successive planes, so stacked foliage does not repeat a clear tunnel through
+the entire canopy. The same discard rule must run in the visible material and
+directional shadow depth material; the sun-glare query uses the visible
+material's real depth.
+
+[blockTextureAtlas.ts](../src/blockTextureAtlas.ts) owns the shared shader
+patch and attaches matching depth/distance materials to terrain meshes. Those
+materials share the visible material's lifecycle. Full and damaged terrain
+both cast shadows, using the back-face shadow rule established by the v0.24.2
+carved-terrain fixes. Damaged leaves use the same cutouts in visible rendering,
+shadow depth and glare occlusion.
+
+Leaves remain solid gameplay blocks. Their separate rendering/light rule
+retains surfaces behind the gaps, lets the existing sky-connectivity flood
+through, and passes Lamp block light with its normal one-level-per-cell decay.
+The sky baseline is still a binary outdoor/sealed classification; directional
+cutout shadows supply the filtered sunlight. Partial damage retains the leaf
+rule. Bushes and opaque building materials keep their previous behavior.
+
 ## Color, previews and resources
 
 Authored texture pixels own terrain hue. Full chunks, workers and partial
@@ -113,3 +137,5 @@ Inspect actual terrain in Chrome: repeated ground and walls, grass caps and
 vertical bark, carved faces, lit and sealed Lamp surfaces, and menu previews at
 normal and narrow widths. Native-sheet inspection and CPU hash tests do not
 establish browser shader compilation or in-world lighting by themselves.
+For leaves, also inspect sky and opaque blocks through the gaps, layered
+canopies, their filtered sun shadows, Lamp spill, and partially carved foliage.

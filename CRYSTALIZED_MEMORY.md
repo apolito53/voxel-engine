@@ -58,6 +58,10 @@ owners and risk pointers in [CODEBASE_INDEX.md](CODEBASE_INDEX.md).
 - `BLOCKS.color` is linear RGB for Three.js consumers. The 2D minimap converts
   it to display sRGB before applying height shade; writing linear channels
   directly as image bytes makes the selected palette too dark.
+- Leaf transparency belongs to rendering and light occlusion, not gameplay
+  solidity. Keep collision, perching and saved block IDs intact; full and
+  damaged leaf geometry must share light transmission and cutout rules. See
+  [leaf cutouts](docs/terrain-art.md#leaf-cutouts).
 - Sky atmosphere, elevated clouds, and terrain visibility have independent
   distance roles. Clouds occupy fixed world elevation and use elapsed active
   play time for wind; saved clock edits only affect their lighting. Preserve

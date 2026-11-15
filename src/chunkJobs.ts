@@ -1,4 +1,4 @@
-import { BLOCK, BLOCKS } from "./blocks";
+import { BLOCK, BLOCKS, isBlockOpaque } from "./blocks";
 import { getMaterialBlockColor } from "./blockColors";
 import { appendBlockTextureQuadAttributes } from "./blockTextureTiles";
 import {
@@ -164,7 +164,7 @@ function buildChunkMesh({
   const ox = cx * CHUNK_SIZE;
   const oz = cz * CHUNK_SIZE;
   const skyExposure = createChunkSkyExposure((x, y, z) => (
-    isRenderableSolidAt(blocks, neighbors, partialBlockMasks, x, y, z)
+    isOpaqueAt(blocks, neighbors, partialBlockMasks, x, y, z)
   ));
 
   buildXFaces(blocks, neighbors, partialBlockMasks, blockLights, skyExposure, ox, oz, positions, normals, colors, blockLightAttributes, uvs, textureTiles, indices);
@@ -469,7 +469,7 @@ function exposedBlock(
   if (
     !BLOCKS[block].solid ||
     isPartialBlockAt(partialBlockMasks, x, y, z) ||
-    isRenderableSolidAt(blocks, neighbors, partialBlockMasks, nx, ny, nz)
+    isOpaqueAt(blocks, neighbors, partialBlockMasks, nx, ny, nz)
   ) {
     return BLOCK.air;
   }
@@ -482,7 +482,7 @@ function exposedBlock(
   ), getBlockLightAt(blockLights, nx, ny, nz));
 }
 
-function isRenderableSolidAt(
+function isOpaqueAt(
   blocks: Uint8Array,
   neighbors: ChunkNeighborBlocks,
   partialBlockMasks: ChunkPartialBlockMasks,
@@ -498,7 +498,7 @@ function isRenderableSolidAt(
   // Missing neighbor chunks are unknown, not air. Treat them as solid for this
   // mesh pass so streaming does not draw temporary chunk-edge walls that vanish
   // a few frames later when the real neighbor data arrives and marks us dirty.
-  return block === null || BLOCKS[block].solid;
+  return block === null || isBlockOpaque(block);
 }
 
 function isPartialBlockAt(

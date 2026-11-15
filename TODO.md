@@ -18,6 +18,9 @@ promoted work, not every fun idea that crosses the room.
 - Sunwashed's stronger-noise material set and connected tiling are implemented
   in `v0.24.0`; see [the art workflow](docs/terrain-art.md). All three study sets
   and earlier comparison passes are retained for future biome work.
+- Leaf cutouts and light transmission are implemented in `v0.25.0`; see
+  [the foliage contract](docs/terrain-art.md#leaf-cutouts). Further foliage art
+  and biome work remain open directions without a chosen next implementation.
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:
@@ -242,6 +245,11 @@ follow-ups do not change the gameplay priorities above.
   [src/performanceHitchLog.ts](src/performanceHitchLog.ts) currently ignores
   rejected writes and does not check HTTP success; include an unavailable
   collector repro when validating the eventual change.
+  During the 2026-11-15 foliage pass, the host could read collector health on
+  5174, but Chrome on 5173 could not fetch that health endpoint and the deliberate
+  runtime-diagnostic probe was not found in the known collector logs. Recheck
+  browser delivery when addressing this gap; no performance conclusions were
+  drawn from that pass.
 
 ## Development Follow-up: CI Rigid-Debris Validation
 

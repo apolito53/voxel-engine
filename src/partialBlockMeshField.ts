@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { configureWorldBlockMesh } from "./blockTextureAtlas";
 import {
   buildPartialBlockMeshGeometryData,
   createPartialBlockFaceVisibilityMasks,
@@ -196,6 +197,7 @@ export class PartialBlockMeshField {
     mesh.name = `Partial block region ${key}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    configureWorldBlockMesh(mesh);
     mesh.visible = false;
     this.mesh.add(mesh);
 

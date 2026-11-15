@@ -22,7 +22,7 @@ import {
   getTerrainImpactFragmentCount,
   normalizeBlockFragmentCount
 } from "../src/blockFragments";
-import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, type BlockId } from "../src/blocks";
+import { BLOCK, BLOCKS, PLACEABLE_BLOCKS, isBlockOpaque, type BlockId } from "../src/blocks";
 import {
   BLOCK_MATERIAL_RULES,
   TERRAFORMER_SUBCELL_DAMAGE_SCALE,
@@ -93,7 +93,14 @@ import {
 import { getConnectedBlockTextureVariant } from "../src/blockTextureSelection";
 import terrainArt from "../src/assets/terrain-art.json";
 import { BLOCK_TEXTURE_ART_PALETTE_SYMBOLS, decodeBlockTextureArt } from "../src/blockTextureArt";
-import { applyWorldBlockShaderPatches } from "../src/blockTextureAtlas";
+import {
+  applyWorldBlockShaderPatches,
+  applyWorldBlockCutoutShaderPatches,
+  configureWorldBlockMesh,
+  createWorldBlockMaterial,
+  disposeWorldBlockMaterial
+} from "../src/blockTextureAtlas";
+import { getLeafCutoutAlpha, LEAF_ALPHA_TEST, LEAF_CUTOUT_GLSL } from "../src/leafCutout";
 import { writeMinimapBlockPixel } from "../src/minimap";
 import {
   applyBuilderBrush,
@@ -4104,6 +4111,230 @@ test("block texture preview addresses both axes of the shared atlas", () => {
   assert(css.includes("background-position: var(--block-top-position);") && css.includes("background-position: var(--block-side-position);"), "CSS must consume each complete x/y preview position");
 });
 
+test("block texture leaf cutouts stay binary and stagger successive foliage layers", () => {
+  for (const normal of [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as const) {
+    for (const origin of [-16, 0, 16]) {
+      let holes = 0;
+      let changedLayerPixels = 0;
+      for (let y = 0; y < 32; y += 1) {
+        for (let x = 0; x < 32; x += 1) {
+          const u = origin + (x + 0.5) / 32;
+          const v = origin + (y + 0.5) / 32;
+          const point: [number, number, number] = normal[0] ? [origin, v, u] : normal[1] ? [u, origin, v] : [u, v, origin];
+          const nextLayer = point.map((value, axis) => value + normal[axis]) as [number, number, number];
+          const alpha = getLeafCutoutAlpha(point, normal);
+          assert(alpha === 0 || alpha === 1, "leaf pixels should use opaque-or-discarded alpha, without blending");
+          assertEqual(alpha, getLeafCutoutAlpha(point, normal.map((value) => -value) as [number, number, number]), "opposed faces on the same plane must agree, including negative coordinates");
+          holes += 1 - alpha;
+          if (alpha !== getLeafCutoutAlpha(nextLayer, normal)) changedLayerPixels += 1;
+        }
+      }
+      assert(holes > 200 && holes < 550, "each leaf face should contain irregular holes while retaining substantial foliage coverage");
+      assert(changedLayerPixels > 200, "neighboring leaf planes must use distinct holes so a dense canopy does not become aligned empty tunnels");
+    }
+  }
+});
+
+test("block texture leaf discard is identical in color, sun depth and shadow shaders", () => {
+  for (const kind of ["standard", "depth", "distanceRGBA"] as const) {
+    const shader = {
+      uniforms: {},
+      vertexShader: THREE.ShaderLib[kind].vertexShader,
+      fragmentShader: THREE.ShaderLib[kind].fragmentShader
+    } as Parameters<typeof applyWorldBlockShaderPatches>[0];
+    if (kind === "standard") applyWorldBlockShaderPatches(shader);
+    else applyWorldBlockCutoutShaderPatches(shader);
+    assertEqual(shader.vertexShader.split("attribute float blockTextureTile;").length - 1, 1, `${kind} should receive one leaf-family attribute declaration`);
+    assert(shader.fragmentShader.includes(LEAF_CUTOUT_GLSL), `${kind} must use the exact shared leaf mask`);
+    assert(shader.fragmentShader.includes(`abs(floor(vBlockTextureTile + 0.5) - ${BLOCK_TEXTURE_TILE.leaves.toFixed(1)}) < 0.5`), "cutouts must affect only leaves, preserving opaque bush and terrain pixels");
+    const maskIndex = shader.fragmentShader.indexOf("diffuseColor.a *= voxelLeafCutoutAlpha(vVoxelWorldPosition, vVoxelCutoutNormal);");
+    assert(maskIndex >= 0 && maskIndex < shader.fragmentShader.indexOf("#include <alphatest_fragment>"), `${kind} must apply holes before the native alpha-test/depth write`);
+    assert(shader.vertexShader.includes("vVoxelWorldPosition = (modelMatrix * voxelWorldPosition).xyz;"), `${kind} must use world coordinates in every pass, including the depth shader without worldpos_vertex`);
+  }
+});
+
+test("block texture leaf shadow resources follow the shared material lifetime", () => {
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    createElement: () => ({
+      width: 0, height: 0,
+      getContext: () => ({
+        createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+        putImageData: () => {}
+      })
+    })
+  } });
+  try {
+    const material = createWorldBlockMaterial();
+    assertEqual(material.alphaTest, LEAF_ALPHA_TEST, "the terrain material should use the native alpha-test path");
+    assert(!material.transparent && material.depthWrite, "cutout terrain should remain in the opaque draw/depth path");
+    const first = new THREE.Mesh(new THREE.BufferGeometry(), material);
+    const second = new THREE.Mesh(new THREE.BufferGeometry(), material);
+    configureWorldBlockMesh(first);
+    configureWorldBlockMesh(second);
+    assert(first.customDepthMaterial instanceof THREE.MeshDepthMaterial, "terrain meshes must receive a cutout-aware sun shadow material");
+    assert(first.customDistanceMaterial instanceof THREE.MeshDistanceMaterial, "terrain meshes must receive a cutout-aware distance material");
+    assertEqual(first.customDepthMaterial, second.customDepthMaterial, "chunk meshes should share owned shadow materials rather than allocating per chunk");
+    assertEqual(first.customDistanceMaterial, second.customDistanceMaterial, "distance materials should share the same ownership");
+    const field = new PartialBlockMeshField(new THREE.Scene(), material);
+    const cell = { ...createTestPartialBlockCell({ x: 1, y: 8, z: 1 }, [0]), block: BLOCK.leaves };
+    const key = createPartialBlockMeshRegionKey(cell.position);
+    field.updateRegion({ key, cells: [cell], contextCells: [cell] }, () => true);
+    const partialMesh = field.getRegionMesh(key);
+    assert(partialMesh, "partial leaf geometry must retain a render owner");
+    assertEqual(partialMesh.customDepthMaterial, first.customDepthMaterial, "partial leaf surfaces must keep the same cutout depth contract");
+    assertEqual(partialMesh.castShadow, true, "damaged foliage must retain the partial terrain shadow caster and use the cutout depth material");
+    assertEqual(partialMesh.material.shadowSide, THREE.BackSide, "damaged foliage must preserve the carved-floor back-face shadow rule");
+    const disposed = { visible: 0, atlas: 0, depth: 0, distance: 0 };
+    material.addEventListener("dispose", () => { disposed.visible += 1; });
+    material.map?.addEventListener("dispose", () => { disposed.atlas += 1; });
+    first.customDepthMaterial.addEventListener("dispose", () => { disposed.depth += 1; });
+    first.customDistanceMaterial.addEventListener("dispose", () => { disposed.distance += 1; });
+    field.dispose();
+    assertEqual(disposed.depth, 0, "disposing a partial field must not release its externally owned shared material");
+    disposeWorldBlockMaterial(material);
+    assertDeepEqual(disposed, { visible: 1, atlas: 1, depth: 1, distance: 1 }, "HMR/unload must release each owned texture/material once");
+    first.geometry.dispose();
+    second.geometry.dispose();
+  } finally {
+    if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("chunk mesh leaf neighbors reveal backing faces and keep interior foliage across seams", () => {
+  for (const cx of [-1, 0]) {
+    const world = new VoxelWorld({ seed: "foliage-face-culling" });
+    const left = new Chunk(cx, 0);
+    const right = new Chunk(cx + 1, 0);
+    world.chunks.set(world.key(cx, 0), left);
+    world.chunks.set(world.key(cx + 1, 0), right);
+    left.setLocal(14, 5, 7, BLOCK.leaves);
+    left.setLocal(15, 5, 7, BLOCK.leaves);
+    right.setLocal(0, 5, 7, BLOCK.stone);
+    const material = new THREE.MeshStandardMaterial();
+    const seam = (cx + 1) * CHUNK_SIZE;
+    for (const chunk of [left, right]) {
+      const sync = chunk.rebuildMesh(world, material);
+      const air = new Uint8Array(chunk.blocks.length).buffer;
+      const worker = buildChunkMeshJob({
+        requestId: 804, cx: chunk.cx, cz: 0, revision: 1,
+        blocks: chunk.blocks.buffer.slice(0),
+        neighbors: {
+          negativeX: chunk === right ? left.blocks.buffer.slice(0) : air,
+          positiveX: chunk === left ? right.blocks.buffer.slice(0) : air,
+          negativeZ: air, positiveZ: air
+        },
+        partialBlockMasks: { current: null, neighbors: { negativeX: null, positiveX: null, negativeZ: null, positiveZ: null } },
+        blockLights: createChunkMeshBlockLightBuffers()
+      });
+      assertFloat32ArraysEqual(worker.positions, sync.geometry.getAttribute("position").array as Float32Array, "worker and sync foliage culling must match at positive and negative chunk seams");
+      assertFloat32ArraysEqual(worker.textureTiles, sync.geometry.getAttribute("blockTextureTile").array as Float32Array, "both paths must retain the same backing material faces");
+      const countFace = (plane: number, normalX: number) => {
+        let count = 0;
+        for (let vertex = 0; vertex < worker.textureTiles.length; vertex += 1) {
+          if (worker.positions[vertex * 3] === plane && worker.normals[vertex * 3] === normalX) count += 1;
+        }
+        return count;
+      };
+      if (chunk === left) {
+        assertEqual(countFace(seam - 1, 1), 4, "the first leaf must keep its inner face against another leaf");
+        assertEqual(countFace(seam - 1, -1), 4, "the next leaf must also retain its oppositely facing inner surface");
+        assertEqual(countFace(seam, 1), 0, "a leaf face hidden by solid stone should be culled instead of doubling the backing face");
+      } else {
+        assertEqual(countFace(seam, -1), 4, "opaque stone must remain visible through its neighboring leaf holes");
+      }
+      sync.geometry.dispose();
+    }
+    assert(world.isSolid(seam - 1, 5, 7), "the optically open leaf must still block gameplay collision/support queries");
+    assertEqual(BLOCKS[BLOCK.leaves].health, 3, "leaf cutouts must retain established terrain HP");
+    material.dispose();
+  }
+});
+
+test("chunk mesh foliage opacity preserves the virtual floor in sync, worker and partial paths", () => {
+  const world = new VoxelWorld({ seed: "foliage-floor" });
+  const chunk = new Chunk(0, 0);
+  world.chunks.set(world.key(0, 0), chunk);
+  chunk.setLocal(7, 0, 7, BLOCK.leaves);
+  const material = new THREE.MeshStandardMaterial();
+  const sync = chunk.rebuildMesh(world, material);
+  const worker = buildChunkMeshJob({
+    requestId: 805, cx: 0, cz: 0, revision: 1,
+    blocks: chunk.blocks.buffer.slice(0),
+    neighbors: { negativeX: null, positiveX: null, negativeZ: null, positiveZ: null },
+    partialBlockMasks: { current: null, neighbors: { negativeX: null, positiveX: null, negativeZ: null, positiveZ: null } },
+    blockLights: createChunkMeshBlockLightBuffers()
+  });
+  assertFloat32ArraysEqual(worker.positions, sync.geometry.getAttribute("position").array as Float32Array, "virtual floor culling must stay identical in worker and sync paths");
+  assert(!Array.from(worker.normals).some((value, index) => index % 3 === 1 && value === -1), "leaf blocks at y=0 must not expose a face through the engine floor");
+  const partialCell = { ...createTestPartialBlockCell({ x: 7, y: 0, z: 7 }, [0]), block: BLOCK.leaves };
+  assertEqual(world.shouldRenderPartialBlockFace(partialCell, { x: 0, y: -1, z: 0 }), false, "partial leaves must preserve the same lower world boundary");
+  sync.geometry.dispose();
+  material.dispose();
+});
+
+test("partial block faces behind leaves remain visible without changing solid neighbors", () => {
+  const world = new VoxelWorld({ seed: "partial-leaf-backing" });
+  world.chunks.set(world.key(0, 0), new Chunk(0, 0));
+  const cell = createTestPartialBlockCell({ x: 7, y: 12, z: 7 }, [0]);
+  for (const neighbor of [BLOCK.leaves, BLOCK.stone, BLOCK.bush]) {
+    world.setBlock(8, 12, 7, neighbor);
+    assertEqual(world.shouldRenderPartialBlockFace(cell, { x: 1, y: 0, z: 0 }), neighbor === BLOCK.leaves, "partial backing surfaces must show through leaves while normal opaque face culling stays unchanged");
+  }
+});
+
+test("partial block meshes refresh when a stone neighbor changes to leaves and back without workers", () => {
+  for (const x of [-1, 7, 15]) {
+    const world = new VoxelWorld({ seed: "partial-leaf-edit-invalidation" });
+    const position = { x, y: 80, z: 7 };
+    world.setBlock(x, 80, 7, BLOCK.stone);
+    world.setBlock(x + 1, 80, 7, BLOCK.stone);
+    world.carveBlock({
+      ...position,
+      point: new THREE.Vector3(x + 0.05, 80.5, 7.5),
+      normal: new THREE.Vector3(-1, 0, 0),
+      speed: 20,
+      amount: PARTIAL_BLOCK_CORE_DAMAGE
+    });
+    const scene = new THREE.Scene();
+    const field = new PartialBlockMeshField(scene);
+    const regionKey = createPartialBlockMeshRegionKey(position);
+    updatePartialBlockMeshFieldFromWorld(world, field);
+    assertEqual(world.getDirtyPartialBlockMeshRegionCount(), 0, "the initial partial mesh should have drained its dirty state");
+    const firstRevision = world.getPartialBlockGeometryRevision();
+    const countBackingVertices = () => {
+      const mesh = field.getRegionMesh(regionKey);
+      assert(mesh, "the carved stone must retain its existing mesh");
+      const points = mesh.geometry.getAttribute("position");
+      const normals = mesh.geometry.getAttribute("normal");
+      let count = 0;
+      for (let vertex = 0; vertex < points.count; vertex += 1) {
+        if (Math.abs(points.getX(vertex) - (x + 1)) < 0.0001 && normals.getX(vertex) > 0.99) count += 1;
+      }
+      return count;
+    };
+    assertEqual(countBackingVertices(), 0, "the initial opaque neighbor should hide the carved block's shared face");
+    world.setBlock(x + 1, 80, 7, BLOCK.leaves);
+    assertEqual(world.getDirtyPartialBlockMeshRegionCount(), 1, "the optical change should directly dirty the touching partial region, including across negative and positive chunk seams");
+    assert(world.isPartialBlockMeshRegionRevisionStale(regionKey, firstRevision), "an in-flight pre-leaf partial mesh must become stale immediately");
+    updatePartialBlockMeshFieldFromWorld(world, field);
+    assert(countBackingVertices() > 0, "the rebuilt existing mesh should reveal its stone face through the leaf holes");
+    const leafRevision = world.getPartialBlockGeometryRevision();
+    world.setBlock(x + 1, 80, 7, BLOCK.stone);
+    assertEqual(world.getDirtyPartialBlockMeshRegionCount(), 1, "closing the optical path should also dirty the partial region");
+    assert(world.isPartialBlockMeshRegionRevisionStale(regionKey, leafRevision), "an in-flight leaf-exposed partial mesh must become stale when stone returns");
+    updatePartialBlockMeshFieldFromWorld(world, field);
+    assertEqual(countBackingVertices(), 0, "the existing carved mesh should hide that face again after stone returns");
+    world.setBlock(x + 1, 80, 7, BLOCK.wood);
+    assertEqual(world.getDirtyPartialBlockMeshRegionCount(), 0, "a material swap with unchanged optical opacity should not dirty partial geometry");
+    world.setBlock(x + 8, 80, 7, BLOCK.stone);
+    world.setBlock(x + 8, 80, 7, BLOCK.leaves);
+    assertEqual(world.getDirtyPartialBlockMeshRegionCount(), 0, "unrelated opacity changes should not sweep distant partial regions");
+    field.dispose();
+  }
+});
+
 test("block texture tile mapping keeps material faces distinct", () => {
   const grassKey = createBlockMeshKey(BLOCK.grass, 2, 5, 7);
   const woodKey = createBlockMeshKey(BLOCK.wood, 2, 5, 7);
@@ -4423,6 +4654,45 @@ function getBlockLightValuesForMeshNormal(
   }
   return values;
 }
+
+test("voxel block light passes through full and damaged leaves with normal attenuation", () => {
+  const blocks = createEmptyBlockLightChunkSnapshot();
+  blocks.fill(BLOCK.stone);
+  const mask = createEmptyChunkBlockLight();
+  for (let x = 1; x <= 6; x += 1) blocks[getBlockLightIndex(x, 12, 8)] = BLOCK.air;
+  blocks[getBlockLightIndex(1, 12, 8)] = BLOCK.lamp;
+  blocks[getBlockLightIndex(2, 12, 8)] = BLOCK.leaves;
+  blocks[getBlockLightIndex(3, 12, 8)] = BLOCK.leaves;
+  const full = buildChunkBlockLight({ blocks });
+  mask[getBlockLightIndex(2, 12, 8)] = 1;
+  mask[getBlockLightIndex(3, 12, 8)] = 1;
+  const damaged = buildChunkBlockLight({ blocks, partialBlockMask: mask });
+  assertEqual(full.blockLight[getBlockLightIndex(2, 12, 8)], 14, "first leaves should receive the usual one-level loss");
+  assertEqual(full.blockLight[getBlockLightIndex(3, 12, 8)], 13, "stacked leaves should retain normal per-voxel falloff");
+  assertEqual(full.blockLight[getBlockLightIndex(6, 12, 8)], 10, "light should reach the corridor behind the foliage without a route around it");
+  assertDeepEqual(Array.from(damaged.blockLight), Array.from(full.blockLight), "damaging a leaf must not turn the macro light path opaque or change attenuation");
+  assertEqual(isBlockLightOpaque(BLOCK.leaves), false, "full leaves should be optically permeable");
+  assertEqual(isBlockLightOpaque(BLOCK.leaves, 1), false, "partial leaves should remain optically permeable");
+  assertEqual(isBlockLightOpaque(BLOCK.stone, 1), true, "partial stone must retain existing macro opacity");
+  assertEqual(isBlockLightOpaque(BLOCK.bush), true, "this leaf change must preserve opaque bush behavior");
+});
+
+test("cross-chunk Lamp light passes through a leaf boundary and stops at opaque terrain", () => {
+  const left = createEmptyBlockLightChunkSnapshot();
+  const right = createEmptyBlockLightChunkSnapshot();
+  left.fill(BLOCK.stone);
+  right.fill(BLOCK.stone);
+  left[getBlockLightIndex(14, 12, 8)] = BLOCK.lamp;
+  left[getBlockLightIndex(15, 12, 8)] = BLOCK.leaves;
+  right[getBlockLightIndex(0, 12, 8)] = BLOCK.leaves;
+  right[getBlockLightIndex(1, 12, 8)] = BLOCK.air;
+  const result = buildChunkBlockLight({ blocks: right, neighbors: { [createBlockLightNeighborKey(-1, 0)]: left } });
+  assertEqual(result.blockLight[getBlockLightIndex(1, 12, 8)], 12, "the halo solver should transmit through leaves on both sides of a chunk seam");
+  assertEqual(result.blockLight[getBlockLightIndex(2, 12, 8)], 0, "the adjacent stone wall must still stop propagation");
+  right[getBlockLightIndex(0, 12, 8)] = BLOCK.bush;
+  const blocked = buildChunkBlockLight({ blocks: right, neighbors: { [createBlockLightNeighborKey(-1, 0)]: left } });
+  assertEqual(blocked.blockLight[getBlockLightIndex(1, 12, 8)], 0, "replacing the leaf with bush must close the only optical path");
+});
 
 test("voxel block light emits lamp sources and falls off through open air", () => {
   const blocks = createEmptyBlockLightChunkSnapshot();
@@ -4932,6 +5202,20 @@ test("lamp blocks register as local light sources", () => {
   assertEqual(selections[0]?.x, 2, "local-light selection should prioritize the nearest lamp");
   assertEqual(selections[0]?.sourceCount, 1, "isolated lamp lights should remain single-source selections");
   assert(selections[0]?.distanceSq < selections[1]?.distanceSq, "local lights should be sorted nearest-first");
+});
+
+test("lamp leaf cages keep surface emitters while opaque cages stay buried", () => {
+  const world = new VoxelWorld({ seed: "leaf-lamp-cage" });
+  const chunk = new Chunk(0, 0);
+  world.chunks.set(world.key(0, 0), chunk);
+  world.setBlock(7, 12, 7, BLOCK.lamp);
+  for (const block of [BLOCK.stone, BLOCK.bush, BLOCK.leaves]) {
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      world.setBlock(7 + dx, 12 + dy, 7 + dz, block);
+    }
+    const sources = world.getLocalLightSources({ x: 7.5, y: 12.5, z: 7.5 }, 16);
+    assertEqual(sources.length, block === BLOCK.leaves ? 1 : 0, "supplementary PointLight emitters should agree with leaf permeability and opaque cage occlusion");
+  }
 });
 
 test("lamp fixtures emit from exposed surfaces instead of buried centers", () => {
@@ -16123,6 +16407,44 @@ test("baked voxel face shading is azimuth-neutral while preserving sky and under
   assert(shadedWest > bottom, "undersides should stay darker than walls");
   assert(top <= 1 && bottom >= 0.32, "face shading should remain inside the vertex-color safety range");
   assert(bottom < 0.42, "undersides should stay meaningfully dim to avoid baked light bleed under overhangs");
+});
+
+test("chunk sky exposure passes through a leaf roof while sealed stone stays dark", () => {
+  assertEqual(isBlockOpaque(BLOCK.leaves), false, "leaf optical opacity must remain separate from gameplay solidity");
+  assertEqual(isBlockOpaque(BLOCK.bush), true, "bushes retain their existing optical opacity");
+  for (const roof of [BLOCK.leaves, BLOCK.stone]) {
+    const world = new VoxelWorld({ seed: "leaf-roof-enclosure" });
+    const chunk = new Chunk(0, 0);
+    world.chunks.set(world.key(0, 0), chunk);
+    for (let y = 4; y <= 8; y += 1) {
+      for (let z = 4; z <= 8; z += 1) {
+        for (let x = 4; x <= 8; x += 1) {
+          if (x !== 4 && x !== 8 && y !== 4 && y !== 8 && z !== 4 && z !== 8) continue;
+          const isRoof = y === 8 && x > 4 && x < 8 && z > 4 && z < 8;
+          chunk.setLocal(x, y, z, isRoof ? roof : BLOCK.stone);
+        }
+      }
+    }
+    const material = new THREE.MeshStandardMaterial();
+    const sync = chunk.rebuildMesh(world, material);
+    const worker = buildChunkMeshJob({
+      requestId: 806, cx: 0, cz: 0, revision: 1,
+      blocks: chunk.blocks.buffer.slice(0),
+      neighbors: { negativeX: null, positiveX: null, negativeZ: null, positiveZ: null },
+      partialBlockMasks: { current: null, neighbors: { negativeX: null, positiveX: null, negativeZ: null, positiveZ: null } },
+      blockLights: createChunkMeshBlockLightBuffers()
+    });
+    assertFloat32ArraysEqual(worker.colors, sync.geometry.getAttribute("color").array as Float32Array, "worker and sync enclosure shading must agree for permeable leaf roofs and sealed stone");
+    const floorShades: number[] = [];
+    for (let vertex = 0; vertex < worker.colors.length / 3; vertex += 1) {
+      if (worker.positions[vertex * 3 + 1] !== 5 || worker.normals[vertex * 3 + 1] !== 1) continue;
+      floorShades.push(worker.colors[vertex * 3]);
+    }
+    assert(floorShades.length >= 4, "the room's inner floor must remain present");
+    assert(floorShades.every((shade) => roof === BLOCK.leaves ? shade > 0.5 : shade < 0.05), "leaf roofs should admit the existing sky fill while an airtight stone roof retains the sealed darkness floor");
+    sync.geometry.dispose();
+    material.dispose();
+  }
 });
 
 test("chunk sky exposure darkens sealed air pockets", () => {

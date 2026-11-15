@@ -9,6 +9,18 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.25.0 - 2026-11-15
+
+### Changed
+
+- Added stable pixel cutouts to leaf faces, with matching directional shadow
+  depth, while preserving the selected Sunwashed color art and all study assets.
+- Separated leaf light/render occlusion from collision solidity across full,
+  worker-built and damaged terrain. Sky connectivity and normally attenuated
+  Lamp block light now pass through full and partial leaves.
+- Retained opaque faces behind leaves and leaf layers inside canopies so the
+  gaps reveal real terrain without hollowing out foliage clusters.
+
 ## 0.24.2 - 2026-11-15
 
 ### Fixed

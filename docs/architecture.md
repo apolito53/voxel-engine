@@ -165,6 +165,15 @@ stripes. A saved partial-height surface emits its base when the underside is exp
 Even damage below the first removed lattice cell uses the partial mesh, so its
 flat face winding must agree with the outward normals for two-sided lighting.
 
+Leaf light/render occlusion is separate from gameplay solidity. Full and
+damaged leaves pass the existing binary sky-connectivity flood and normally
+attenuated Lamp block light, while still supporting collision and tree perches.
+Their clustered pixel cutouts share visible and directional-shadow discard
+rules. Meshing retains opaque terrain behind leaves and leaf layers inside a
+canopy. This is not a global skylight propagation field: sky-connected faces
+keep the existing outdoor baseline, with filtered direct sun supplied by the
+cutout shadows. See [terrain art](terrain-art.md#leaf-cutouts).
+
 `skybox.ts` owns the far-depth procedural atmosphere, directional twilight,
 celestial disks, and stars. Its shared atmosphere shader also supplies the
 distant color for `cloudLayer.ts`; clouds do not consume terrain fog. The shared

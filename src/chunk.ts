@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { BLOCK, BLOCKS } from "./blocks";
+import { BLOCK, BLOCKS, isBlockOpaque } from "./blocks";
+import { configureWorldBlockMesh } from "./blockTextureAtlas";
 import { getMaterialBlockColor } from "./blockColors";
 import { appendBlockTextureQuadAttributes } from "./blockTextureTiles";
 import {
@@ -21,6 +22,7 @@ export type TopBlock = {
 };
 
 type MeshWorld = {
+  getBlock?(x: number, y: number, z: number): number;
   isSolid(x: number, y: number, z: number): boolean;
   isRenderableSolid?(x: number, y: number, z: number): boolean;
 };
@@ -155,7 +157,7 @@ export class Chunk {
     const skyExposure = createChunkSkyExposure((localX, y, localZ) => {
       const worldX = ox + localX;
       const worldZ = oz + localZ;
-      return world.isRenderableSolid?.(worldX, y, worldZ) ?? world.isSolid(worldX, y, worldZ);
+      return isOpaqueAt(this, world, worldX, y, worldZ);
     });
 
     this.buildXFaces(world, skyExposure, ox, oz, positions, normals, colors, blockLights, uvs, textureTiles, indices);
@@ -186,6 +188,7 @@ export class Chunk {
       this.mesh = new THREE.Mesh(geometry, material);
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
+      configureWorldBlockMesh(this.mesh);
     }
 
     this.dirty = false;
@@ -223,6 +226,7 @@ export class Chunk {
       this.mesh = new THREE.Mesh(geometry, material);
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
+      configureWorldBlockMesh(this.mesh);
     }
 
     this.dirty = false;
@@ -457,9 +461,7 @@ function exposedBlock(
   const worldY = neighborWorldY - _normalY;
   const worldZ = neighborWorldZ - _normalZ;
   const selfRenderable = world.isRenderableSolid?.(worldX, worldY, worldZ) ?? BLOCKS[block].solid;
-  const neighborRenderable = world.isRenderableSolid?.(neighborWorldX, neighborWorldY, neighborWorldZ)
-    ?? world.isSolid(neighborWorldX, neighborWorldY, neighborWorldZ);
-  if (!BLOCKS[block].solid || !selfRenderable || neighborRenderable) return BLOCK.air;
+  if (!BLOCKS[block].solid || !selfRenderable || isOpaqueAt(chunk, world, neighborWorldX, neighborWorldY, neighborWorldZ)) return BLOCK.air;
   // Greedy terrain faces must merge by material and light bucket, not by the
   // per-block visual variant. Keeping coordinate noise in this key splits flat
   // walls into many little rectangles, creating T-junctions that show up as
@@ -468,6 +470,20 @@ function exposedBlock(
     block,
     skyExposure.getLightBucketForNeighbor(neighborLocalX, neighborY, neighborLocalZ)
   );
+}
+
+function isOpaqueAt(chunk: Chunk, world: MeshWorld, x: number, y: number, z: number): boolean {
+  if (y < 0) return true;
+  if (y >= WORLD_HEIGHT) return false;
+  const renderable = world.isRenderableSolid?.(x, y, z) ?? world.isSolid(x, y, z);
+  if (!renderable) return false;
+  const localX = x - chunk.cx * CHUNK_SIZE;
+  const localZ = z - chunk.cz * CHUNK_SIZE;
+  const block = world.getBlock?.(x, y, z) ?? (
+    localX >= 0 && localX < CHUNK_SIZE && localZ >= 0 && localZ < CHUNK_SIZE && y >= 0
+      ? chunk.getLocal(localX, y, localZ) : undefined
+  );
+  return block === undefined || isBlockOpaque(block);
 }
 
 function emitGreedyFaces(

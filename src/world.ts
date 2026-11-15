@@ -12,7 +12,7 @@ import {
   getTerrainMaxHealth,
   getTerraformerSubCellHealth
 } from "./blockMaterialRules";
-import { BLOCK, BLOCKS } from "./blocks";
+import { BLOCK, BLOCKS, isBlockOpaque } from "./blocks";
 import { CHUNK_SIZE, Chunk, WORLD_HEIGHT } from "./chunk";
 import type {
   ChunkBlockLightBuffers,
@@ -1821,6 +1821,9 @@ export class VoxelWorld implements CollisionWorld {
     if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
     if (lz === 0) this.markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+    if (isBlockOpaque(previousBlock) !== isBlockOpaque(block)) {
+      this.markNeighborPartialBlockMeshesDirty({ x: blockX, y: blockY, z: blockZ });
+    }
     this.markBlockLightChunksDirtyForEdit(blockX, blockZ);
   }
 
@@ -1854,8 +1857,7 @@ export class VoxelWorld implements CollisionWorld {
         position.y + direction.dy,
         position.z + direction.dz
       );
-      const neighborDefinition = BLOCKS[neighborBlock] ?? BLOCKS[BLOCK.air];
-      if (neighborDefinition.solid) continue;
+      if (isBlockOpaque(neighborBlock)) continue;
 
       normalX += direction.dx;
       normalY += direction.dy;
@@ -2280,7 +2282,9 @@ export class VoxelWorld implements CollisionWorld {
     const neighborX = cell.position.x + normal.x;
     const neighborY = cell.position.y + normal.y;
     const neighborZ = cell.position.z + normal.z;
-    return !this.isRenderableSolid(neighborX, neighborY, neighborZ);
+    if (neighborY < 0) return false;
+    return !this.isRenderableSolid(neighborX, neighborY, neighborZ)
+      || !isBlockOpaque(this.getBlock(neighborX, neighborY, neighborZ));
   }
 
   damageKey(x: number, y: number, z: number): string {
@@ -3113,6 +3117,18 @@ export class VoxelWorld implements CollisionWorld {
     // and stitched partial-height surfaces both need adjacent regions to refresh
     // when a neighboring damaged cell appears, changes, or disappears.
     this.markPartialBlockMeshRegionKeysDirty(getPartialBlockMeshDirtyRegionKeys(position), urgent);
+  }
+
+  private markNeighborPartialBlockMeshesDirty(position: VoxelBlockPosition): void {
+    const regionKeys = new Set<string>();
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const) {
+      const cell = this.getPartialBlock(position.x + dx, position.y + dy, position.z + dz);
+      if (cell) regionKeys.add(createPartialBlockMeshRegionKey(cell.position));
+    }
+    // Visibility changes also need a fresh revision without a worker/light
+    // completion to trigger it. Limit this to actual touching partial regions;
+    // the normal revision guard will reject their previously queued geometry.
+    this.markPartialBlockMeshRegionKeysDirty(regionKeys, true);
   }
 
   private markPartialBlockMeshRegionKeysDirty(regionKeys: Iterable<string>, urgent: boolean): void {

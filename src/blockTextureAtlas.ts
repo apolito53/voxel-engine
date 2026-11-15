@@ -9,6 +9,7 @@ import {
   BLOCK_TEXTURE_TILE_SIZE_PX
 } from "./blockTextureTiles";
 import { ENCLOSED_INTERIOR_SHADE } from "./chunkLightOcclusion";
+import { LEAF_ALPHA_TEST, LEAF_CUTOUT_GLSL } from "./leafCutout";
 import { BLOCK_LIGHT_MAX_LEVEL, BLOCK_LIGHT_MIN_LEVEL } from "./voxelBlockLight";
 
 type ShaderWithUniforms = Parameters<THREE.MeshStandardMaterial["onBeforeCompile"]>[0];
@@ -25,6 +26,10 @@ const SEALED_VERTEX_LIGHT_THRESHOLD = 0.05;
 const SEALED_DIRECT_LIGHT_RESTORE_SCALE = 1 / ENCLOSED_INTERIOR_SHADE;
 const LAMP_EMISSIVE_STRENGTH = 2.35;
 const LAMP_BLOCK_LIGHT_STRENGTH = 1.45;
+const worldBlockShadowMaterials = new WeakMap<THREE.Material, {
+  readonly depth: THREE.MeshDepthMaterial;
+  readonly distance: THREE.MeshDistanceMaterial;
+}>();
 
 export type WorldBlockMaterialOptions = {
   readonly side?: THREE.Side;
@@ -45,10 +50,18 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     map: atlasTexture,
+    alphaTest: LEAF_ALPHA_TEST,
     roughness: 0.92,
     metalness: 0,
     side: options.side ?? THREE.FrontSide
   });
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, alphaTest: LEAF_ALPHA_TEST });
+  const distance = new THREE.MeshDistanceMaterial({ alphaTest: LEAF_ALPHA_TEST });
+  for (const shadowMaterial of [depth, distance]) {
+    shadowMaterial.onBeforeCompile = applyWorldBlockCutoutShaderPatches;
+    shadowMaterial.customProgramCacheKey = () => "voxel-leaf-cutout-shadow-v1";
+  }
+  worldBlockShadowMaterials.set(material, { depth, distance });
   const fogCameraPosition = new THREE.Vector3();
   const dayNightTint = new THREE.Color(1, 1, 1);
   const dayNightExposure = { value: 1 };
@@ -63,8 +76,64 @@ export function createWorldBlockMaterial(options: WorldBlockMaterialOptions = {}
     material.userData.shader = shader;
   };
 
-  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v12-sunwashed-connected-corners";
+  material.customProgramCacheKey = () => "voxel-block-texture-atlas-v13-leaf-cutout";
   return material;
+}
+
+export function configureWorldBlockMesh(mesh: THREE.Mesh): void {
+  if (Array.isArray(mesh.material)) return;
+  const shadows = worldBlockShadowMaterials.get(mesh.material);
+  if (!shadows) return;
+  mesh.customDepthMaterial = shadows.depth;
+  mesh.customDistanceMaterial = shadows.distance;
+}
+
+// Keep alpha discard identical in ordinary rendering, real-scene sun-glare
+// depth queries, and the materials substituted by Three's shadow renderer.
+export function applyWorldBlockCutoutShaderPatches(shader: ShaderWithUniforms): void {
+  shader.vertexShader = shader.vertexShader
+    .replace("#include <common>", [
+      "#include <common>",
+      "attribute float blockTextureTile;",
+      "varying float vBlockTextureTile;",
+      "varying vec3 vVoxelWorldPosition;",
+      "varying vec3 vVoxelCutoutNormal;"
+    ].join("\n"))
+    .replace("#include <uv_vertex>", [
+      "#include <uv_vertex>",
+      "vBlockTextureTile = blockTextureTile;",
+      "vVoxelCutoutNormal = mat3(modelMatrix) * normal;"
+    ].join("\n"));
+  // MeshDepthMaterial lacks worldpos_vertex; both paths have transformed ready
+  // by project_vertex, while Standard/Distance retain Three's stock world hook.
+  const worldPositionHook = shader.vertexShader.includes("#include <worldpos_vertex>")
+    ? "#include <worldpos_vertex>" : "#include <project_vertex>";
+  shader.vertexShader = shader.vertexShader.replace(worldPositionHook, [
+    worldPositionHook,
+    "vec4 voxelWorldPosition = vec4(transformed, 1.0);",
+    "#ifdef USE_BATCHING",
+    "  voxelWorldPosition = batchingMatrix * voxelWorldPosition;",
+    "#endif",
+    "#ifdef USE_INSTANCING",
+    "  voxelWorldPosition = instanceMatrix * voxelWorldPosition;",
+    "#endif",
+    "vVoxelWorldPosition = (modelMatrix * voxelWorldPosition).xyz;"
+  ].join("\n"));
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <common>", [
+      "#include <common>",
+      "varying float vBlockTextureTile;",
+      "varying vec3 vVoxelWorldPosition;",
+      "varying vec3 vVoxelCutoutNormal;",
+      BLOCK_TEXTURE_SELECTION_GLSL,
+      LEAF_CUTOUT_GLSL
+    ].join("\n"))
+    .replace("#include <alphatest_fragment>", [
+      `if (abs(floor(vBlockTextureTile + 0.5) - ${BLOCK_TEXTURE_TILE.leaves.toFixed(1)}) < 0.5) {`,
+      "  diffuseColor.a *= voxelLeafCutoutAlpha(vVoxelWorldPosition, vVoxelCutoutNormal);",
+      "}",
+      "#include <alphatest_fragment>"
+    ].join("\n"));
 }
 
 export function applyWorldBlockShaderPatches(
@@ -74,6 +143,7 @@ export function applyWorldBlockShaderPatches(
   dayNightExposure = { value: 1 },
   blockLightLevelRange = new THREE.Vector2(BLOCK_LIGHT_MIN_LEVEL, BLOCK_LIGHT_MAX_LEVEL)
 ): void {
+  applyWorldBlockCutoutShaderPatches(shader);
   shader.uniforms.blockTextureAtlasGrid = {
     value: new THREE.Vector2(BLOCK_TEXTURE_ATLAS_COLUMNS, BLOCK_TEXTURE_ATLAS_ROWS)
   };
@@ -104,33 +174,13 @@ export function applyWorldBlockShaderPatches(
       "#include <common>",
       [
         "#include <common>",
-        "attribute float blockTextureTile;",
         "attribute float blockLight;",
-        "varying float vBlockTextureTile;",
-        "varying float vBlockLight;",
-        "varying vec3 vVoxelWorldPosition;"
+        "varying float vBlockLight;"
       ].join("\n")
     )
     .replace(
       "#include <uv_vertex>",
-      "#include <uv_vertex>\nvBlockTextureTile = blockTextureTile;\nvBlockLight = blockLight;"
-    )
-    .replace(
-      "#include <worldpos_vertex>",
-      [
-        // Three declares its stock `worldPosition` only when another enabled
-        // feature needs it. Potato deliberately has no PointLights or shadows,
-        // so terrain fog must build an unconditional position of its own.
-        "vec4 voxelWorldPosition = vec4(transformed, 1.0);",
-        "#ifdef USE_BATCHING",
-        "  voxelWorldPosition = batchingMatrix * voxelWorldPosition;",
-        "#endif",
-        "#ifdef USE_INSTANCING",
-        "  voxelWorldPosition = instanceMatrix * voxelWorldPosition;",
-        "#endif",
-        "vVoxelWorldPosition = (modelMatrix * voxelWorldPosition).xyz;",
-        "#include <worldpos_vertex>"
-      ].join("\n")
+      "#include <uv_vertex>\nvBlockLight = blockLight;"
     );
 
   shader.fragmentShader = shader.fragmentShader
@@ -146,10 +196,7 @@ export function applyWorldBlockShaderPatches(
         `uniform float ${WORLD_DAY_NIGHT_EXPOSURE_UNIFORM};`,
         `uniform vec2 ${WORLD_BLOCK_LIGHT_RANGE_UNIFORM};`,
         `const float voxelLampBaseTile = ${BLOCK_TEXTURE_TILE.lamp.toFixed(1)};`,
-        "varying float vBlockTextureTile;",
-        "varying float vBlockLight;",
-        "varying vec3 vVoxelWorldPosition;",
-        BLOCK_TEXTURE_SELECTION_GLSL
+        "varying float vBlockLight;"
       ].join("\n")
     )
     .replace(
@@ -321,6 +368,10 @@ export function updateWorldBlockMaterialBlockLightRange(
 }
 
 export function disposeWorldBlockMaterial(material: THREE.MeshStandardMaterial): void {
+  const shadows = worldBlockShadowMaterials.get(material);
+  shadows?.depth.dispose();
+  shadows?.distance.dispose();
+  worldBlockShadowMaterials.delete(material);
   material.map?.dispose();
   material.dispose();
 }

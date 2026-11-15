@@ -1,4 +1,4 @@
-import { BLOCK, BLOCKS } from "./blocks";
+import { BLOCK, isBlockOpaque } from "./blocks";
 import type {
   ChunkBlockLightBuffers,
   ChunkBlockLights,
@@ -273,9 +273,11 @@ export function getBlockLightEmission(block: number): number {
 }
 
 export function isBlockLightOpaque(block: number, partialMaskValue = 0): boolean {
-  if (block === BLOCK.air) return false;
+  // Damaging a leaf must not turn its still-perforated material opaque. Other
+  // partial terrain keeps its existing macro opacity and local cavity lighting.
+  if (block === BLOCK.air || block === BLOCK.leaves) return false;
   if (partialMaskValue > 0) return true;
-  return BLOCKS[block]?.solid ?? true;
+  return isBlockOpaque(block);
 }
 
 export function createBlockLightNeighborKey(dx: number, dz: number): string {
