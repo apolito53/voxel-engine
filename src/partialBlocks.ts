@@ -2328,18 +2328,19 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+// Flat macro quads follow tangent then bitangent, so their cross product must face out.
 const PARTIAL_BLOCK_FACES: readonly PartialBlockFace[] = [
   {
     normal: { x: 1, y: 0, z: 0 },
     localOrigin: { x: 1, y: 0, z: 0 },
-    tangent: { x: 0, y: 0, z: 1 },
-    bitangent: { x: 0, y: 1, z: 0 }
+    tangent: { x: 0, y: 1, z: 0 },
+    bitangent: { x: 0, y: 0, z: 1 }
   },
   {
     normal: { x: -1, y: 0, z: 0 },
     localOrigin: { x: 0, y: 0, z: 1 },
-    tangent: { x: 0, y: 0, z: -1 },
-    bitangent: { x: 0, y: 1, z: 0 }
+    tangent: { x: 0, y: 1, z: 0 },
+    bitangent: { x: 0, y: 0, z: -1 }
   },
   {
     normal: { x: 0, y: 1, z: 0 },
@@ -2356,14 +2357,14 @@ const PARTIAL_BLOCK_FACES: readonly PartialBlockFace[] = [
   {
     normal: { x: 0, y: 0, z: 1 },
     localOrigin: { x: 1, y: 0, z: 1 },
-    tangent: { x: -1, y: 0, z: 0 },
-    bitangent: { x: 0, y: 1, z: 0 }
+    tangent: { x: 0, y: 1, z: 0 },
+    bitangent: { x: -1, y: 0, z: 0 }
   },
   {
     normal: { x: 0, y: 0, z: -1 },
     localOrigin: { x: 0, y: 0, z: 0 },
-    tangent: { x: 1, y: 0, z: 0 },
-    bitangent: { x: 0, y: 1, z: 0 }
+    tangent: { x: 0, y: 1, z: 0 },
+    bitangent: { x: 1, y: 0, z: 0 }
   }
 ];
 

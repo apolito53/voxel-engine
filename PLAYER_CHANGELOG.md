@@ -1,5 +1,9 @@
 # Player release notes
 
+## 0.24.2 - 2026-11-15
+
+- Chipped ledges now cast sun shadows that follow the pieces left standing. A light hit also keeps the sunlit and shaded sides of a block facing the right way.
+
 ## 0.24.1 - 2026-11-15
 
 - Birds build up speed smoothly as they fly, with faster cruising and double their previous top speeds.

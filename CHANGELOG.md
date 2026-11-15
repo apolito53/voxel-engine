@@ -9,6 +9,13 @@
 - Kept the full test/validation gate, added selector regressions, and made its
   full-test entry reject selection arguments with a focused-command hint.
 
+## 0.24.2 - 2026-11-15
+
+### Fixed
+
+- Partial terrain casts its surviving geometry into the directional shadow map after the full chunk mesh hands off a damaged block.
+- Corrected the four vertical faces on the flat partial mesh used before the first lattice cell breaks. Their winding now agrees with their outward shading normals.
+
 ## 0.24.1 - 2026-11-15
 
 ### Changed

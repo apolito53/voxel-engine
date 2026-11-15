@@ -158,6 +158,11 @@ Terrain lighting has several layers with different costs:
 - worker-derived integer block light illuminates terrain and partial cavities;
 - a quality-scaled nearest PointLight pool adds smooth local highlights.
 
+Full chunks and partial terrain regions both cast and receive sun shadows.
+The same region mesh that draws a carved ledge supplies its shadow silhouette.
+Even damage below the first removed lattice cell uses the partial mesh, so its
+flat face winding must agree with the outward normals for two-sided lighting.
+
 `skybox.ts` owns the far-depth procedural atmosphere, directional twilight,
 celestial disks, and stars. Its shared atmosphere shader also supplies the
 distant color for `cloudLayer.ts`; clouds do not consume terrain fog. The shared

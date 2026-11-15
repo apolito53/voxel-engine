@@ -191,7 +191,7 @@ export class PartialBlockMeshField {
 
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
     mesh.name = `Partial block region ${key}`;
-    mesh.castShadow = false;
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.visible = false;
     this.mesh.add(mesh);

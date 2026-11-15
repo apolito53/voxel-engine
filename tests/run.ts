@@ -8472,6 +8472,34 @@ test("partial block mesh builder uses face visibility masks without world callba
   }
 });
 
+test("partial block faces keep outward winding before damage removes a sub-cell", () => {
+  const cell: PartialBlockCell = {
+    block: BLOCK.sand,
+    position: { x: 1, y: 2, z: 3 },
+    damage: 1,
+    maxHealth: 270,
+    cuts: []
+  };
+  const update = { key: createPartialBlockMeshRegionKey(cell.position), cells: [cell], contextCells: [cell] };
+  const geometry = buildPartialBlockMeshGeometryData({
+    update,
+    faceVisibilityMasks: createPartialBlockFaceVisibilityMasks(update, () => true)
+  });
+  const { positions, normals, indices } = geometry;
+  assertEqual(indices.length, 36, "a tiny chip should leave all six macro faces intact");
+  const triangle = new THREE.Triangle();
+  const outward = new THREE.Vector3();
+  const geometricNormal = new THREE.Vector3();
+  for (let i = 0; i < indices.length; i += 3) {
+    triangle.a.fromArray(positions, 3 * indices[i]!);
+    triangle.b.fromArray(positions, 3 * indices[i + 1]!);
+    triangle.c.fromArray(positions, 3 * indices[i + 2]!);
+    outward.fromArray(normals, 3 * indices[i]!);
+    assert(triangle.getNormal(geometricNormal).dot(outward) > 0.99,
+      "each outward-facing triangle should light from the side named by its normal");
+  }
+});
+
 test("partial block exterior vertex colors match chunk material colors", () => {
   const normal = [1, 0, 0] as const;
   const shade = getSunlitFaceShade(normal);
@@ -9307,6 +9335,8 @@ test("partial block field renders faceted custom terrain cells", () => {
   field.updateRegion({ key: regionKey, cells: [cell], contextCells: [cell] }, () => true);
   const regionMesh = field.getRegionMesh(regionKey);
   assert(regionMesh, "partial block field should create a mesh for the dirty region");
+  assert(regionMesh.castShadow && regionMesh.receiveShadow,
+    "surviving terrain should cast its carved silhouette and receive shadows from neighboring blocks");
   const positionAttribute = regionMesh.geometry.getAttribute("position");
   const uvAttribute = regionMesh.geometry.getAttribute("uv");
   const textureTileAttribute = regionMesh.geometry.getAttribute("blockTextureTile");

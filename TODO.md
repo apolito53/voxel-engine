@@ -102,6 +102,10 @@ promoted work, not every fun idea that crosses the room.
   needs colored/emissive blocks, dynamic projectile glows, tool/Nova light
   pulses, or illumination-aware mechanics. Sub-cell propagation through intact
   partial material remains deliberately out of scope until it earns the cost.
+- Check a chipped wall beside an intact wall in a sealed, unlit room. Full
+  chunk faces use the enclosed sky-exposure bucket in `chunkLightOcclusion.ts`;
+  partial geometry currently bakes the outdoor ambient value. Compare both
+  again after opening the roof and with a Lamp present.
 
 ## Completed Foundation: Creative Inventory
 
