@@ -21,6 +21,10 @@ promoted work, not every fun idea that crosses the room.
   irregular gap shapes replacing the plus-sign pattern in `v0.25.3`; see
   [the foliage contract](docs/terrain-art.md#leaf-cutouts). Further foliage art
   and biome work remain open directions without a chosen next implementation.
+- Port the *First Uneasy Night* pines as a tree type in the base engine's seeded
+  terrain. Keep the five tiers of drooping blue-green boughs and the variation
+  in tree height and canopy width. See the [prototype geometry and palette](https://github.com/apolito53/voxel-engine-v2/blob/b203feae08032d652f72de7dec585b589b07c81a/src/firstNightArt.ts#L61-L110)
+  and the [base tree generator](src/terrain.ts).
 - Stop polishing debris unless logs or playtesting show a blocking regression.
   The engine is stable enough to start adding gameplay-relevant systems again.
 - Best next gameplay-feel lanes:
